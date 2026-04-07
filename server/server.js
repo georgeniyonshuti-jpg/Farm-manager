@@ -1,13 +1,53 @@
 import crypto from "node:crypto";
 import cors from "cors";
 import express from "express";
+import rateLimit from "express-rate-limit";
+import session from "express-session";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
-const PEPPER = process.env.AUTH_PEPPER || "farm-manager-dev-pepper-change-me";
+// ENV: moved to environment variable
+const PEPPER = process.env.AUTH_PEPPER ?? "";
 
-app.use(cors());
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  "http://localhost:5173",
+].filter(Boolean);
+
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true,
+}));
 app.use(express.json({ limit: "20mb" }));
+app.use(session({
+  // ENV: moved to environment variable
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+    maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
+  },
+}));
+
+app.use("/api/auth/login", rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  message: { error: "Too many login attempts. Try again in 15 minutes." },
+}));
+
+app.use("/api/laborer/translate", rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { error: "Translation limit reached. Wait a moment." },
+}));
+
+app.use("/api/", rateLimit({
+  windowMs: 60 * 1000,
+  max: 200,
+}));
 
 function hashPassword(pw) {
   return crypto.createHash("sha256").update(`${PEPPER}:${pw}`).digest("hex");
@@ -945,6 +985,14 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "farm-manager-api", storedLogs: dailyLogs.length, users: usersById.size });
 });
 
+app.get("/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    version: process.env.APP_VERSION ?? "1.0.0",
+    timestamp: new Date().toISOString(),
+  });
+});
+
 function computeValidation(payload) {
   const initial = Number(process.env.DEMO_INITIAL_COUNT) || 1000;
   const mortality = Number(payload.mortality) || 0;
@@ -1176,3 +1224,16 @@ app.post("/api/payroll-impact/bulk-approve", requireAuth, requireFarmAccess, req
 app.listen(PORT, () => {
   console.log(`Farm Manager API http://127.0.0.1:${PORT}`);
 });
+
+// Keep-alive ping — prevents Render free tier from sleeping
+if (process.env.NODE_ENV === "production" && process.env.RENDER_EXTERNAL_URL) {
+  const PING_INTERVAL = 14 * 60 * 1000; // every 14 minutes
+  setInterval(async () => {
+    try {
+      await fetch(`${process.env.RENDER_EXTERNAL_URL}/health`);
+      console.log("[keep-alive] ping sent");
+    } catch (e) {
+      console.error("[keep-alive] ping failed:", e.message);
+    }
+  }, PING_INTERVAL);
+}

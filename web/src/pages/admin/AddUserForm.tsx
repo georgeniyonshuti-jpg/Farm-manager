@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { BusinessUnitAccess, UserRole } from "../../auth/types";
 import { useAuth } from "../../auth/AuthContext";
 import { useToast } from "../../components/Toast";
+import { API_BASE_URL } from "../../api/config";
 
 export type AddUserPayload = {
   email: string;
@@ -72,7 +73,8 @@ export function AddUserForm({ onCreated }: Props) {
         canViewSensitiveFinancial,
         departmentKeys,
       };
-      const res = await fetch("/api/users", {
+      // ENV: moved to environment variable
+      const res = await fetch(`${API_BASE_URL}/api/users`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

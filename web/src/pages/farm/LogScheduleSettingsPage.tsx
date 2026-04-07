@@ -6,6 +6,7 @@ import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
+import { API_BASE_URL } from "../../api/config";
 
 type Schedule = {
   id: string;
@@ -51,8 +52,10 @@ export function LogScheduleSettingsPage() {
     setLoading(true);
     try {
       const [tf, ts] = await Promise.all([
-        fetch("/api/server-time", { headers: readAuthHeaders(token) }).then((r) => r.json()),
-        fetch("/api/flocks", { headers: readAuthHeaders(token) }).then((r) => r.json()),
+        // ENV: moved to environment variable
+        fetch(`${API_BASE_URL}/api/server-time`, { headers: readAuthHeaders(token) }).then((r) => r.json()),
+        // ENV: moved to environment variable
+        fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) }).then((r) => r.json()),
       ]);
       setServerKigali(String((tf as { kigali?: string }).kigali ?? ""));
 
@@ -62,7 +65,8 @@ export function LogScheduleSettingsPage() {
 
       const allSched: Schedule[] = [];
       for (const f of fl) {
-        const r = await fetch(`/api/log-schedule/${f.id}`, { headers: readAuthHeaders(token) });
+        // ENV: moved to environment variable
+        const r = await fetch(`${API_BASE_URL}/api/log-schedule/${f.id}`, { headers: readAuthHeaders(token) });
         const d = await r.json();
         if (!r.ok) throw new Error((d as { error?: string }).error);
         for (const s of (d.schedules as Schedule[]) ?? []) allSched.push(s);
@@ -94,7 +98,8 @@ export function LogScheduleSettingsPage() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch("/api/log-schedule", {
+      // ENV: moved to environment variable
+      const res = await fetch(`${API_BASE_URL}/api/log-schedule`, {
         method: "POST",
         headers: jsonAuthHeaders(token),
         body: JSON.stringify({
@@ -121,7 +126,8 @@ export function LogScheduleSettingsPage() {
     if (!window.confirm("Delete this schedule?")) return;
     setBusy(true);
     try {
-      const res = await fetch(`/api/log-schedule/${id}`, {
+      // ENV: moved to environment variable
+      const res = await fetch(`${API_BASE_URL}/api/log-schedule/${id}`, {
         method: "DELETE",
         headers: readAuthHeaders(token),
       });

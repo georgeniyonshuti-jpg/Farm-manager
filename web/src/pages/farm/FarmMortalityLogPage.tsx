@@ -8,6 +8,7 @@ import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
+import { API_BASE_URL } from "../../api/config";
 
 function MortalityPhotoBlock({
   busy,
@@ -64,7 +65,8 @@ export function FarmMortalityLogPage() {
     setFlockError(null);
     setFlockLoading(true);
     try {
-      const fr = await fetch("/api/flocks", { headers: readAuthHeaders(token) });
+      // ENV: moved to environment variable
+      const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
       const fd = await fr.json();
       if (!fr.ok) throw new Error(fd.error);
       const flocks = fd.flocks as { id: string }[];
@@ -101,7 +103,8 @@ export function FarmMortalityLogPage() {
     setError(null);
     setBusy(true);
     try {
-      const res = await fetch(`/api/flocks/${flockId}/mortality-events`, {
+      // ENV: moved to environment variable
+      const res = await fetch(`${API_BASE_URL}/api/flocks/${flockId}/mortality-events`, {
         method: "POST",
         headers: jsonAuthHeaders(token),
         body: JSON.stringify({

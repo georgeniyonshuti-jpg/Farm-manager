@@ -6,6 +6,7 @@ import { CheckinUrgencyBadge, type CheckinBadge } from "../../components/farm/Ch
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
+import { API_BASE_URL } from "../../api/config";
 
 type FlockRow = {
   id: string;
@@ -27,7 +28,8 @@ export function FlockListPage() {
     setError(null);
     setLoading(true);
     try {
-      const r = await fetch("/api/flocks", { headers: readAuthHeaders(token) });
+      // ENV: moved to environment variable
+      const r = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
       const d = await r.json();
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Load failed");
       setFlocks((d.flocks as FlockRow[]) ?? []);

@@ -6,6 +6,7 @@ import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
+import { API_BASE_URL } from "../../api/config";
 
 type PayrollRow = {
   id: string;
@@ -50,7 +51,8 @@ export function PayrollImpactPage() {
     setLoading(true);
     try {
       const qs = new URLSearchParams({ period_start: from, period_end: to });
-      const r = await fetch(`/api/payroll-impact?${qs}`, { headers: readAuthHeaders(token) });
+      // ENV: moved to environment variable
+      const r = await fetch(`${API_BASE_URL}/api/payroll-impact?${qs}`, { headers: readAuthHeaders(token) });
       const d = await r.json();
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Load failed");
       setEntries((d.entries as PayrollRow[]) ?? []);
@@ -82,7 +84,8 @@ export function PayrollImpactPage() {
   async function approveOne(id: string) {
     setBusyId(id);
     try {
-      const r = await fetch(`/api/payroll-impact/${id}/approve`, {
+      // ENV: moved to environment variable
+      const r = await fetch(`${API_BASE_URL}/api/payroll-impact/${id}/approve`, {
         method: "PATCH",
         headers: jsonAuthHeaders(token),
         body: "{}",
@@ -101,7 +104,8 @@ export function PayrollImpactPage() {
   async function approveAllPending() {
     setBusyId("all");
     try {
-      const r = await fetch("/api/payroll-impact/bulk-approve", {
+      // ENV: moved to environment variable
+      const r = await fetch(`${API_BASE_URL}/api/payroll-impact/bulk-approve`, {
         method: "POST",
         headers: jsonAuthHeaders(token),
         body: JSON.stringify({}),

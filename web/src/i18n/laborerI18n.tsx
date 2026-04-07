@@ -8,6 +8,7 @@ import React, {
 } from "react";
 import { useAuth } from "../auth/AuthContext";
 import type { UserRole } from "../auth/types";
+import { API_BASE_URL } from "../api/config";
 import { jsonAuthHeaders } from "../lib/authHeaders";
 
 export type LaborerLocale = "rw" | "en";
@@ -130,7 +131,8 @@ export function useLaborerTranslation(english: string): LaborerTranslationState 
           /* ignore */
         }
 
-        const res = await fetch("/api/laborer/translate", {
+        // ENV: moved to environment variable
+        const res = await fetch(`${API_BASE_URL}/api/laborer/translate`, {
           method: "POST",
           headers: jsonAuthHeaders(token),
           body: JSON.stringify({ text: english, targetLang: "rw" }),
@@ -209,7 +211,8 @@ export function usePreLoginRwT(english: string, locale: LaborerLocale): string {
           /* ignore */
         }
 
-        const res = await fetch("/api/i18n/translate-public", {
+        // ENV: moved to environment variable
+        const res = await fetch(`${API_BASE_URL}/api/i18n/translate-public`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: english, targetLang: "rw" }),

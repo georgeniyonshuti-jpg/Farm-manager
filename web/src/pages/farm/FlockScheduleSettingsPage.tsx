@@ -6,6 +6,7 @@ import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
+import { API_BASE_URL } from "../../api/config";
 import type { CheckinStatus } from "./FarmCheckinPage";
 
 type Band = { untilDay: number; intervalHours: number };
@@ -27,7 +28,8 @@ export function FlockScheduleSettingsPage() {
     setError(null);
     setPageLoading(true);
     try {
-      const fr = await fetch("/api/flocks", { headers: readAuthHeaders(token) });
+      // ENV: moved to environment variable
+      const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
       const fd = await fr.json();
       if (!fr.ok) throw new Error(fd.error);
       const flocks = fd.flocks as { id: string }[];
@@ -37,7 +39,8 @@ export function FlockScheduleSettingsPage() {
         setStatus(null);
         return;
       }
-      const sr = await fetch(`/api/flocks/${id}/checkin-status`, { headers: readAuthHeaders(token) });
+      // ENV: moved to environment variable
+      const sr = await fetch(`${API_BASE_URL}/api/flocks/${id}/checkin-status`, { headers: readAuthHeaders(token) });
       const sd = await sr.json();
       if (!sr.ok) throw new Error(sd.error);
       const s = sd as CheckinStatus;
@@ -81,7 +84,8 @@ export function FlockScheduleSettingsPage() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/flocks/${flockId}/checkin-schedule`, {
+      // ENV: moved to environment variable
+      const res = await fetch(`${API_BASE_URL}/api/flocks/${flockId}/checkin-schedule`, {
         method: "PATCH",
         headers: jsonAuthHeaders(token),
         body: JSON.stringify({

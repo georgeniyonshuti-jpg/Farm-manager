@@ -9,6 +9,7 @@ import { CheckinUrgencyBadge } from "../../components/farm/CheckinUrgencyBadge";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
+import { API_BASE_URL } from "../../api/config";
 
 export type CheckinBadge = "ok" | "upcoming" | "overdue";
 
@@ -134,14 +135,16 @@ export function FarmCheckinPage() {
     setLoadError(null);
     setPageLoading(true);
     try {
-      const fr = await fetch("/api/flocks", { headers: readAuthHeaders(token) });
+      // ENV: moved to environment variable
+      const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
       const fd = await fr.json();
       if (!fr.ok) throw new Error(fd.error ?? "Flocks failed");
       const flocks = fd.flocks as { id: string }[];
       const id = flocks[0]?.id ?? null;
       setFlockId(id);
       if (!id) return;
-      const sr = await fetch(`/api/flocks/${id}/checkin-status`, { headers: readAuthHeaders(token) });
+      // ENV: moved to environment variable
+      const sr = await fetch(`${API_BASE_URL}/api/flocks/${id}/checkin-status`, { headers: readAuthHeaders(token) });
       const sd = await sr.json();
       if (!sr.ok) throw new Error(sd.error ?? "Status failed");
       setStatus(sd as CheckinStatus);
@@ -167,7 +170,8 @@ export function FarmCheckinPage() {
     setSubmitError(null);
     setBusy(true);
     try {
-      const res = await fetch(`/api/flocks/${flockId}/round-checkins`, {
+      // ENV: moved to environment variable
+      const res = await fetch(`${API_BASE_URL}/api/flocks/${flockId}/round-checkins`, {
         method: "POST",
         headers: jsonAuthHeaders(token),
         body: JSON.stringify({

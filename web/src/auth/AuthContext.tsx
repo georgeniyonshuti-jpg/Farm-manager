@@ -11,6 +11,7 @@ import {
   canAccessWorkspace,
   defaultWorkspaceForUser,
 } from "./permissions";
+import { API_BASE_URL } from "../api/config";
 
 const AUTH_STORAGE_KEY = "fm_auth_token";
 
@@ -30,7 +31,8 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 async function fetchMe(token: string): Promise<SessionUser> {
-  const res = await fetch("/api/auth/me", {
+  // ENV: moved to environment variable
+  const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   const data = await res.json().catch(() => ({}));
@@ -101,7 +103,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(
     async (creds: LoginCredentials) => {
-      const res = await fetch("/api/auth/login", {
+      // ENV: moved to environment variable
+      const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(creds),
@@ -122,7 +125,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     const t = token ?? localStorage.getItem(AUTH_STORAGE_KEY);
     if (t) {
-      await fetch("/api/auth/logout", {
+      // ENV: moved to environment variable
+      await fetch(`${API_BASE_URL}/api/auth/logout`, {
         method: "POST",
         headers: { Authorization: `Bearer ${t}` },
       }).catch(() => {});

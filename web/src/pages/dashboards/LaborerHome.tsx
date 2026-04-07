@@ -7,6 +7,7 @@ import { CheckinStatusBlock, type CheckinStatus } from "../farm/FarmCheckinPage"
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
+import { API_BASE_URL } from "../../api/config";
 
 export function LaborerHome() {
   const { token } = useAuth();
@@ -29,7 +30,8 @@ export function LaborerHome() {
     setLoadError(null);
     setLoading(true);
     try {
-      const fr = await fetch("/api/flocks", { headers: readAuthHeaders(token) });
+      // ENV: moved to environment variable
+      const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
       const fd = await fr.json();
       if (!fr.ok) throw new Error(fd.error ?? "Flocks failed");
       const id = (fd.flocks as { id: string }[])[0]?.id;
@@ -37,7 +39,8 @@ export function LaborerHome() {
         setStatus(null);
         return;
       }
-      const sr = await fetch(`/api/flocks/${id}/checkin-status`, { headers: readAuthHeaders(token) });
+      // ENV: moved to environment variable
+      const sr = await fetch(`${API_BASE_URL}/api/flocks/${id}/checkin-status`, { headers: readAuthHeaders(token) });
       const sd = await sr.json();
       if (!sr.ok) throw new Error(sd.error ?? "Status failed");
       setStatus(sd as CheckinStatus);

@@ -5,6 +5,7 @@ import { readAuthHeaders } from "../../lib/authHeaders";
 import { CheckinUrgencyBadge } from "../../components/farm/CheckinUrgencyBadge";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
+import { API_BASE_URL } from "../../api/config";
 import type { CheckinStatus } from "./FarmCheckinPage";
 
 export function FlockDetailPage() {
@@ -20,7 +21,8 @@ export function FlockDetailPage() {
     setError(null);
     setLoading(true);
     try {
-      const fr = await fetch("/api/flocks", { headers: readAuthHeaders(token) });
+      // ENV: moved to environment variable
+      const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
       const fd = await fr.json();
       if (!fr.ok) throw new Error((fd as { error?: string }).error);
       const f = ((fd.flocks as { id: string; label: string; placementDate: string }[]) ?? []).find(
@@ -29,7 +31,8 @@ export function FlockDetailPage() {
       if (!f) throw new Error("Flock not found");
       setFlockMeta({ label: f.label, placementDate: f.placementDate });
 
-      const sr = await fetch(`/api/flocks/${id}/checkin-status`, { headers: readAuthHeaders(token) });
+      // ENV: moved to environment variable
+      const sr = await fetch(`${API_BASE_URL}/api/flocks/${id}/checkin-status`, { headers: readAuthHeaders(token) });
       const sd = await sr.json();
       if (!sr.ok) throw new Error((sd as { error?: string }).error);
       setStatus(sd as CheckinStatus);

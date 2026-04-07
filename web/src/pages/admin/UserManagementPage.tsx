@@ -5,6 +5,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { AddUserForm } from "./AddUserForm";
+import { API_BASE_URL } from "../../api/config";
 
 type AuditRow = {
   id: string;
@@ -38,7 +39,8 @@ export function UserManagementPage() {
   const pageSize = 20;
 
   const loadUsers = useCallback(async () => {
-    const u = await fetch("/api/users", { headers: { Authorization: `Bearer ${token}` } }).then((r) =>
+    // ENV: moved to environment variable
+    const u = await fetch(`${API_BASE_URL}/api/users`, { headers: { Authorization: `Bearer ${token}` } }).then((r) =>
       r.json()
     );
     if (!u.users) throw new Error(u.error ?? "Users failed");
@@ -57,7 +59,8 @@ export function UserManagementPage() {
       const qs = new URLSearchParams({ page: String(auditPage), pageSize: String(pageSize) });
       if (roleFilter.trim()) qs.set("role", roleFilter.trim());
       if (actionFilter.trim()) qs.set("action", actionFilter.trim());
-      const a = await fetch(`/api/audit?${qs}`, {
+      // ENV: moved to environment variable
+      const a = await fetch(`${API_BASE_URL}/api/audit?${qs}`, {
         headers: { Authorization: `Bearer ${token}` },
       }).then((r) => r.json());
       if (cancelled) return;

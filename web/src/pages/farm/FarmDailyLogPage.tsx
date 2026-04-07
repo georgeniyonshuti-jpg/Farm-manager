@@ -3,6 +3,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { useLaborerT } from "../../i18n/laborerI18n";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/Toast";
+import { API_BASE_URL } from "../../api/config";
 
 /** Demo API flock id — matches server seed + payroll log_schedule */
 const DEMO_FLOCK_ID = "flock_demo_001";
@@ -19,7 +20,8 @@ export function FarmDailyLogPage() {
     const headers: HeadersInit = { "Content-Type": "application/json" };
     if (token) headers.Authorization = `Bearer ${token}`;
 
-    const res = await fetch("/api/daily-logs", {
+    // ENV: moved to environment variable
+    const res = await fetch(`${API_BASE_URL}/api/daily-logs`, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
@@ -35,7 +37,8 @@ export function FarmDailyLogPage() {
     const headers: HeadersInit = { "Content-Type": "application/json" };
     if (token) headers.Authorization = `Bearer ${token}`;
 
-    const res = await fetch("/api/daily-logs/validate", {
+    // ENV: moved to environment variable
+    const res = await fetch(`${API_BASE_URL}/api/daily-logs/validate`, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),

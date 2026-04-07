@@ -7,6 +7,7 @@ import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
+import { API_BASE_URL } from "../../api/config";
 
 type PayrollRow = {
   id: string;
@@ -66,7 +67,8 @@ export function LaborerEarningsPage() {
         period_start: initial.from,
         period_end: initial.to,
       });
-      const r = await fetch(`/api/payroll-impact?${qs}`, { headers: readAuthHeaders(token) });
+      // ENV: moved to environment variable
+      const r = await fetch(`${API_BASE_URL}/api/payroll-impact?${qs}`, { headers: readAuthHeaders(token) });
       const d = await r.json();
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Load failed");
       setEntries((d.entries as PayrollRow[]) ?? []);

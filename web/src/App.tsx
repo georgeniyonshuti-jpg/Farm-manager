@@ -27,6 +27,7 @@ import { LogScheduleSettingsPage } from "./pages/farm/LogScheduleSettingsPage";
 import { PayrollImpactPage } from "./pages/farm/PayrollImpactPage";
 import { LaborerEarningsPage } from "./pages/laborer/LaborerEarningsPage";
 import { ToastProvider } from "./components/Toast";
+import { VersionBadge } from "./components/VersionBadge";
 
 export default function App() {
   return (
@@ -155,6 +156,7 @@ export default function App() {
             </Route>
           </Route>
         </Routes>
+        <VersionBadge />
         </ToastProvider>
         </LaborerI18nProvider>
       </AuthProvider>

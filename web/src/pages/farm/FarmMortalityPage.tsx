@@ -6,6 +6,7 @@ import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { PageHeader } from "../../components/PageHeader";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
+import { API_BASE_URL } from "../../api/config";
 
 type MortalityRow = {
   id: string;
@@ -38,7 +39,8 @@ export function FarmMortalityPage() {
     setError(null);
     setLoading(true);
     try {
-      const fr = await fetch("/api/flocks", { headers: readAuthHeaders(token) });
+      // ENV: moved to environment variable
+      const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
       const fd = await fr.json();
       if (!fr.ok) throw new Error(fd.error);
       const id = (fd.flocks as { id: string }[])[0]?.id;
@@ -46,7 +48,8 @@ export function FarmMortalityPage() {
         setRows([]);
         return;
       }
-      const mr = await fetch(`/api/flocks/${id}/mortality-events`, { headers: readAuthHeaders(token) });
+      // ENV: moved to environment variable
+      const mr = await fetch(`${API_BASE_URL}/api/flocks/${id}/mortality-events`, { headers: readAuthHeaders(token) });
       const md = await mr.json();
       if (!mr.ok) throw new Error(md.error);
       setRows((md.events as MortalityRow[]) ?? []);
