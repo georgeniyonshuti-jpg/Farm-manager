@@ -1,0 +1,315 @@
+import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { PhotoCaptureInput } from "../../components/farm/PhotoCaptureInput";
+import { useAuth } from "../../auth/AuthContext";
+import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
+import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
+import { CheckinBandLine } from "./CheckinBandLine";
+import { CheckinUrgencyBadge } from "../../components/farm/CheckinUrgencyBadge";
+import { PageHeader } from "../../components/PageHeader";
+import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
+import { useToast } from "../../components/Toast";
+
+export type CheckinBadge = "ok" | "upcoming" | "overdue";
+
+export type CheckinStatus = {
+  flockId: string;
+  label: string;
+  placementDate: string;
+  ageDays: number;
+  targetSlaughterDays: { min: number; max: number };
+  intervalHours: number;
+  intervalSource: string;
+  lastCheckinAt: string | null;
+  nextDueAt: string;
+  overdueMs: number;
+  isOverdue: boolean;
+  checkinBadge: CheckinBadge;
+  photosRequiredPerRound: number;
+  bands: { untilDay: number; intervalHours: number }[];
+};
+
+function TranslatedFlockName({ name }: { name: string }) {
+  const t = useLaborerT(name);
+  return <p className="text-sm font-semibold text-neutral-900">{t}</p>;
+}
+
+export function CheckinStatusBlock({ status }: { status: CheckinStatus }) {
+  const onSiteLine = useLaborerT(
+    `Day ${status.ageDays} on-site • target harvest ~days ${status.targetSlaughterDays.min}–${status.targetSlaughterDays.max}`
+  );
+  const sourceWord =
+    status.intervalSource === "default_age_curve" ? "age-based default" : "custom batch";
+  const policyLine = useLaborerT(
+    `Current policy: every ${status.intervalHours} h (${sourceWord})`
+  );
+  const nextDueLbl = useLaborerT("Next due:");
+  const overdueMsg = useLaborerT("Overdue — please complete check-in as soon as possible.");
+  const upcomingMsg = useLaborerT("Check-in is due within one hour — please prepare.");
+  return (
+    <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <TranslatedFlockName name={status.label} />
+        {/* FIX: age-based schedule urgency badge */}
+        <CheckinUrgencyBadge badge={status.checkinBadge} />
+      </div>
+      <p className="mt-1 text-xs text-neutral-600">{onSiteLine}</p>
+      <p className="mt-2 text-sm text-neutral-800">{policyLine}</p>
+      <p className="mt-1 text-sm">
+        {nextDueLbl}{" "}
+        <time className="font-mono text-neutral-900" dateTime={status.nextDueAt}>
+          {new Date(status.nextDueAt).toLocaleString()}
+        </time>
+      </p>
+      {status.isOverdue && (
+        <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-900">
+          {overdueMsg}
+        </p>
+      )}
+      {status.checkinBadge === "upcoming" && !status.isOverdue && (
+        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
+          {upcomingMsg}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function CheckinPhotoBlock({
+  minCount,
+  busy,
+  onPhotos,
+}: {
+  minCount: number;
+  busy: boolean;
+  onPhotos: (urls: string[]) => void;
+}) {
+  const pickerLabel = useLaborerT(`Tap to add photos (${minCount}+ required, up to 6)`);
+  return (
+    <PhotoCaptureInput
+      minCount={minCount}
+      maxCount={6}
+      pickerLabel={pickerLabel}
+      onChangeDataUrls={onPhotos}
+      disabled={busy}
+    />
+  );
+}
+
+export function FarmCheckinPage() {
+  const { token } = useAuth();
+  const { showToast } = useToast();
+  const title = useLaborerT("Round check-in");
+  const subtitle = useLaborerT(
+    "Photos required • feed & water • optional birds lost at this round"
+  );
+  const linkAction = useLaborerT("Action center");
+  const lblFeed = useLaborerT("Feed since last round (kg)");
+  const lblWater = useLaborerT("Water since last round (L)");
+  const lblMort = useLaborerT("Birds lost at this check-in (optional)");
+  const lblNotes = useLaborerT("Notes");
+  const phZero = useLaborerT("0");
+  const btnSaving = useLaborerT("Saving…");
+  const btnSubmit = useLaborerT("Submit round check-in");
+  const detailsTitle = useLaborerT("Age → frequency curve");
+  const detailsFoot = useLaborerT(
+    "Management, vet, or superuser can customize this batch under Check-in schedule."
+  );
+  const savedMsg = useLaborerT("Round check-in saved.");
+  const errSave = useLaborerT("Save failed");
+
+  const [flockId, setFlockId] = useState<string | null>(null);
+  const [status, setStatus] = useState<CheckinStatus | null>(null);
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [feedKg, setFeedKg] = useState("");
+  const [waterL, setWaterL] = useState("");
+  const [mortalityAtCheckin, setMortalityAtCheckin] = useState("");
+  const [notes, setNotes] = useState("");
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [pageLoading, setPageLoading] = useState(true);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const loadStatus = useCallback(async () => {
+    setLoadError(null);
+    setPageLoading(true);
+    try {
+      const fr = await fetch("/api/flocks", { headers: readAuthHeaders(token) });
+      const fd = await fr.json();
+      if (!fr.ok) throw new Error(fd.error ?? "Flocks failed");
+      const flocks = fd.flocks as { id: string }[];
+      const id = flocks[0]?.id ?? null;
+      setFlockId(id);
+      if (!id) return;
+      const sr = await fetch(`/api/flocks/${id}/checkin-status`, { headers: readAuthHeaders(token) });
+      const sd = await sr.json();
+      if (!sr.ok) throw new Error(sd.error ?? "Status failed");
+      setStatus(sd as CheckinStatus);
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : "Load failed");
+    } finally {
+      setPageLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    void loadStatus();
+  }, [loadStatus]);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!flockId) return;
+    const minP = status?.photosRequiredPerRound ?? 1;
+    if (photos.length < minP) {
+      setSubmitError(`Add at least ${minP} photo(s).`);
+      return;
+    }
+    setSubmitError(null);
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/flocks/${flockId}/round-checkins`, {
+        method: "POST",
+        headers: jsonAuthHeaders(token),
+        body: JSON.stringify({
+          photos,
+          feedKg: feedKg === "" ? 0 : Number(feedKg),
+          waterL: waterL === "" ? 0 : Number(waterL),
+          mortalityAtCheckin: mortalityAtCheckin === "" ? 0 : Number(mortalityAtCheckin),
+          notes,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // FIX: surface photo / server errors on check-in (no silent failure)
+        const msg = (data as { error?: string }).error ?? `Save failed (${res.status})`;
+        throw new Error(msg);
+      }
+      setPhotos([]);
+      setFeedKg("");
+      setWaterL("");
+      setMortalityAtCheckin("");
+      setNotes("");
+      if ((data as { status?: CheckinStatus }).status) {
+        setStatus((data as { status: CheckinStatus }).status);
+      } else void loadStatus();
+      const pay = (data as { payrollImpact?: { rwfDelta?: number } }).payrollImpact;
+      const bonus =
+        pay != null && typeof pay.rwfDelta === "number"
+          ? ` (${pay.rwfDelta >= 0 ? "+" : ""}${pay.rwfDelta} RWF)`
+          : "";
+      showToast("success", `${savedMsg}${bonus}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : errSave;
+      setSubmitError(msg);
+      showToast("error", msg);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-lg space-y-6">
+      <PageHeader
+        title={title}
+        subtitle={subtitle}
+        action={
+          <Link to="/dashboard/laborer" className="text-sm font-medium text-emerald-800 hover:underline">
+            {linkAction}
+          </Link>
+        }
+      />
+
+      {pageLoading && <SkeletonList rows={3} />}
+      {!pageLoading && loadError && <ErrorState message={loadError} onRetry={() => void loadStatus()} />}
+
+      {!pageLoading && !loadError && status && <CheckinStatusBlock status={status} />}
+
+      {!pageLoading && !loadError ? (
+      <form
+        onSubmit={(e) => void handleSubmit(e)}
+        className="space-y-5 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"
+      >
+        <CheckinPhotoBlock
+          minCount={status?.photosRequiredPerRound ?? 1}
+          busy={busy}
+          onPhotos={setPhotos}
+        />
+
+        <div>
+          <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="feed">
+            {lblFeed}
+          </label>
+          <input
+            id="feed"
+            inputMode="decimal"
+            className="w-full min-h-[48px] rounded-xl border border-neutral-300 px-4 text-lg"
+            value={feedKg}
+            onChange={(e) => setFeedKg(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="water">
+            {lblWater}
+          </label>
+          <input
+            id="water"
+            inputMode="decimal"
+            className="w-full min-h-[48px] rounded-xl border border-neutral-300 px-4 text-lg"
+            value={waterL}
+            onChange={(e) => setWaterL(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="mort">
+            {lblMort}
+          </label>
+          <input
+            id="mort"
+            inputMode="numeric"
+            className="w-full min-h-[48px] rounded-xl border border-neutral-300 px-4 text-lg"
+            value={mortalityAtCheckin}
+            placeholder={phZero}
+            onChange={(e) => setMortalityAtCheckin(e.target.value)}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="notes">
+            {lblNotes}
+          </label>
+          <textarea
+            id="notes"
+            rows={3}
+            className="w-full rounded-xl border border-neutral-300 px-4 py-3 text-sm"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+          />
+        </div>
+        {submitError && (
+          <p className="text-sm text-red-800" role="alert">
+            <TranslatedText text={submitError} />
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={busy || !flockId}
+          className="w-full min-h-[52px] rounded-xl bg-emerald-800 text-lg font-semibold text-white hover:bg-emerald-900 disabled:opacity-50"
+        >
+          {busy ? btnSaving : btnSubmit}
+        </button>
+      </form>
+      ) : null}
+
+      {!pageLoading && !loadError && status ? (
+        <details className="rounded-xl border border-neutral-100 bg-neutral-50 p-4 text-sm text-neutral-700">
+          <summary className="cursor-pointer font-medium text-neutral-900">{detailsTitle}</summary>
+          <ul className="mt-2 space-y-1 pl-4">
+            {status.bands.map((b) => (
+              <CheckinBandLine key={`${b.untilDay}-${b.intervalHours}`} untilDay={b.untilDay} hours={b.intervalHours} />
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-neutral-500">{detailsFoot}</p>
+        </details>
+      ) : null}
+    </div>
+  );
+}

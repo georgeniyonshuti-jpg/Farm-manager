@@ -1,0 +1,9 @@
+{
+  "name": "farm-manager",
+  "private": true,
+  "scripts": {
+    "dev": "npm run dev --prefix web",
+    "dev:api": "npm run dev --prefix server",
+    "dev:all": "npm run dev --prefix server & npm run dev --prefix web"
+  }
+}

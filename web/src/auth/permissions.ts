@@ -1,0 +1,85 @@
+import type { ActiveWorkspace, SessionUser, UserRole } from "./types";
+
+const ROLE_ORDER: UserRole[] = [
+  "laborer",
+  "dispatcher",
+  "procurement_officer",
+  "sales_coordinator",
+  "vet",
+  "vet_manager",
+  "investor",
+  "manager",
+  "superuser",
+];
+
+export function roleAtLeast(user: SessionUser | null, minRole: UserRole): boolean {
+  if (!user) return false;
+  if (user.role === "superuser") return true;
+  const u = ROLE_ORDER.indexOf(user.role);
+  const m = ROLE_ORDER.indexOf(minRole);
+  if (u < 0 || m < 0) return false;
+  return u >= m;
+}
+
+export function isSuperuser(user: SessionUser | null): boolean {
+  return user?.role === "superuser";
+}
+
+export function canAccessWorkspace(user: SessionUser | null, workspace: ActiveWorkspace): boolean {
+  if (!user) return false;
+  const a = user.businessUnitAccess;
+  if (a === "both") return true;
+  return a === workspace;
+}
+
+/** Effective workspace: null if user has no access */
+export function defaultWorkspaceForUser(user: SessionUser | null): ActiveWorkspace | null {
+  if (!user) return null;
+  if (user.businessUnitAccess === "farm") return "farm";
+  if (user.businessUnitAccess === "clevacredit") return "clevacredit";
+  return "farm";
+}
+
+export function canViewClevaSensitive(user: SessionUser | null): boolean {
+  if (!user) return false;
+  if (!canAccessWorkspace(user, "clevacredit")) return false;
+  return user.canViewSensitiveFinancial;
+}
+
+export function canAccessRouteLaborerBlock(user: SessionUser | null, path: string): boolean {
+  if (!user) return false;
+  if (user.role === "laborer" || user.role === "dispatcher") {
+    const blocked = ["/admin", "/clevacredit/investor-memos", "/clevacredit/credit-scoring"];
+    if (blocked.some((p) => path.startsWith(p))) return false;
+  }
+  return true;
+}
+
+export type PermissionKey =
+  | "view_net_profit"
+  | "view_bank_balances"
+  | "view_investor_memos"
+  | "manage_users";
+
+export function hasPermission(user: SessionUser | null, key: PermissionKey): boolean {
+  if (!user) return false;
+  if (user.role === "superuser") return true;
+
+  switch (key) {
+    case "manage_users":
+      return false;
+    case "view_net_profit":
+      if (user.role === "investor") return canAccessWorkspace(user, "clevacredit");
+      if (!user.canViewSensitiveFinancial) return false;
+      return roleAtLeast(user, "manager");
+    case "view_bank_balances":
+      if (!user.canViewSensitiveFinancial) return false;
+      return roleAtLeast(user, "manager");
+    case "view_investor_memos":
+      if (!canAccessWorkspace(user, "clevacredit")) return false;
+      if (user.role === "investor") return true;
+      return user.canViewSensitiveFinancial && roleAtLeast(user, "manager");
+    default:
+      return false;
+  }
+}
