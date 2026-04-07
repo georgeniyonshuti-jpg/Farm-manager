@@ -15,6 +15,7 @@ export function FlockDetailPage() {
   const [status, setStatus] = useState<CheckinStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [performance, setPerformance] = useState<{ feedToDateKg: number; fcr: number | null; birdsLiveEstimate: number } | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -36,6 +37,10 @@ export function FlockDetailPage() {
       const sd = await sr.json();
       if (!sr.ok) throw new Error((sd as { error?: string }).error);
       setStatus(sd as CheckinStatus);
+      const pr = await fetch(`${API_BASE_URL}/api/flocks/${id}/performance-summary`, { headers: readAuthHeaders(token) });
+      const pd = await pr.json();
+      if (!pr.ok) throw new Error((pd as { error?: string }).error);
+      setPerformance(pd as { feedToDateKg: number; fcr: number | null; birdsLiveEstimate: number });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -64,7 +69,15 @@ export function FlockDetailPage() {
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
 
       {flockMeta && status && !loading && !error ? (
-        <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
+        <div className="space-y-4">
+          {performance ? (
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">Feed to date</p><p className="font-semibold">{performance.feedToDateKg} kg</p></div>
+              <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">Live estimate</p><p className="font-semibold">{performance.birdsLiveEstimate}</p></div>
+              <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">FCR</p><p className="font-semibold">{performance.fcr != null ? performance.fcr.toFixed(2) : "-"}</p></div>
+            </div>
+          ) : null}
+          <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 pb-4">
             <p className="text-sm font-medium text-neutral-800">Round check-in</p>
             <CheckinUrgencyBadge badge={status.checkinBadge} />
@@ -93,6 +106,7 @@ export function FlockDetailPage() {
               </dd>
             </div>
           </dl>
+        </div>
         </div>
       ) : null}
     </div>

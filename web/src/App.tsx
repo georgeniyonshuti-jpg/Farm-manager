@@ -29,6 +29,8 @@ import { LaborerEarningsPage } from "./pages/laborer/LaborerEarningsPage";
 import { ToastProvider } from "./components/Toast";
 import { VersionBadge } from "./components/VersionBadge";
 import { SystemStatus } from "./components/SystemStatus";
+import { FarmTreatmentPage } from "./pages/farm/FarmTreatmentPage";
+import { FarmSlaughterPage } from "./pages/farm/FarmSlaughterPage";
 
 export default function App() {
   return (
@@ -112,6 +114,22 @@ export default function App() {
                 <Route path="daily-log" element={<FarmDailyLogPage />} />
                 <Route path="mortality" element={<FarmMortalityPage />} />
                 <Route path="inventory" element={<FarmInventoryPage />} />
+                <Route
+                  path="treatments"
+                  element={
+                    <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
+                      <FarmTreatmentPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="slaughter"
+                  element={
+                    <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
+                      <FarmSlaughterPage />
+                    </ProtectedRoute>
+                  }
+                />
                 <Route
                   path="batch-schedule"
                   element={

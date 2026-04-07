@@ -405,6 +405,12 @@ const logSchedules = [];
 /** @type {Array<{ id: string, userId: string, logId: string, logType: string, rwfDelta: number, reason: string, periodStart: string, periodEnd: string, approvedBy: string | null, approvedAt: string | null, createdAt: string, submittedAt: string, onTime: boolean | null }>} */
 const payrollImpacts = [];
 
+/** @type {Array<{ id: string, flockId: string, at: string, diseaseOrReason: string, medicineName: string, dose: number, doseUnit: string, route: string, durationDays: number, withdrawalDays: number, notes: string, administeredByUserId: string }>} */
+const flockTreatments = [];
+
+/** @type {Array<{ id: string, flockId: string, at: string, birdsSlaughtered: number, avgLiveWeightKg: number, avgCarcassWeightKg: number | null, notes: string, enteredByUserId: string }>} */
+const slaughterEvents = [];
+
 const payrollMissedKeys = new Set();
 
 function seedLogScheduleDemo() {
@@ -477,6 +483,33 @@ function maybeAutoPayrollForSubmit(reqUser, flockId, logType, logId, submittedAt
     rwfDelta,
     reason,
   });
+}
+
+function canLogTreatments(user) {
+  if (!user) return false;
+  return ["superuser", "manager", "vet_manager", "vet"].includes(user.role);
+}
+
+function requireTreatmentLogger(req, res, next) {
+  if (!canLogTreatments(req.authUser)) {
+    res.status(403).json({ error: "Only vet, vet manager, manager, or superuser can log treatments" });
+    return;
+  }
+  next();
+}
+
+function csvEscape(v) {
+  const s = String(v ?? "");
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function csvFromRows(headers, rows) {
+  const lines = [
+    headers.join(","),
+    ...rows.map((r) => headers.map((h) => csvEscape(r[h])).join(",")),
+  ];
+  return lines.join("\n");
 }
 
 function hasLogInWindowForUserOnDay(userId, flockId, ymd, sched) {
@@ -980,7 +1013,13 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, (req,
       count: mortalityAtCheckin,
     });
   }
-  res.json({ ok: true, checkin: row, status: checkinStatusPayload(f), payrollImpact });
+  res.json({
+    ok: true,
+    checkin: row,
+    flockDay: flockAgeDays(f, new Date(at)),
+    status: checkinStatusPayload(f),
+    payrollImpact,
+  });
 });
 
 app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, (req, res) => {
@@ -1065,6 +1104,183 @@ app.get("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, (req, 
   }
   const list = roundCheckins.filter((c) => c.flockId === f.id).sort((a, b) => (a.at < b.at ? 1 : -1));
   res.json({ checkins: list });
+});
+
+function buildFlockPerformanceSummary(flockId, atIso = null) {
+  const flock = flocksById.get(flockId);
+  if (!flock) return null;
+  const cutoffMs = atIso ? new Date(atIso).getTime() : Number.POSITIVE_INFINITY;
+  const feedToDate = roundCheckins
+    .filter((c) => c.flockId === flockId && new Date(c.at).getTime() <= cutoffMs)
+    .reduce((s, c) => s + (Number(c.feedKg) || 0), 0);
+  const mortalityToDate = mortalityEvents
+    .filter((m) => m.flockId === flockId && new Date(m.at).getTime() <= cutoffMs)
+    .reduce((s, m) => s + (Number(m.count) || 0), 0);
+  const slaughterToDate = slaughterEvents
+    .filter((s) => s.flockId === flockId && new Date(s.at).getTime() <= cutoffMs)
+    .reduce((sum, s) => sum + (Number(s.birdsSlaughtered) || 0), 0);
+  const birdsLiveEstimate = Math.max(0, (Number(flock.initialCount) || 0) - mortalityToDate - slaughterToDate);
+  const latestSlaughter = slaughterEvents
+    .filter((s) => s.flockId === flockId && new Date(s.at).getTime() <= cutoffMs)
+    .sort((a, b) => (a.at < b.at ? 1 : -1))[0] ?? null;
+  const fcr =
+    latestSlaughter && latestSlaughter.birdsSlaughtered > 0 && latestSlaughter.avgLiveWeightKg > 0
+      ? feedToDate / (latestSlaughter.birdsSlaughtered * latestSlaughter.avgLiveWeightKg)
+      : null;
+  return {
+    flockId,
+    placementDate: flock.placementDate,
+    ageDays: flockAgeDays(flock, new Date()),
+    feedToDateKg: Number(feedToDate.toFixed(2)),
+    mortalityToDate,
+    birdsLiveEstimate,
+    latestSlaughter,
+    fcr,
+  };
+}
+
+app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireTreatmentLogger, (req, res) => {
+  const f = flocksById.get(req.params.id);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
+  const body = req.body ?? {};
+  const medicineName = String(body.medicineName ?? "").trim();
+  const diseaseOrReason = String(body.diseaseOrReason ?? "").trim();
+  const dose = Number(body.dose);
+  const doseUnit = String(body.doseUnit ?? "").trim();
+  const route = String(body.route ?? "").trim();
+  const durationDays = Math.max(1, Number(body.durationDays) || 1);
+  const withdrawalDays = Math.max(0, Number(body.withdrawalDays) || 0);
+  const notes = String(body.notes ?? "").slice(0, 4000);
+  if (!medicineName || !diseaseOrReason || !Number.isFinite(dose) || dose <= 0 || !doseUnit || !route) {
+    res.status(400).json({ error: "medicineName, diseaseOrReason, dose, doseUnit, route are required" });
+    return;
+  }
+  const row = {
+    id: `trt_${crypto.randomBytes(6).toString("hex")}`,
+    flockId: f.id,
+    at: new Date().toISOString(),
+    diseaseOrReason,
+    medicineName,
+    dose,
+    doseUnit,
+    route,
+    durationDays,
+    withdrawalDays,
+    notes,
+    administeredByUserId: req.authUser.id,
+  };
+  flockTreatments.unshift(row);
+  appendAudit(req.authUser.id, req.authUser.role, "flock.treatment.create", "flock", f.id, { treatmentId: row.id });
+  res.status(201).json({ treatment: row });
+});
+
+app.get("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, (req, res) => {
+  const f = flocksById.get(req.params.id);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
+  const list = flockTreatments.filter((t) => t.flockId === f.id).sort((a, b) => (a.at < b.at ? 1 : -1));
+  res.json({ treatments: list });
+});
+
+app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requirePayrollApprover, (req, res) => {
+  const f = flocksById.get(req.params.id);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
+  const body = req.body ?? {};
+  const birdsSlaughtered = Number(body.birdsSlaughtered);
+  const avgLiveWeightKg = Number(body.avgLiveWeightKg);
+  const avgCarcassWeightKg =
+    body.avgCarcassWeightKg == null || body.avgCarcassWeightKg === "" ? null : Number(body.avgCarcassWeightKg);
+  const notes = String(body.notes ?? "").slice(0, 4000);
+  if (!Number.isFinite(birdsSlaughtered) || birdsSlaughtered <= 0 || !Number.isFinite(avgLiveWeightKg) || avgLiveWeightKg <= 0) {
+    res.status(400).json({ error: "birdsSlaughtered and avgLiveWeightKg are required and must be > 0" });
+    return;
+  }
+  const at = new Date().toISOString();
+  const row = {
+    id: `slh_${crypto.randomBytes(6).toString("hex")}`,
+    flockId: f.id,
+    at,
+    birdsSlaughtered,
+    avgLiveWeightKg,
+    avgCarcassWeightKg: Number.isFinite(avgCarcassWeightKg) ? avgCarcassWeightKg : null,
+    notes,
+    enteredByUserId: req.authUser.id,
+  };
+  slaughterEvents.unshift(row);
+  const perf = buildFlockPerformanceSummary(f.id, at);
+  appendAudit(req.authUser.id, req.authUser.role, "flock.slaughter.create", "flock", f.id, { slaughterId: row.id });
+  res.status(201).json({ slaughter: row, fcr: perf?.fcr ?? null, performance: perf });
+});
+
+app.get("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, (req, res) => {
+  const f = flocksById.get(req.params.id);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
+  const list = slaughterEvents.filter((s) => s.flockId === f.id).sort((a, b) => (a.at < b.at ? 1 : -1));
+  res.json({ slaughterEvents: list });
+});
+
+app.get("/api/flocks/:id/performance-summary", requireAuth, requireFarmAccess, (req, res) => {
+  const summary = buildFlockPerformanceSummary(req.params.id);
+  if (!summary) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
+  res.json(summary);
+});
+
+app.get("/api/reports/flock-performance.csv", requireAuth, requireFarmAccess, (req, res) => {
+  const flockId = String(req.query.flock_id ?? "").trim();
+  if (!flockId || !flocksById.has(flockId)) {
+    res.status(400).json({ error: "Valid flock_id is required" });
+    return;
+  }
+  const summary = buildFlockPerformanceSummary(flockId);
+  const csv = csvFromRows(
+    ["flock_id", "placement_date", "age_days", "feed_to_date_kg", "mortality_to_date", "birds_live_estimate", "fcr"],
+    [summary]
+  );
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="flock-performance-${flockId}.csv"`);
+  res.send(csv);
+});
+
+app.get("/api/reports/treatments.csv", requireAuth, requireFarmAccess, (req, res) => {
+  const flockId = String(req.query.flock_id ?? "").trim();
+  const rows = flockTreatments
+    .filter((t) => (flockId ? t.flockId === flockId : true))
+    .sort((a, b) => (a.at < b.at ? 1 : -1));
+  const csv = csvFromRows(
+    ["at", "flockId", "diseaseOrReason", "medicineName", "dose", "doseUnit", "route", "durationDays", "withdrawalDays", "notes"],
+    rows
+  );
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="treatments${flockId ? `-${flockId}` : ""}.csv"`);
+  res.send(csv);
+});
+
+app.get("/api/reports/slaughter.csv", requireAuth, requireFarmAccess, (req, res) => {
+  const flockId = String(req.query.flock_id ?? "").trim();
+  const rows = slaughterEvents
+    .filter((s) => (flockId ? s.flockId === flockId : true))
+    .sort((a, b) => (a.at < b.at ? 1 : -1));
+  const csv = csvFromRows(
+    ["at", "flockId", "birdsSlaughtered", "avgLiveWeightKg", "avgCarcassWeightKg", "notes"],
+    rows
+  );
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="slaughter${flockId ? `-${flockId}` : ""}.csv"`);
+  res.send(csv);
 });
 
 /** @type {Array<Record<string, unknown>>} */

@@ -107,16 +107,22 @@ export function VetHome() {
 
       <div className="grid gap-4">
         <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <h2 className="text-sm font-semibold text-neutral-800">Ibisuzumwa bitegereje</h2>
+          <h2 className="text-sm font-semibold text-neutral-800">Ubuvuzi</h2>
           <p className="mt-2 text-sm text-neutral-600">
-            Raporo zifite impfu nyinshi zitegereje kwemezwa na vet manager.
+            Andika imiti yahawe flock, dose, n'iminsi yo kwirinda gusarura.
           </p>
+          <Link to="/farm/treatments" className="mt-3 inline-block rounded-lg border border-emerald-300 px-3 py-2 text-sm font-semibold text-emerald-800">
+            Jya kuri medicine tracking
+          </Link>
         </section>
         <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <h2 className="text-sm font-semibold text-neutral-800">Icyerekezo cy'ubuzima</h2>
+          <h2 className="text-sm font-semibold text-neutral-800">Slaughter na FCR</h2>
           <p className="mt-2 text-sm text-neutral-600">
-            Imibare ya morbidity n'uburyo bwo kuvura bizerekanwa hano.
+            Injiza igihe cyo gusarura n'ibipimo by'ibiro, ubone FCR n'ama reports.
           </p>
+          <Link to="/farm/slaughter" className="mt-3 inline-block rounded-lg border border-emerald-300 px-3 py-2 text-sm font-semibold text-emerald-800">
+            Jya kuri slaughter & FCR
+          </Link>
         </section>
       </div>
 

@@ -236,11 +236,13 @@ export function FarmCheckinPage() {
         setStatus((data as { status: CheckinStatus }).status);
       } else void loadStatus();
       const pay = (data as { payrollImpact?: { rwfDelta?: number } }).payrollImpact;
+      const flockDay = (data as { flockDay?: number }).flockDay;
       const bonus =
         pay != null && typeof pay.rwfDelta === "number"
           ? ` (${pay.rwfDelta >= 0 ? "+" : ""}${pay.rwfDelta} RWF)`
           : "";
-      showToast("success", `${savedMsg}${bonus}`);
+      const dayLabel = typeof flockDay === "number" ? ` (Day ${flockDay})` : "";
+      showToast("success", `${savedMsg}${dayLabel}${bonus}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : errSave;
       setSubmitError(msg);

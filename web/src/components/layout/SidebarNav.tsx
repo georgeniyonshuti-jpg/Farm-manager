@@ -71,6 +71,16 @@ export function SidebarNav({ onNavigate }: Props) {
     (user.role === "manager" || user.role === "vet_manager" || user.role === "superuser")
       ? { to: "/farm/payroll", label: "Payroll" }
       : null;
+  const treatmentNavItem: NavItem | null =
+    activeWorkspace === "farm" &&
+    (user.role === "manager" || user.role === "vet_manager" || user.role === "vet" || user.role === "superuser")
+      ? { to: "/farm/treatments", label: "Medicine tracking" }
+      : null;
+  const slaughterNavItem: NavItem | null =
+    activeWorkspace === "farm" &&
+    (user.role === "manager" || user.role === "vet_manager" || user.role === "vet" || user.role === "superuser")
+      ? { to: "/farm/slaughter", label: "Slaughter & FCR" }
+      : null;
 
   const laborerEarningsItem: NavItem | null =
     activeWorkspace === "farm" && (user.role === "laborer" || user.role === "dispatcher")
@@ -83,6 +93,8 @@ export function SidebarNav({ onNavigate }: Props) {
     scheduleItem,
     logPayrollItem,
     payrollNavItem,
+    treatmentNavItem,
+    slaughterNavItem,
   ].filter(Boolean) as NavItem[];
   const farmNav = farmExtras.length ? [...FARM_NAV_BASE, ...farmExtras] : FARM_NAV_BASE;
   const nav = activeWorkspace === "farm" ? farmNav : clevaNav;
