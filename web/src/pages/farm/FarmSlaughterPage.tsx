@@ -29,6 +29,8 @@ export function FarmSlaughterPage() {
   const [flockId, setFlockId] = useState("");
   const [rows, setRows] = useState<Slaughter[]>([]);
   const [summary, setSummary] = useState<PerformanceSummary | null>(null);
+  const [startAt, setStartAt] = useState("");
+  const [endAt, setEndAt] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,8 +49,11 @@ export function FarmSlaughterPage() {
       setFlockId(selected);
       if (!selected) return;
 
+      const q = new URLSearchParams();
+      if (startAt) q.set("start_at", `${startAt}T00:00:00.000Z`);
+      if (endAt) q.set("end_at", `${endAt}T23:59:59.999Z`);
       const [sr, pr] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/flocks/${selected}/slaughter-events`, { headers: readAuthHeaders(token) }),
+        fetch(`${API_BASE_URL}/api/flocks/${selected}/slaughter-events?${q.toString()}`, { headers: readAuthHeaders(token) }),
         fetch(`${API_BASE_URL}/api/flocks/${selected}/performance-summary`, { headers: readAuthHeaders(token) }),
       ]);
       const sd = await sr.json();
@@ -62,7 +67,7 @@ export function FarmSlaughterPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, flockId]);
+  }, [token, flockId, startAt, endAt]);
 
   useEffect(() => {
     void load();
@@ -84,12 +89,23 @@ export function FarmSlaughterPage() {
         }),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Save failed");
+      if (!r.ok) {
+        const payload = d as { error?: string; activeMedicines?: Array<{ medicineName?: string }> };
+        if (Array.isArray(payload.activeMedicines) && payload.activeMedicines.length > 0) {
+          const names = payload.activeMedicines
+            .map((x) => x.medicineName)
+            .filter((x): x is string => Boolean(x))
+            .join(", ");
+          throw new Error(`${payload.error ?? "Save failed"} Active: ${names}`);
+        }
+        throw new Error(payload.error ?? "Save failed");
+      }
       showToast("success", "Slaughter record saved.");
       setForm({ birdsSlaughtered: "", avgLiveWeightKg: "", avgCarcassWeightKg: "", notes: "" });
       await load();
     } catch (e) {
-      showToast("error", e instanceof Error ? e.message : "Save failed");
+      const d = e instanceof Error ? e.message : "Save failed";
+      showToast("error", d);
     } finally {
       setBusy(false);
     }
@@ -111,6 +127,8 @@ export function FarmSlaughterPage() {
 
           <form onSubmit={submit} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
             <div className="grid gap-3 sm:grid-cols-2">
+              <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={startAt} onChange={(e) => setStartAt(e.target.value)} />
+              <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
               <select className="rounded-lg border border-neutral-300 px-3 py-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
                 {flocks.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
               </select>
@@ -120,8 +138,8 @@ export function FarmSlaughterPage() {
             </div>
             <textarea className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} placeholder="Notes" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
             <div className="mt-3 flex justify-end gap-2">
-              <a className="rounded-lg border border-neutral-300 px-3 py-2 text-sm" href={`${API_BASE_URL}/api/reports/slaughter.csv?flock_id=${encodeURIComponent(flockId)}`} target="_blank" rel="noreferrer">Slaughter CSV</a>
-              <a className="rounded-lg border border-neutral-300 px-3 py-2 text-sm" href={`${API_BASE_URL}/api/reports/flock-performance.csv?flock_id=${encodeURIComponent(flockId)}`} target="_blank" rel="noreferrer">Performance CSV</a>
+              <a className="rounded-lg border border-neutral-300 px-3 py-2 text-sm" href={`${API_BASE_URL}/api/reports/slaughter.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`} target="_blank" rel="noreferrer">Slaughter CSV</a>
+              <a className="rounded-lg border border-neutral-300 px-3 py-2 text-sm" href={`${API_BASE_URL}/api/reports/flock-performance.csv?flock_id=${encodeURIComponent(flockId)}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`} target="_blank" rel="noreferrer">Performance CSV</a>
               <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">{busy ? "Saving..." : "Save slaughter"}</button>
             </div>
           </form>

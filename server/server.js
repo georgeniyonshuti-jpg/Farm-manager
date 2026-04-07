@@ -4,6 +4,7 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import session from "express-session";
 import pgSession from "connect-pg-simple";
+import pg from "pg";
 import { runMigrations } from "./migrate.js";
 import { checkinSchema, dailyLogSchema, loginSchema } from "./utils/validation.js";
 
@@ -21,6 +22,8 @@ const PORT = Number(process.env.PORT) || 3000;
 // FIX: move hardcoded values to environment variables
 const PEPPER = process.env.AUTH_PEPPER ?? "";
 const PgStore = pgSession(session);
+const { Pool } = pg;
+const dbPool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,
@@ -510,6 +513,22 @@ function csvFromRows(headers, rows) {
     ...rows.map((r) => headers.map((h) => csvEscape(r[h])).join(",")),
   ];
   return lines.join("\n");
+}
+
+function hasDb() {
+  return Boolean(dbPool);
+}
+
+async function dbQuery(sql, params = []) {
+  if (!dbPool) throw new Error("Database pool not configured");
+  return dbPool.query(sql, params);
+}
+
+function parseOptionalIsoDate(value) {
+  if (value == null || value === "") return null;
+  const d = new Date(String(value));
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
 }
 
 function hasLogInWindowForUserOnDay(userId, flockId, ymd, sched) {
@@ -1106,7 +1125,51 @@ app.get("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, (req, 
   res.json({ checkins: list });
 });
 
-function buildFlockPerformanceSummary(flockId, atIso = null) {
+async function listTreatmentsForFlock(flockId, startIso = null, endIso = null) {
+  if (hasDb()) {
+    const r = await dbQuery(
+      `SELECT id, flock_id AS "flockId", at, disease_or_reason AS "diseaseOrReason", medicine_name AS "medicineName",
+              dose, dose_unit AS "doseUnit", route, duration_days AS "durationDays", withdrawal_days AS "withdrawalDays",
+              notes, administered_by_user_id AS "administeredByUserId"
+         FROM flock_treatments
+        WHERE flock_id = $1
+          AND ($2::timestamptz IS NULL OR at >= $2::timestamptz)
+          AND ($3::timestamptz IS NULL OR at <= $3::timestamptz)
+        ORDER BY at DESC`,
+      [flockId, startIso, endIso]
+    );
+    return r.rows;
+  }
+  const startMs = startIso ? new Date(startIso).getTime() : Number.NEGATIVE_INFINITY;
+  const endMs = endIso ? new Date(endIso).getTime() : Number.POSITIVE_INFINITY;
+  return flockTreatments
+    .filter((t) => t.flockId === flockId && new Date(t.at).getTime() >= startMs && new Date(t.at).getTime() <= endMs)
+    .sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+
+async function listSlaughterForFlock(flockId, startIso = null, endIso = null) {
+  if (hasDb()) {
+    const r = await dbQuery(
+      `SELECT id, flock_id AS "flockId", at, birds_slaughtered AS "birdsSlaughtered",
+              avg_live_weight_kg AS "avgLiveWeightKg", avg_carcass_weight_kg AS "avgCarcassWeightKg",
+              notes, entered_by_user_id AS "enteredByUserId"
+         FROM flock_slaughter_events
+        WHERE flock_id = $1
+          AND ($2::timestamptz IS NULL OR at >= $2::timestamptz)
+          AND ($3::timestamptz IS NULL OR at <= $3::timestamptz)
+        ORDER BY at DESC`,
+      [flockId, startIso, endIso]
+    );
+    return r.rows;
+  }
+  const startMs = startIso ? new Date(startIso).getTime() : Number.NEGATIVE_INFINITY;
+  const endMs = endIso ? new Date(endIso).getTime() : Number.POSITIVE_INFINITY;
+  return slaughterEvents
+    .filter((s) => s.flockId === flockId && new Date(s.at).getTime() >= startMs && new Date(s.at).getTime() <= endMs)
+    .sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+
+async function buildFlockPerformanceSummary(flockId, atIso = null) {
   const flock = flocksById.get(flockId);
   if (!flock) return null;
   const cutoffMs = atIso ? new Date(atIso).getTime() : Number.POSITIVE_INFINITY;
@@ -1116,12 +1179,13 @@ function buildFlockPerformanceSummary(flockId, atIso = null) {
   const mortalityToDate = mortalityEvents
     .filter((m) => m.flockId === flockId && new Date(m.at).getTime() <= cutoffMs)
     .reduce((s, m) => s + (Number(m.count) || 0), 0);
-  const slaughterToDate = slaughterEvents
-    .filter((s) => s.flockId === flockId && new Date(s.at).getTime() <= cutoffMs)
+  const slRows = await listSlaughterForFlock(flockId);
+  const slaughterToDate = slRows
+    .filter((s) => new Date(s.at).getTime() <= cutoffMs)
     .reduce((sum, s) => sum + (Number(s.birdsSlaughtered) || 0), 0);
   const birdsLiveEstimate = Math.max(0, (Number(flock.initialCount) || 0) - mortalityToDate - slaughterToDate);
-  const latestSlaughter = slaughterEvents
-    .filter((s) => s.flockId === flockId && new Date(s.at).getTime() <= cutoffMs)
+  const latestSlaughter = slRows
+    .filter((s) => new Date(s.at).getTime() <= cutoffMs)
     .sort((a, b) => (a.at < b.at ? 1 : -1))[0] ?? null;
   const fcr =
     latestSlaughter && latestSlaughter.birdsSlaughtered > 0 && latestSlaughter.avgLiveWeightKg > 0
@@ -1139,7 +1203,7 @@ function buildFlockPerformanceSummary(flockId, atIso = null) {
   };
 }
 
-app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireTreatmentLogger, (req, res) => {
+app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireTreatmentLogger, async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -1172,22 +1236,38 @@ app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireTr
     notes,
     administeredByUserId: req.authUser.id,
   };
-  flockTreatments.unshift(row);
+  try {
+    if (hasDb()) {
+      await dbQuery(
+        `INSERT INTO flock_treatments
+          (id, flock_id, at, disease_or_reason, medicine_name, dose, dose_unit, route, duration_days, withdrawal_days, notes, administered_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [row.id, row.flockId, row.at, row.diseaseOrReason, row.medicineName, row.dose, row.doseUnit, row.route, row.durationDays, row.withdrawalDays, row.notes, row.administeredByUserId]
+      );
+    } else {
+      flockTreatments.unshift(row);
+    }
+  } catch {
+    res.status(500).json({ error: "Failed to persist treatment" });
+    return;
+  }
   appendAudit(req.authUser.id, req.authUser.role, "flock.treatment.create", "flock", f.id, { treatmentId: row.id });
   res.status(201).json({ treatment: row });
 });
 
-app.get("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, (req, res) => {
+app.get("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
     return;
   }
-  const list = flockTreatments.filter((t) => t.flockId === f.id).sort((a, b) => (a.at < b.at ? 1 : -1));
+  const startIso = parseOptionalIsoDate(req.query.start_at);
+  const endIso = parseOptionalIsoDate(req.query.end_at);
+  const list = await listTreatmentsForFlock(f.id, startIso, endIso);
   res.json({ treatments: list });
 });
 
-app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requirePayrollApprover, (req, res) => {
+app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requirePayrollApprover, async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -1204,6 +1284,23 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
     return;
   }
   const at = new Date().toISOString();
+  const treatments = await listTreatmentsForFlock(f.id);
+  const activeWithdrawal = treatments.filter((t) => {
+    const treatmentAt = new Date(t.at).getTime();
+    const withdrawalMs = Math.max(0, Number(t.withdrawalDays) || 0) * 24 * 60 * 60 * 1000;
+    return new Date(at).getTime() < treatmentAt + withdrawalMs;
+  });
+  if (activeWithdrawal.length > 0) {
+    res.status(400).json({
+      error: "Withdrawal period still active for this flock.",
+      activeMedicines: activeWithdrawal.map((t) => ({
+        medicineName: t.medicineName,
+        withdrawalDays: t.withdrawalDays,
+        treatmentAt: t.at,
+      })),
+    });
+    return;
+  }
   const row = {
     id: `slh_${crypto.randomBytes(6).toString("hex")}`,
     flockId: f.id,
@@ -1214,24 +1311,40 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
     notes,
     enteredByUserId: req.authUser.id,
   };
-  slaughterEvents.unshift(row);
-  const perf = buildFlockPerformanceSummary(f.id, at);
+  try {
+    if (hasDb()) {
+      await dbQuery(
+        `INSERT INTO flock_slaughter_events
+          (id, flock_id, at, birds_slaughtered, avg_live_weight_kg, avg_carcass_weight_kg, notes, entered_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+        [row.id, row.flockId, row.at, row.birdsSlaughtered, row.avgLiveWeightKg, row.avgCarcassWeightKg, row.notes, row.enteredByUserId]
+      );
+    } else {
+      slaughterEvents.unshift(row);
+    }
+  } catch {
+    res.status(500).json({ error: "Failed to persist slaughter event" });
+    return;
+  }
+  const perf = await buildFlockPerformanceSummary(f.id, at);
   appendAudit(req.authUser.id, req.authUser.role, "flock.slaughter.create", "flock", f.id, { slaughterId: row.id });
   res.status(201).json({ slaughter: row, fcr: perf?.fcr ?? null, performance: perf });
 });
 
-app.get("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, (req, res) => {
+app.get("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
     return;
   }
-  const list = slaughterEvents.filter((s) => s.flockId === f.id).sort((a, b) => (a.at < b.at ? 1 : -1));
+  const startIso = parseOptionalIsoDate(req.query.start_at);
+  const endIso = parseOptionalIsoDate(req.query.end_at);
+  const list = await listSlaughterForFlock(f.id, startIso, endIso);
   res.json({ slaughterEvents: list });
 });
 
-app.get("/api/flocks/:id/performance-summary", requireAuth, requireFarmAccess, (req, res) => {
-  const summary = buildFlockPerformanceSummary(req.params.id);
+app.get("/api/flocks/:id/performance-summary", requireAuth, requireFarmAccess, async (req, res) => {
+  const summary = await buildFlockPerformanceSummary(req.params.id);
   if (!summary) {
     res.status(404).json({ error: "Flock not found" });
     return;
@@ -1239,13 +1352,13 @@ app.get("/api/flocks/:id/performance-summary", requireAuth, requireFarmAccess, (
   res.json(summary);
 });
 
-app.get("/api/reports/flock-performance.csv", requireAuth, requireFarmAccess, (req, res) => {
+app.get("/api/reports/flock-performance.csv", requireAuth, requireFarmAccess, async (req, res) => {
   const flockId = String(req.query.flock_id ?? "").trim();
   if (!flockId || !flocksById.has(flockId)) {
     res.status(400).json({ error: "Valid flock_id is required" });
     return;
   }
-  const summary = buildFlockPerformanceSummary(flockId);
+  const summary = await buildFlockPerformanceSummary(flockId, parseOptionalIsoDate(req.query.end_at));
   const csv = csvFromRows(
     ["flock_id", "placement_date", "age_days", "feed_to_date_kg", "mortality_to_date", "birds_live_estimate", "fcr"],
     [summary]
@@ -1255,11 +1368,30 @@ app.get("/api/reports/flock-performance.csv", requireAuth, requireFarmAccess, (r
   res.send(csv);
 });
 
-app.get("/api/reports/treatments.csv", requireAuth, requireFarmAccess, (req, res) => {
+app.get("/api/reports/treatments.csv", requireAuth, requireFarmAccess, async (req, res) => {
   const flockId = String(req.query.flock_id ?? "").trim();
-  const rows = flockTreatments
-    .filter((t) => (flockId ? t.flockId === flockId : true))
-    .sort((a, b) => (a.at < b.at ? 1 : -1));
+  const startIso = parseOptionalIsoDate(req.query.start_at);
+  const endIso = parseOptionalIsoDate(req.query.end_at);
+  const rows = flockId
+    ? await listTreatmentsForFlock(flockId, startIso, endIso)
+    : hasDb()
+      ? (await dbQuery(
+        `SELECT id, flock_id AS "flockId", at, disease_or_reason AS "diseaseOrReason", medicine_name AS "medicineName",
+                dose, dose_unit AS "doseUnit", route, duration_days AS "durationDays", withdrawal_days AS "withdrawalDays", notes
+           FROM flock_treatments
+          WHERE ($1::timestamptz IS NULL OR at >= $1::timestamptz)
+            AND ($2::timestamptz IS NULL OR at <= $2::timestamptz)
+          ORDER BY at DESC`,
+        [startIso, endIso]
+      )).rows
+      : flockTreatments
+        .filter((t) => {
+          const ms = new Date(t.at).getTime();
+          const start = startIso ? new Date(startIso).getTime() : Number.NEGATIVE_INFINITY;
+          const end = endIso ? new Date(endIso).getTime() : Number.POSITIVE_INFINITY;
+          return ms >= start && ms <= end;
+        })
+        .sort((a, b) => (a.at < b.at ? 1 : -1));
   const csv = csvFromRows(
     ["at", "flockId", "diseaseOrReason", "medicineName", "dose", "doseUnit", "route", "durationDays", "withdrawalDays", "notes"],
     rows
@@ -1269,11 +1401,30 @@ app.get("/api/reports/treatments.csv", requireAuth, requireFarmAccess, (req, res
   res.send(csv);
 });
 
-app.get("/api/reports/slaughter.csv", requireAuth, requireFarmAccess, (req, res) => {
+app.get("/api/reports/slaughter.csv", requireAuth, requireFarmAccess, async (req, res) => {
   const flockId = String(req.query.flock_id ?? "").trim();
-  const rows = slaughterEvents
-    .filter((s) => (flockId ? s.flockId === flockId : true))
-    .sort((a, b) => (a.at < b.at ? 1 : -1));
+  const startIso = parseOptionalIsoDate(req.query.start_at);
+  const endIso = parseOptionalIsoDate(req.query.end_at);
+  const rows = flockId
+    ? await listSlaughterForFlock(flockId, startIso, endIso)
+    : hasDb()
+      ? (await dbQuery(
+        `SELECT id, flock_id AS "flockId", at, birds_slaughtered AS "birdsSlaughtered",
+                avg_live_weight_kg AS "avgLiveWeightKg", avg_carcass_weight_kg AS "avgCarcassWeightKg", notes
+           FROM flock_slaughter_events
+          WHERE ($1::timestamptz IS NULL OR at >= $1::timestamptz)
+            AND ($2::timestamptz IS NULL OR at <= $2::timestamptz)
+          ORDER BY at DESC`,
+        [startIso, endIso]
+      )).rows
+      : slaughterEvents
+        .filter((s) => {
+          const ms = new Date(s.at).getTime();
+          const start = startIso ? new Date(startIso).getTime() : Number.NEGATIVE_INFINITY;
+          const end = endIso ? new Date(endIso).getTime() : Number.POSITIVE_INFINITY;
+          return ms >= start && ms <= end;
+        })
+        .sort((a, b) => (a.at < b.at ? 1 : -1));
   const csv = csvFromRows(
     ["at", "flockId", "birdsSlaughtered", "avgLiveWeightKg", "avgCarcassWeightKg", "notes"],
     rows

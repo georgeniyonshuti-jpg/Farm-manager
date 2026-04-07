@@ -26,6 +26,8 @@ export function FarmTreatmentPage() {
   const [flocks, setFlocks] = useState<Flock[]>([]);
   const [flockId, setFlockId] = useState("");
   const [rows, setRows] = useState<Treatment[]>([]);
+  const [startAt, setStartAt] = useState("");
+  const [endAt, setEndAt] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +57,10 @@ export function FarmTreatmentPage() {
         setRows([]);
         return;
       }
-      const tr = await fetch(`${API_BASE_URL}/api/flocks/${selected}/treatments`, {
+      const q = new URLSearchParams();
+      if (startAt) q.set("start_at", `${startAt}T00:00:00.000Z`);
+      if (endAt) q.set("end_at", `${endAt}T23:59:59.999Z`);
+      const tr = await fetch(`${API_BASE_URL}/api/flocks/${selected}/treatments?${q.toString()}`, {
         headers: readAuthHeaders(token),
       });
       const td = await tr.json();
@@ -66,7 +71,7 @@ export function FarmTreatmentPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, flockId]);
+  }, [token, flockId, startAt, endAt]);
 
   useEffect(() => {
     void load();
@@ -108,6 +113,8 @@ export function FarmTreatmentPage() {
         <>
           <form onSubmit={submit} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
             <div className="grid gap-3 sm:grid-cols-2">
+              <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={startAt} onChange={(e) => setStartAt(e.target.value)} />
+              <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
               <select className="rounded-lg border border-neutral-300 px-3 py-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
                 {flocks.map((f) => (
                   <option key={f.id} value={f.id}>{f.label}</option>
@@ -123,7 +130,14 @@ export function FarmTreatmentPage() {
             </div>
             <textarea className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} placeholder="Notes" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
             <div className="mt-3 flex justify-end gap-2">
-              <a className="rounded-lg border border-neutral-300 px-3 py-2 text-sm" href={`${API_BASE_URL}/api/reports/treatments.csv?flock_id=${encodeURIComponent(flockId)}`} target="_blank" rel="noreferrer">Download CSV</a>
+              <a
+                className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                href={`${API_BASE_URL}/api/reports/treatments.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Download CSV
+              </a>
               <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">{busy ? "Saving..." : "Save treatment"}</button>
             </div>
           </form>
