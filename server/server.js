@@ -1266,7 +1266,7 @@ app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireTr
       flockTreatments.unshift(row);
     }
   } catch {
-    res.status(500).json({ error: "Failed to persist treatment" });
+    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
     return;
   }
   appendAudit(req.authUser.id, req.authUser.role, "flock.treatment.create", "flock", f.id, { treatmentId: row.id });
@@ -1351,15 +1351,15 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
       slaughterEvents.unshift(row);
     }
   } catch {
-    res.status(500).json({ error: "Failed to persist slaughter event" });
+    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
     return;
   }
   let perf = null;
   try {
     perf = await buildFlockPerformanceSummary(f.id, at);
   } catch {
-    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
-    return;
+    // Submission already persisted above; return success without summary to avoid duplicate retries.
+    perf = null;
   }
   appendAudit(req.authUser.id, req.authUser.role, "flock.slaughter.create", "flock", f.id, { slaughterId: row.id });
   res.status(201).json({ slaughter: row, fcr: perf?.fcr ?? null, performance: perf });
