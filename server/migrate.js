@@ -11,7 +11,11 @@ export async function runMigrations() {
     throw new Error("DATABASE_URL is required");
   }
 
-  const client = new Client({ connectionString: databaseUrl });
+  const client = new Client({
+    connectionString: databaseUrl,
+    ssl: { rejectUnauthorized: false },
+    family: 4,
+  });
   await client.connect();
   let failedCount = 0;
 

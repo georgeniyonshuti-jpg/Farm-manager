@@ -1,3 +1,6 @@
+// Flush-friendly banner so Render "Logs" shows activity even if boot fails later
+console.log("[INFO]", "[startup] clevafarm process boot", new Date().toISOString(), `cwd=${process.cwd()}`);
+
 import crypto from "node:crypto";
 import cors from "cors";
 import express from "express";
@@ -966,6 +969,38 @@ app.get("/api/users", requireAuth, requireSuperuser, async (_req, res) => {
        ORDER BY created_at DESC`
     );
     res.json({ users: rows.rows.map(sanitizeUser) });
+  } catch {
+    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+  }
+});
+
+app.get("/api/debug/demo-access", requireAuth, requireSuperuser, async (_req, res) => {
+  try {
+    const result = await dbQuery(
+      `SELECT id, email, role,
+              business_unit_access AS "businessUnitAccess",
+              can_view_sensitive_financial AS "canViewSensitiveFinancial",
+              department_keys AS "departmentKeys"
+       FROM app_users
+       WHERE email LIKE '%@demo.com'
+       ORDER BY email ASC`
+    );
+    const accounts = result.rows.map((u) => {
+      const access = String(u.businessUnitAccess ?? "");
+      const hasFarm = access === "farm" || access === "both";
+      const hasFinance = access === "clevacredit" || access === "both";
+      return {
+        id: u.id,
+        email: u.email,
+        role: u.role,
+        businessUnitAccess: access,
+        canViewSensitiveFinancial: Boolean(u.canViewSensitiveFinancial),
+        departmentKeys: Array.isArray(u.departmentKeys) ? u.departmentKeys : [],
+        hasFarmAccess: hasFarm,
+        hasFinanceAccess: hasFinance,
+      };
+    });
+    res.json({ accounts, total: accounts.length, checkedAt: new Date().toISOString() });
   } catch {
     res.status(503).json({ error: "Database unavailable. Please retry shortly." });
   }
@@ -2327,10 +2362,33 @@ app.use((err, _req, res, _next) => {
   });
 });
 
-app.listen(PORT, () => {
-  // PROD-SAFE: sanitized logging
-  console.log("[INFO]", `Clevafarm API listening on port ${PORT}`);
+process.on("uncaughtException", (err) => {
+  console.error("[ERROR]", "[fatal] uncaughtException:", err?.message ?? err);
+  console.error(err);
+  process.exit(1);
 });
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[ERROR]", "[fatal] unhandledRejection:", reason);
+});
+
+function listenServer() {
+  const server = app.listen(PORT, "0.0.0.0", () => {
+    console.log("[INFO]", `Clevafarm API listening on 0.0.0.0:${PORT} env=${process.env.NODE_ENV ?? "development"}`);
+    if (process.env.DATABASE_URL) {
+      console.log("[INFO]", "[startup] DATABASE_URL is set (pool will use DB)");
+    } else {
+      console.warn("[WARN]", "[startup] DATABASE_URL is not set — API auth and DB routes will fail");
+    }
+  });
+  server.on("error", (err) => {
+    console.error("[ERROR]", "[listen] server error:", err?.message ?? err);
+    throw err;
+  });
+  return server;
+}
+
+listenServer();
 
 // Keep-alive ping — prevents Render free tier from sleeping
 if (process.env.NODE_ENV === "production" && process.env.RENDER_EXTERNAL_URL) {

@@ -2,8 +2,12 @@ services:
   - type: web
     name: farm-manager-api
     env: node
-    buildCommand: npm install
+    # Repo root has no dependencies; server lives in server/ — install there so node can resolve express, pg, etc.
+    buildCommand: npm install --prefix server
     startCommand: node server/server.js
     envVars:
       - key: NODE_ENV
         value: production
+      # Prefer IPv4 for some DB hosts (e.g. Supabase) + ensure logs are visible in Render
+      - key: NODE_OPTIONS
+        value: "--dns-result-order=ipv4first"
