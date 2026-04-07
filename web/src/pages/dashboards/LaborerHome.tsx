@@ -7,6 +7,7 @@ import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
+import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 
 function kigaliNowDate(): Date {
   return new Date(new Date().toLocaleString("en-US", { timeZone: "Africa/Kigali" }));
@@ -15,18 +16,34 @@ function kigaliNowDate(): Date {
 export function LaborerHome() {
   const { token, user } = useAuth();
   const isJuniorVet = user?.role === "vet" || user?.departmentKeys.includes("junior_vet");
-  const hTitle = isJuniorVet ? "Intera ya Vet Muto" : "Ikigo cy'ibikorwa";
-  const hSub = isJuniorVet
-    ? "Gukurikirana rounds, ubuzima bw'amatungo n'ibyihutirwa."
-    : "Ibikorwa bya buri munsi kuri telefone.";
-  const linkCheckin = "Round checking";
-  const linkMort = "Andika impfu";
-  const linkDaily = "Raporo y'umunsi";
-  const linkTable = "Imbonerahamwe y'impfu";
-  const linkInv = "Ububiko bw'ibiryo";
-  const linkEarnings = "Ihembo ryanjye";
-  const noFlockTitle = "Nta flock ibonetse";
-  const noFlockBody = "Status ya round checking igaragara gusa iyo flock ihari.";
+
+  const hTitleJunior = useLaborerT("Junior vet hub");
+  const hTitleLaborer = useLaborerT("Field operations hub");
+  const hSubJunior = useLaborerT("Track rounds, flock health, and urgent work.");
+  const hSubLaborer = useLaborerT("Daily tasks optimized for your phone.");
+  const linkCheckin = useLaborerT("Round check-in");
+  const linkMort = useLaborerT("Log mortality");
+  const linkDaily = useLaborerT("Daily log");
+  const linkTable = useLaborerT("Mortality table");
+  const linkInv = useLaborerT("Feed inventory");
+  const linkEarnings = useLaborerT("My earnings");
+  const noFlockTitle = useLaborerT("No flock available");
+  const noFlockBody = useLaborerT("Round status appears when a flock is assigned to your site.");
+  const tLoadingBanner = useLaborerT("Preparing round check-in status…");
+  const tErrBanner = useLaborerT("Could not load round check-in. Try again.");
+  const tNoScheduleBanner = useLaborerT("No round schedule available right now.");
+  const tOverduePrefix = useLaborerT("Round check-in is overdue by");
+  const tOverdueSuffix = useLaborerT("minutes. Inspect the flock now.");
+  const tOnTrack = useLaborerT("You are on track.");
+  const tAbout = useLaborerT("About");
+  const tUntilNext = useLaborerT("minutes until the next round.");
+  const tRetry = useLaborerT("Try again");
+  const navHome = useLaborerT("Home");
+  const navRound = useLaborerT("Round");
+  const navMort = useLaborerT("Mortality");
+  const navLog = useLaborerT("Log");
+  const navHistory = useLaborerT("History");
+  const navStock = useLaborerT("Stock");
 
   const [status, setStatus] = useState<CheckinStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -36,7 +53,6 @@ export function LaborerHome() {
     setLoadError(null);
     setLoading(true);
     try {
-      // ENV: moved to environment variable
       const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
       const fd = await fr.json();
       if (!fr.ok) throw new Error(fd.error ?? "Flocks failed");
@@ -45,7 +61,6 @@ export function LaborerHome() {
         setStatus(null);
         return;
       }
-      // ENV: moved to environment variable
       const sr = await fetch(`${API_BASE_URL}/api/flocks/${id}/checkin-status`, { headers: readAuthHeaders(token) });
       const sd = await sr.json();
       if (!sr.ok) throw new Error(sd.error ?? "Status failed");
@@ -70,9 +85,9 @@ export function LaborerHome() {
   }, []);
 
   const roundBanner = useMemo(() => {
-    if (loading) return { tone: "bg-neutral-200 text-neutral-700", text: "Round checking iri gutegurwa..." };
-    if (loadError) return { tone: "bg-red-100 text-red-800", text: "Round checking ifite ikibazo. Ongera ugerageze." };
-    if (!status) return { tone: "bg-amber-100 text-amber-900", text: "Nta round schedule iraboneka kuri ubu." };
+    if (loading) return { tone: "bg-neutral-200 text-neutral-700", text: tLoadingBanner };
+    if (loadError) return { tone: "bg-red-100 text-red-800", text: tErrBanner };
+    if (!status) return { tone: "bg-amber-100 text-amber-900", text: tNoScheduleBanner };
     void clockTick;
     const now = kigaliNowDate().getTime();
     const next = new Date(status.nextDueAt).getTime();
@@ -80,23 +95,36 @@ export function LaborerHome() {
       const mins = Math.floor((now - next) / 60000);
       return {
         tone: "bg-red-100 text-red-900",
-        text: `Round checking yakerereweho iminota ${Math.max(1, mins)}. Kora igenzura ako kanya.`,
+        text: `${tOverduePrefix} ${Math.max(1, mins)} ${tOverdueSuffix}`,
       };
     }
     const minsLeft = Math.floor((next - now) / 60000);
     return {
       tone: "bg-emerald-100 text-emerald-900",
-      text: `Uri ku murongo. Hasigaye iminota ${Math.max(1, minsLeft)} mbere ya round ikurikira.`,
+      text: `${tOnTrack} ${tAbout} ${Math.max(1, minsLeft)} ${tUntilNext}`,
     };
-  }, [loading, loadError, status, clockTick]);
+  }, [
+    loading,
+    loadError,
+    status,
+    clockTick,
+    tLoadingBanner,
+    tErrBanner,
+    tNoScheduleBanner,
+    tOverduePrefix,
+    tOverdueSuffix,
+    tOnTrack,
+    tAbout,
+    tUntilNext,
+  ]);
 
   const bottomNav: Array<{ to: string; label: string }> = [
-    { to: "/dashboard/laborer", label: "Ahabanza" },
-    { to: "/farm/checkin", label: "Round" },
-    { to: "/farm/mortality-log", label: "Impfu" },
-    { to: "/farm/daily-log", label: "Raporo" },
-    { to: "/farm/mortality", label: "Amateka" },
-    { to: "/farm/inventory", label: "Ububiko" },
+    { to: "/dashboard/laborer", label: navHome },
+    { to: "/farm/checkin", label: navRound },
+    { to: "/farm/mortality-log", label: navMort },
+    { to: "/farm/daily-log", label: navLog },
+    { to: "/farm/mortality", label: navHistory },
+    { to: "/farm/inventory", label: navStock },
   ];
 
   return (
@@ -104,11 +132,19 @@ export function LaborerHome() {
       <div className={`rounded-xl px-4 py-3 text-sm font-semibold leading-6 ${roundBanner.tone}`}>
         {roundBanner.text}
       </div>
-      <PageHeader className="mb-3 gap-3" title={hTitle} subtitle={hSub} />
+      <PageHeader
+        className="mb-3 gap-3"
+        title={isJuniorVet ? hTitleJunior : hTitleLaborer}
+        subtitle={isJuniorVet ? hSubJunior : hSubLaborer}
+      />
 
       {loading && <SkeletonList rows={2} />}
       {!loading && loadError && (
-        <ErrorState message={loadError} onRetry={() => void load()} />
+        <ErrorState
+          message={<TranslatedText text={loadError} />}
+          retryLabel={tRetry}
+          onRetry={() => void load()}
+        />
       )}
 
       {!loading && !loadError && status && <CheckinStatusBlock status={status} showWarning={false} />}

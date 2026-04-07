@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 type RowProps = { className?: string };
 
 export function SkeletonRow({ className = "h-14" }: RowProps) {
@@ -17,11 +19,12 @@ export function SkeletonList({ rows = 4 }: ListProps) {
 }
 
 type Props = {
-  message: string;
+  message: ReactNode;
   onRetry?: () => void;
+  retryLabel?: string;
 };
 
-export function ErrorState({ message, onRetry }: Props) {
+export function ErrorState({ message, onRetry, retryLabel = "Try again" }: Props) {
   return (
     <div className="rounded-lg bg-red-50 px-3 py-3 text-sm text-red-800" role="alert">
       <p>{message}</p>
@@ -31,7 +34,7 @@ export function ErrorState({ message, onRetry }: Props) {
           className="mt-2 font-semibold text-red-900 underline hover:text-red-950"
           onClick={onRetry}
         >
-          Try again
+          {retryLabel}
         </button>
       ) : null}
     </div>

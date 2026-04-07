@@ -22,7 +22,7 @@ type AuthContextValue = {
   token: string | null;
   activeWorkspace: ActiveWorkspace | null;
   bootstrapped: boolean;
-  login: (creds: LoginCredentials) => Promise<void>;
+  login: (creds: LoginCredentials) => Promise<SessionUser>;
   logout: () => Promise<void>;
   setActiveWorkspace: (w: ActiveWorkspace) => void;
   refreshMe: () => Promise<void>;
@@ -102,7 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [setTokenPersist]);
 
   const login = useCallback(
-    async (creds: LoginCredentials) => {
+    async (creds: LoginCredentials): Promise<SessionUser> => {
       // ENV: moved to environment variable
       const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: "POST",
@@ -118,6 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setTokenPersist(t);
       setUser(u);
       setActiveWorkspaceState(defaultWorkspaceForUser(u));
+      return u;
     },
     [setTokenPersist]
   );

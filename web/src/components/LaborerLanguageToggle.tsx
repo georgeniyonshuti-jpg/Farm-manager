@@ -1,21 +1,19 @@
 import { useAuth } from "../auth/AuthContext";
 import type { LaborerLocale } from "../i18n/laborerI18n";
-import { useLaborerI18n, useLaborerT } from "../i18n/laborerI18n";
+import { isLaborerLocaleUser, useLaborerI18n, useLaborerT } from "../i18n/laborerI18n";
 
 const seg =
   "rounded-md px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-emerald-600/40";
 
-/**
- * Shown only for laborer accounts. Defaults to Kinyarwanda (Ikinyarwanda).
- */
+/** Shown only for laborers; app defaults to English until they switch to Kinyarwanda. */
 export function LaborerLanguageToggle() {
   const { user } = useAuth();
   const { locale, setLocale } = useLaborerI18n();
   const ariaLang = useLaborerT("Language");
-  const labelRw = useLaborerT("Ikinyarwanda");
+  const labelRw = useLaborerT("Kinyarwanda");
   const labelEn = useLaborerT("English");
 
-  if (user?.role !== "laborer" && user?.role !== "dispatcher" && user?.role !== "vet") return null;
+  if (!isLaborerLocaleUser(user)) return null;
 
   const pick = (l: LaborerLocale) =>
     setLocale(l);

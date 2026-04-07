@@ -18,6 +18,13 @@ type AuditRow = {
   metadata?: Record<string, unknown>;
 };
 
+const AUDIT_ACTION_QUICK_FILTERS: Array<{ label: string; value: string }> = [
+  { label: "Report exports", value: "report.export" },
+  { label: "Round check-ins", value: "farm.round_checkin.create" },
+  { label: "Slaughter records", value: "flock.slaughter.create" },
+  { label: "Treatments", value: "flock.treatment.create" },
+];
+
 export function UserManagementPage() {
   const { token } = useAuth();
   const [users, setUsers] = useState<SessionUser[]>([]);
@@ -116,12 +123,19 @@ export function UserManagementPage() {
 
   const roleOptions = useMemo(() => {
     const s = new Set<string>();
+    users.forEach((u) => s.add(u.role));
     audit.forEach((r) => s.add(r.role));
     return [...s].sort();
-  }, [audit]);
+  }, [audit, users]);
 
   const totalPages = Math.max(1, Math.ceil(auditTotal / pageSize));
   const auditBusy = (loading && !loadError) || auditLoading;
+
+  function applyActionFilter(value: string) {
+    setActionDraft(value);
+    setActionFilter(value.trim());
+    setAuditPage(1);
+  }
 
   return (
     <div className="space-y-8">
@@ -197,6 +211,33 @@ export function UserManagementPage() {
           POST <code className="rounded bg-neutral-100 px-1">/api/audit</code> records actor, role, and resource.
         </p>
 
+        <div className="mt-3 flex flex-wrap gap-2">
+          <span className="self-center text-xs font-medium text-neutral-500">Quick:</span>
+          {AUDIT_ACTION_QUICK_FILTERS.map((q) => (
+            <button
+              key={q.value}
+              type="button"
+              disabled={loading || auditBusy}
+              className={`rounded-full border px-3 py-1 text-xs font-semibold disabled:opacity-40 ${
+                actionFilter === q.value
+                  ? "border-emerald-700 bg-emerald-50 text-emerald-900"
+                  : "border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50"
+              }`}
+              onClick={() => applyActionFilter(q.value)}
+            >
+              {q.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            disabled={loading || auditBusy}
+            className="rounded-full border border-dashed border-neutral-400 px-3 py-1 text-xs font-semibold text-neutral-600 hover:bg-neutral-50 disabled:opacity-40"
+            onClick={() => applyActionFilter("")}
+          >
+            Clear action
+          </button>
+        </div>
+
         <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
           <div>
             <label htmlFor="audit-role" className="mb-1 block text-xs font-medium text-neutral-600">
@@ -229,7 +270,7 @@ export function UserManagementPage() {
               type="text"
               className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
               value={actionDraft}
-              placeholder="e.g. farm.mortality"
+              placeholder="e.g. report.export or farm.mortality"
               disabled={loading}
               onChange={(e) => setActionDraft(e.target.value)}
             />

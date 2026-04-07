@@ -7,7 +7,7 @@ import React, {
   useState,
 } from "react";
 import { useAuth } from "../auth/AuthContext";
-import type { UserRole } from "../auth/types";
+import type { SessionUser, UserRole } from "../auth/types";
 import { API_BASE_URL } from "../api/config";
 import { jsonAuthHeaders } from "../lib/authHeaders";
 
@@ -35,14 +35,24 @@ export function txCacheKey(lang: LaborerLocale, text: string): string {
 function readStoredLocale(): LaborerLocale {
   try {
     const v = sessionStorage.getItem(LABORER_UI_LOCALE_KEY);
-    return v === "en" ? "en" : "rw";
+    return v === "rw" ? "rw" : "en";
   } catch {
-    return "rw";
+    return "en";
   }
 }
 
-function isFieldOpsRole(role: UserRole | undefined): boolean {
-  return role === "laborer" || role === "dispatcher";
+/** True for coop laborers and junior vets (same field UI as laborers). */
+export function isLaborerLocaleUser(user: SessionUser | null | undefined): boolean {
+  if (!user) return false;
+  if (user.role === "laborer") return true;
+  if (user.role === "vet" && user.departmentKeys.includes("junior_vet")) return true;
+  return false;
+}
+
+function laborerLocaleFromRole(role: UserRole | undefined, departmentKeys: string[]): boolean {
+  if (role === "laborer") return true;
+  if (role === "vet" && departmentKeys.includes("junior_vet")) return true;
+  return false;
 }
 
 export function LaborerI18nProvider({ children }: { children: React.ReactNode }) {
@@ -51,23 +61,27 @@ export function LaborerI18nProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     if (!bootstrapped) return;
-    const r = user?.role;
-    if (!isFieldOpsRole(r)) return;
+    if (!isLaborerLocaleUser(user)) {
+      setLocaleState("en");
+      return;
+    }
     setLocaleState(readStoredLocale());
-  }, [bootstrapped, user?.role]);
+  }, [bootstrapped, user]);
 
   const setLocale = useCallback(
     (l: LaborerLocale) => {
+      if (!isLaborerLocaleUser(user)) {
+        setLocaleState("en");
+        return;
+      }
       setLocaleState(l);
       try {
-        if (isFieldOpsRole(user?.role)) {
-          sessionStorage.setItem(LABORER_UI_LOCALE_KEY, l);
-        }
+        sessionStorage.setItem(LABORER_UI_LOCALE_KEY, l);
       } catch {
         /* ignore */
       }
     },
-    [user?.role]
+    [user]
   );
 
   const v = useMemo(() => ({ locale, setLocale }), [locale, setLocale]);
@@ -87,8 +101,8 @@ export type LaborerTranslationState = {
 };
 
 /**
- * For laborer & dispatcher + Kinyarwanda: translates via Gemini (server). Cached in sessionStorage.
- * FIX: exposes loading + fallback for slow/failed translation.
+ * Laborers only: when locale is Kinyarwanda, translates via Gemini (server). Cached in sessionStorage.
+ * Other roles always see English source text.
  */
 export function useLaborerTranslation(english: string): LaborerTranslationState {
   const { user, token } = useAuth();
@@ -98,8 +112,7 @@ export function useLaborerTranslation(english: string): LaborerTranslationState 
   const [usedFallback, setUsedFallback] = useState(false);
 
   useEffect(() => {
-    const role = user?.role;
-    if (!isFieldOpsRole(role) || locale === "en") {
+    if (!laborerLocaleFromRole(user?.role, user?.departmentKeys ?? []) || locale === "en") {
       setText(english);
       setIsLoading(false);
       setUsedFallback(false);
@@ -170,7 +183,7 @@ export function useLaborerTranslation(english: string): LaborerTranslationState 
     return () => {
       cancelled = true;
     };
-  }, [english, locale, user?.role, token]);
+  }, [english, locale, user?.role, user?.departmentKeys, token]);
 
   return { text, isLoading, usedFallback };
 }
@@ -241,7 +254,7 @@ export function usePreLoginRwT(english: string, locale: LaborerLocale): string {
   return out;
 }
 
-/** Authenticated laborer/dispatcher in-app copy (Gemini + cache). */
+/** Authenticated laborer in-app copy (Gemini + cache); others see English. */
 export function TranslatedText({ text }: { text: string }) {
   const { text: t, isLoading, usedFallback } = useLaborerTranslation(text);
   return (

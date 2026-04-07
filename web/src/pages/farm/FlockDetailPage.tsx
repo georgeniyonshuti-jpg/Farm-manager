@@ -16,6 +16,7 @@ export function FlockDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [performance, setPerformance] = useState<{ feedToDateKg: number; fcr: number | null; birdsLiveEstimate: number } | null>(null);
+  const [treatments, setTreatments] = useState<Array<{ at: string; medicineName: string; withdrawalDays: number }>>([]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -41,6 +42,10 @@ export function FlockDetailPage() {
       const pd = await pr.json();
       if (!pr.ok) throw new Error((pd as { error?: string }).error);
       setPerformance(pd as { feedToDateKg: number; fcr: number | null; birdsLiveEstimate: number });
+      const tr = await fetch(`${API_BASE_URL}/api/flocks/${id}/treatments`, { headers: readAuthHeaders(token) });
+      const td = await tr.json();
+      if (!tr.ok) throw new Error((td as { error?: string }).error);
+      setTreatments(((td as { treatments?: Array<{ at: string; medicineName: string; withdrawalDays: number }> }).treatments ?? []).slice(0, 5));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -75,6 +80,22 @@ export function FlockDetailPage() {
               <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">Feed to date</p><p className="font-semibold">{performance.feedToDateKg} kg</p></div>
               <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">Live estimate</p><p className="font-semibold">{performance.birdsLiveEstimate}</p></div>
               <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">FCR</p><p className="font-semibold">{performance.fcr != null ? performance.fcr.toFixed(2) : "-"}</p></div>
+            </div>
+          ) : null}
+          {!!treatments.length ? (
+            <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
+              <p className="mb-2 font-semibold text-neutral-800">Withdrawal compliance</p>
+              <div className="space-y-1">
+                {treatments.map((t, i) => {
+                  const endsAt = new Date(new Date(t.at).getTime() + t.withdrawalDays * 24 * 60 * 60 * 1000).getTime();
+                  const left = Math.ceil((endsAt - Date.now()) / (24 * 60 * 60 * 1000));
+                  return (
+                    <p key={`${t.at}-${i}`} className={left > 0 ? "text-amber-700" : "text-emerald-700"}>
+                      {t.medicineName}: {left > 0 ? `${left} day(s) left` : "cleared"}
+                    </p>
+                  );
+                })}
+              </div>
             </div>
           ) : null}
           <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">

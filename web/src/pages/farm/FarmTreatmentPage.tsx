@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
 import { readAuthHeaders, jsonAuthHeaders } from "../../lib/authHeaders";
@@ -41,6 +41,27 @@ export function FarmTreatmentPage() {
     withdrawalDays: "0",
     notes: "",
   });
+
+  const preset = useMemo(() => ({
+    set7d: () => {
+      const end = new Date();
+      const start = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000);
+      setStartAt(start.toISOString().slice(0, 10));
+      setEndAt(end.toISOString().slice(0, 10));
+    },
+    set30d: () => {
+      const end = new Date();
+      const start = new Date(Date.now() - 29 * 24 * 60 * 60 * 1000);
+      setStartAt(start.toISOString().slice(0, 10));
+      setEndAt(end.toISOString().slice(0, 10));
+    },
+    setCycle: () => {
+      const flock = flocks.find((f) => f.id === flockId);
+      void flock;
+      setStartAt("");
+      setEndAt(new Date().toISOString().slice(0, 10));
+    },
+  }), [flocks, flockId]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -128,6 +149,11 @@ export function FarmTreatmentPage() {
               <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Duration days" inputMode="numeric" value={form.durationDays} onChange={(e) => setForm((v) => ({ ...v, durationDays: e.target.value }))} />
               <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Withdrawal days" inputMode="numeric" value={form.withdrawalDays} onChange={(e) => setForm((v) => ({ ...v, withdrawalDays: e.target.value }))} />
             </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" onClick={preset.set7d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 7d</button>
+              <button type="button" onClick={preset.set30d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 30d</button>
+              <button type="button" onClick={preset.setCycle} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Cycle to date</button>
+            </div>
             <textarea className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} placeholder="Notes" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
             <div className="mt-3 flex justify-end gap-2">
               <a
@@ -149,6 +175,13 @@ export function FarmTreatmentPage() {
                 <div key={r.id} className="rounded-lg border border-neutral-200 p-3 text-sm">
                   <p className="font-medium">{r.medicineName} - {r.diseaseOrReason}</p>
                   <p className="text-neutral-600">{r.dose} {r.doseUnit} via {r.route}, withdrawal {r.withdrawalDays} day(s)</p>
+                  <p className="text-xs text-neutral-500">
+                    {(() => {
+                      const endsAt = new Date(new Date(r.at).getTime() + r.withdrawalDays * 24 * 60 * 60 * 1000).getTime();
+                      const leftDays = Math.ceil((endsAt - Date.now()) / (24 * 60 * 60 * 1000));
+                      return leftDays > 0 ? `Withdrawal active: ${leftDays} day(s) left` : "Withdrawal cleared";
+                    })()}
+                  </p>
                 </div>
               ))}
               {!rows.length ? <p className="text-sm text-neutral-500">No treatments yet.</p> : null}

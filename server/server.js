@@ -1359,6 +1359,10 @@ app.get("/api/reports/flock-performance.csv", requireAuth, requireFarmAccess, as
     return;
   }
   const summary = await buildFlockPerformanceSummary(flockId, parseOptionalIsoDate(req.query.end_at));
+  appendAudit(req.authUser.id, req.authUser.role, "report.export", "report", "flock-performance.csv", {
+    flockId,
+    endAt: req.query.end_at ?? null,
+  });
   const csv = csvFromRows(
     ["flock_id", "placement_date", "age_days", "feed_to_date_kg", "mortality_to_date", "birds_live_estimate", "fcr"],
     [summary]
@@ -1396,6 +1400,11 @@ app.get("/api/reports/treatments.csv", requireAuth, requireFarmAccess, async (re
     ["at", "flockId", "diseaseOrReason", "medicineName", "dose", "doseUnit", "route", "durationDays", "withdrawalDays", "notes"],
     rows
   );
+  appendAudit(req.authUser.id, req.authUser.role, "report.export", "report", "treatments.csv", {
+    flockId: flockId || null,
+    startAt: req.query.start_at ?? null,
+    endAt: req.query.end_at ?? null,
+  });
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="treatments${flockId ? `-${flockId}` : ""}.csv"`);
   res.send(csv);
@@ -1429,6 +1438,11 @@ app.get("/api/reports/slaughter.csv", requireAuth, requireFarmAccess, async (req
     ["at", "flockId", "birdsSlaughtered", "avgLiveWeightKg", "avgCarcassWeightKg", "notes"],
     rows
   );
+  appendAudit(req.authUser.id, req.authUser.role, "report.export", "report", "slaughter.csv", {
+    flockId: flockId || null,
+    startAt: req.query.start_at ?? null,
+    endAt: req.query.end_at ?? null,
+  });
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="slaughter${flockId ? `-${flockId}` : ""}.csv"`);
   res.send(csv);

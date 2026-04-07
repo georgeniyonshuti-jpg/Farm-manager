@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
 import { API_BASE_URL } from "../../api/config";
@@ -35,6 +35,25 @@ export function FarmSlaughterPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({ birdsSlaughtered: "", avgLiveWeightKg: "", avgCarcassWeightKg: "", notes: "" });
+
+  const preset = useMemo(() => ({
+    set7d: () => {
+      const end = new Date();
+      const start = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000);
+      setStartAt(start.toISOString().slice(0, 10));
+      setEndAt(end.toISOString().slice(0, 10));
+    },
+    set30d: () => {
+      const end = new Date();
+      const start = new Date(Date.now() - 29 * 24 * 60 * 60 * 1000);
+      setStartAt(start.toISOString().slice(0, 10));
+      setEndAt(end.toISOString().slice(0, 10));
+    },
+    setCycle: () => {
+      setStartAt("");
+      setEndAt(new Date().toISOString().slice(0, 10));
+    },
+  }), []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -135,6 +154,11 @@ export function FarmSlaughterPage() {
               <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Birds slaughtered" inputMode="numeric" value={form.birdsSlaughtered} onChange={(e) => setForm((v) => ({ ...v, birdsSlaughtered: e.target.value }))} />
               <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Avg live weight (kg)" inputMode="decimal" value={form.avgLiveWeightKg} onChange={(e) => setForm((v) => ({ ...v, avgLiveWeightKg: e.target.value }))} />
               <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Avg carcass weight (kg, optional)" inputMode="decimal" value={form.avgCarcassWeightKg} onChange={(e) => setForm((v) => ({ ...v, avgCarcassWeightKg: e.target.value }))} />
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button type="button" onClick={preset.set7d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 7d</button>
+              <button type="button" onClick={preset.set30d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 30d</button>
+              <button type="button" onClick={preset.setCycle} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Cycle to date</button>
             </div>
             <textarea className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} placeholder="Notes" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
             <div className="mt-3 flex justify-end gap-2">
