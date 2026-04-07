@@ -48,7 +48,7 @@ export default function App() {
               <Route
                 path="/dashboard/laborer"
                 element={
-                  <ProtectedRoute roles={["laborer", "dispatcher"]}>
+                  <ProtectedRoute roles={["laborer", "dispatcher", "vet"]}>
                     <LaborerHome />
                   </ProtectedRoute>
                 }

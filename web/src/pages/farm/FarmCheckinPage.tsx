@@ -30,6 +30,19 @@ export type CheckinStatus = {
   bands: { untilDay: number; intervalHours: number }[];
 };
 
+function kigaliNowDate(): Date {
+  const asKigali = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Africa/Kigali" })
+  );
+  return asKigali;
+}
+
+function computeLiveOverdue(status: CheckinStatus): boolean {
+  const nextDue = new Date(status.nextDueAt);
+  const now = kigaliNowDate();
+  return now.getTime() > nextDue.getTime();
+}
+
 function TranslatedFlockName({ name }: { name: string }) {
   const t = useLaborerT(name);
   return <p className="text-sm font-semibold text-neutral-900">{t}</p>;
@@ -47,6 +60,14 @@ export function CheckinStatusBlock({ status }: { status: CheckinStatus }) {
   const nextDueLbl = useLaborerT("Next due:");
   const overdueMsg = useLaborerT("Overdue — please complete check-in as soon as possible.");
   const upcomingMsg = useLaborerT("Check-in is due within one hour — please prepare.");
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((x) => x + 1), 15000);
+    return () => window.clearInterval(id);
+  }, []);
+  void tick;
+  const liveIsOverdue = computeLiveOverdue(status);
+  const liveBadge: CheckinBadge = liveIsOverdue ? "overdue" : status.checkinBadge;
   return (
     <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -59,15 +80,15 @@ export function CheckinStatusBlock({ status }: { status: CheckinStatus }) {
       <p className="mt-1 text-sm">
         {nextDueLbl}{" "}
         <time className="font-mono text-neutral-900" dateTime={status.nextDueAt}>
-          {new Date(status.nextDueAt).toLocaleString()}
+          {new Date(status.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
         </time>
       </p>
-      {status.isOverdue && (
+      {liveIsOverdue && (
         <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-900">
           {overdueMsg}
         </p>
       )}
-      {status.checkinBadge === "upcoming" && !status.isOverdue && (
+      {liveBadge === "upcoming" && !liveIsOverdue && (
         <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
           {upcomingMsg}
         </p>

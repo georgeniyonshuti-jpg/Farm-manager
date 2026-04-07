@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { readAuthHeaders } from "../../lib/authHeaders";
-import { useLaborerT } from "../../i18n/laborerI18n";
 import { CheckinStatusBlock, type CheckinStatus } from "../farm/FarmCheckinPage";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
@@ -10,17 +9,20 @@ import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
 
 export function LaborerHome() {
-  const { token } = useAuth();
-  const hTitle = useLaborerT("Action center");
-  const hSub = useLaborerT("Daily tasks — mobile-first.");
-  const linkCheckin = useLaborerT("Round check-in (photos + feed / water)");
-  const linkMort = useLaborerT("Log mortality (photos anytime / emergency)");
-  const linkDaily = useLaborerT("End-of-day summary (legacy daily log)");
-  const linkTable = useLaborerT("Mortality history table");
-  const linkInv = useLaborerT("Feed inventory");
-  const linkEarnings = useLaborerT("My earnings");
-  const noFlockTitle = useLaborerT("No active flock");
-  const noFlockBody = useLaborerT("Check-in status appears when a flock exists on the farm.");
+  const { token, user } = useAuth();
+  const isJuniorVet = user?.role === "vet" || user?.departmentKeys.includes("junior_vet");
+  const hTitle = isJuniorVet ? "Intera ya Vet Muto" : "Ikigo cy'ibikorwa";
+  const hSub = isJuniorVet
+    ? "Gukurikirana rounds, ubuzima bw'amatungo n'ibyihutirwa."
+    : "Ibikorwa bya buri munsi kuri telefone.";
+  const linkCheckin = "Round checking";
+  const linkMort = "Andika impfu";
+  const linkDaily = "Raporo y'umunsi";
+  const linkTable = "Imbonerahamwe y'impfu";
+  const linkInv = "Ububiko bw'ibiryo";
+  const linkEarnings = "Ihembo ryanjye";
+  const noFlockTitle = "Nta flock ibonetse";
+  const noFlockBody = "Status ya round checking igaragara gusa iyo flock ihari.";
 
   const [status, setStatus] = useState<CheckinStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -53,12 +55,34 @@ export function LaborerHome() {
 
   useEffect(() => {
     void load();
-    const t = window.setInterval(() => void load(), 60_000);
+    const t = window.setInterval(() => void load(), 15_000);
     return () => window.clearInterval(t);
   }, [load]);
 
+  const roundBanner = useMemo(() => {
+    if (loading) return { tone: "bg-neutral-200 text-neutral-700", text: "Round checking iri gutegurwa..." };
+    if (loadError) return { tone: "bg-red-100 text-red-800", text: "Round checking ifite ikibazo. Ongera ugerageze." };
+    if (!status) return { tone: "bg-amber-100 text-amber-900", text: "Nta round schedule iraboneka kuri ubu." };
+    if (status.checkinBadge === "overdue")
+      return { tone: "bg-red-100 text-red-900", text: "Round checking yakererewe. Kora igenzura ako kanya." };
+    if (status.checkinBadge === "upcoming")
+      return { tone: "bg-amber-100 text-amber-900", text: "Round checking iri hafi kugera." };
+    return { tone: "bg-emerald-100 text-emerald-900", text: "Round checking iri ku gihe." };
+  }, [loading, loadError, status]);
+
+  const bottomNav: Array<{ to: string; label: string }> = [
+    { to: "/farm/checkin", label: "Round" },
+    { to: "/farm/mortality-log", label: "Impfu" },
+    { to: "/farm/daily-log", label: "Raporo" },
+    { to: "/farm/mortality", label: "Amateka" },
+    { to: "/farm/inventory", label: "Ububiko" },
+  ];
+
   return (
     <div className="mx-auto max-w-lg space-y-6">
+      <div className={`rounded-xl px-4 py-3 text-sm font-semibold ${roundBanner.tone}`}>
+        {roundBanner.text}
+      </div>
       <PageHeader title={hTitle} subtitle={hSub} />
 
       {loading && <SkeletonList rows={2} />}
@@ -109,6 +133,20 @@ export function LaborerHome() {
           {linkEarnings}
         </Link>
       </div>
+
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-neutral-200 bg-white px-2 py-2 sm:hidden">
+        <div className="grid grid-cols-5 gap-1">
+          {bottomNav.map((item) => (
+            <Link
+              key={item.to}
+              to={item.to}
+              className="rounded-lg px-2 py-2 text-center text-[11px] font-semibold text-neutral-700 hover:bg-neutral-100"
+            >
+              {item.label}
+            </Link>
+          ))}
+        </div>
+      </nav>
     </div>
   );
 }
