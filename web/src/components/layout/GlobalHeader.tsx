@@ -19,7 +19,6 @@ const ROLE_LABEL_EN: Record<UserRole, string> = {
 
 export function GlobalHeader() {
   const { user, logout, activeWorkspace, setActiveWorkspace } = useAuth();
-  const signOutLabel = useLaborerT("Sign out");
   const financialRestricted = useLaborerT("Financial: restricted");
   const farmWorkspace = useLaborerT("Farm / Poultry");
   const clevaWorkspace = useLaborerT("ClevaCredit");
@@ -91,8 +90,10 @@ export function GlobalHeader() {
           type="button"
           onClick={() => void logout()}
           className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+          aria-label="Sign out"
+          title="Sign out"
         >
-          {signOutLabel}
+          <span aria-hidden>↪</span>
         </button>
       </div>
     </header>

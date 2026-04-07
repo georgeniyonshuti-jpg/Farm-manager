@@ -10,6 +10,7 @@ function NavText({ text }: { text: string }) {
 }
 
 type NavItem = { to: string; label: string; end?: boolean };
+type Props = { onNavigate?: () => void };
 
 const FARM_NAV_BASE: NavItem[] = [
   { to: "/farm/checkin", label: "Round check-in" },
@@ -25,7 +26,7 @@ const CLEVA_NAV: NavItem[] = [
   { to: "/cleva/credit-scoring", label: "Credit scoring" },
 ];
 
-export function SidebarNav() {
+export function SidebarNav({ onNavigate }: Props) {
   const { activeWorkspace, user } = useAuth();
   const farmSectionTitle = useLaborerT("Farm operations");
   const clevaSectionTitle = useLaborerT("ClevaCredit");
@@ -105,6 +106,7 @@ export function SidebarNav() {
         <nav className="mt-3 flex flex-col gap-1 sm:flex-col">
           <NavLink
             to={dashLink.to}
+            onClick={onNavigate}
             className={({ isActive }) =>
               [
                 "rounded-lg px-3 py-2 text-sm font-medium",
@@ -121,6 +123,7 @@ export function SidebarNav() {
               key={item.to}
               to={item.to}
               end={item.end}
+              onClick={onNavigate}
               className={({ isActive }) =>
                 [
                   "rounded-lg px-3 py-2 text-sm font-medium",
@@ -136,6 +139,7 @@ export function SidebarNav() {
           {adminLink && (
             <NavLink
               to={adminLink.to}
+              onClick={onNavigate}
               className={({ isActive }) =>
                 [
                   "mt-2 rounded-lg px-3 py-2 text-sm font-medium",
