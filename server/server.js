@@ -23,7 +23,13 @@ const PORT = Number(process.env.PORT) || 3000;
 const PEPPER = process.env.AUTH_PEPPER ?? "";
 const PgStore = pgSession(session);
 const { Pool } = pg;
-const dbPool = process.env.DATABASE_URL ? new Pool({ connectionString: process.env.DATABASE_URL }) : null;
+const dbPool = process.env.DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      family: 4,
+    })
+  : null;
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,
