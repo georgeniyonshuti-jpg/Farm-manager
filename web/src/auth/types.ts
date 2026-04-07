@@ -22,7 +22,7 @@ export type SessionUser = {
   displayName: string;
   role: UserRole;
   businessUnitAccess: BusinessUnitAccess;
-  /** ClevaCredit investor / bank-level data; false even for some Managers */
+  /** Clevafarm finance investor / bank-level data; false even for some Managers */
   canViewSensitiveFinancial: boolean;
   /** Optional scoping (e.g. hide Investor Memo department) */
   departmentKeys: string[];

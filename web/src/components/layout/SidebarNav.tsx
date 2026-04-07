@@ -29,7 +29,7 @@ const CLEVA_NAV: NavItem[] = [
 export function SidebarNav({ onNavigate }: Props) {
   const { activeWorkspace, user } = useAuth();
   const farmSectionTitle = useLaborerT("Farm operations");
-  const clevaSectionTitle = useLaborerT("ClevaCredit");
+  const clevaSectionTitle = useLaborerT("Clevafarm Finance");
 
   if (!user || !activeWorkspace) return null;
 

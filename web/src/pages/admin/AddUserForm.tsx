@@ -38,7 +38,7 @@ type Props = {
 
 /**
  * Superuser-only: invite/add identity with RBAC, business unit scope,
- * and explicit ClevaCredit sensitive-financial toggle.
+ * and explicit Clevafarm finance sensitive-data toggle.
  */
 export function AddUserForm({ onCreated }: Props) {
   const { token } = useAuth();
@@ -112,7 +112,7 @@ export function AddUserForm({ onCreated }: Props) {
       <h2 className="text-lg font-semibold text-neutral-900">Add user</h2>
       <p className="mt-1 text-sm text-neutral-600">
         Assign role and business units. Sensitive financial access is separate from agriculture
-        access so farm managers do not automatically see ClevaCredit investor data.
+        access so farm managers do not automatically see Clevafarm finance investor data.
       </p>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2">
@@ -187,7 +187,7 @@ export function AddUserForm({ onCreated }: Props) {
             className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-neutral-900 shadow-sm focus:border-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-700/30"
           >
             <option value="farm">Farm / Poultry only</option>
-            <option value="clevacredit">ClevaCredit only</option>
+            <option value="clevacredit">Clevafarm Finance only</option>
             <option value="both">Both (workspace switcher)</option>
           </select>
         </div>
@@ -206,7 +206,7 @@ export function AddUserForm({ onCreated }: Props) {
               Can view sensitive financial data
             </span>
             <span className="text-sm text-neutral-600">
-              Enables net profit, bank balances, and confidential ClevaCredit investor fields. Use
+              Enables net profit, bank balances, and confidential Clevafarm finance investor fields. Use
               sparingly — e.g. a farm manager with both units but no investor clearance should leave
               this off.
             </span>

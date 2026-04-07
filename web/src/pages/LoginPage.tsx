@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { defaultHomeForUser } from "../routes/ProtectedRoute";
+import { BrandLogo } from "../components/BrandLogo";
 
 const DEMO_ACCOUNTS = [
   {
@@ -35,7 +36,7 @@ const DEMO_ACCOUNTS = [
   {
     id: "investor",
     label: "Investor",
-    hint: "ClevaCredit + memos",
+    hint: "Clevafarm finance + memos",
     email: "investor@demo.com",
     password: "demo",
   },
@@ -119,8 +120,11 @@ export function LoginPage() {
   return (
     <div className="flex min-h-screen flex-col justify-center bg-neutral-100 px-4 py-8">
       <div className="mx-auto w-full max-w-lg rounded-2xl border border-neutral-200 bg-white p-8 shadow-sm">
+        <div className="mb-2 flex justify-center">
+          <BrandLogo size={66} />
+        </div>
         <h1 className="text-center text-xl font-semibold tracking-tight text-neutral-900">
-          Precision Poultry & ClevaCredit
+          Clevafarm
         </h1>
         <p className="mt-1 text-center text-sm text-neutral-500">Secure sign-in</p>
 

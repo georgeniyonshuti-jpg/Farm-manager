@@ -6,7 +6,7 @@ export function ManagementHome() {
     <div className="space-y-6">
       <PageHeader
         title="Command center"
-        subtitle="Cross-unit KPIs — Farm and ClevaCredit (subject to permissions)."
+        subtitle="Cross-unit KPIs — Clevafarm operations and finance (subject to permissions)."
       />
       <div className="grid gap-4 lg:grid-cols-3">
         <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
@@ -15,7 +15,7 @@ export function ManagementHome() {
           <p className="text-xs text-neutral-500">Connect biological engine service.</p>
         </section>
         <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <h2 className="text-sm font-semibold text-neutral-800">ClevaCredit portfolio</h2>
+          <h2 className="text-sm font-semibold text-neutral-800">Clevafarm finance portfolio</h2>
           <p className="mt-2 text-sm text-neutral-600">Exposure and PAR summary.</p>
         </section>
         <PermissionGuard

@@ -771,7 +771,7 @@ seedFlock();
 app.get("/", (_req, res) => {
   res.json({
     status: "ok",
-    message: "Farm Manager API running",
+    message: "Clevafarm API running",
     version: process.env.APP_VERSION ?? "1.0.0",
     timestamp: new Date().toISOString(),
   });
@@ -1786,7 +1786,7 @@ app.patch("/api/inventory/:id", requireAuth, requireFarmAccess, (req, res) => {
 const dailyLogs = [];
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "farm-manager-api", storedLogs: dailyLogs.length, users: usersById.size });
+  res.json({ ok: true, service: "clevafarm-api", storedLogs: dailyLogs.length, users: usersById.size });
 });
 
 function computeValidation(payload) {
@@ -2045,7 +2045,7 @@ app.use((err, _req, res, _next) => {
 
 app.listen(PORT, () => {
   // PROD-SAFE: sanitized logging
-  console.log("[INFO]", `Farm Manager API listening on port ${PORT}`);
+  console.log("[INFO]", `Clevafarm API listening on port ${PORT}`);
 });
 
 // Keep-alive ping — prevents Render free tier from sleeping

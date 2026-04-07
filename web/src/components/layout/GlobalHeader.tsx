@@ -4,6 +4,7 @@ import { canAccessWorkspace } from "../../auth/permissions";
 import { LaborerLanguageToggle } from "../LaborerLanguageToggle";
 import { useLaborerT } from "../../i18n/laborerI18n";
 import { Link } from "react-router-dom";
+import { BrandLogo } from "../BrandLogo";
 
 const ROLE_LABEL_EN: Record<UserRole, string> = {
   superuser: "Superuser",
@@ -21,11 +22,12 @@ export function GlobalHeader() {
   const { user, logout, activeWorkspace, setActiveWorkspace } = useAuth();
   const financialRestricted = useLaborerT("Financial: restricted");
   const farmWorkspace = useLaborerT("Farm / Poultry");
-  const clevaWorkspace = useLaborerT("ClevaCredit");
+  const clevaWorkspace = useLaborerT("Clevafarm Finance");
   const businessLabel = useLaborerT("Business");
   const switchWorkspaceAria = useLaborerT("Switch active business unit");
   const roleBadge = useLaborerT(user ? ROLE_LABEL_EN[user.role] : "");
   const homeLabel = useLaborerT("Action center");
+  const appName = useLaborerT("Clevafarm");
 
   if (!user) return null;
 
@@ -41,9 +43,11 @@ export function GlobalHeader() {
   return (
     <header className="flex min-h-14 flex-wrap items-start justify-between gap-3 border-b border-neutral-200 bg-white px-3 py-3 shadow-sm sm:px-4">
       <div className="flex min-w-0 flex-1 flex-col sm:flex-row sm:items-center sm:gap-3">
-        <span className="truncate text-sm font-semibold text-neutral-900">
-          {user.displayName}
+        <span className="inline-flex items-center gap-2 text-sm font-semibold text-neutral-900">
+          <BrandLogo size={24} />
+          <span>{appName}</span>
         </span>
+        <span className="truncate text-sm font-medium text-neutral-800">{user.displayName}</span>
         <span className="text-xs text-neutral-500">
           <span className="rounded bg-neutral-100 px-2 py-0.5 font-medium uppercase tracking-wide text-neutral-700">
             {roleBadge}

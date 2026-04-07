@@ -122,6 +122,7 @@ export function FarmSlaughterPage() {
         headers: jsonAuthHeaders(token),
         body: JSON.stringify({
           ...form,
+          reasonCode: form.reasonCode,
           birdsSlaughtered: Number(form.birdsSlaughtered),
           avgLiveWeightKg: Number(form.avgLiveWeightKg),
           avgCarcassWeightKg: form.avgCarcassWeightKg ? Number(form.avgCarcassWeightKg) : null,

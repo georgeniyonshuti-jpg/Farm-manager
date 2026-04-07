@@ -5,7 +5,7 @@ export function PortfolioPage() {
     <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
       <PageHeader
         title="Portfolio analytics"
-        subtitle="ClevaCredit exposure, cohort performance, and risk bands."
+        subtitle="Clevafarm finance exposure, cohort performance, and risk bands."
       />
     </div>
   );
