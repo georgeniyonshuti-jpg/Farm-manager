@@ -5,11 +5,10 @@ import pg from "pg";
 
 const { Client } = pg;
 
-async function run() {
+export async function runMigrations() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
-    console.error("[FAIL] DATABASE_URL is required");
-    process.exit(1);
+    throw new Error("DATABASE_URL is required");
   }
 
   const client = new Client({ connectionString: databaseUrl });
@@ -52,18 +51,21 @@ async function run() {
         console.log(`[OK] ${filename}`);
       } catch (e) {
         await client.query("ROLLBACK");
-        console.error(`[FAIL] ${filename}:`, e instanceof Error ? e.message : e);
-        process.exit(1);
+        throw new Error(`[FAIL] ${filename}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
   } finally {
     await client.end();
   }
-
-  process.exit(0);
 }
 
-run().catch((e) => {
-  console.error("[FAIL] migration runner:", e instanceof Error ? e.message : e);
-  process.exit(1);
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  runMigrations()
+    .then(() => {
+      process.exit(0);
+    })
+    .catch((e) => {
+      console.error("[FAIL] migration runner:", e instanceof Error ? e.message : e);
+      process.exit(1);
+    });
+}

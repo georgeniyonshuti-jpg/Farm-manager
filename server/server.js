@@ -3,6 +3,14 @@ import cors from "cors";
 import express from "express";
 import rateLimit from "express-rate-limit";
 import session from "express-session";
+import { runMigrations } from "./migrate.js";
+
+runMigrations().then(() => {
+  console.log("[startup] migrations complete");
+}).catch(err => {
+  console.error("[startup] migration error:", err.message);
+  // Don't crash the server if migrations fail
+});
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
