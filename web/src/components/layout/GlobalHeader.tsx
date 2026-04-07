@@ -3,6 +3,7 @@ import type { ActiveWorkspace, UserRole } from "../../auth/types";
 import { canAccessWorkspace } from "../../auth/permissions";
 import { LaborerLanguageToggle } from "../LaborerLanguageToggle";
 import { useLaborerT } from "../../i18n/laborerI18n";
+import { Link } from "react-router-dom";
 
 const ROLE_LABEL_EN: Record<UserRole, string> = {
   superuser: "Superuser",
@@ -25,10 +26,13 @@ export function GlobalHeader() {
   const businessLabel = useLaborerT("Business");
   const switchWorkspaceAria = useLaborerT("Switch active business unit");
   const roleBadge = useLaborerT(user ? ROLE_LABEL_EN[user.role] : "");
+  const homeLabel = useLaborerT("Action center");
 
   if (!user) return null;
 
   const showSwitcher = user.businessUnitAccess === "both";
+  const showFieldHome =
+    user.role === "vet" || user.role === "laborer" || user.role === "dispatcher";
 
   const workspaces: { id: ActiveWorkspace; label: string }[] = [
     { id: "farm", label: farmWorkspace },
@@ -36,8 +40,8 @@ export function GlobalHeader() {
   ];
 
   return (
-    <header className="flex min-h-14 items-center justify-between gap-4 border-b border-neutral-200 bg-white px-4 py-3 shadow-sm">
-      <div className="flex min-w-0 flex-col sm:flex-row sm:items-center sm:gap-3">
+    <header className="flex min-h-14 flex-wrap items-start justify-between gap-3 border-b border-neutral-200 bg-white px-3 py-3 shadow-sm sm:px-4">
+      <div className="flex min-w-0 flex-1 flex-col sm:flex-row sm:items-center sm:gap-3">
         <span className="truncate text-sm font-semibold text-neutral-900">
           {user.displayName}
         </span>
@@ -54,6 +58,15 @@ export function GlobalHeader() {
       </div>
 
       <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
+        {showFieldHome && (
+          <Link
+            to="/dashboard/laborer"
+            className="inline-flex min-h-[44px] items-center gap-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+          >
+            <span aria-hidden>🏠</span>
+            {homeLabel}
+          </Link>
+        )}
         <LaborerLanguageToggle />
 
         {showSwitcher && (

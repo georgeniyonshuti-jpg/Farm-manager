@@ -43,6 +43,14 @@ function computeLiveOverdue(status: CheckinStatus): boolean {
   return now.getTime() > nextDue.getTime();
 }
 
+function formatDurationMs(ms: number): string {
+  const abs = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(abs / 3600);
+  const m = Math.floor((abs % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
 function TranslatedFlockName({ name }: { name: string }) {
   const t = useLaborerT(name);
   return <p className="text-sm font-semibold text-neutral-900">{t}</p>;
@@ -59,7 +67,7 @@ export function CheckinStatusBlock({ status }: { status: CheckinStatus }) {
   );
   const nextDueLbl = useLaborerT("Next due:");
   const overdueMsg = useLaborerT("Overdue — please complete check-in as soon as possible.");
-  const upcomingMsg = useLaborerT("Check-in is due within one hour — please prepare.");
+  const onTrackMsg = useLaborerT("You are on track.");
   const [tick, setTick] = useState(0);
   useEffect(() => {
     const id = window.setInterval(() => setTick((x) => x + 1), 15000);
@@ -67,7 +75,9 @@ export function CheckinStatusBlock({ status }: { status: CheckinStatus }) {
   }, []);
   void tick;
   const liveIsOverdue = computeLiveOverdue(status);
-  const liveBadge: CheckinBadge = liveIsOverdue ? "overdue" : status.checkinBadge;
+  const now = kigaliNowDate();
+  const nextDueMs = new Date(status.nextDueAt).getTime();
+  const deltaMs = nextDueMs - now.getTime();
   return (
     <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -83,14 +93,13 @@ export function CheckinStatusBlock({ status }: { status: CheckinStatus }) {
           {new Date(status.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
         </time>
       </p>
-      {liveIsOverdue && (
+      {liveIsOverdue ? (
         <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-900">
-          {overdueMsg}
+          {overdueMsg} ({formatDurationMs(Math.abs(deltaMs))})
         </p>
-      )}
-      {liveBadge === "upcoming" && !liveIsOverdue && (
-        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900">
-          {upcomingMsg}
+      ) : (
+        <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900">
+          {onTrackMsg} ({formatDurationMs(deltaMs)} remaining)
         </p>
       )}
     </section>

@@ -9,7 +9,9 @@ export function AppShell() {
   const { user } = useAuth();
   const laborerLikeView = location.pathname.startsWith("/dashboard/laborer");
   const juniorVetMode = user?.role === "vet" || user?.departmentKeys.includes("junior_vet");
-  const compactFieldView = laborerLikeView || juniorVetMode;
+  const fieldOpsMode = user?.role === "laborer" || user?.role === "dispatcher";
+  // Nuclear removal: keep sidebar fully disabled for junior-vet/field-ops account experiences.
+  const compactFieldView = laborerLikeView || juniorVetMode || fieldOpsMode;
   return (
     <div className="flex min-h-screen flex-col bg-neutral-100">
       <GlobalHeader />
