@@ -10,6 +10,7 @@ type Flock = { id: string; label: string };
 type Slaughter = {
   id: string;
   at: string;
+  reasonCode?: string;
   birdsSlaughtered: number;
   avgLiveWeightKg: number;
   avgCarcassWeightKg: number | null;
@@ -21,6 +22,19 @@ type PerformanceSummary = {
   mortalityToDate: number;
   fcr: number | null;
 };
+
+const SLAUGHTER_REASON_OPTIONS = [
+  { value: "planned_market", label: "Planned market harvest" },
+  { value: "target_weight_reached", label: "Target weight reached" },
+  { value: "emergency_cull", label: "Emergency cull" },
+  { value: "partial_harvest", label: "Partial harvest" },
+  { value: "other", label: "Other" },
+];
+
+function slaughterReasonLabel(row: Slaughter): string {
+  const source = row.reasonCode ?? row.notes;
+  return SLAUGHTER_REASON_OPTIONS.find((r) => r.value === source)?.label ?? row.notes;
+}
 
 export function FarmSlaughterPage() {
   const { token } = useAuth();
@@ -34,7 +48,13 @@ export function FarmSlaughterPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState({ birdsSlaughtered: "", avgLiveWeightKg: "", avgCarcassWeightKg: "", notes: "" });
+  const [form, setForm] = useState({
+    reasonCode: "planned_market",
+    birdsSlaughtered: "",
+    avgLiveWeightKg: "",
+    avgCarcassWeightKg: "",
+    notes: "",
+  });
 
   const preset = useMemo(() => ({
     set7d: () => {
@@ -120,7 +140,7 @@ export function FarmSlaughterPage() {
         throw new Error(payload.error ?? "Save failed");
       }
       showToast("success", "Slaughter record saved.");
-      setForm({ birdsSlaughtered: "", avgLiveWeightKg: "", avgCarcassWeightKg: "", notes: "" });
+      setForm((v) => ({ ...v, birdsSlaughtered: "", avgLiveWeightKg: "", avgCarcassWeightKg: "", notes: "" }));
       await load();
     } catch (e) {
       const d = e instanceof Error ? e.message : "Save failed";
@@ -151,6 +171,11 @@ export function FarmSlaughterPage() {
               <select className="rounded-lg border border-neutral-300 px-3 py-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
                 {flocks.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
               </select>
+              <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.reasonCode} onChange={(e) => setForm((v) => ({ ...v, reasonCode: e.target.value }))}>
+                {SLAUGHTER_REASON_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
               <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Birds slaughtered" inputMode="numeric" value={form.birdsSlaughtered} onChange={(e) => setForm((v) => ({ ...v, birdsSlaughtered: e.target.value }))} />
               <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Avg live weight (kg)" inputMode="decimal" value={form.avgLiveWeightKg} onChange={(e) => setForm((v) => ({ ...v, avgLiveWeightKg: e.target.value }))} />
               <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Avg carcass weight (kg, optional)" inputMode="decimal" value={form.avgCarcassWeightKg} onChange={(e) => setForm((v) => ({ ...v, avgCarcassWeightKg: e.target.value }))} />
@@ -160,7 +185,7 @@ export function FarmSlaughterPage() {
               <button type="button" onClick={preset.set30d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 30d</button>
               <button type="button" onClick={preset.setCycle} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Cycle to date</button>
             </div>
-            <textarea className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} placeholder="Notes" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
+            <textarea className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} placeholder="Notes (optional)" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
             <div className="mt-3 flex justify-end gap-2">
               <a className="rounded-lg border border-neutral-300 px-3 py-2 text-sm" href={`${API_BASE_URL}/api/reports/slaughter.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`} target="_blank" rel="noreferrer">Slaughter CSV</a>
               <a className="rounded-lg border border-neutral-300 px-3 py-2 text-sm" href={`${API_BASE_URL}/api/reports/flock-performance.csv?flock_id=${encodeURIComponent(flockId)}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`} target="_blank" rel="noreferrer">Performance CSV</a>
@@ -175,6 +200,7 @@ export function FarmSlaughterPage() {
                   <p className="font-medium">
                     {r.birdsSlaughtered} birds - {r.avgLiveWeightKg} kg live avg
                   </p>
+                  <p className="text-neutral-600">{slaughterReasonLabel(r)}</p>
                   <p className="text-neutral-600">
                     {new Date(r.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
                   </p>

@@ -10,6 +10,7 @@ type Flock = { id: string; label: string };
 type Treatment = {
   id: string;
   at: string;
+  reasonCode?: string;
   diseaseOrReason: string;
   medicineName: string;
   dose: number;
@@ -19,6 +20,22 @@ type Treatment = {
   withdrawalDays: number;
   notes: string;
 };
+
+const TREATMENT_REASON_OPTIONS = [
+  { value: "routine_prevention", label: "Routine prevention" },
+  { value: "suspected_infection", label: "Suspected infection" },
+  { value: "confirmed_infection", label: "Confirmed infection" },
+  { value: "vet_directive", label: "Vet directive" },
+  { value: "other", label: "Other" },
+];
+
+const ROUTE_OPTIONS = ["oral", "injection", "waterline", "spray", "other"];
+const DOSE_UNIT_OPTIONS = ["ml", "g", "mg", "tablet", "drop", "other"];
+
+function treatmentReasonLabel(row: Treatment): string {
+  const source = row.reasonCode ?? row.diseaseOrReason;
+  return TREATMENT_REASON_OPTIONS.find((r) => r.value === source)?.label ?? row.diseaseOrReason;
+}
 
 export function FarmTreatmentPage() {
   const { token } = useAuth();
@@ -32,6 +49,7 @@ export function FarmTreatmentPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
+    reasonCode: "routine_prevention",
     diseaseOrReason: "",
     medicineName: "",
     dose: "",
@@ -141,11 +159,24 @@ export function FarmTreatmentPage() {
                   <option key={f.id} value={f.id}>{f.label}</option>
                 ))}
               </select>
-              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Disease / reason" value={form.diseaseOrReason} onChange={(e) => setForm((v) => ({ ...v, diseaseOrReason: e.target.value }))} />
+              <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.reasonCode} onChange={(e) => setForm((v) => ({ ...v, reasonCode: e.target.value }))}>
+                {TREATMENT_REASON_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Condition details (optional)" value={form.diseaseOrReason} onChange={(e) => setForm((v) => ({ ...v, diseaseOrReason: e.target.value }))} />
               <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Medicine name" value={form.medicineName} onChange={(e) => setForm((v) => ({ ...v, medicineName: e.target.value }))} />
               <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Dose" inputMode="decimal" value={form.dose} onChange={(e) => setForm((v) => ({ ...v, dose: e.target.value }))} />
-              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Dose unit (ml, g...)" value={form.doseUnit} onChange={(e) => setForm((v) => ({ ...v, doseUnit: e.target.value }))} />
-              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Route (oral, injection...)" value={form.route} onChange={(e) => setForm((v) => ({ ...v, route: e.target.value }))} />
+              <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.doseUnit} onChange={(e) => setForm((v) => ({ ...v, doseUnit: e.target.value }))}>
+                {DOSE_UNIT_OPTIONS.map((u) => (
+                  <option key={u} value={u}>{u}</option>
+                ))}
+              </select>
+              <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.route} onChange={(e) => setForm((v) => ({ ...v, route: e.target.value }))}>
+                {ROUTE_OPTIONS.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
               <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Duration days" inputMode="numeric" value={form.durationDays} onChange={(e) => setForm((v) => ({ ...v, durationDays: e.target.value }))} />
               <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Withdrawal days" inputMode="numeric" value={form.withdrawalDays} onChange={(e) => setForm((v) => ({ ...v, withdrawalDays: e.target.value }))} />
             </div>
@@ -173,7 +204,7 @@ export function FarmTreatmentPage() {
             <div className="space-y-2">
               {rows.map((r) => (
                 <div key={r.id} className="rounded-lg border border-neutral-200 p-3 text-sm">
-                  <p className="font-medium">{r.medicineName} - {r.diseaseOrReason}</p>
+                  <p className="font-medium">{r.medicineName} - {treatmentReasonLabel(r)}</p>
                   <p className="text-neutral-600">{r.dose} {r.doseUnit} via {r.route}, withdrawal {r.withdrawalDays} day(s)</p>
                   <p className="text-xs text-neutral-500">
                     {(() => {

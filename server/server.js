@@ -561,6 +561,22 @@ const INVENTORY_REASON_CODES = {
   adjustment: ["stock_count_correction", "damage_loss", "expired_feed", "other"],
 };
 
+const TREATMENT_REASON_CODES = [
+  "routine_prevention",
+  "suspected_infection",
+  "confirmed_infection",
+  "vet_directive",
+  "other",
+];
+
+const SLAUGHTER_REASON_CODES = [
+  "planned_market",
+  "target_weight_reached",
+  "emergency_cull",
+  "partial_harvest",
+  "other",
+];
+
 function hasDb() {
   return Boolean(dbPool);
 }
@@ -1176,7 +1192,7 @@ async function listTreatmentsForFlock(flockId, startIso = null, endIso = null) {
     try {
       const r = await dbQuery(
         `SELECT id, flock_id AS "flockId", at, disease_or_reason AS "diseaseOrReason", medicine_name AS "medicineName",
-                dose, dose_unit AS "doseUnit", route, duration_days AS "durationDays", withdrawal_days AS "withdrawalDays",
+                reason_code AS "reasonCode", dose, dose_unit AS "doseUnit", route, duration_days AS "durationDays", withdrawal_days AS "withdrawalDays",
                 notes, administered_by_user_id AS "administeredByUserId"
            FROM flock_treatments
           WHERE flock_id = $1
@@ -1203,7 +1219,7 @@ async function listSlaughterForFlock(flockId, startIso = null, endIso = null) {
     try {
       const r = await dbQuery(
         `SELECT id, flock_id AS "flockId", at, birds_slaughtered AS "birdsSlaughtered",
-                avg_live_weight_kg AS "avgLiveWeightKg", avg_carcass_weight_kg AS "avgCarcassWeightKg",
+                reason_code AS "reasonCode", avg_live_weight_kg AS "avgLiveWeightKg", avg_carcass_weight_kg AS "avgCarcassWeightKg",
                 notes, entered_by_user_id AS "enteredByUserId"
            FROM flock_slaughter_events
           WHERE flock_id = $1
@@ -1267,7 +1283,12 @@ app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireTr
   }
   const body = req.body ?? {};
   const medicineName = String(body.medicineName ?? "").trim();
-  const diseaseOrReason = String(body.diseaseOrReason ?? "").trim();
+  const reasonCode = String(body.reasonCode ?? "").trim() || "other";
+  if (!TREATMENT_REASON_CODES.includes(reasonCode)) {
+    res.status(400).json({ error: "Invalid reasonCode for treatment" });
+    return;
+  }
+  const diseaseOrReason = String(body.diseaseOrReason ?? reasonCode).trim();
   const dose = Number(body.dose);
   const doseUnit = String(body.doseUnit ?? "").trim();
   const route = String(body.route ?? "").trim();
@@ -1291,14 +1312,15 @@ app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireTr
     withdrawalDays,
     notes,
     administeredByUserId: req.authUser.id,
+    reasonCode,
   };
   try {
     if (hasDb()) {
       await dbQuery(
         `INSERT INTO flock_treatments
-          (id, flock_id, at, disease_or_reason, medicine_name, dose, dose_unit, route, duration_days, withdrawal_days, notes, administered_by_user_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        [row.id, row.flockId, row.at, row.diseaseOrReason, row.medicineName, row.dose, row.doseUnit, row.route, row.durationDays, row.withdrawalDays, row.notes, row.administeredByUserId]
+          (id, flock_id, at, disease_or_reason, medicine_name, reason_code, dose, dose_unit, route, duration_days, withdrawal_days, notes, administered_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [row.id, row.flockId, row.at, row.diseaseOrReason, row.medicineName, row.reasonCode, row.dose, row.doseUnit, row.route, row.durationDays, row.withdrawalDays, row.notes, row.administeredByUserId]
       );
     } else {
       flockTreatments.unshift(row);
@@ -1338,7 +1360,12 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
   const avgLiveWeightKg = Number(body.avgLiveWeightKg);
   const avgCarcassWeightKg =
     body.avgCarcassWeightKg == null || body.avgCarcassWeightKg === "" ? null : Number(body.avgCarcassWeightKg);
-  const notes = String(body.notes ?? "").slice(0, 4000);
+  const reasonCode = String(body.reasonCode ?? "").trim() || "planned_market";
+  if (!SLAUGHTER_REASON_CODES.includes(reasonCode)) {
+    res.status(400).json({ error: "Invalid reasonCode for slaughter event" });
+    return;
+  }
+  const notes = String(body.notes ?? reasonCode).slice(0, 4000);
   if (!Number.isFinite(birdsSlaughtered) || birdsSlaughtered <= 0 || !Number.isFinite(avgLiveWeightKg) || avgLiveWeightKg <= 0) {
     res.status(400).json({ error: "birdsSlaughtered and avgLiveWeightKg are required and must be > 0" });
     return;
@@ -1376,14 +1403,15 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
     avgCarcassWeightKg: Number.isFinite(avgCarcassWeightKg) ? avgCarcassWeightKg : null,
     notes,
     enteredByUserId: req.authUser.id,
+    reasonCode,
   };
   try {
     if (hasDb()) {
       await dbQuery(
         `INSERT INTO flock_slaughter_events
-          (id, flock_id, at, birds_slaughtered, avg_live_weight_kg, avg_carcass_weight_kg, notes, entered_by_user_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [row.id, row.flockId, row.at, row.birdsSlaughtered, row.avgLiveWeightKg, row.avgCarcassWeightKg, row.notes, row.enteredByUserId]
+          (id, flock_id, at, birds_slaughtered, reason_code, avg_live_weight_kg, avg_carcass_weight_kg, notes, entered_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [row.id, row.flockId, row.at, row.birdsSlaughtered, row.reasonCode, row.avgLiveWeightKg, row.avgCarcassWeightKg, row.notes, row.enteredByUserId]
       );
     } else {
       slaughterEvents.unshift(row);
@@ -1471,7 +1499,7 @@ app.get("/api/reports/treatments.csv", requireAuth, requireFarmAccess, async (re
       : hasDb()
         ? (await dbQuery(
           `SELECT id, flock_id AS "flockId", at, disease_or_reason AS "diseaseOrReason", medicine_name AS "medicineName",
-                  dose, dose_unit AS "doseUnit", route, duration_days AS "durationDays", withdrawal_days AS "withdrawalDays", notes
+                  reason_code AS "reasonCode", dose, dose_unit AS "doseUnit", route, duration_days AS "durationDays", withdrawal_days AS "withdrawalDays", notes
              FROM flock_treatments
             WHERE ($1::timestamptz IS NULL OR at >= $1::timestamptz)
               AND ($2::timestamptz IS NULL OR at <= $2::timestamptz)
@@ -1515,7 +1543,7 @@ app.get("/api/reports/slaughter.csv", requireAuth, requireFarmAccess, async (req
       : hasDb()
         ? (await dbQuery(
           `SELECT id, flock_id AS "flockId", at, birds_slaughtered AS "birdsSlaughtered",
-                  avg_live_weight_kg AS "avgLiveWeightKg", avg_carcass_weight_kg AS "avgCarcassWeightKg", notes
+                  reason_code AS "reasonCode", avg_live_weight_kg AS "avgLiveWeightKg", avg_carcass_weight_kg AS "avgCarcassWeightKg", notes
              FROM flock_slaughter_events
             WHERE ($1::timestamptz IS NULL OR at >= $1::timestamptz)
               AND ($2::timestamptz IS NULL OR at <= $2::timestamptz)
