@@ -135,7 +135,7 @@ CREATE TABLE IF NOT EXISTS app_sessions (
 CREATE INDEX IF NOT EXISTS idx_app_sessions_user ON app_sessions (user_id);
 
 CREATE TABLE IF NOT EXISTS audit_events (
-  id TEXT PRIMARY KEY,
+  id BIGSERIAL PRIMARY KEY,
   at TIMESTAMPTZ NOT NULL DEFAULT now(),
   actor_id TEXT NOT NULL,
   role TEXT NOT NULL,

@@ -10,15 +10,7 @@ import pgSession from "connect-pg-simple";
 import pg from "pg";
 import { runMigrations } from "./migrate.js";
 import { checkinSchema, dailyLogSchema, loginSchema } from "./utils/validation.js";
-
-// PROD-FIX: run migrations on boot without crashing API startup on failure
-runMigrations().then((result) => {
-  if (result.ok) console.log("[INFO]", "[startup] migrations complete");
-  else console.error("[ERROR]", "[startup] migrations complete with failures:", result.failedCount);
-}).catch(err => {
-  console.error("[ERROR]", "[startup] migration error:", err.message);
-  // Don't crash the server if migrations fail
-});
+import { geminiTranslateManyKinyarwanda, geminiTranslateToKinyarwanda } from "./utils/geminiTranslate.js";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -134,14 +126,13 @@ const usersByEmail = new Map();
 const auditEvents = [];
 
 /**
- * FIX: audit payload shape { actor_id, role, action, resource, resource_id, timestamp } compatible
- * IDs must be unique across process restarts (Postgres PK), not in-memory sequence.
+ * Audit: Postgres generates id (BIGSERIAL). Non-blocking for HTTP — never throws to callers.
+ * Single DB attempt (no retry loop). Errors logged with [audit] only.
  */
 function appendAudit(actorUserId, role, action, resource, resourceId, metadata) {
-  const id = `aud_${crypto.randomBytes(8).toString("hex")}`;
   const at = new Date().toISOString();
   const row = {
-    id,
+    id: null,
     at,
     actor_id: actorUserId,
     role: role ?? "unknown",
@@ -150,17 +141,24 @@ function appendAudit(actorUserId, role, action, resource, resourceId, metadata) 
     resource_id: resourceId ?? null,
     metadata: metadata ?? {},
   };
-  if (hasDb()) {
-    void dbQuery(
-      `INSERT INTO audit_events (id, at, actor_id, role, action, resource, resource_id, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
-      [id, at, actorUserId, role ?? "unknown", action, resource ?? "", resourceId ?? null, JSON.stringify(metadata ?? {})]
-    ).catch((err) => {
-      console.error("[ERROR]", "[audit] persist failed:", err.message);
-    });
-  } else {
-    auditEvents.unshift(row);
+  if (!hasDb()) {
+    row.id = `mem_${crypto.randomBytes(6).toString("hex")}`;
+    auditEvents.unshift({ ...row, id: row.id });
+    return row;
   }
+  setImmediate(() => {
+    void (async () => {
+      try {
+        await dbQuery(
+          `INSERT INTO audit_events (at, actor_id, role, action, resource, resource_id, metadata)
+           VALUES ($1::timestamptz, $2, $3, $4, $5, $6, $7::jsonb)`,
+          [at, actorUserId, role ?? "unknown", action, resource ?? "", resourceId ?? null, JSON.stringify(metadata ?? {})]
+        );
+      } catch (e) {
+        console.error("[audit]", "persist failed (non-fatal):", e instanceof Error ? e.message : e);
+      }
+    })();
+  });
   return row;
 }
 
@@ -363,66 +361,6 @@ function requireLaborer(req, res, next) {
     return;
   }
   next();
-}
-
-/** Gemini (Google AI) — set GEMINI_API_KEY in the environment for Kinyarwanda UI translation */
-const translateCache = new Map();
-const TRANSLATE_CACHE_MAX = 2000;
-
-async function geminiTranslateToKinyarwanda(text) {
-  const key = process.env.GEMINI_API_KEY;
-  const trimmed = String(text ?? "").trim();
-  if (!trimmed) return { translation: "", usedGemini: false, cached: false };
-
-  if (!key) {
-    // PROD-SAFE: sanitized logging
-    console.error("[ERROR]", "[translate] GEMINI_API_KEY is not set; returning original text");
-    return { translation: trimmed, usedGemini: false, cached: false };
-  }
-
-  const cacheKey = `rw:${crypto.createHash("sha256").update(trimmed).digest("hex")}`;
-  if (translateCache.has(cacheKey)) {
-    return { translation: translateCache.get(cacheKey), usedGemini: true, cached: true };
-  }
-
-  const prompt =
-    "Translate the following user interface line for a poultry farm laborer app in Rwanda.\n" +
-    "Target language: Kinyarwanda (Ikinyarwanda).\n" +
-    "Keep numbers, units (kg, L, h, °C, %) and ISO dates exactly as in the source. Do not explain; output only the translation.\n\n" +
-    `Text:\n${trimmed}`;
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(key)}`;
-
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.15, maxOutputTokens: 1024 },
-      }),
-    });
-
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      // PROD-SAFE: sanitized logging
-      console.error("[ERROR]", "[translate] Gemini HTTP", res.status);
-      return { translation: trimmed, usedGemini: false, cached: false };
-    }
-
-    const data = await res.json();
-    let out = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? trimmed;
-    out = out.replace(/^["“”']+|["“”']+$/g, "");
-
-    if (translateCache.size > TRANSLATE_CACHE_MAX) translateCache.clear();
-    translateCache.set(cacheKey, out);
-
-    return { translation: out || trimmed, usedGemini: true, cached: false };
-  } catch (e) {
-    // PROD-SAFE: sanitized logging
-    console.error("[ERROR]", "[translate] Gemini fetch error");
-    return { translation: trimmed, usedGemini: false, cached: false };
-  }
 }
 
 function hasFarmAccess(user) {
@@ -697,6 +635,40 @@ async function dbQuery(sql, params = []) {
   if (!dbPool) throw new Error("Database pool not configured");
   return dbPool.query(sql, params);
 }
+
+/** Align BIGSERIAL after migrations; failures are logged only ([migration]). */
+async function syncAuditEventIdSequence() {
+  if (!hasDb()) return;
+  try {
+    await dbQuery(`
+      SELECT setval(
+        pg_get_serial_sequence('audit_events', 'id'),
+        COALESCE((SELECT MAX(id) FROM audit_events), 1),
+        (SELECT MAX(id) FROM audit_events) IS NOT NULL
+      )
+    `);
+    console.log("[migration]", "audit_events id sequence synced");
+  } catch (e) {
+    console.warn("[migration]", "audit_events sequence sync skipped:", e instanceof Error ? e.message : e);
+  }
+}
+
+// PROD-FIX: migrations on boot — never throw into process; isolate from HTTP.
+runMigrations()
+  .then(async (result) => {
+    if (result.skipped) {
+      console.warn("[migration]", "migrations skipped (no DATABASE_URL)");
+    } else if (result.ok) {
+      console.log("[migration]", "all migration files applied OK");
+    } else {
+      console.error("[migration]", "migrations finished with failures:", result.failedCount);
+    }
+    await syncAuditEventIdSequence();
+  })
+  .catch((err) => {
+    console.error("[migration]", "runner error (non-fatal):", err instanceof Error ? err.message : err);
+    void syncAuditEventIdSequence();
+  });
 
 function parseOptionalIsoDate(value) {
   if (value == null || value === "") return null;
@@ -1106,24 +1078,25 @@ app.post("/api/audit", requireAuth, async (req, res) => {
     res.status(400).json({ error: "action is required" });
     return;
   }
-  const id = `aud_${crypto.randomBytes(6).toString("hex")}`;
   const at = timestamp && !Number.isNaN(Date.parse(timestamp)) ? new Date(timestamp).toISOString() : new Date().toISOString();
-  const row = {
-    id,
-    at,
-    actor_id: actorId,
-    role,
-    action,
-    resource,
-    resource_id: resourceId,
-    metadata: {},
-  };
   try {
-    await dbQuery(
-      `INSERT INTO audit_events (id, at, actor_id, role, action, resource, resource_id, metadata)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, '{}'::jsonb)`,
-      [id, at, actorId, role, action, resource, resourceId]
+    const ins = await dbQuery(
+      `INSERT INTO audit_events (at, actor_id, role, action, resource, resource_id, metadata)
+       VALUES ($1::timestamptz, $2, $3, $4, $5, $6, '{}'::jsonb)
+       RETURNING id, at, actor_id, role, action, resource, resource_id, metadata`,
+      [at, actorId, role, action, resource, resourceId]
     );
+    const ev = ins.rows[0];
+    const row = {
+      id: ev.id,
+      at: ev.at,
+      actor_id: ev.actor_id,
+      role: ev.role,
+      action: ev.action,
+      resource: ev.resource,
+      resource_id: ev.resource_id,
+      metadata: ev.metadata ?? {},
+    };
     res.status(201).json({ event: row });
   } catch {
     res.status(503).json({ error: "Database unavailable. Please retry shortly." });
@@ -1151,40 +1124,94 @@ function publicTranslateLimiter(req, res, next) {
 app.post("/api/i18n/translate-public", publicTranslateLimiter, async (req, res) => {
   const body = req.body ?? {};
   const targetLang = String(body.targetLang ?? "rw");
-  const text = String(body.text ?? "");
+  const texts = Array.isArray(body.texts)
+    ? body.texts.map((x) => String(x ?? ""))
+    : body.text != null
+      ? [String(body.text ?? "")]
+      : [];
   if (targetLang !== "rw") {
-    res.json({ translation: text, usedGemini: false });
+    if (texts.length <= 1) {
+      res.json({ translation: texts[0] ?? "", usedGemini: false });
+    } else {
+      res.json({ translations: texts, usedGemini: false });
+    }
     return;
   }
-  if (text.length > 4000) {
-    res.status(400).json({ error: "Text too long" });
+  const totalChars = texts.reduce((n, t) => n + t.length, 0);
+  if (totalChars > 8000 || texts.length > 20) {
+    res.status(400).json({ error: "Request too large; max 20 strings or 8000 chars total" });
     return;
   }
-  const out = await geminiTranslateToKinyarwanda(text);
-  res.json({ translation: out.translation, usedGemini: out.usedGemini, cached: Boolean(out.cached) });
+  if (texts.length === 0) {
+    res.json({ translation: "", usedGemini: false });
+    return;
+  }
+  if (texts.length === 1) {
+    const out = await geminiTranslateToKinyarwanda(texts[0]);
+    res.json({ translation: out.translation, usedGemini: out.usedGemini, cached: Boolean(out.cached) });
+    return;
+  }
+  const batch = await geminiTranslateManyKinyarwanda(texts);
+  res.json({
+    translations: batch.translations,
+    usedGemini: batch.usedGemini,
+    cached: Boolean(batch.cached),
+  });
 });
 
 app.post("/api/laborer/translate", requireAuth, requireLaborer, async (req, res) => {
   const body = req.body ?? {};
   const targetLang = String(body.targetLang ?? "rw");
-  const text = String(body.text ?? "");
+  const texts = Array.isArray(body.texts)
+    ? body.texts.map((x) => String(x ?? ""))
+    : body.text != null
+      ? [String(body.text ?? "")]
+      : [];
 
   if (targetLang !== "rw") {
-    res.json({ translation: text, usedGemini: false });
+    if (texts.length <= 1) {
+      res.json({ translation: texts[0] ?? "", usedGemini: false });
+    } else {
+      res.json({ translations: texts, usedGemini: false });
+    }
     return;
   }
-  if (text.length > 8000) {
-    res.status(400).json({ error: "Text too long" });
+  const totalChars = texts.reduce((n, t) => n + t.length, 0);
+  if (totalChars > 16000 || texts.length > 20) {
+    res.status(400).json({ error: "Request too large; max 20 strings or 16000 chars total" });
+    return;
+  }
+  if (texts.length === 0) {
+    res.json({ translation: "", usedGemini: false });
     return;
   }
 
-  const out = await geminiTranslateToKinyarwanda(text);
+  let out;
+  if (texts.length === 1) {
+    out = await geminiTranslateToKinyarwanda(texts[0]);
+    appendAudit(req.authUser.id, req.authUser.role, "laborer.translate", "gemini", null, {
+      chars: texts[0].length,
+      usedGemini: out.usedGemini,
+      cached: Boolean(out.cached),
+      batch: false,
+    });
+    res.json({ translation: out.translation, usedGemini: out.usedGemini, cached: Boolean(out.cached) });
+    return;
+  }
+
+  const batch = await geminiTranslateManyKinyarwanda(texts);
   appendAudit(req.authUser.id, req.authUser.role, "laborer.translate", "gemini", null, {
-    chars: text.length,
-    usedGemini: out.usedGemini,
-    cached: Boolean(out.cached),
+    chars: totalChars,
+    usedGemini: batch.usedGemini,
+    cached: Boolean(batch.cached),
+    batch: true,
+    count: texts.length,
   });
-  res.json({ translation: out.translation, usedGemini: out.usedGemini, cached: Boolean(out.cached) });
+  res.json({
+    translations: batch.translations,
+    usedGemini: batch.usedGemini,
+    cached: Boolean(batch.cached),
+  });
 });
 
 app.get("/api/flocks", requireAuth, requireFarmAccess, async (_req, res) => {

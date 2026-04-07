@@ -8,7 +8,8 @@ const { Client } = pg;
 export async function runMigrations() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
-    throw new Error("DATABASE_URL is required");
+    console.warn("[migration]", "DATABASE_URL not set; skipping migration runner");
+    return { ok: true, failedCount: 0, skipped: true };
   }
 
   const client = new Client({
@@ -41,7 +42,7 @@ export async function runMigrations() {
         [filename]
       );
       if ((alreadyRan.rowCount ?? 0) > 0) {
-        console.log(`[SKIP] ${filename}`);
+        console.log("[migration]", `[SKIP] ${filename}`);
         continue;
       }
 
@@ -50,15 +51,23 @@ export async function runMigrations() {
         await client.query("BEGIN");
         await client.query(sql);
         await client.query(
-          "INSERT INTO schema_migrations(filename) VALUES ($1)",
+          "INSERT INTO schema_migrations(filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING",
           [filename]
         );
         await client.query("COMMIT");
-        console.log(`[OK] ${filename}`);
+        console.log("[migration]", `[OK] ${filename}`);
       } catch (e) {
-        await client.query("ROLLBACK");
+        try {
+          await client.query("ROLLBACK");
+        } catch {
+          /* ignore rollback errors */
+        }
         failedCount += 1;
-        console.error(`[FAIL] ${filename}: ${e instanceof Error ? e.message : String(e)}`);
+        console.error(
+          "[migration]",
+          `[FAIL] ${filename}:`,
+          e instanceof Error ? e.message : String(e)
+        );
       }
     }
   } finally {
@@ -66,7 +75,7 @@ export async function runMigrations() {
   }
 
   // PROD-FIX: report migration health without crashing long-running app process
-  return { ok: failedCount === 0, failedCount };
+  return { ok: failedCount === 0, failedCount, skipped: false };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -75,7 +84,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.exit(result.ok ? 0 : 1);
     })
     .catch((e) => {
-      console.error("[FAIL] migration runner:", e instanceof Error ? e.message : e);
+      console.error("[migration]", "runner fatal:", e instanceof Error ? e.message : e);
       process.exit(1);
     });
 }
