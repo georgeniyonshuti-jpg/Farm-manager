@@ -20,6 +20,37 @@ type LedgerRow = {
   reference: string;
 };
 
+const PROCUREMENT_REASON_OPTIONS = [
+  { value: "supplier_delivery", label: "Supplier delivery" },
+  { value: "internal_transfer_in", label: "Internal transfer in" },
+  { value: "returned_stock", label: "Returned stock" },
+  { value: "other", label: "Other" },
+];
+
+const CONSUMPTION_REASON_OPTIONS = [
+  { value: "round_feed", label: "Round feed" },
+  { value: "catchup_feed", label: "Catch-up feed" },
+  { value: "spillage_adjusted", label: "Spillage adjusted" },
+  { value: "other", label: "Other" },
+];
+
+const ADJUST_REASON_OPTIONS = [
+  { value: "stock_count_correction", label: "Stock count correction" },
+  { value: "damage_loss", label: "Damage/loss" },
+  { value: "expired_feed", label: "Expired feed" },
+  { value: "other", label: "Other" },
+];
+
+function reasonLabel(type: LedgerRow["type"], reason: string): string {
+  const table =
+    type === "procurement_receipt"
+      ? PROCUREMENT_REASON_OPTIONS
+      : type === "feed_consumption"
+        ? CONSUMPTION_REASON_OPTIONS
+        : ADJUST_REASON_OPTIONS;
+  return table.find((x) => x.value === reason)?.label ?? reason;
+}
+
 export function FarmInventoryPage() {
   const { token, user } = useAuth();
   const { showToast } = useToast();
@@ -34,15 +65,18 @@ export function FarmInventoryPage() {
   const [busy, setBusy] = useState(false);
 
   const [procQty, setProcQty] = useState("");
-  const [procReason, setProcReason] = useState("Stock receipt");
+  const [procReasonCode, setProcReasonCode] = useState("supplier_delivery");
   const [procRef, setProcRef] = useState("");
-  const [feedQty, setFeedQty] = useState("");
-  const [feedReason, setFeedReason] = useState("Feed consumed");
+  const [feedQty, setFeedQty] = useState<number>(0);
+  const [feedReasonCode, setFeedReasonCode] = useState("round_feed");
   const [adjDelta, setAdjDelta] = useState("");
-  const [adjReason, setAdjReason] = useState("Manager adjustment");
+  const [adjReasonCode, setAdjReasonCode] = useState("stock_count_correction");
+  const [activeTab, setActiveTab] = useState<"procurement" | "consumption" | "adjustment">("procurement");
 
-  const canProcure = user?.role === "procurement_officer" || user?.role === "manager" || user?.role === "superuser";
-  const canFeed = user?.role === "laborer" || user?.role === "dispatcher" || user?.role === "manager" || user?.role === "superuser";
+  const canProcure =
+    user?.role === "procurement_officer" || user?.role === "vet_manager" || user?.role === "manager" || user?.role === "superuser";
+  const canFeed =
+    user?.role === "laborer" || user?.role === "dispatcher" || user?.role === "vet_manager" || user?.role === "manager" || user?.role === "superuser";
   const canAdjust = user?.role === "manager" || user?.role === "superuser";
 
   const load = useCallback(async () => {
@@ -148,19 +182,58 @@ export function FarmInventoryPage() {
                 ))}
               </select>
             </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {canProcure ? (
+                <button
+                  type="button"
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "procurement" ? "border-emerald-700 bg-emerald-50 text-emerald-900" : "border-neutral-300 text-neutral-700"}`}
+                  onClick={() => setActiveTab("procurement")}
+                >
+                  Receive stock
+                </button>
+              ) : null}
+              {canFeed ? (
+                <button
+                  type="button"
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "consumption" ? "border-emerald-700 bg-emerald-50 text-emerald-900" : "border-neutral-300 text-neutral-700"}`}
+                  onClick={() => setActiveTab("consumption")}
+                >
+                  Log consumption
+                </button>
+              ) : null}
+              {canAdjust ? (
+                <button
+                  type="button"
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "adjustment" ? "border-emerald-700 bg-emerald-50 text-emerald-900" : "border-neutral-300 text-neutral-700"}`}
+                  onClick={() => setActiveTab("adjustment")}
+                >
+                  Adjust stock
+                </button>
+              ) : null}
+            </div>
           </div>
 
-          {canProcure ? (
+          {canProcure && activeTab === "procurement" ? (
             <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
               <h2 className="text-sm font-semibold text-neutral-900">Procurement receipt</h2>
               <div className="mt-3 grid gap-3 sm:grid-cols-3">
                 <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Quantity kg" inputMode="decimal" value={procQty} onChange={(e) => setProcQty(e.target.value)} />
-                <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Reason" value={procReason} onChange={(e) => setProcReason(e.target.value)} />
+                <select className="rounded-lg border border-neutral-300 px-3 py-2" value={procReasonCode} onChange={(e) => setProcReasonCode(e.target.value)}>
+                  {PROCUREMENT_REASON_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
                 <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Reference (invoice/GRN)" value={procRef} onChange={(e) => setProcRef(e.target.value)} />
               </div>
               <button
                 disabled={busy || !procQty}
-                onClick={() => void post("/api/inventory/procurement", { quantityKg: Number(procQty), reason: procReason, reference: procRef }, "Stock received")}
+                onClick={() =>
+                  void post(
+                    "/api/inventory/procurement",
+                    { quantityKg: Number(procQty), reasonCode: procReasonCode, reason: procReasonCode, reference: procRef },
+                    "Stock received"
+                  )
+                }
                 className="mt-3 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
               >
                 Save procurement
@@ -168,16 +241,29 @@ export function FarmInventoryPage() {
             </section>
           ) : null}
 
-          {canFeed ? (
+          {canFeed && activeTab === "consumption" ? (
             <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
               <h2 className="text-sm font-semibold text-neutral-900">Feed consumption</h2>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Quantity kg" inputMode="decimal" value={feedQty} onChange={(e) => setFeedQty(e.target.value)} />
-                <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Reason" value={feedReason} onChange={(e) => setFeedReason(e.target.value)} />
+                <div className="space-y-2 rounded-lg border border-neutral-300 px-3 py-2">
+                  <p className="text-xs font-medium text-neutral-600">Consumption quantity (kg)</p>
+                  <div className="flex items-center gap-2">
+                    <button type="button" className="rounded border border-neutral-300 px-2 py-1 text-xs" onClick={() => setFeedQty((v) => Math.max(0, Number((v - 5).toFixed(2))))}>-5</button>
+                    <button type="button" className="rounded border border-neutral-300 px-2 py-1 text-xs" onClick={() => setFeedQty((v) => Math.max(0, Number((v - 1).toFixed(2))))}>-1</button>
+                    <input readOnly className="w-full rounded border border-neutral-200 bg-neutral-50 px-2 py-1 text-center text-sm font-semibold" value={feedQty.toFixed(2)} />
+                    <button type="button" className="rounded border border-neutral-300 px-2 py-1 text-xs" onClick={() => setFeedQty((v) => Number((v + 1).toFixed(2)))}>+1</button>
+                    <button type="button" className="rounded border border-neutral-300 px-2 py-1 text-xs" onClick={() => setFeedQty((v) => Number((v + 5).toFixed(2)))}>+5</button>
+                  </div>
+                </div>
+                <select className="rounded-lg border border-neutral-300 px-3 py-2" value={feedReasonCode} onChange={(e) => setFeedReasonCode(e.target.value)}>
+                  {CONSUMPTION_REASON_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
               </div>
               <button
-                disabled={busy || !feedQty}
-                onClick={() => void post("/api/inventory/feed-consumption", { quantityKg: Number(feedQty), reason: feedReason }, "Feed usage logged")}
+                disabled={busy || feedQty <= 0}
+                onClick={() => void post("/api/inventory/feed-consumption", { quantityKg: feedQty, reasonCode: feedReasonCode, reason: feedReasonCode }, "Feed usage logged")}
                 className="mt-3 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
               >
                 Save feed usage
@@ -185,16 +271,20 @@ export function FarmInventoryPage() {
             </section>
           ) : null}
 
-          {canAdjust ? (
+          {canAdjust && activeTab === "adjustment" ? (
             <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
               <h2 className="text-sm font-semibold text-neutral-900">Manager adjustment</h2>
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Delta kg (+/-)" inputMode="decimal" value={adjDelta} onChange={(e) => setAdjDelta(e.target.value)} />
-                <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Reason" value={adjReason} onChange={(e) => setAdjReason(e.target.value)} />
+                <select className="rounded-lg border border-neutral-300 px-3 py-2" value={adjReasonCode} onChange={(e) => setAdjReasonCode(e.target.value)}>
+                  {ADJUST_REASON_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
               </div>
               <button
                 disabled={busy || !adjDelta}
-                onClick={() => void post("/api/inventory/adjustments", { deltaKg: Number(adjDelta), reason: adjReason }, "Adjustment saved")}
+                onClick={() => void post("/api/inventory/adjustments", { deltaKg: Number(adjDelta), reasonCode: adjReasonCode, reason: adjReasonCode }, "Adjustment saved")}
                 className="mt-3 rounded-lg bg-neutral-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
               >
                 Save adjustment
@@ -210,7 +300,7 @@ export function FarmInventoryPage() {
                   <p className="font-medium text-neutral-900">
                     {r.type} - {r.deltaKg >= 0 ? "+" : ""}{r.deltaKg} kg
                   </p>
-                  <p className="text-neutral-600">{r.reason || "—"}</p>
+                  <p className="text-neutral-600">{reasonLabel(r.type, r.reason) || "—"}</p>
                   <p className="text-xs text-neutral-500">
                     {new Date(r.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
                   </p>

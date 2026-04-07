@@ -498,12 +498,12 @@ function canLogTreatments(user) {
 
 function canCreateProcurement(user) {
   if (!user) return false;
-  return ["superuser", "manager", "procurement_officer"].includes(user.role);
+  return ["superuser", "manager", "vet_manager", "procurement_officer"].includes(user.role);
 }
 
 function canCreateFeedConsumption(user) {
   if (!user) return false;
-  return ["superuser", "manager", "laborer", "dispatcher"].includes(user.role);
+  return ["superuser", "manager", "vet_manager", "laborer", "dispatcher"].includes(user.role);
 }
 
 function canCreateInventoryAdjustment(user) {
@@ -554,6 +554,12 @@ function csvFromRows(headers, rows) {
   ];
   return lines.join("\n");
 }
+
+const INVENTORY_REASON_CODES = {
+  procurement: ["supplier_delivery", "internal_transfer_in", "returned_stock", "other"],
+  consumption: ["round_feed", "catchup_feed", "spillage_adjusted", "other"],
+  adjustment: ["stock_count_correction", "damage_loss", "expired_feed", "other"],
+};
 
 function hasDb() {
   return Boolean(dbPool);
@@ -1595,7 +1601,12 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, (req, res
   const quantityKg = Number(body.quantityKg);
   const unitCostRwfPerKg =
     body.unitCostRwfPerKg == null || body.unitCostRwfPerKg === "" ? null : Number(body.unitCostRwfPerKg);
-  const reason = String(body.reason ?? "Stock receipt").slice(0, 400);
+  const reasonCode = String(body.reasonCode ?? "").trim() || "supplier_delivery";
+  if (!INVENTORY_REASON_CODES.procurement.includes(reasonCode)) {
+    res.status(400).json({ error: "Invalid reasonCode for procurement" });
+    return;
+  }
+  const reason = String(body.reason ?? reasonCode).slice(0, 400);
   const reference = String(body.reference ?? "").slice(0, 200);
   if (!flockId || !flocksById.has(flockId)) {
     res.status(400).json({ error: "Valid flockId is required" });
@@ -1639,7 +1650,12 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, (req
   const body = req.body ?? {};
   const flockId = String(body.flockId ?? "").trim();
   const quantityKg = Number(body.quantityKg);
-  const reason = String(body.reason ?? "Feed consumed").slice(0, 400);
+  const reasonCode = String(body.reasonCode ?? "").trim() || "round_feed";
+  if (!INVENTORY_REASON_CODES.consumption.includes(reasonCode)) {
+    res.status(400).json({ error: "Invalid reasonCode for feed consumption" });
+    return;
+  }
+  const reason = String(body.reason ?? reasonCode).slice(0, 400);
   if (!flockId || !flocksById.has(flockId)) {
     res.status(400).json({ error: "Valid flockId is required" });
     return;
@@ -1683,7 +1699,12 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, (req, res
   const body = req.body ?? {};
   const flockId = String(body.flockId ?? "").trim();
   const deltaKg = Number(body.deltaKg);
-  const reason = String(body.reason ?? "Adjustment").slice(0, 400);
+  const reasonCode = String(body.reasonCode ?? "").trim() || "stock_count_correction";
+  if (!INVENTORY_REASON_CODES.adjustment.includes(reasonCode)) {
+    res.status(400).json({ error: "Invalid reasonCode for adjustment" });
+    return;
+  }
+  const reason = String(body.reason ?? reasonCode).slice(0, 400);
   if (!flockId || !flocksById.has(flockId)) {
     res.status(400).json({ error: "Valid flockId is required" });
     return;
