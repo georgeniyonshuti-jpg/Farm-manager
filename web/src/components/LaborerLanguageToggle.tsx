@@ -15,7 +15,7 @@ export function LaborerLanguageToggle() {
   const labelRw = useLaborerT("Ikinyarwanda");
   const labelEn = useLaborerT("English");
 
-  if (user?.role !== "laborer" && user?.role !== "dispatcher") return null;
+  if (user?.role !== "laborer" && user?.role !== "dispatcher" && user?.role !== "vet") return null;
 
   const pick = (l: LaborerLocale) =>
     setLocale(l);
