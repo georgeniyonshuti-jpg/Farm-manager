@@ -8,15 +8,10 @@ const { Client } = pg;
 export async function runMigrations() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
-    console.warn("[migration]", "DATABASE_URL not set; skipping migration runner");
-    return { ok: true, failedCount: 0, skipped: true };
+    throw new Error("DATABASE_URL is required");
   }
 
-  const client = new Client({
-    connectionString: databaseUrl,
-    ssl: { rejectUnauthorized: false },
-    family: 4,
-  });
+  const client = new Client({ connectionString: databaseUrl });
   await client.connect();
   let failedCount = 0;
 
@@ -42,7 +37,7 @@ export async function runMigrations() {
         [filename]
       );
       if ((alreadyRan.rowCount ?? 0) > 0) {
-        console.log("[migration]", `[SKIP] ${filename}`);
+        console.log(`[SKIP] ${filename}`);
         continue;
       }
 
@@ -51,23 +46,15 @@ export async function runMigrations() {
         await client.query("BEGIN");
         await client.query(sql);
         await client.query(
-          "INSERT INTO schema_migrations(filename) VALUES ($1) ON CONFLICT (filename) DO NOTHING",
+          "INSERT INTO schema_migrations(filename) VALUES ($1)",
           [filename]
         );
         await client.query("COMMIT");
-        console.log("[migration]", `[OK] ${filename}`);
+        console.log(`[OK] ${filename}`);
       } catch (e) {
-        try {
-          await client.query("ROLLBACK");
-        } catch {
-          /* ignore rollback errors */
-        }
+        await client.query("ROLLBACK");
         failedCount += 1;
-        console.error(
-          "[migration]",
-          `[FAIL] ${filename}:`,
-          e instanceof Error ? e.message : String(e)
-        );
+        console.error(`[FAIL] ${filename}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
   } finally {
@@ -75,7 +62,7 @@ export async function runMigrations() {
   }
 
   // PROD-FIX: report migration health without crashing long-running app process
-  return { ok: failedCount === 0, failedCount, skipped: false };
+  return { ok: failedCount === 0, failedCount };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -84,7 +71,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       process.exit(result.ok ? 0 : 1);
     })
     .catch((e) => {
-      console.error("[migration]", "runner fatal:", e instanceof Error ? e.message : e);
+      console.error("[FAIL] migration runner:", e instanceof Error ? e.message : e);
       process.exit(1);
     });
 }

@@ -1,6 +1,3 @@
-// Flush-friendly banner so Render "Logs" shows activity even if boot fails later
-console.log("[INFO]", "[startup] clevafarm process boot", new Date().toISOString(), `cwd=${process.cwd()}`);
-
 import crypto from "node:crypto";
 import cors from "cors";
 import express from "express";
@@ -10,7 +7,15 @@ import pgSession from "connect-pg-simple";
 import pg from "pg";
 import { runMigrations } from "./migrate.js";
 import { checkinSchema, dailyLogSchema, loginSchema } from "./utils/validation.js";
-import { geminiTranslateManyKinyarwanda, geminiTranslateToKinyarwanda } from "./utils/geminiTranslate.js";
+
+// PROD-FIX: run migrations on boot without crashing API startup on failure
+runMigrations().then((result) => {
+  if (result.ok) console.log("[INFO]", "[startup] migrations complete");
+  else console.error("[ERROR]", "[startup] migrations complete with failures:", result.failedCount);
+}).catch(err => {
+  console.error("[ERROR]", "[startup] migration error:", err.message);
+  // Don't crash the server if migrations fail
+});
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -122,17 +127,19 @@ const usersById = new Map();
 /** @type {Map<string, string>} */
 const usersByEmail = new Map();
 
+let auditSeq = 0;
 /** @type {Array<{ id: string, at: string, actor_id: string, role: string, action: string, resource: string, resource_id: string | null, metadata?: object }>} */
 const auditEvents = [];
 
 /**
- * Audit: Postgres generates id (BIGSERIAL). Non-blocking for HTTP — never throws to callers.
- * Single DB attempt (no retry loop). Errors logged with [audit] only.
+ * FIX: audit payload shape { actor_id, role, action, resource, resource_id, timestamp } compatible
  */
 function appendAudit(actorUserId, role, action, resource, resourceId, metadata) {
+  auditSeq += 1;
+  const id = `aud_${auditSeq}`;
   const at = new Date().toISOString();
   const row = {
-    id: null,
+    id,
     at,
     actor_id: actorUserId,
     role: role ?? "unknown",
@@ -141,24 +148,7 @@ function appendAudit(actorUserId, role, action, resource, resourceId, metadata) 
     resource_id: resourceId ?? null,
     metadata: metadata ?? {},
   };
-  if (!hasDb()) {
-    row.id = `mem_${crypto.randomBytes(6).toString("hex")}`;
-    auditEvents.unshift({ ...row, id: row.id });
-    return row;
-  }
-  setImmediate(() => {
-    void (async () => {
-      try {
-        await dbQuery(
-          `INSERT INTO audit_events (at, actor_id, role, action, resource, resource_id, metadata)
-           VALUES ($1::timestamptz, $2, $3, $4, $5, $6, $7::jsonb)`,
-          [at, actorUserId, role ?? "unknown", action, resource ?? "", resourceId ?? null, JSON.stringify(metadata ?? {})]
-        );
-      } catch (e) {
-        console.error("[audit]", "persist failed (non-fatal):", e instanceof Error ? e.message : e);
-      }
-    })();
-  });
+  auditEvents.unshift(row);
   return row;
 }
 
@@ -206,39 +196,9 @@ function seedUsers() {
     {
       id: "usr_vet",
       email: "vet@demo.com",
-      displayName: "Field Vet",
-      passwordHash: hashPassword("demo"),
-      role: "vet",
-      businessUnitAccess: "farm",
-      canViewSensitiveFinancial: false,
-      departmentKeys: ["junior_vet"],
-    },
-    {
-      id: "usr_vet_mgr",
-      email: "vetmanager@demo.com",
       displayName: "Lead Vet",
       passwordHash: hashPassword("demo"),
       role: "vet_manager",
-      businessUnitAccess: "farm",
-      canViewSensitiveFinancial: false,
-      departmentKeys: [],
-    },
-    {
-      id: "usr_disp",
-      email: "dispatcher@demo.com",
-      displayName: "Dispatcher",
-      passwordHash: hashPassword("demo"),
-      role: "dispatcher",
-      businessUnitAccess: "farm",
-      canViewSensitiveFinancial: false,
-      departmentKeys: ["dispatch"],
-    },
-    {
-      id: "usr_proc",
-      email: "procurement@demo.com",
-      displayName: "Procurement Officer",
-      passwordHash: hashPassword("demo"),
-      role: "procurement_officer",
       businessUnitAccess: "farm",
       canViewSensitiveFinancial: false,
       departmentKeys: [],
@@ -259,85 +219,21 @@ function seedUsers() {
 
 seedUsers();
 
-async function bootstrapDatabaseDefaults() {
-  if (!hasDb()) return;
-  const users = [...usersById.values()];
-  for (const u of users) {
-    try {
-      await dbQuery(
-        `INSERT INTO app_users (
-          id, email, display_name, password_hash, role, business_unit_access,
-          can_view_sensitive_financial, department_keys
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
-        ON CONFLICT (id) DO UPDATE
-        SET email = EXCLUDED.email,
-            display_name = EXCLUDED.display_name,
-            password_hash = EXCLUDED.password_hash,
-            role = EXCLUDED.role,
-            business_unit_access = EXCLUDED.business_unit_access,
-            can_view_sensitive_financial = EXCLUDED.can_view_sensitive_financial,
-            department_keys = EXCLUDED.department_keys`,
-        [
-          u.id,
-          u.email,
-          u.displayName,
-          u.passwordHash,
-          u.role,
-          u.businessUnitAccess,
-          Boolean(u.canViewSensitiveFinancial),
-          JSON.stringify(u.departmentKeys ?? []),
-        ]
-      );
-    } catch (err) {
-      console.error("[ERROR]", "[db] bootstrap app_users failed:", err.message);
-    }
-  }
-  try {
-    await dbQuery(
-      `INSERT INTO flocks (id, label, breed, placement_date, initial_count, current_count, status, metadata)
-       VALUES ($1, $2, $3, $4::date, $5, $6, 'active', '{}'::jsonb)
-       ON CONFLICT (id) DO NOTHING`,
-      ["flock_demo_001", "Demo batch - Barn A", "broiler", new Date(Date.now() - 10 * 86400000).toISOString().slice(0, 10), 1000, 1000]
-    );
-  } catch (err) {
-    console.error("[ERROR]", "[db] bootstrap flocks failed:", err.message);
-  }
-}
-void bootstrapDatabaseDefaults();
-
 function newSessionId() {
   return crypto.randomBytes(32).toString("hex");
 }
 
-async function getUserFromRequest(req) {
+function getUserFromRequest(req) {
   const h = req.headers.authorization;
   if (!h || !h.startsWith("Bearer ")) return null;
   const sid = h.slice("Bearer ".length).trim();
-  if (hasDb()) {
-    try {
-      const result = await dbQuery(
-        `SELECT u.id, u.email, u.display_name AS "displayName", u.role,
-                u.business_unit_access AS "businessUnitAccess",
-                u.can_view_sensitive_financial AS "canViewSensitiveFinancial",
-                u.department_keys AS "departmentKeys"
-         FROM app_sessions s
-         JOIN app_users u ON u.id = s.user_id
-         WHERE s.id = $1 AND s.expires_at > now()
-         LIMIT 1`,
-        [sid]
-      );
-      return result.rows[0] ?? null;
-    } catch {
-      return null;
-    }
-  }
   const s = sessions.get(sid);
   if (!s || s.exp < Date.now()) return null;
   return usersById.get(s.userId) ?? null;
 }
 
-async function requireAuth(req, res, next) {
-  const u = await getUserFromRequest(req);
+function requireAuth(req, res, next) {
+  const u = getUserFromRequest(req);
   if (!u) {
     res.status(401).json({ error: "Unauthorized" });
     return;
@@ -361,6 +257,66 @@ function requireLaborer(req, res, next) {
     return;
   }
   next();
+}
+
+/** Gemini (Google AI) — set GEMINI_API_KEY in the environment for Kinyarwanda UI translation */
+const translateCache = new Map();
+const TRANSLATE_CACHE_MAX = 2000;
+
+async function geminiTranslateToKinyarwanda(text) {
+  const key = process.env.GEMINI_API_KEY;
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) return { translation: "", usedGemini: false, cached: false };
+
+  if (!key) {
+    // PROD-SAFE: sanitized logging
+    console.error("[ERROR]", "[translate] GEMINI_API_KEY is not set; returning original text");
+    return { translation: trimmed, usedGemini: false, cached: false };
+  }
+
+  const cacheKey = `rw:${crypto.createHash("sha256").update(trimmed).digest("hex")}`;
+  if (translateCache.has(cacheKey)) {
+    return { translation: translateCache.get(cacheKey), usedGemini: true, cached: true };
+  }
+
+  const prompt =
+    "Translate the following user interface line for a poultry farm laborer app in Rwanda.\n" +
+    "Target language: Kinyarwanda (Ikinyarwanda).\n" +
+    "Keep numbers, units (kg, L, h, °C, %) and ISO dates exactly as in the source. Do not explain; output only the translation.\n\n" +
+    `Text:\n${trimmed}`;
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(key)}`;
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.15, maxOutputTokens: 1024 },
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      // PROD-SAFE: sanitized logging
+      console.error("[ERROR]", "[translate] Gemini HTTP", res.status);
+      return { translation: trimmed, usedGemini: false, cached: false };
+    }
+
+    const data = await res.json();
+    let out = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? trimmed;
+    out = out.replace(/^["“”']+|["“”']+$/g, "");
+
+    if (translateCache.size > TRANSLATE_CACHE_MAX) translateCache.clear();
+    translateCache.set(cacheKey, out);
+
+    return { translation: out || trimmed, usedGemini: true, cached: false };
+  } catch (e) {
+    // PROD-SAFE: sanitized logging
+    console.error("[ERROR]", "[translate] Gemini fetch error");
+    return { translation: trimmed, usedGemini: false, cached: false };
+  }
 }
 
 function hasFarmAccess(user) {
@@ -636,40 +592,6 @@ async function dbQuery(sql, params = []) {
   return dbPool.query(sql, params);
 }
 
-/** Align BIGSERIAL after migrations; failures are logged only ([migration]). */
-async function syncAuditEventIdSequence() {
-  if (!hasDb()) return;
-  try {
-    await dbQuery(`
-      SELECT setval(
-        pg_get_serial_sequence('audit_events', 'id'),
-        COALESCE((SELECT MAX(id) FROM audit_events), 1),
-        (SELECT MAX(id) FROM audit_events) IS NOT NULL
-      )
-    `);
-    console.log("[migration]", "audit_events id sequence synced");
-  } catch (e) {
-    console.warn("[migration]", "audit_events sequence sync skipped:", e instanceof Error ? e.message : e);
-  }
-}
-
-// PROD-FIX: migrations on boot — never throw into process; isolate from HTTP.
-runMigrations()
-  .then(async (result) => {
-    if (result.skipped) {
-      console.warn("[migration]", "migrations skipped (no DATABASE_URL)");
-    } else if (result.ok) {
-      console.log("[migration]", "all migration files applied OK");
-    } else {
-      console.error("[migration]", "migrations finished with failures:", result.failedCount);
-    }
-    await syncAuditEventIdSequence();
-  })
-  .catch((err) => {
-    console.error("[migration]", "runner error (non-fatal):", err instanceof Error ? err.message : err);
-    void syncAuditEventIdSequence();
-  });
-
 function parseOptionalIsoDate(value) {
   if (value == null || value === "") return null;
   const d = new Date(String(value));
@@ -871,7 +793,7 @@ app.get("/health", (_req, res) => {
   });
 });
 
-app.post("/api/auth/login", async (req, res) => {
+app.post("/api/auth/login", (req, res) => {
   // PROD-FIX: prevents malformed data and injection
   const loginParsed = loginSchema.safeParse(req.body ?? {});
   if (!loginParsed.success) {
@@ -881,46 +803,22 @@ app.post("/api/auth/login", async (req, res) => {
   const payload = loginParsed.data;
   const email = payload.email.trim().toLowerCase();
   const password = payload.password;
-  try {
-    const dbUser = await dbQuery(
-      `SELECT id, email, display_name AS "displayName", password_hash AS "passwordHash", role,
-              business_unit_access AS "businessUnitAccess",
-              can_view_sensitive_financial AS "canViewSensitiveFinancial",
-              department_keys AS "departmentKeys"
-       FROM app_users
-       WHERE email = $1
-       LIMIT 1`,
-      [email]
-    );
-    const u = dbUser.rows[0];
-    if (!u || u.passwordHash !== hashPassword(password)) {
-      res.status(401).json({ error: "Invalid email or password" });
-      return;
-    }
-    const token = newSessionId();
-    await dbQuery(
-      `INSERT INTO app_sessions (id, user_id, expires_at)
-       VALUES ($1, $2, $3::timestamptz)`,
-      [token, u.id, new Date(Date.now() + 1000 * 60 * 60 * 24 * 7).toISOString()]
-    );
-    appendAudit(u.id, u.role, "auth.login", "session", null, { email: u.email });
-    res.json({ token, user: sanitizeUser(u) });
-  } catch {
-    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+  const uid = usersByEmail.get(email);
+  const u = uid ? usersById.get(uid) : null;
+  if (!u || u.passwordHash !== hashPassword(password)) {
+    res.status(401).json({ error: "Invalid email or password" });
+    return;
   }
+  const token = newSessionId();
+  sessions.set(token, { userId: u.id, exp: Date.now() + 1000 * 60 * 60 * 24 * 7 });
+  appendAudit(u.id, u.role, "auth.login", "session", null, { email: u.email });
+  res.json({ token, user: sanitizeUser(u) });
 });
 
-app.post("/api/auth/logout", requireAuth, async (req, res) => {
+app.post("/api/auth/logout", requireAuth, (req, res) => {
   const h = req.headers.authorization;
   const sid = h?.startsWith("Bearer ") ? h.slice("Bearer ".length).trim() : null;
-  if (sid) {
-    try {
-      await dbQuery("DELETE FROM app_sessions WHERE id = $1", [sid]);
-    } catch {
-      res.status(503).json({ error: "Database unavailable. Please retry shortly." });
-      return;
-    }
-  }
+  if (sid) sessions.delete(sid);
   appendAudit(req.authUser.id, req.authUser.role, "auth.logout", "session", null, {});
   res.json({ ok: true });
 });
@@ -929,55 +827,11 @@ app.get("/api/auth/me", requireAuth, (req, res) => {
   res.json({ user: sanitizeUser(req.authUser) });
 });
 
-app.get("/api/users", requireAuth, requireSuperuser, async (_req, res) => {
-  try {
-    const rows = await dbQuery(
-      `SELECT id, email, display_name AS "displayName", role,
-              business_unit_access AS "businessUnitAccess",
-              can_view_sensitive_financial AS "canViewSensitiveFinancial",
-              department_keys AS "departmentKeys"
-       FROM app_users
-       ORDER BY created_at DESC`
-    );
-    res.json({ users: rows.rows.map(sanitizeUser) });
-  } catch {
-    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
-  }
+app.get("/api/users", requireAuth, requireSuperuser, (_req, res) => {
+  res.json({ users: [...usersById.values()].map(sanitizeUser) });
 });
 
-app.get("/api/debug/demo-access", requireAuth, requireSuperuser, async (_req, res) => {
-  try {
-    const result = await dbQuery(
-      `SELECT id, email, role,
-              business_unit_access AS "businessUnitAccess",
-              can_view_sensitive_financial AS "canViewSensitiveFinancial",
-              department_keys AS "departmentKeys"
-       FROM app_users
-       WHERE email LIKE '%@demo.com'
-       ORDER BY email ASC`
-    );
-    const accounts = result.rows.map((u) => {
-      const access = String(u.businessUnitAccess ?? "");
-      const hasFarm = access === "farm" || access === "both";
-      const hasFinance = access === "clevacredit" || access === "both";
-      return {
-        id: u.id,
-        email: u.email,
-        role: u.role,
-        businessUnitAccess: access,
-        canViewSensitiveFinancial: Boolean(u.canViewSensitiveFinancial),
-        departmentKeys: Array.isArray(u.departmentKeys) ? u.departmentKeys : [],
-        hasFarmAccess: hasFarm,
-        hasFinanceAccess: hasFinance,
-      };
-    });
-    res.json({ accounts, total: accounts.length, checkedAt: new Date().toISOString() });
-  } catch {
-    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
-  }
-});
-
-app.post("/api/users", requireAuth, requireSuperuser, async (req, res) => {
+app.post("/api/users", requireAuth, requireSuperuser, (req, res) => {
   const body = req.body ?? {};
   const email = String(body.email ?? "").trim().toLowerCase();
   const displayName = String(body.displayName ?? "").trim();
@@ -991,78 +845,50 @@ app.post("/api/users", requireAuth, requireSuperuser, async (req, res) => {
     res.status(400).json({ error: "email, displayName, password required" });
     return;
   }
-  try {
-    const existing = await dbQuery("SELECT id FROM app_users WHERE email = $1 LIMIT 1", [email]);
-    if (existing.rowCount > 0) {
-      res.status(409).json({ error: "User already exists" });
-      return;
-    }
-    const id = `usr_${crypto.randomBytes(6).toString("hex")}`;
-    await dbQuery(
-      `INSERT INTO app_users (
-        id, email, display_name, password_hash, role, business_unit_access,
-        can_view_sensitive_financial, department_keys
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
-      [id, email, displayName, hashPassword(password), role, businessUnitAccess, canViewSensitiveFinancial, JSON.stringify(departmentKeys)]
-    );
-    const row = {
-      id,
-      email,
-      displayName,
-      role,
-      businessUnitAccess,
-      canViewSensitiveFinancial,
-      departmentKeys,
-    };
-    appendAudit(req.authUser.id, req.authUser.role, "user.create", "user", id, {
-      email,
-      role,
-      businessUnitAccess,
-      canViewSensitiveFinancial,
-    });
-    res.json({ user: sanitizeUser(row) });
-  } catch {
-    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+  if (usersByEmail.has(email)) {
+    res.status(409).json({ error: "User already exists" });
+    return;
   }
+
+  const id = `usr_${crypto.randomBytes(6).toString("hex")}`;
+  const row = {
+    id,
+    email,
+    displayName,
+    passwordHash: hashPassword(password),
+    role,
+    businessUnitAccess,
+    canViewSensitiveFinancial,
+    departmentKeys,
+  };
+  upsertUser(row);
+  appendAudit(req.authUser.id, req.authUser.role, "user.create", "user", id, {
+    email,
+    role,
+    businessUnitAccess,
+    canViewSensitiveFinancial,
+  });
+  res.json({ user: sanitizeUser(row) });
 });
 
-app.get("/api/audit", requireAuth, requireSuperuser, async (req, res) => {
+app.get("/api/audit", requireAuth, requireSuperuser, (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
   const roleFilter = String(req.query.role ?? "").trim();
   const actionFilter = String(req.query.action ?? "").trim();
 
-  try {
-    const where = [];
-    const params = [];
-    if (roleFilter) {
-      params.push(roleFilter);
-      where.push(`role = $${params.length}`);
-    }
-    if (actionFilter) {
-      params.push(`%${actionFilter}%`);
-      where.push(`action ILIKE $${params.length}`);
-    }
-    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-    const totalResult = await dbQuery(`SELECT COUNT(*)::int AS total FROM audit_events ${whereSql}`, params);
-    params.push(pageSize);
-    params.push((page - 1) * pageSize);
-    const rowsResult = await dbQuery(
-      `SELECT id, at, actor_id, role, action, resource, resource_id, metadata
-       FROM audit_events
-       ${whereSql}
-       ORDER BY at DESC
-       LIMIT $${params.length - 1} OFFSET $${params.length}`,
-      params
-    );
-    res.json({ events: rowsResult.rows, total: totalResult.rows[0]?.total ?? 0, page, pageSize });
-  } catch {
-    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
-  }
+  let list = auditEvents;
+  if (roleFilter) list = list.filter((e) => e.role === roleFilter);
+  if (actionFilter) list = list.filter((e) => e.action.includes(actionFilter));
+
+  const total = list.length;
+  const start = (page - 1) * pageSize;
+  const events = list.slice(start, start + pageSize);
+  res.json({ events, total, page, pageSize });
 });
 
 /** FIX: explicit audit POST (actor must match session; superuser may supply any actor_id for tooling) */
-app.post("/api/audit", requireAuth, async (req, res) => {
+app.post("/api/audit", requireAuth, (req, res) => {
   const body = req.body ?? {};
   const actorId = String(body.actor_id ?? req.authUser.id);
   if (req.authUser.role !== "superuser" && actorId !== req.authUser.id) {
@@ -1078,29 +904,21 @@ app.post("/api/audit", requireAuth, async (req, res) => {
     res.status(400).json({ error: "action is required" });
     return;
   }
+  auditSeq += 1;
+  const id = `aud_${auditSeq}`;
   const at = timestamp && !Number.isNaN(Date.parse(timestamp)) ? new Date(timestamp).toISOString() : new Date().toISOString();
-  try {
-    const ins = await dbQuery(
-      `INSERT INTO audit_events (at, actor_id, role, action, resource, resource_id, metadata)
-       VALUES ($1::timestamptz, $2, $3, $4, $5, $6, '{}'::jsonb)
-       RETURNING id, at, actor_id, role, action, resource, resource_id, metadata`,
-      [at, actorId, role, action, resource, resourceId]
-    );
-    const ev = ins.rows[0];
-    const row = {
-      id: ev.id,
-      at: ev.at,
-      actor_id: ev.actor_id,
-      role: ev.role,
-      action: ev.action,
-      resource: ev.resource,
-      resource_id: ev.resource_id,
-      metadata: ev.metadata ?? {},
-    };
-    res.status(201).json({ event: row });
-  } catch {
-    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
-  }
+  const row = {
+    id,
+    at,
+    actor_id: actorId,
+    role,
+    action,
+    resource,
+    resource_id: resourceId,
+    metadata: {},
+  };
+  auditEvents.unshift(row);
+  res.status(201).json({ event: row });
 });
 
 /** Rate-limited public translation (login screen when laborer_ui_locale is rw). Same Gemini cache as authenticated. */
@@ -1124,205 +942,101 @@ function publicTranslateLimiter(req, res, next) {
 app.post("/api/i18n/translate-public", publicTranslateLimiter, async (req, res) => {
   const body = req.body ?? {};
   const targetLang = String(body.targetLang ?? "rw");
-  const texts = Array.isArray(body.texts)
-    ? body.texts.map((x) => String(x ?? ""))
-    : body.text != null
-      ? [String(body.text ?? "")]
-      : [];
+  const text = String(body.text ?? "");
   if (targetLang !== "rw") {
-    if (texts.length <= 1) {
-      res.json({ translation: texts[0] ?? "", usedGemini: false });
-    } else {
-      res.json({ translations: texts, usedGemini: false });
-    }
+    res.json({ translation: text, usedGemini: false });
     return;
   }
-  const totalChars = texts.reduce((n, t) => n + t.length, 0);
-  if (totalChars > 8000 || texts.length > 20) {
-    res.status(400).json({ error: "Request too large; max 20 strings or 8000 chars total" });
+  if (text.length > 4000) {
+    res.status(400).json({ error: "Text too long" });
     return;
   }
-  if (texts.length === 0) {
-    res.json({ translation: "", usedGemini: false });
-    return;
-  }
-  if (texts.length === 1) {
-    const out = await geminiTranslateToKinyarwanda(texts[0]);
-    res.json({ translation: out.translation, usedGemini: out.usedGemini, cached: Boolean(out.cached) });
-    return;
-  }
-  const batch = await geminiTranslateManyKinyarwanda(texts);
-  res.json({
-    translations: batch.translations,
-    usedGemini: batch.usedGemini,
-    cached: Boolean(batch.cached),
-  });
+  const out = await geminiTranslateToKinyarwanda(text);
+  res.json({ translation: out.translation, usedGemini: out.usedGemini, cached: Boolean(out.cached) });
 });
 
 app.post("/api/laborer/translate", requireAuth, requireLaborer, async (req, res) => {
   const body = req.body ?? {};
   const targetLang = String(body.targetLang ?? "rw");
-  const texts = Array.isArray(body.texts)
-    ? body.texts.map((x) => String(x ?? ""))
-    : body.text != null
-      ? [String(body.text ?? "")]
-      : [];
+  const text = String(body.text ?? "");
 
   if (targetLang !== "rw") {
-    if (texts.length <= 1) {
-      res.json({ translation: texts[0] ?? "", usedGemini: false });
-    } else {
-      res.json({ translations: texts, usedGemini: false });
-    }
+    res.json({ translation: text, usedGemini: false });
     return;
   }
-  const totalChars = texts.reduce((n, t) => n + t.length, 0);
-  if (totalChars > 16000 || texts.length > 20) {
-    res.status(400).json({ error: "Request too large; max 20 strings or 16000 chars total" });
-    return;
-  }
-  if (texts.length === 0) {
-    res.json({ translation: "", usedGemini: false });
+  if (text.length > 8000) {
+    res.status(400).json({ error: "Text too long" });
     return;
   }
 
-  let out;
-  if (texts.length === 1) {
-    out = await geminiTranslateToKinyarwanda(texts[0]);
-    appendAudit(req.authUser.id, req.authUser.role, "laborer.translate", "gemini", null, {
-      chars: texts[0].length,
-      usedGemini: out.usedGemini,
-      cached: Boolean(out.cached),
-      batch: false,
-    });
-    res.json({ translation: out.translation, usedGemini: out.usedGemini, cached: Boolean(out.cached) });
-    return;
-  }
-
-  const batch = await geminiTranslateManyKinyarwanda(texts);
+  const out = await geminiTranslateToKinyarwanda(text);
   appendAudit(req.authUser.id, req.authUser.role, "laborer.translate", "gemini", null, {
-    chars: totalChars,
-    usedGemini: batch.usedGemini,
-    cached: Boolean(batch.cached),
-    batch: true,
-    count: texts.length,
+    chars: text.length,
+    usedGemini: out.usedGemini,
+    cached: Boolean(out.cached),
   });
-  res.json({
-    translations: batch.translations,
-    usedGemini: batch.usedGemini,
-    cached: Boolean(batch.cached),
+  res.json({ translation: out.translation, usedGemini: out.usedGemini, cached: Boolean(out.cached) });
+});
+
+app.get("/api/flocks", requireAuth, requireFarmAccess, (_req, res) => {
+  // FIX: embed check-in urgency per flock for list + detail views
+  const flocks = [...flocksById.values()].map((f) => {
+    const st = checkinStatusPayload(f);
+    return {
+      ...f,
+      checkinBadge: st.checkinBadge,
+      nextDueAt: st.nextDueAt,
+      lastCheckinAt: st.lastCheckinAt,
+      isOverdue: st.isOverdue,
+      ageDays: st.ageDays,
+      intervalHours: st.intervalHours,
+    };
   });
+  res.json({ flocks });
 });
 
-app.get("/api/flocks", requireAuth, requireFarmAccess, async (_req, res) => {
-  try {
-    const result = await dbQuery(
-      `SELECT f.id, f.label, f.placement_date AS "placementDate", f.initial_count AS "initialCount",
-              f.current_count AS "currentCount", f.status,
-              COALESCE(s.interval_hours, 6) AS "intervalHours",
-              (
-                SELECT c.at
-                FROM check_ins c
-                WHERE c.flock_id = f.id
-                ORDER BY c.at DESC
-                LIMIT 1
-              ) AS "lastCheckinAt"
-       FROM flocks f
-       LEFT JOIN check_in_schedules s ON s.flock_id = f.id
-       ORDER BY f.placement_date DESC`
-    );
-    const flocks = result.rows.map((f) => {
-      const intervalHours = Number(f.intervalHours) || 6;
-      const lastAtMs = f.lastCheckinAt ? new Date(f.lastCheckinAt).getTime() : new Date(`${f.placementDate}T00:00:00.000Z`).getTime();
-      const nextDueMs = lastAtMs + intervalHours * 3600_000;
-      const overdueMs = Date.now() - nextDueMs;
-      const isOverdue = overdueMs > 0;
-      return {
-        ...f,
-        nextDueAt: new Date(nextDueMs).toISOString(),
-        isOverdue,
-        checkinBadge: isOverdue ? "overdue" : "upcoming",
-        ageDays: Math.max(0, Math.floor((Date.now() - new Date(`${f.placementDate}T00:00:00.000Z`).getTime()) / 86400000)),
-      };
-    });
-    res.json({ flocks });
-  } catch {
-    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+app.get("/api/flocks/:id/checkin-status", requireAuth, requireFarmAccess, (req, res) => {
+  const f = flocksById.get(req.params.id);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
   }
+  res.json(checkinStatusPayload(f));
 });
 
-app.get("/api/flocks/:id/checkin-status", requireAuth, requireFarmAccess, async (req, res) => {
-  try {
-    const fResult = await dbQuery(
-      `SELECT f.id, f.label, f.placement_date AS "placementDate",
-              COALESCE(s.interval_hours, 6) AS "intervalHours"
-       FROM flocks f
-       LEFT JOIN check_in_schedules s ON s.flock_id = f.id
-       WHERE f.id = $1
-       LIMIT 1`,
-      [req.params.id]
-    );
-    const f = fResult.rows[0];
-    if (!f) {
-      res.status(404).json({ error: "Flock not found" });
-      return;
-    }
-    const cResult = await dbQuery(
-      `SELECT at FROM check_ins WHERE flock_id = $1 ORDER BY at DESC LIMIT 1`,
-      [f.id]
-    );
-    const lastCheckinAt = cResult.rows[0]?.at ?? null;
-    const intervalHours = Number(f.intervalHours) || 6;
-    const basisMs = lastCheckinAt ? new Date(lastCheckinAt).getTime() : new Date(`${f.placementDate}T00:00:00.000Z`).getTime();
-    const nextDueMs = basisMs + intervalHours * 3600_000;
-    const overdueMs = Date.now() - nextDueMs;
-    res.json({
-      flockId: f.id,
-      label: f.label,
-      placementDate: f.placementDate,
-      ageDays: Math.max(0, Math.floor((Date.now() - new Date(`${f.placementDate}T00:00:00.000Z`).getTime()) / 86400000)),
-      intervalHours,
-      lastCheckinAt,
-      nextDueAt: new Date(nextDueMs).toISOString(),
-      overdueMs,
-      isOverdue: overdueMs > 0,
-      checkinBadge: overdueMs > 0 ? "overdue" : "upcoming",
-    });
-  } catch {
-    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+app.patch("/api/flocks/:id/checkin-schedule", requireAuth, requireFarmAccess, requireCheckinScheduleEditor, (req, res) => {
+  const f = flocksById.get(req.params.id);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
   }
-});
-
-app.patch("/api/flocks/:id/checkin-schedule", requireAuth, requireFarmAccess, requireCheckinScheduleEditor, async (req, res) => {
   const body = req.body ?? {};
-  const photosRequiredPerRound = Math.max(1, Math.min(5, Number(body.photosRequiredPerRound) || 1));
-  const intervalHours = Math.max(1, Number(body.intervalHours) || 6);
-  try {
-    const flock = await dbQuery("SELECT id FROM flocks WHERE id = $1 LIMIT 1", [req.params.id]);
-    if (flock.rowCount < 1) {
-      res.status(404).json({ error: "Flock not found" });
-      return;
-    }
-    await dbQuery(
-      `INSERT INTO check_in_schedules (flock_id, interval_hours, photos_required_per_round, updated_at)
-       VALUES ($1, $2, $3, now())
-       ON CONFLICT (flock_id)
-       DO UPDATE SET interval_hours = EXCLUDED.interval_hours,
-                     photos_required_per_round = EXCLUDED.photos_required_per_round,
-                     updated_at = now()`,
-      [req.params.id, intervalHours, photosRequiredPerRound]
-    );
-    appendAudit(req.authUser.id, req.authUser.role, "flock.checkin_schedule.update", "flock", req.params.id, {
-      photosRequiredPerRound,
-      intervalHours,
-    });
-    res.json({ ok: true });
-  } catch {
-    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+  if (body.checkinBands !== undefined) {
+    f.checkinBands = normalizeBands(body.checkinBands);
   }
+  if (body.photosRequiredPerRound !== undefined) {
+    const n = Number(body.photosRequiredPerRound);
+    f.photosRequiredPerRound = Math.max(1, Math.min(5, Number.isFinite(n) ? n : 1));
+  }
+  if (body.targetSlaughterDayMin !== undefined) {
+    f.targetSlaughterDayMin = Math.max(1, Number(body.targetSlaughterDayMin) || 45);
+  }
+  if (body.targetSlaughterDayMax !== undefined) {
+    f.targetSlaughterDayMax = Math.max(f.targetSlaughterDayMin, Number(body.targetSlaughterDayMax) || 50);
+  }
+  appendAudit(req.authUser.id, req.authUser.role, "flock.checkin_schedule.update", "flock", f.id, {
+    hasCustomBands: Boolean(f.checkinBands?.length),
+    photosRequiredPerRound: f.photosRequiredPerRound,
+  });
+  res.json({ flock: f, status: checkinStatusPayload(f) });
 });
 
-app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, async (req, res) => {
+app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, (req, res) => {
+  const f = flocksById.get(req.params.id);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
   // PROD-FIX: prevents malformed data and injection
   const checkinParsed = checkinSchema.safeParse(req.body ?? {});
   if (!checkinParsed.success) {
@@ -1336,7 +1050,11 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, async
     res.status(400).json({ error: uploadError });
     return;
   }
-  let minPhotos = 1;
+  const minPhotos = f.photosRequiredPerRound ?? 1;
+  if (photos.length < minPhotos) {
+    res.status(400).json({ error: `At least ${minPhotos} photo(s) required for this check-in` });
+    return;
+  }
   const feedKg = Number(body.feedKg);
   const waterL = Number(body.waterL);
   const notes = String(body.notes ?? "").slice(0, 4000);
@@ -1346,7 +1064,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, async
   const at = new Date().toISOString();
   const row = {
     id,
-    flockId: req.params.id,
+    flockId: f.id,
     laborerId: req.authUser.id,
     at,
     photos,
@@ -1357,54 +1075,46 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, async
     notes,
     mortalityAtCheckin,
   };
-  try {
-    const flock = await dbQuery(
-      `SELECT id, placement_date AS "placementDate" FROM flocks WHERE id = $1 LIMIT 1`,
-      [req.params.id]
-    );
-    if (flock.rowCount < 1) {
-      res.status(404).json({ error: "Flock not found" });
-      return;
-    }
-    const schedule = await dbQuery(
-      `SELECT photos_required_per_round AS "photosRequired" FROM check_in_schedules WHERE flock_id = $1 LIMIT 1`,
-      [req.params.id]
-    );
-    minPhotos = Number(schedule.rows[0]?.photosRequired) || 1;
-    if (photos.length < minPhotos) {
-      res.status(400).json({ error: `At least ${minPhotos} photo(s) required for this check-in` });
-      return;
-    }
-    await dbQuery(
-      `INSERT INTO check_ins (id, flock_id, at, feed_kg, water_l, notes, mortality_at_checkin, photo_url, entered_by_user_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-      [id, req.params.id, at, Number.isFinite(feedKg) ? feedKg : 0, Number.isFinite(waterL) ? waterL : 0, notes, mortalityAtCheckin, photos[0] ?? null, req.authUser.id]
-    );
-    if (mortalityAtCheckin > 0) {
-      const mid = `mort_${crypto.randomBytes(8).toString("hex")}`;
-      await dbQuery(
-        `INSERT INTO mortality_events (id, flock_id, at, count, is_emergency, notes, entered_by_user_id, linked_checkin_id)
-         VALUES ($1, $2, $3, $4, false, $5, $6, $7)`,
-        [mid, req.params.id, at, mortalityAtCheckin, "Logged at scheduled round check-in", req.authUser.id, id]
-      );
-      await dbQuery(
-        `UPDATE flocks
-         SET current_count = GREATEST(0, current_count - $2), updated_at = now()
-         WHERE id = $1`,
-        [req.params.id, mortalityAtCheckin]
-      );
-    }
-    appendAudit(req.authUser.id, req.authUser.role, "farm.round_checkin.create", "flock", req.params.id, {
-      checkinId: id,
-      photoCount: photos.length,
+  roundCheckins.push(row);
+  const payrollImpact = maybeAutoPayrollForSubmit(req.authUser, f.id, "check_in", id, at);
+  appendAudit(req.authUser.id, req.authUser.role, "farm.round_checkin.create", "flock", f.id, {
+    checkinId: id,
+    photoCount: photos.length,
+  });
+  if (mortalityAtCheckin > 0) {
+    const mid = `mort_${crypto.randomBytes(8).toString("hex")}`;
+    mortalityEvents.push({
+      id: mid,
+      flockId: f.id,
+      laborerId: req.authUser.id,
+      at,
+      count: mortalityAtCheckin,
+      isEmergency: false,
+      photos: photos.slice(0, 2),
+      notes: "Logged at scheduled round check-in",
+      linkedCheckinId: id,
+      source: "round_checkin",
     });
-    res.json({ ok: true, checkin: row });
-  } catch {
-    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+    appendAudit(req.authUser.id, req.authUser.role, "farm.mortality.create", "flock", f.id, {
+      mortalityId: mid,
+      count: mortalityAtCheckin,
+    });
   }
+  res.json({
+    ok: true,
+    checkin: row,
+    flockDay: flockAgeDays(f, new Date(at)),
+    status: checkinStatusPayload(f),
+    payrollImpact,
+  });
 });
 
-app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, async (req, res) => {
+app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, (req, res) => {
+  const f = flocksById.get(req.params.id);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
   const body = req.body ?? {};
   const photos = Array.isArray(body.photos) ? body.photos.filter((p) => typeof p === "string" && p.length > 40) : [];
   if (photos.length < 1) {
@@ -1427,7 +1137,7 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, asy
 
   // FIX: duplicate mortality debounce — same flock/day/cause pattern within 5 minutes
   const dayKey = new Date().toISOString().slice(0, 10);
-  const dedupeKey = `${req.params.id}|${req.authUser.id}|${dayKey}|${isEmergency}|${count}|${notes.slice(0, 120)}`;
+  const dedupeKey = `${f.id}|${req.authUser.id}|${dayKey}|${isEmergency}|${count}|${notes.slice(0, 120)}`;
   const prev = mortalityRecentByKey.get(dedupeKey);
   const nowMs = Date.now();
   if (prev != null && nowMs - prev < MORTALITY_DEBOUNCE_MS) {
@@ -1443,7 +1153,7 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, asy
   const at = new Date().toISOString();
   const row = {
     id,
-    flockId: req.params.id,
+    flockId: f.id,
     laborerId: req.authUser.id,
     at,
     count,
@@ -1453,65 +1163,34 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, asy
     linkedCheckinId,
     source: linkedCheckinId ? "linked" : isEmergency ? "emergency" : "adhoc",
   };
-  try {
-    const flock = await dbQuery("SELECT id FROM flocks WHERE id = $1 LIMIT 1", [req.params.id]);
-    if (flock.rowCount < 1) {
-      res.status(404).json({ error: "Flock not found" });
-      return;
-    }
-    await dbQuery(
-      `INSERT INTO mortality_events (id, flock_id, at, count, is_emergency, notes, entered_by_user_id, linked_checkin_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [id, req.params.id, at, count, isEmergency, notes, req.authUser.id, linkedCheckinId]
-    );
-    await dbQuery(
-      `UPDATE flocks
-       SET current_count = GREATEST(0, current_count - $2), updated_at = now()
-       WHERE id = $1`,
-      [req.params.id, count]
-    );
-    mortalityRecentByKey.set(dedupeKey, nowMs);
-    appendAudit(req.authUser.id, req.authUser.role, "farm.mortality.create", "flock", req.params.id, {
-      mortalityId: id,
-      count,
-      isEmergency,
-    });
-    res.json({ ok: true, mortality: row });
-  } catch {
-    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
-  }
+  mortalityEvents.push(row);
+  mortalityRecentByKey.set(dedupeKey, nowMs);
+  appendAudit(req.authUser.id, req.authUser.role, "farm.mortality.create", "flock", f.id, {
+    mortalityId: id,
+    count,
+    isEmergency,
+  });
+  res.json({ ok: true, mortality: row, status: checkinStatusPayload(f) });
 });
 
-app.get("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, async (req, res) => {
-  try {
-    const list = await dbQuery(
-      `SELECT id, flock_id AS "flockId", at, count, is_emergency AS "isEmergency", notes, linked_checkin_id AS "linkedCheckinId",
-              CASE WHEN linked_checkin_id IS NOT NULL THEN 'linked' WHEN is_emergency THEN 'emergency' ELSE 'adhoc' END AS source
-       FROM mortality_events
-       WHERE flock_id = $1
-       ORDER BY at DESC`,
-      [req.params.id]
-    );
-    res.json({ events: list.rows });
-  } catch {
-    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+app.get("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, (req, res) => {
+  const f = flocksById.get(req.params.id);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
   }
+  const list = mortalityEvents.filter((m) => m.flockId === f.id).sort((a, b) => (a.at < b.at ? 1 : -1));
+  res.json({ events: list });
 });
 
-app.get("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, async (req, res) => {
-  try {
-    const list = await dbQuery(
-      `SELECT id, flock_id AS "flockId", entered_by_user_id AS "laborerId", at,
-              feed_kg AS "feedKg", water_l AS "waterL", notes, mortality_at_checkin AS "mortalityAtCheckin", photo_url AS "photoUrl"
-       FROM check_ins
-       WHERE flock_id = $1
-       ORDER BY at DESC`,
-      [req.params.id]
-    );
-    res.json({ checkins: list.rows });
-  } catch {
-    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+app.get("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, (req, res) => {
+  const f = flocksById.get(req.params.id);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
   }
+  const list = roundCheckins.filter((c) => c.flockId === f.id).sort((a, b) => (a.at < b.at ? 1 : -1));
+  res.json({ checkins: list });
 });
 
 async function listTreatmentsForFlock(flockId, startIso = null, endIso = null) {
@@ -1603,7 +1282,11 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
 }
 
 app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireTreatmentLogger, async (req, res) => {
-  const flockId = req.params.id;
+  const f = flocksById.get(req.params.id);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
   const body = req.body ?? {};
   const medicineName = String(body.medicineName ?? "").trim();
   const reasonCode = String(body.reasonCode ?? "").trim() || "other";
@@ -1624,7 +1307,7 @@ app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireTr
   }
   const row = {
     id: `trt_${crypto.randomBytes(6).toString("hex")}`,
-    flockId,
+    flockId: f.id,
     at: new Date().toISOString(),
     diseaseOrReason,
     medicineName,
@@ -1638,43 +1321,34 @@ app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireTr
     reasonCode,
   };
   try {
-    const flockExists = await dbQuery("SELECT id FROM flocks WHERE id = $1 LIMIT 1", [flockId]);
-    if (flockExists.rowCount < 1) {
-      res.status(404).json({ error: "Flock not found" });
-      return;
+    if (hasDb()) {
+      await dbQuery(
+        `INSERT INTO flock_treatments
+          (id, flock_id, at, disease_or_reason, medicine_name, reason_code, dose, dose_unit, route, duration_days, withdrawal_days, notes, administered_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [row.id, row.flockId, row.at, row.diseaseOrReason, row.medicineName, row.reasonCode, row.dose, row.doseUnit, row.route, row.durationDays, row.withdrawalDays, row.notes, row.administeredByUserId]
+      );
+    } else {
+      flockTreatments.unshift(row);
     }
-    await dbQuery(
-      `INSERT INTO flock_treatments
-        (id, flock_id, at, disease_or_reason, medicine_name, reason_code, dose, dose_unit, route, duration_days, withdrawal_days, notes, administered_by_user_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
-      [row.id, row.flockId, row.at, row.diseaseOrReason, row.medicineName, row.reasonCode, row.dose, row.doseUnit, row.route, row.durationDays, row.withdrawalDays, row.notes, row.administeredByUserId]
-    );
-    await dbQuery(
-      `INSERT INTO medicine_inventory (id, flock_id, medicine_name, balance_qty, unit, updated_at)
-       VALUES ($1, $2, $3, 0, $4, now())
-       ON CONFLICT (flock_id, medicine_name, unit)
-       DO NOTHING`,
-      [`med_${crypto.randomBytes(6).toString("hex")}`, flockId, medicineName, doseUnit]
-    );
-    await dbQuery(
-      `UPDATE medicine_inventory
-       SET balance_qty = GREATEST(0, balance_qty - $4), updated_at = now()
-       WHERE flock_id = $1 AND medicine_name = $2 AND unit = $3`,
-      [flockId, medicineName, doseUnit, dose]
-    );
   } catch {
     res.status(503).json({ error: "Database unavailable. Please retry shortly." });
     return;
   }
-  appendAudit(req.authUser.id, req.authUser.role, "flock.treatment.create", "flock", flockId, { treatmentId: row.id });
+  appendAudit(req.authUser.id, req.authUser.role, "flock.treatment.create", "flock", f.id, { treatmentId: row.id });
   res.status(201).json({ treatment: row });
 });
 
 app.get("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, async (req, res) => {
+  const f = flocksById.get(req.params.id);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
   const startIso = parseOptionalIsoDate(req.query.start_at);
   const endIso = parseOptionalIsoDate(req.query.end_at);
   try {
-    const list = await listTreatmentsForFlock(req.params.id, startIso, endIso);
+    const list = await listTreatmentsForFlock(f.id, startIso, endIso);
     res.json({ treatments: list });
   } catch {
     res.status(503).json({ error: "Database unavailable. Please retry shortly." });
@@ -1682,7 +1356,11 @@ app.get("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, async (req
 });
 
 app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requireSlaughterEventLogger, async (req, res) => {
-  const flockId = req.params.id;
+  const f = flocksById.get(req.params.id);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
   const body = req.body ?? {};
   const birdsSlaughtered = Number(body.birdsSlaughtered);
   const avgLiveWeightKg = Number(body.avgLiveWeightKg);
@@ -1701,7 +1379,7 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
   const at = new Date().toISOString();
   let treatments = [];
   try {
-    treatments = await listTreatmentsForFlock(flockId);
+    treatments = await listTreatmentsForFlock(f.id);
   } catch {
     res.status(503).json({ error: "Database unavailable. Please retry shortly." });
     return;
@@ -1724,7 +1402,7 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
   }
   const row = {
     id: `slh_${crypto.randomBytes(6).toString("hex")}`,
-    flockId,
+    flockId: f.id,
     at,
     birdsSlaughtered,
     avgLiveWeightKg,
@@ -1734,45 +1412,41 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
     reasonCode,
   };
   try {
-    const flockExists = await dbQuery("SELECT id FROM flocks WHERE id = $1 LIMIT 1", [flockId]);
-    if (flockExists.rowCount < 1) {
-      res.status(404).json({ error: "Flock not found" });
-      return;
+    if (hasDb()) {
+      await dbQuery(
+        `INSERT INTO flock_slaughter_events
+          (id, flock_id, at, birds_slaughtered, reason_code, avg_live_weight_kg, avg_carcass_weight_kg, notes, entered_by_user_id)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [row.id, row.flockId, row.at, row.birdsSlaughtered, row.reasonCode, row.avgLiveWeightKg, row.avgCarcassWeightKg, row.notes, row.enteredByUserId]
+      );
+    } else {
+      slaughterEvents.unshift(row);
     }
-    await dbQuery(
-      `INSERT INTO flock_slaughter_events
-        (id, flock_id, at, birds_slaughtered, reason_code, avg_live_weight_kg, avg_carcass_weight_kg, notes, entered_by_user_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-      [row.id, row.flockId, row.at, row.birdsSlaughtered, row.reasonCode, row.avgLiveWeightKg, row.avgCarcassWeightKg, row.notes, row.enteredByUserId]
-    );
-    await dbQuery(
-      `UPDATE flocks
-       SET current_count = GREATEST(0, current_count - $2),
-           status = CASE WHEN GREATEST(0, current_count - $2) = 0 THEN 'closed' ELSE status END,
-           updated_at = now()
-       WHERE id = $1`,
-      [flockId, birdsSlaughtered]
-    );
   } catch {
     res.status(503).json({ error: "Database unavailable. Please retry shortly." });
     return;
   }
   let perf = null;
   try {
-    perf = await buildFlockPerformanceSummary(flockId, at);
+    perf = await buildFlockPerformanceSummary(f.id, at);
   } catch {
     // Submission already persisted above; return success without summary to avoid duplicate retries.
     perf = null;
   }
-  appendAudit(req.authUser.id, req.authUser.role, "flock.slaughter.create", "flock", flockId, { slaughterId: row.id });
+  appendAudit(req.authUser.id, req.authUser.role, "flock.slaughter.create", "flock", f.id, { slaughterId: row.id });
   res.status(201).json({ slaughter: row, fcr: perf?.fcr ?? null, performance: perf });
 });
 
 app.get("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, async (req, res) => {
+  const f = flocksById.get(req.params.id);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
   const startIso = parseOptionalIsoDate(req.query.start_at);
   const endIso = parseOptionalIsoDate(req.query.end_at);
   try {
-    const list = await listSlaughterForFlock(req.params.id, startIso, endIso);
+    const list = await listSlaughterForFlock(f.id, startIso, endIso);
     res.json({ slaughterEvents: list });
   } catch {
     res.status(503).json({ error: "Database unavailable. Please retry shortly." });
@@ -2143,7 +1817,7 @@ app.post("/api/daily-logs/validate", requireAuth, (req, res) => {
   res.json({ warnings });
 });
 
-app.post("/api/daily-logs", requireAuth, async (req, res) => {
+app.post("/api/daily-logs", requireAuth, (req, res) => {
   // PROD-FIX: prevents malformed data and injection
   const parsed = dailyLogSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -2158,38 +1832,25 @@ app.post("/api/daily-logs", requireAuth, async (req, res) => {
   const validation = computeValidation(payload);
   const dlId = `dl_${crypto.randomBytes(6).toString("hex")}`;
   const receivedAt = new Date().toISOString();
-  try {
-    await dbQuery(
-      `INSERT INTO daily_logs (id, flock_id, log_date, feed_kg, water_l, notes, entered_by_user_id, created_at)
-       VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8)`,
-      [
-        dlId,
-        String(payload.flockId),
-        String(payload.logDate),
-        Number(payload.feedKg ?? 0),
-        Number(payload.waterL ?? 0),
-        String(payload.notes ?? ""),
-        req.authUser.id,
-        receivedAt,
-      ]
-    );
-    appendAudit(req.authUser.id, req.authUser.role, "farm.daily_log.create", "flock", String(payload.flockId), {
-      logDate: payload.logDate,
-    });
-    res.json({
-      ok: true,
-      record: {
-        id: dlId,
-        ...payload,
-        receivedAt,
-        validation,
-        enteredByUserId: req.authUser.id,
-      },
-      payrollImpact: null,
-    });
-  } catch {
-    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
-  }
+  const record = {
+    id: dlId,
+    ...payload,
+    receivedAt,
+    validation,
+    enteredByUserId: req.authUser.id,
+  };
+  dailyLogs.push(record);
+  const payrollImpact = maybeAutoPayrollForSubmit(
+    req.authUser,
+    String(payload.flockId),
+    "daily_log",
+    dlId,
+    receivedAt
+  );
+  appendAudit(req.authUser.id, req.authUser.role, "farm.daily_log.create", "flock", String(payload.flockId), {
+    logDate: payload.logDate,
+  });
+  res.json({ ok: true, record: { ...record, index: dailyLogs.length }, payrollImpact });
 });
 
 app.get("/api/server-time", requireAuth, (_req, res) => {
@@ -2388,33 +2049,10 @@ app.use((err, _req, res, _next) => {
   });
 });
 
-process.on("uncaughtException", (err) => {
-  console.error("[ERROR]", "[fatal] uncaughtException:", err?.message ?? err);
-  console.error(err);
-  process.exit(1);
+app.listen(PORT, () => {
+  // PROD-SAFE: sanitized logging
+  console.log("[INFO]", `Clevafarm API listening on port ${PORT}`);
 });
-
-process.on("unhandledRejection", (reason) => {
-  console.error("[ERROR]", "[fatal] unhandledRejection:", reason);
-});
-
-function listenServer() {
-  const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log("[INFO]", `Clevafarm API listening on 0.0.0.0:${PORT} env=${process.env.NODE_ENV ?? "development"}`);
-    if (process.env.DATABASE_URL) {
-      console.log("[INFO]", "[startup] DATABASE_URL is set (pool will use DB)");
-    } else {
-      console.warn("[WARN]", "[startup] DATABASE_URL is not set — API auth and DB routes will fail");
-    }
-  });
-  server.on("error", (err) => {
-    console.error("[ERROR]", "[listen] server error:", err?.message ?? err);
-    throw err;
-  });
-  return server;
-}
-
-listenServer();
 
 // Keep-alive ping — prevents Render free tier from sleeping
 if (process.env.NODE_ENV === "production" && process.env.RENDER_EXTERNAL_URL) {

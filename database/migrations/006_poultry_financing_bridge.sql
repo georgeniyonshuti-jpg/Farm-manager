@@ -14,7 +14,7 @@ CREATE TABLE poultry_batch_pl_exports (
   net_pl_amount           NUMERIC(18, 2) NOT NULL,
   currency                TEXT NOT NULL DEFAULT 'USD',
   exported_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
-  exported_by             TEXT REFERENCES app_users (id) ON DELETE SET NULL,
+  exported_by             UUID REFERENCES users (id) ON DELETE SET NULL,
   financing_ledger_ref    TEXT,
   status                  poultry_pl_export_status NOT NULL DEFAULT 'pending',
   memo                    TEXT,
