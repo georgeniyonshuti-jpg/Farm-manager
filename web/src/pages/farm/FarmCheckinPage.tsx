@@ -56,7 +56,13 @@ function TranslatedFlockName({ name }: { name: string }) {
   return <p className="text-sm font-semibold text-neutral-900">{t}</p>;
 }
 
-export function CheckinStatusBlock({ status }: { status: CheckinStatus }) {
+export function CheckinStatusBlock({
+  status,
+  showWarning = true,
+}: {
+  status: CheckinStatus;
+  showWarning?: boolean;
+}) {
   const onSiteLine = useLaborerT(
     `Day ${status.ageDays} on-site • target harvest ~days ${status.targetSlaughterDays.min}–${status.targetSlaughterDays.max}`
   );
@@ -75,6 +81,7 @@ export function CheckinStatusBlock({ status }: { status: CheckinStatus }) {
   }, []);
   void tick;
   const liveIsOverdue = computeLiveOverdue(status);
+  const liveBadge: CheckinBadge = liveIsOverdue ? "overdue" : status.checkinBadge;
   const now = kigaliNowDate();
   const nextDueMs = new Date(status.nextDueAt).getTime();
   const deltaMs = nextDueMs - now.getTime();
@@ -83,7 +90,7 @@ export function CheckinStatusBlock({ status }: { status: CheckinStatus }) {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <TranslatedFlockName name={status.label} />
         {/* FIX: age-based schedule urgency badge */}
-        <CheckinUrgencyBadge badge={status.checkinBadge} />
+        <CheckinUrgencyBadge badge={liveBadge} />
       </div>
       <p className="mt-1 text-xs text-neutral-600">{onSiteLine}</p>
       <p className="mt-2 text-sm text-neutral-800">{policyLine}</p>
@@ -93,15 +100,17 @@ export function CheckinStatusBlock({ status }: { status: CheckinStatus }) {
           {new Date(status.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
         </time>
       </p>
-      {liveIsOverdue ? (
-        <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-900">
-          {overdueMsg} ({formatDurationMs(Math.abs(deltaMs))})
-        </p>
-      ) : (
-        <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900">
-          {onTrackMsg} ({formatDurationMs(deltaMs)} remaining)
-        </p>
-      )}
+      {showWarning ? (
+        liveIsOverdue ? (
+          <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-900">
+            {overdueMsg} ({formatDurationMs(Math.abs(deltaMs))})
+          </p>
+        ) : (
+          <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900">
+            {onTrackMsg} ({formatDurationMs(deltaMs)} remaining)
+          </p>
+        )
+      ) : null}
     </section>
   );
 }

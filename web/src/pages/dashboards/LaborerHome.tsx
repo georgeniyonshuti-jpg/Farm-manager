@@ -111,7 +111,7 @@ export function LaborerHome() {
         <ErrorState message={loadError} onRetry={() => void load()} />
       )}
 
-      {!loading && !loadError && status && <CheckinStatusBlock status={status} />}
+      {!loading && !loadError && status && <CheckinStatusBlock status={status} showWarning={false} />}
       {!loading && !loadError && !status ? (
         <EmptyState title={noFlockTitle} description={noFlockBody} />
       ) : null}
