@@ -1,8 +1,8 @@
 import { useState } from "react";
 import type { BusinessUnitAccess, UserRole } from "../../auth/types";
 import { useAuth } from "../../auth/AuthContext";
+import { useApiFetch } from "../../api/fetchClient";
 import { useToast } from "../../components/Toast";
-import { API_BASE_URL } from "../../api/config";
 
 export type AddUserPayload = {
   email: string;
@@ -43,6 +43,7 @@ type Props = {
 export function AddUserForm({ onCreated }: Props) {
   const { token } = useAuth();
   const { showToast } = useToast();
+  const apiFetch = useApiFetch();
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [password, setPassword] = useState("");
@@ -73,19 +74,18 @@ export function AddUserForm({ onCreated }: Props) {
         canViewSensitiveFinancial,
         departmentKeys,
       };
-      // ENV: moved to environment variable
-      const res = await fetch(`${API_BASE_URL}/api/users`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      const data = await apiFetch<{ user: { email: string } }>(
+        "/api/users",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(payload),
         },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error((data as { error?: string }).error ?? `Failed (${res.status})`);
-      }
+        "Create user failed"
+      );
       const emailOk = (data as { user: { email: string } }).user.email;
       showToast("success", `User created: ${emailOk}`);
       setEmail("");
@@ -99,7 +99,6 @@ export function AddUserForm({ onCreated }: Props) {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Could not create user";
       setError(msg);
-      showToast("error", msg);
     } finally {
       setBusy(false);
     }

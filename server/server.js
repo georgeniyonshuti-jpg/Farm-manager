@@ -3,31 +3,42 @@ import cors from "cors";
 import express from "express";
 import rateLimit from "express-rate-limit";
 import session from "express-session";
+import pgSession from "connect-pg-simple";
 import { runMigrations } from "./migrate.js";
+import { checkinSchema, dailyLogSchema, loginSchema } from "./utils/validation.js";
 
-runMigrations().then(() => {
-  console.log("[startup] migrations complete");
+// PROD-FIX: run migrations on boot without crashing API startup on failure
+runMigrations().then((result) => {
+  if (result.ok) console.log("[INFO]", "[startup] migrations complete");
+  else console.error("[ERROR]", "[startup] migrations complete with failures:", result.failedCount);
 }).catch(err => {
-  console.error("[startup] migration error:", err.message);
+  console.error("[ERROR]", "[startup] migration error:", err.message);
   // Don't crash the server if migrations fail
 });
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
-// ENV: moved to environment variable
+// FIX: move hardcoded values to environment variables
 const PEPPER = process.env.AUTH_PEPPER ?? "";
+const PgStore = pgSession(session);
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   "http://localhost:5173",
 ].filter(Boolean);
 
+// FIX: setup CORS for frontend connection
 app.use(cors({
   origin: allowedOrigins,
   credentials: true,
 }));
 app.use(express.json({ limit: "20mb" }));
+app.set("trust proxy", 1); // required for Render
 app.use(session({
+  // PROD-FIX: persistent session store for multi-instance deployment
+  store: new PgStore({
+    conString: process.env.DATABASE_URL,
+  }),
   // ENV: moved to environment variable
   secret: process.env.SESSION_SECRET,
   resave: false,
@@ -59,6 +70,28 @@ app.use("/api/", rateLimit({
 
 function hashPassword(pw) {
   return crypto.createHash("sha256").update(`${PEPPER}:${pw}`).digest("hex");
+}
+
+function imageDataUrlMeta(value) {
+  const raw = String(value ?? "");
+  const m = raw.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!m) return null;
+  const mime = m[1]?.toLowerCase() ?? "";
+  const base64 = m[2] ?? "";
+  const byteLength = Buffer.byteLength(base64, "base64");
+  return { mime, byteLength };
+}
+
+function validateImageDataUrls(photos, maxBytes = 5 * 1024 * 1024) {
+  for (const p of photos) {
+    const meta = imageDataUrlMeta(p);
+    if (!meta) return "Invalid image format. Use image data URLs.";
+    // PROD-FIX: prevents malicious uploads
+    if (!meta.mime.startsWith("image/")) return "Only image uploads are allowed.";
+    // PROD-FIX: prevents malicious uploads
+    if (meta.byteLength > maxBytes) return "Image too large (max 5MB).";
+  }
+  return null;
 }
 
 function sanitizeUser(row) {
@@ -225,7 +258,8 @@ async function geminiTranslateToKinyarwanda(text) {
   if (!trimmed) return { translation: "", usedGemini: false, cached: false };
 
   if (!key) {
-    console.warn("[translate] GEMINI_API_KEY is not set; returning original text");
+    // PROD-SAFE: sanitized logging
+    console.error("[ERROR]", "[translate] GEMINI_API_KEY is not set; returning original text");
     return { translation: trimmed, usedGemini: false, cached: false };
   }
 
@@ -254,7 +288,8 @@ async function geminiTranslateToKinyarwanda(text) {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => "");
-      console.error("[translate] Gemini HTTP", res.status, errText.slice(0, 500));
+      // PROD-SAFE: sanitized logging
+      console.error("[ERROR]", "[translate] Gemini HTTP", res.status);
       return { translation: trimmed, usedGemini: false, cached: false };
     }
 
@@ -267,7 +302,8 @@ async function geminiTranslateToKinyarwanda(text) {
 
     return { translation: out || trimmed, usedGemini: true, cached: false };
   } catch (e) {
-    console.error("[translate] Gemini fetch error", e);
+    // PROD-SAFE: sanitized logging
+    console.error("[ERROR]", "[translate] Gemini fetch error");
     return { translation: trimmed, usedGemini: false, cached: false };
   }
 }
@@ -615,9 +651,24 @@ function seedFlock() {
 }
 seedFlock();
 
+// FIX: add root and health endpoints
+app.get("/", (_req, res) => {
+  res.json({
+    message: "Farm API is running",
+    status: "ok",
+  });
+});
+
 app.post("/api/auth/login", (req, res) => {
-  const email = String(req.body?.email ?? "").trim().toLowerCase();
-  const password = String(req.body?.password ?? "");
+  // PROD-FIX: prevents malformed data and injection
+  const loginParsed = loginSchema.safeParse(req.body ?? {});
+  if (!loginParsed.success) {
+    res.status(400).json({ error: loginParsed.error.issues[0]?.message ?? "Invalid login payload" });
+    return;
+  }
+  const payload = loginParsed.data;
+  const email = payload.email.trim().toLowerCase();
+  const password = payload.password;
   const uid = usersByEmail.get(email);
   const u = uid ? usersById.get(uid) : null;
   if (!u || u.passwordHash !== hashPassword(password)) {
@@ -852,8 +903,19 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, (req,
     res.status(404).json({ error: "Flock not found" });
     return;
   }
-  const body = req.body ?? {};
+  // PROD-FIX: prevents malformed data and injection
+  const checkinParsed = checkinSchema.safeParse(req.body ?? {});
+  if (!checkinParsed.success) {
+    res.status(400).json({ error: checkinParsed.error.issues[0]?.message ?? "Invalid check-in payload" });
+    return;
+  }
+  const body = checkinParsed.data;
   const photos = Array.isArray(body.photos) ? body.photos.filter((p) => typeof p === "string" && p.length > 40) : [];
+  const uploadError = validateImageDataUrls(photos);
+  if (uploadError) {
+    res.status(400).json({ error: uploadError });
+    return;
+  }
   const minPhotos = f.photosRequiredPerRound ?? 1;
   if (photos.length < minPhotos) {
     res.status(400).json({ error: `At least ${minPhotos} photo(s) required for this check-in` });
@@ -917,6 +979,11 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, (re
   const photos = Array.isArray(body.photos) ? body.photos.filter((p) => typeof p === "string" && p.length > 40) : [];
   if (photos.length < 1) {
     res.status(400).json({ error: "At least one mortality photo is required" });
+    return;
+  }
+  const uploadError = validateImageDataUrls(photos);
+  if (uploadError) {
+    res.status(400).json({ error: uploadError });
     return;
   }
   const count = Math.max(1, Number(body.count) || 0);
@@ -993,9 +1060,11 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "farm-manager-api", storedLogs: dailyLogs.length, users: usersById.size });
 });
 
+// FIX: add root and health endpoints
 app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
+    uptime: process.uptime(),
     version: process.env.APP_VERSION ?? "1.0.0",
     timestamp: new Date().toISOString(),
   });
@@ -1012,13 +1081,25 @@ function computeValidation(payload) {
 }
 
 app.post("/api/daily-logs/validate", requireAuth, (req, res) => {
-  const payload = req.body ?? {};
+  // PROD-FIX: prevents malformed data and injection
+  const parsed = dailyLogSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid daily log payload" });
+    return;
+  }
+  const payload = { ...(req.body ?? {}), ...parsed.data };
   const { warnings } = computeValidation(payload);
   res.json({ warnings });
 });
 
 app.post("/api/daily-logs", requireAuth, (req, res) => {
-  const payload = req.body ?? {};
+  // PROD-FIX: prevents malformed data and injection
+  const parsed = dailyLogSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid daily log payload" });
+    return;
+  }
+  const payload = { ...(req.body ?? {}), ...parsed.data };
   if (!payload.flockId || !payload.logDate) {
     res.status(400).json({ error: "flockId and logDate are required" });
     return;
@@ -1229,8 +1310,18 @@ app.post("/api/payroll-impact/bulk-approve", requireAuth, requireFarmAccess, req
   res.json({ ok: true, approvedCount: n });
 });
 
+// PROD-FIX: prevents crashes and hides sensitive errors
+app.use((err, req, res, next) => {
+  console.error("[ERROR]", err);
+
+  res.status(err.status || 500).json({
+    error: "Internal server error"
+  });
+});
+
 app.listen(PORT, () => {
-  console.log(`Farm Manager API http://127.0.0.1:${PORT}`);
+  // PROD-SAFE: sanitized logging
+  console.log("[INFO]", `Farm Manager API listening on port ${PORT}`);
 });
 
 // Keep-alive ping — prevents Render free tier from sleeping
@@ -1239,9 +1330,11 @@ if (process.env.NODE_ENV === "production" && process.env.RENDER_EXTERNAL_URL) {
   setInterval(async () => {
     try {
       await fetch(`${process.env.RENDER_EXTERNAL_URL}/health`);
-      console.log("[keep-alive] ping sent");
+      // PROD-SAFE: sanitized logging
+      console.log("[INFO]", "[keep-alive] ping sent");
     } catch (e) {
-      console.error("[keep-alive] ping failed:", e.message);
+      // PROD-SAFE: sanitized logging
+      console.error("[ERROR]", "[keep-alive] ping failed");
     }
   }, PING_INTERVAL);
 }

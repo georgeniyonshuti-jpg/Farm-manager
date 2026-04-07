@@ -13,8 +13,10 @@ export async function runMigrations() {
 
   const client = new Client({ connectionString: databaseUrl });
   await client.connect();
+  let failedCount = 0;
 
   try {
+    // PROD-FIX: track applied migrations to keep startup idempotent
     await client.query(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
         filename TEXT PRIMARY KEY,
@@ -30,11 +32,11 @@ export async function runMigrations() {
       .sort((a, b) => a.localeCompare(b));
 
     for (const filename of files) {
-      const already = await client.query(
+      const alreadyRan = await client.query(
         "SELECT 1 FROM schema_migrations WHERE filename = $1",
         [filename]
       );
-      if (already.rowCount && already.rowCount > 0) {
+      if ((alreadyRan.rowCount ?? 0) > 0) {
         console.log(`[SKIP] ${filename}`);
         continue;
       }
@@ -51,18 +53,22 @@ export async function runMigrations() {
         console.log(`[OK] ${filename}`);
       } catch (e) {
         await client.query("ROLLBACK");
-        throw new Error(`[FAIL] ${filename}: ${e instanceof Error ? e.message : String(e)}`);
+        failedCount += 1;
+        console.error(`[FAIL] ${filename}: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
   } finally {
     await client.end();
   }
+
+  // PROD-FIX: report migration health without crashing long-running app process
+  return { ok: failedCount === 0, failedCount };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   runMigrations()
-    .then(() => {
-      process.exit(0);
+    .then((result) => {
+      process.exit(result.ok ? 0 : 1);
     })
     .catch((e) => {
       console.error("[FAIL] migration runner:", e instanceof Error ? e.message : e);
