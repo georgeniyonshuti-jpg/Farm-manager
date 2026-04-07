@@ -12,13 +12,60 @@ function NavText({ text }: { text: string }) {
 type NavItem = { to: string; label: string; end?: boolean };
 type Props = { onNavigate?: () => void };
 
-const FARM_NAV_BASE: NavItem[] = [
-  { to: "/farm/checkin", label: "Round check-in" },
-  { to: "/farm/mortality-log", label: "Log mortality" },
-  { to: "/farm/daily-log", label: "Daily logs" },
-  { to: "/farm/mortality", label: "Mortality tracking" },
-  { to: "/farm/inventory", label: "Feed inventory" },
-];
+function menuItemsForRole(role: string): NavItem[] {
+  if (role === "laborer" || role === "dispatcher") {
+    return [
+      { to: "/farm/checkin", label: "Round check-in" },
+      { to: "/farm/mortality-log", label: "Log mortality" },
+      { to: "/farm/daily-log", label: "Daily logs" },
+      { to: "/farm/mortality", label: "Mortality tracking" },
+      { to: "/farm/inventory", label: "Feed inventory" },
+      { to: "/laborer/earnings", label: "My earnings" },
+    ];
+  }
+  if (role === "vet") {
+    return [
+      { to: "/farm/flocks", label: "Flocks" },
+      { to: "/farm/treatments", label: "Medicine tracking" },
+      { to: "/farm/slaughter", label: "Slaughter & FCR" },
+      { to: "/farm/mortality", label: "Mortality tracking" },
+    ];
+  }
+  if (role === "vet_manager" || role === "manager") {
+    return [
+      { to: "/farm/flocks", label: "Flocks" },
+      { to: "/farm/batch-schedule", label: "Check-in schedule" },
+      { to: "/farm/schedule-settings", label: "Schedule settings" },
+      { to: "/farm/payroll", label: "Payroll" },
+      { to: "/farm/inventory", label: "Feed inventory" },
+      { to: "/farm/treatments", label: "Medicine tracking" },
+      { to: "/farm/slaughter", label: "Slaughter & FCR" },
+      { to: "/farm/mortality", label: "Mortality tracking" },
+    ];
+  }
+  if (role === "procurement_officer") {
+    return [
+      { to: "/farm/flocks", label: "Flocks" },
+      { to: "/farm/inventory", label: "Feed inventory" },
+    ];
+  }
+  if (role === "superuser") {
+    return [
+      { to: "/farm/flocks", label: "Flocks" },
+      { to: "/farm/checkin", label: "Round check-in" },
+      { to: "/farm/mortality-log", label: "Log mortality" },
+      { to: "/farm/daily-log", label: "Daily logs" },
+      { to: "/farm/mortality", label: "Mortality tracking" },
+      { to: "/farm/inventory", label: "Feed inventory" },
+      { to: "/farm/treatments", label: "Medicine tracking" },
+      { to: "/farm/slaughter", label: "Slaughter & FCR" },
+      { to: "/farm/batch-schedule", label: "Check-in schedule" },
+      { to: "/farm/schedule-settings", label: "Schedule settings" },
+      { to: "/farm/payroll", label: "Payroll" },
+    ];
+  }
+  return [{ to: "/farm/flocks", label: "Flocks" }];
+}
 
 const CLEVA_NAV: NavItem[] = [
   { to: "/cleva/portfolio", label: "Portfolio analytics", end: true },
@@ -42,61 +89,10 @@ export function SidebarNav({ onNavigate }: Props) {
     );
   });
 
-  const scheduleItem: NavItem | null =
-    activeWorkspace === "farm" && user && canEditFlockScheduleRole(user.role)
-      ? { to: "/farm/batch-schedule", label: "Check-in schedule" }
-      : null;
-
-  // FIX: flock list + urgency for management / clinical roles
-  const flocksItem: NavItem | null =
-    activeWorkspace === "farm" &&
-    user &&
-    (user.role === "manager" ||
-      user.role === "vet_manager" ||
-      user.role === "vet" ||
-      user.role === "superuser" ||
-      user.role === "procurement_officer" ||
-      user.role === "sales_coordinator")
-      ? { to: "/farm/flocks", label: "Flocks" }
-      : null;
-
-  const logPayrollItem: NavItem | null =
-    activeWorkspace === "farm" &&
-    (user.role === "manager" || user.role === "vet_manager" || user.role === "superuser")
-      ? { to: "/farm/schedule-settings", label: "Schedule settings" }
-      : null;
-
-  const payrollNavItem: NavItem | null =
-    activeWorkspace === "farm" &&
-    (user.role === "manager" || user.role === "vet_manager" || user.role === "superuser")
-      ? { to: "/farm/payroll", label: "Payroll" }
-      : null;
-  const treatmentNavItem: NavItem | null =
-    activeWorkspace === "farm" &&
-    (user.role === "manager" || user.role === "vet_manager" || user.role === "vet" || user.role === "superuser")
-      ? { to: "/farm/treatments", label: "Medicine tracking" }
-      : null;
-  const slaughterNavItem: NavItem | null =
-    activeWorkspace === "farm" &&
-    (user.role === "manager" || user.role === "vet_manager" || user.role === "vet" || user.role === "superuser")
-      ? { to: "/farm/slaughter", label: "Slaughter & FCR" }
-      : null;
-
-  const laborerEarningsItem: NavItem | null =
-    activeWorkspace === "farm" && (user.role === "laborer" || user.role === "dispatcher")
-      ? { to: "/laborer/earnings", label: "My earnings" }
-      : null;
-
-  const farmExtras = [
-    laborerEarningsItem,
-    flocksItem,
-    scheduleItem,
-    logPayrollItem,
-    payrollNavItem,
-    treatmentNavItem,
-    slaughterNavItem,
-  ].filter(Boolean) as NavItem[];
-  const farmNav = farmExtras.length ? [...FARM_NAV_BASE, ...farmExtras] : FARM_NAV_BASE;
+  const farmNav = menuItemsForRole(user.role).filter((item) => {
+    if (item.to === "/farm/batch-schedule") return canEditFlockScheduleRole(user.role);
+    return true;
+  });
   const nav = activeWorkspace === "farm" ? farmNav : clevaNav;
 
   const dashLink =
