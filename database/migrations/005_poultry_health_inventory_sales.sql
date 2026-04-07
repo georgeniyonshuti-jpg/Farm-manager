@@ -3,7 +3,7 @@
 CREATE TABLE poultry_health_records (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   flock_id            UUID NOT NULL REFERENCES poultry_flocks (id) ON DELETE CASCADE,
-  veterinarian_id     UUID NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
+  veterinarian_id     TEXT NOT NULL REFERENCES app_users (id) ON DELETE RESTRICT,
   record_date         DATE NOT NULL,
   diagnosis           TEXT NOT NULL,
   treatment           TEXT,
@@ -22,7 +22,7 @@ CREATE INDEX idx_poultry_health_vet ON poultry_health_records (veterinarian_id);
 CREATE TABLE poultry_inventory_transactions (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   flock_id            UUID REFERENCES poultry_flocks (id) ON DELETE SET NULL,
-  recorded_by         UUID NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
+  recorded_by         TEXT NOT NULL REFERENCES app_users (id) ON DELETE RESTRICT,
   item_type           poultry_inventory_item_type NOT NULL,
   quantity            NUMERIC(14, 3) NOT NULL,
   unit                TEXT NOT NULL DEFAULT 'kg',
@@ -43,7 +43,7 @@ CREATE INDEX idx_poultry_inventory_date ON poultry_inventory_transactions (trans
 CREATE TABLE poultry_sales_orders (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   flock_id            UUID NOT NULL REFERENCES poultry_flocks (id) ON DELETE CASCADE,
-  recorded_by         UUID NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
+  recorded_by         TEXT NOT NULL REFERENCES app_users (id) ON DELETE RESTRICT,
   order_date          DATE NOT NULL,
   number_of_birds     INTEGER NOT NULL CHECK (number_of_birds > 0),
   total_weight_kg     NUMERIC(14, 3) NOT NULL CHECK (total_weight_kg > 0),

@@ -130,16 +130,15 @@ const usersById = new Map();
 /** @type {Map<string, string>} */
 const usersByEmail = new Map();
 
-let auditSeq = 0;
 /** @type {Array<{ id: string, at: string, actor_id: string, role: string, action: string, resource: string, resource_id: string | null, metadata?: object }>} */
 const auditEvents = [];
 
 /**
  * FIX: audit payload shape { actor_id, role, action, resource, resource_id, timestamp } compatible
+ * IDs must be unique across process restarts (Postgres PK), not in-memory sequence.
  */
 function appendAudit(actorUserId, role, action, resource, resourceId, metadata) {
-  auditSeq += 1;
-  const id = `aud_${auditSeq}`;
+  const id = `aud_${crypto.randomBytes(8).toString("hex")}`;
   const at = new Date().toISOString();
   const row = {
     id,

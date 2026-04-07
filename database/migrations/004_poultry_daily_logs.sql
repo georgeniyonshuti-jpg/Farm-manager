@@ -3,7 +3,7 @@
 CREATE TABLE poultry_daily_logs (
   id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   flock_id                UUID NOT NULL REFERENCES poultry_flocks (id) ON DELETE CASCADE,
-  laborer_id              UUID NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
+  laborer_id              TEXT NOT NULL REFERENCES app_users (id) ON DELETE RESTRICT,
   log_date                DATE NOT NULL,
   mortality               INTEGER NOT NULL DEFAULT 0 CHECK (mortality >= 0),
   feed_intake_kg          NUMERIC(12, 3) NOT NULL DEFAULT 0 CHECK (feed_intake_kg >= 0),
@@ -16,7 +16,7 @@ CREATE TABLE poultry_daily_logs (
   mortality_pct_of_initial NUMERIC(8, 4),
   flagged_high_mortality  BOOLEAN NOT NULL DEFAULT false,
   submitted_at            TIMESTAMPTZ,
-  reviewed_by             UUID REFERENCES users (id) ON DELETE SET NULL,
+  reviewed_by             TEXT REFERENCES app_users (id) ON DELETE SET NULL,
   reviewed_at             TIMESTAMPTZ,
   review_notes            TEXT,
   created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),

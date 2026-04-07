@@ -2,10 +2,10 @@
 
 CREATE TABLE poultry_user_roles (
   id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id         UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+  user_id         TEXT NOT NULL REFERENCES app_users (id) ON DELETE CASCADE,
   role            poultry_app_role NOT NULL,
   granted_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  granted_by      UUID REFERENCES users (id) ON DELETE SET NULL,
+  granted_by      TEXT REFERENCES app_users (id) ON DELETE SET NULL,
   UNIQUE (user_id, role)
 );
 

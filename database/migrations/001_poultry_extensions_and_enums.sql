@@ -1,5 +1,5 @@
 -- Precision Poultry — AgriculturalModule (isolated from FinancingModule)
--- PostgreSQL. Run after your core auth `users` table exists; adjust FK if your table name differs.
+-- PostgreSQL. Poultry RBAC tables reference `app_users` (see migration 000).
 
 -- Optional: ensure pgcrypto for gen_random_uuid()
 CREATE EXTENSION IF NOT EXISTS pgcrypto;

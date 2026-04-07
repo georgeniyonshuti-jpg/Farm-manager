@@ -3,7 +3,7 @@
 CREATE TABLE poultry_prescriptions (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   flock_id            UUID NOT NULL REFERENCES poultry_flocks (id) ON DELETE CASCADE,
-  veterinarian_id     UUID NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
+  veterinarian_id     TEXT NOT NULL REFERENCES app_users (id) ON DELETE RESTRICT,
   prescribed_date     DATE NOT NULL,
   product_name        TEXT NOT NULL,
   dosage              TEXT,
@@ -18,7 +18,7 @@ CREATE INDEX idx_poultry_rx_flock ON poultry_prescriptions (flock_id);
 CREATE TABLE poultry_biosecurity_audits (
   id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   flock_id            UUID NOT NULL REFERENCES poultry_flocks (id) ON DELETE CASCADE,
-  auditor_id          UUID NOT NULL REFERENCES users (id) ON DELETE RESTRICT,
+  auditor_id          TEXT NOT NULL REFERENCES app_users (id) ON DELETE RESTRICT,
   audit_date          DATE NOT NULL,
   score               NUMERIC(5, 2),
   passed              BOOLEAN,
