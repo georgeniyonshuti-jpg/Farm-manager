@@ -414,6 +414,9 @@ const flockTreatments = [];
 /** @type {Array<{ id: string, flockId: string, at: string, birdsSlaughtered: number, avgLiveWeightKg: number, avgCarcassWeightKg: number | null, notes: string, enteredByUserId: string }>} */
 const slaughterEvents = [];
 
+/** @type {Array<{ id: string, type: "procurement_receipt"|"feed_consumption"|"adjustment", flockId: string, at: string, quantityKg: number, deltaKg: number, unitCostRwfPerKg: number | null, reason: string, reference: string, actorUserId: string, approvedByUserId: string | null, approvedAt: string | null }>} */
+const inventoryTransactions = [];
+
 const payrollMissedKeys = new Set();
 
 function seedLogScheduleDemo() {
@@ -491,6 +494,35 @@ function maybeAutoPayrollForSubmit(reqUser, flockId, logType, logId, submittedAt
 function canLogTreatments(user) {
   if (!user) return false;
   return ["superuser", "manager", "vet_manager", "vet"].includes(user.role);
+}
+
+function canCreateProcurement(user) {
+  if (!user) return false;
+  return ["superuser", "manager", "procurement_officer"].includes(user.role);
+}
+
+function canCreateFeedConsumption(user) {
+  if (!user) return false;
+  return ["superuser", "manager", "laborer", "dispatcher"].includes(user.role);
+}
+
+function canCreateInventoryAdjustment(user) {
+  if (!user) return false;
+  return ["superuser", "manager"].includes(user.role);
+}
+
+function canEditInventoryRow(user, row) {
+  if (!user || !row) return false;
+  if (user.role === "superuser" || user.role === "manager") return true;
+  if (user.role === "procurement_officer" && row.type === "procurement_receipt" && row.actorUserId === user.id) {
+    const sameKigaliDay = kigaliYmd(new Date(row.at)) === kigaliYmd(new Date());
+    return sameKigaliDay;
+  }
+  if ((user.role === "laborer" || user.role === "dispatcher") && row.type === "feed_consumption" && row.actorUserId === user.id) {
+    const sameKigaliDay = kigaliYmd(new Date(row.at)) === kigaliYmd(new Date());
+    return sameKigaliDay;
+  }
+  return false;
 }
 
 function requireTreatmentLogger(req, res, next) {
@@ -1508,6 +1540,197 @@ app.get("/api/reports/slaughter.csv", requireAuth, requireFarmAccess, async (req
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="slaughter${flockId ? `-${flockId}` : ""}.csv"`);
   res.send(csv);
+});
+
+function inventoryRowPayload(row) {
+  return {
+    ...row,
+    flockLabel: flocksById.get(row.flockId)?.label ?? row.flockId,
+  };
+}
+
+function computeInventoryBalances(flockId = null) {
+  const scoped = inventoryTransactions.filter((r) => (flockId ? r.flockId === flockId : true));
+  const byFlock = new Map();
+  for (const row of scoped) {
+    const prev = byFlock.get(row.flockId) ?? 0;
+    byFlock.set(row.flockId, prev + Number(row.deltaKg || 0));
+  }
+  return [...byFlock.entries()].map(([id, balanceKg]) => ({
+    flockId: id,
+    flockLabel: flocksById.get(id)?.label ?? id,
+    balanceKg: Number(balanceKg.toFixed(3)),
+  }));
+}
+
+app.get("/api/inventory/ledger", requireAuth, requireFarmAccess, (req, res) => {
+  const flockId = String(req.query.flock_id ?? "").trim();
+  const type = String(req.query.type ?? "").trim();
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 30));
+
+  let list = inventoryTransactions;
+  if (flockId) list = list.filter((r) => r.flockId === flockId);
+  if (type) list = list.filter((r) => r.type === type);
+
+  list = [...list].sort((a, b) => (a.at < b.at ? 1 : -1));
+  const total = list.length;
+  const start = (page - 1) * pageSize;
+  const rows = list.slice(start, start + pageSize).map(inventoryRowPayload);
+  res.json({ rows, total, page, pageSize });
+});
+
+app.get("/api/inventory/balance", requireAuth, requireFarmAccess, (req, res) => {
+  const flockId = String(req.query.flock_id ?? "").trim() || null;
+  res.json({ balances: computeInventoryBalances(flockId) });
+});
+
+app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, (req, res) => {
+  if (!canCreateProcurement(req.authUser)) {
+    res.status(403).json({ error: "Only procurement, manager, or superuser can receive stock" });
+    return;
+  }
+  const body = req.body ?? {};
+  const flockId = String(body.flockId ?? "").trim();
+  const quantityKg = Number(body.quantityKg);
+  const unitCostRwfPerKg =
+    body.unitCostRwfPerKg == null || body.unitCostRwfPerKg === "" ? null : Number(body.unitCostRwfPerKg);
+  const reason = String(body.reason ?? "Stock receipt").slice(0, 400);
+  const reference = String(body.reference ?? "").slice(0, 200);
+  if (!flockId || !flocksById.has(flockId)) {
+    res.status(400).json({ error: "Valid flockId is required" });
+    return;
+  }
+  if (!Number.isFinite(quantityKg) || quantityKg <= 0) {
+    res.status(400).json({ error: "quantityKg must be > 0" });
+    return;
+  }
+  if (unitCostRwfPerKg != null && (!Number.isFinite(unitCostRwfPerKg) || unitCostRwfPerKg < 0)) {
+    res.status(400).json({ error: "unitCostRwfPerKg must be >= 0" });
+    return;
+  }
+  const row = {
+    id: `inv_${crypto.randomBytes(6).toString("hex")}`,
+    type: "procurement_receipt",
+    flockId,
+    at: new Date().toISOString(),
+    quantityKg,
+    deltaKg: quantityKg,
+    unitCostRwfPerKg: unitCostRwfPerKg != null ? unitCostRwfPerKg : null,
+    reason,
+    reference,
+    actorUserId: req.authUser.id,
+    approvedByUserId: null,
+    approvedAt: null,
+  };
+  inventoryTransactions.unshift(row);
+  appendAudit(req.authUser.id, req.authUser.role, "inventory.procurement.create", "inventory", row.id, {
+    flockId,
+    quantityKg,
+  });
+  res.status(201).json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(flockId) });
+});
+
+app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, (req, res) => {
+  if (!canCreateFeedConsumption(req.authUser)) {
+    res.status(403).json({ error: "Only laborer, dispatcher, manager, or superuser can log feed usage" });
+    return;
+  }
+  const body = req.body ?? {};
+  const flockId = String(body.flockId ?? "").trim();
+  const quantityKg = Number(body.quantityKg);
+  const reason = String(body.reason ?? "Feed consumed").slice(0, 400);
+  if (!flockId || !flocksById.has(flockId)) {
+    res.status(400).json({ error: "Valid flockId is required" });
+    return;
+  }
+  if (!Number.isFinite(quantityKg) || quantityKg <= 0) {
+    res.status(400).json({ error: "quantityKg must be > 0" });
+    return;
+  }
+  const currentBalance = computeInventoryBalances(flockId)[0]?.balanceKg ?? 0;
+  if (currentBalance - quantityKg < 0 && !canCreateInventoryAdjustment(req.authUser)) {
+    res.status(400).json({ error: "Insufficient stock for this flock" });
+    return;
+  }
+  const row = {
+    id: `inv_${crypto.randomBytes(6).toString("hex")}`,
+    type: "feed_consumption",
+    flockId,
+    at: new Date().toISOString(),
+    quantityKg,
+    deltaKg: -quantityKg,
+    unitCostRwfPerKg: null,
+    reason,
+    reference: "",
+    actorUserId: req.authUser.id,
+    approvedByUserId: null,
+    approvedAt: null,
+  };
+  inventoryTransactions.unshift(row);
+  appendAudit(req.authUser.id, req.authUser.role, "inventory.feed.create", "inventory", row.id, {
+    flockId,
+    quantityKg,
+  });
+  res.status(201).json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(flockId) });
+});
+
+app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, (req, res) => {
+  if (!canCreateInventoryAdjustment(req.authUser)) {
+    res.status(403).json({ error: "Only manager or superuser can adjust stock" });
+    return;
+  }
+  const body = req.body ?? {};
+  const flockId = String(body.flockId ?? "").trim();
+  const deltaKg = Number(body.deltaKg);
+  const reason = String(body.reason ?? "Adjustment").slice(0, 400);
+  if (!flockId || !flocksById.has(flockId)) {
+    res.status(400).json({ error: "Valid flockId is required" });
+    return;
+  }
+  if (!Number.isFinite(deltaKg) || deltaKg === 0) {
+    res.status(400).json({ error: "deltaKg must be a non-zero number" });
+    return;
+  }
+  const row = {
+    id: `inv_${crypto.randomBytes(6).toString("hex")}`,
+    type: "adjustment",
+    flockId,
+    at: new Date().toISOString(),
+    quantityKg: Math.abs(deltaKg),
+    deltaKg,
+    unitCostRwfPerKg: null,
+    reason,
+    reference: "",
+    actorUserId: req.authUser.id,
+    approvedByUserId: req.authUser.id,
+    approvedAt: new Date().toISOString(),
+  };
+  inventoryTransactions.unshift(row);
+  appendAudit(req.authUser.id, req.authUser.role, "inventory.adjustment.create", "inventory", row.id, {
+    flockId,
+    deltaKg,
+  });
+  res.status(201).json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(flockId) });
+});
+
+app.patch("/api/inventory/:id", requireAuth, requireFarmAccess, (req, res) => {
+  const row = inventoryTransactions.find((r) => r.id === req.params.id);
+  if (!row) {
+    res.status(404).json({ error: "Inventory row not found" });
+    return;
+  }
+  if (!canEditInventoryRow(req.authUser, row)) {
+    res.status(403).json({ error: "You do not have permission to edit this record" });
+    return;
+  }
+  const body = req.body ?? {};
+  if (body.reason !== undefined) row.reason = String(body.reason).slice(0, 400);
+  if (row.type === "procurement_receipt" && body.reference !== undefined) {
+    row.reference = String(body.reference).slice(0, 200);
+  }
+  appendAudit(req.authUser.id, req.authUser.role, "inventory.row.update", "inventory", row.id, {});
+  res.json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(row.flockId) });
 });
 
 /** @type {Array<Record<string, unknown>>} */
