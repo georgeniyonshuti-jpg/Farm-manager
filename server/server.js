@@ -31,6 +31,8 @@ const allowedOrigins = [
 app.use(cors({
   origin: allowedOrigins,
   credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
 }));
 app.use(express.json({ limit: "20mb" }));
 app.set("trust proxy", 1); // required for Render
@@ -654,8 +656,20 @@ seedFlock();
 // FIX: add root and health endpoints
 app.get("/", (_req, res) => {
   res.json({
-    message: "Farm API is running",
     status: "ok",
+    message: "Farm Manager API running",
+    version: process.env.APP_VERSION ?? "1.0.0",
+    timestamp: new Date().toISOString(),
+  });
+});
+
+// FIX: add root and health endpoints
+app.get("/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    version: process.env.APP_VERSION ?? "1.0.0",
   });
 });
 
@@ -1060,16 +1074,6 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "farm-manager-api", storedLogs: dailyLogs.length, users: usersById.size });
 });
 
-// FIX: add root and health endpoints
-app.get("/health", (_req, res) => {
-  res.json({
-    status: "ok",
-    uptime: process.uptime(),
-    version: process.env.APP_VERSION ?? "1.0.0",
-    timestamp: new Date().toISOString(),
-  });
-});
-
 function computeValidation(payload) {
   const initial = Number(process.env.DEMO_INITIAL_COUNT) || 1000;
   const mortality = Number(payload.mortality) || 0;
@@ -1310,12 +1314,17 @@ app.post("/api/payroll-impact/bulk-approve", requireAuth, requireFarmAccess, req
   res.json({ ok: true, approvedCount: n });
 });
 
-// PROD-FIX: prevents crashes and hides sensitive errors
-app.use((err, req, res, next) => {
-  console.error("[ERROR]", err);
+// FIX: generic 404 handler
+app.use((_req, res) => {
+  res.status(404).json({ status: "error", message: "Not Found" });
+});
 
-  res.status(err.status || 500).json({
-    error: "Internal server error"
+// FIX: generic error handler
+app.use((err, _req, res, _next) => {
+  console.error("[ERROR]", err);
+  res.status(err?.status || 500).json({
+    status: "error",
+    message: err?.message || "Internal Server Error",
   });
 });
 
