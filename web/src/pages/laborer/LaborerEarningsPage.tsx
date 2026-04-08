@@ -20,15 +20,41 @@ type PayrollRow = {
   approvedAt: string | null;
 };
 
-function monthRange(): { from: string; to: string } {
-  const n = new Date();
-  const from = new Date(Date.UTC(n.getFullYear(), n.getMonth(), 1));
-  const to = new Date(Date.UTC(n.getFullYear(), n.getMonth() + 1, 0));
-  return {
-    from: from.toISOString().slice(0, 10),
-    to: to.toISOString().slice(0, 10),
-  };
+/** Calendar month bounds in Africa/Kigali (matches server payroll days). */
+function kigaliMonthRange(): { from: string; to: string } {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Kigali",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const parts = fmt.formatToParts(new Date());
+  const y = Number(parts.find((p) => p.type === "year")?.value);
+  const m = Number(parts.find((p) => p.type === "month")?.value);
+  if (!Number.isFinite(y) || !Number.isFinite(m)) {
+    const fallback = new Date();
+    const y0 = fallback.getFullYear();
+    const m0 = String(fallback.getMonth() + 1).padStart(2, "0");
+    const from = `${y0}-${m0}-01`;
+    const last = new Date(y0, Number(m0), 0).getDate();
+    return { from, to: `${y0}-${m0}-${String(last).padStart(2, "0")}` };
+  }
+  const ms = String(m).padStart(2, "0");
+  const from = `${y}-${ms}-01`;
+  const last = new Date(y, m, 0).getDate();
+  return { from, to: `${y}-${ms}-${String(last).padStart(2, "0")}` };
 }
+
+type PayrollSummary = {
+  monthlyTargetRwf: number;
+  expectedSlotsThisMonth: number;
+  periodFrom: string;
+  periodTo: string;
+  netRwf: number;
+  monthElapsedFraction: number;
+  expectedNetToDate: number;
+  paceRatio: number | null;
+};
 
 export function LaborerEarningsPage() {
   const { token, user } = useAuth();
@@ -48,11 +74,21 @@ export function LaborerEarningsPage() {
   const pending = useLaborerT("Pending");
   const approvalLbl = useLaborerT("Approval");
   const onTimeLbl = useLaborerT("On-time");
+  const targetLbl = useLaborerT("Monthly target");
+  const paceWarn = useLaborerT("Below expected pace for this point in the month.");
+  const paceOk = useLaborerT("On pace relative to the month so far.");
+  const expectedToDateLbl = useLaborerT("Expected net by today (prorated)");
 
-  const initial = useMemo(() => monthRange(), []);
+  const initial = useMemo(() => kigaliMonthRange(), []);
   const [entries, setEntries] = useState<PayrollRow[]>([]);
+  const [summary, setSummary] = useState<PayrollSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const backHref = useMemo(() => {
+    if (user?.role === "vet") return "/dashboard/vet";
+    return "/dashboard/laborer";
+  }, [user?.role]);
 
   const load = useCallback(async () => {
     if (!user?.id) {
@@ -63,15 +99,15 @@ export function LaborerEarningsPage() {
     setLoading(true);
     try {
       const qs = new URLSearchParams({
-        user_id: user.id,
         period_start: initial.from,
         period_end: initial.to,
       });
-      // ENV: moved to environment variable
       const r = await fetch(`${API_BASE_URL}/api/payroll-impact?${qs}`, { headers: readAuthHeaders(token) });
       const d = await r.json();
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Load failed");
       setEntries((d.entries as PayrollRow[]) ?? []);
+      const s = (d as { summary?: PayrollSummary | null }).summary;
+      setSummary(s ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -84,6 +120,13 @@ export function LaborerEarningsPage() {
   }, [load]);
 
   const net = entries.reduce((s, e) => s + e.rwfDelta, 0);
+  const paceRatio = summary?.paceRatio;
+  const showPace =
+    summary &&
+    summary.monthlyTargetRwf > 0 &&
+    paceRatio != null &&
+    summary.monthElapsedFraction > 0;
+  const belowPace = showPace && paceRatio != null && paceRatio < 0.9;
 
   return (
     <div className="mx-auto max-w-lg space-y-6">
@@ -91,18 +134,39 @@ export function LaborerEarningsPage() {
         title={title}
         subtitle={subtitle}
         action={
-          <Link to="/dashboard/laborer" className="text-sm font-medium text-emerald-800 hover:underline">
+          <Link to={backHref} className="text-sm font-medium text-emerald-800 hover:underline">
             {back}
           </Link>
         }
       />
 
       {!loading && !error ? (
-        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-          <p className="text-sm font-medium text-emerald-900">
-            <TranslatedText text={netLabel} />:{" "}
-            <span className="text-lg font-bold text-emerald-950">{formatRwf(net)}</span>
-          </p>
+        <div className="space-y-3">
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+            <p className="text-sm font-medium text-emerald-900">
+              <TranslatedText text={netLabel} />:{" "}
+              <span className="text-lg font-bold text-emerald-950">{formatRwf(net)}</span>
+            </p>
+            {summary && summary.monthlyTargetRwf > 0 ? (
+              <p className="mt-2 text-sm text-emerald-900/90">
+                <TranslatedText text={targetLbl} />: {formatRwf(summary.monthlyTargetRwf)}
+              </p>
+            ) : null}
+            {summary && summary.monthlyTargetRwf > 0 ? (
+              <p className="mt-1 text-xs text-emerald-900/80">
+                <TranslatedText text={expectedToDateLbl} />: {formatRwf(summary.expectedNetToDate)}
+              </p>
+            ) : null}
+          </div>
+          {showPace ? (
+            <div
+              className={`rounded-xl border px-4 py-3 text-sm font-medium ${
+                belowPace ? "border-amber-200 bg-amber-50 text-amber-950" : "border-emerald-200 bg-white text-emerald-900"
+              }`}
+            >
+              <TranslatedText text={belowPace ? paceWarn : paceOk} />
+            </div>
+          ) : null}
         </div>
       ) : null}
 

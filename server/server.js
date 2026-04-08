@@ -510,6 +510,69 @@ function seedLogScheduleDemo() {
 }
 seedLogScheduleDemo();
 
+function kigaliDaysInMonth(ymd) {
+  const [y, m] = String(ymd).slice(0, 10).split("-").map(Number);
+  if (!y || !m) return 30;
+  return new Date(y, m, 0).getDate();
+}
+
+function fieldPayrollMonthlyTargetRwf(user) {
+  if (!user) return 0;
+  if (user.role === "laborer" || user.role === "dispatcher") return 50_000;
+  if (user.role === "vet" || (Array.isArray(user.departmentKeys) && user.departmentKeys.includes("junior_vet")))
+    return 80_000;
+  return 0;
+}
+
+function isFieldPayrollViewer(user) {
+  if (!user) return false;
+  if (user.role === "laborer" || user.role === "dispatcher" || user.role === "vet") return true;
+  if (Array.isArray(user.departmentKeys) && user.departmentKeys.includes("junior_vet")) return true;
+  return false;
+}
+
+function expectedFieldPayrollSlotsForMonth(user, ymd) {
+  const days = kigaliDaysInMonth(ymd);
+  const n = logSchedules.filter((s) => s.role === user.role && flocksById.has(s.flockId)).length;
+  return Math.max(1, n * days);
+}
+
+function fieldPayrollRwfAmounts(user, submittedAtIso) {
+  const target = fieldPayrollMonthlyTargetRwf(user);
+  const ymd = kigaliYmd(new Date(submittedAtIso));
+  if (target <= 0) return { onTimeRwf: 0, lateRwf: 0 };
+  const slots = expectedFieldPayrollSlotsForMonth(user, ymd);
+  const onTimeRwf = Math.round(target / slots);
+  const lateRwf = -Math.round(onTimeRwf * 0.6);
+  return { onTimeRwf, lateRwf };
+}
+
+function findFieldDayPayrollRow(userId, flockId, ymd) {
+  return payrollImpacts.find(
+    (p) =>
+      p.userId === userId &&
+      p.flockId === flockId &&
+      p.periodStart === ymd &&
+      typeof p.reason === "string" &&
+      !p.reason.startsWith("Missed")
+  );
+}
+
+function hasPayrollFieldCreditForDay(userId, flockId, ymd) {
+  return Boolean(findFieldDayPayrollRow(userId, flockId, ymd));
+}
+
+/** Kigali month progress 0..1 from calendar day index (for pace vs target). */
+function kigaliMonthElapsedFraction(periodStartYmd, periodEndYmd) {
+  const today = kigaliYmd(new Date());
+  if (today < periodStartYmd) return 0;
+  if (today > periodEndYmd) return 1;
+  const days = kigaliDaysInMonth(periodStartYmd);
+  const dayNum = Number(today.slice(8, 10));
+  if (!Number.isFinite(dayNum) || days <= 0) return 0;
+  return Math.min(1, dayNum / days);
+}
+
 function createPayrollEntry({
   userId,
   logId,
@@ -536,6 +599,7 @@ function createPayrollEntry({
     createdAt: new Date().toISOString(),
     submittedAt: submittedAtIso,
     onTime,
+    flockId: flockId ?? null,
   };
   payrollImpacts.unshift(row);
   appendAudit(userId, usersById.get(userId)?.role ?? "unknown", "payroll.impact.auto", "payroll_impact", row.id, {
@@ -551,12 +615,38 @@ function createPayrollEntry({
 function maybeAutoPayrollForSubmit(reqUser, flockId, logType, logId, submittedAtIso) {
   const scheds = logSchedules.filter((s) => s.flockId === flockId && s.role === reqUser.role);
   if (!scheds.length) return null;
+  if (fieldPayrollMonthlyTargetRwf(reqUser) <= 0) return null;
   const s = scheds[0];
+  const ymd = kigaliYmd(new Date(submittedAtIso));
   const onTime = isSubmissionWithinPayrollWindow(submittedAtIso, s.windowOpen, s.windowClose);
-  const rwfDelta = onTime ? 500 : -300;
+  const { onTimeRwf, lateRwf } = fieldPayrollRwfAmounts(reqUser, submittedAtIso);
+  const rwfDelta = onTime ? onTimeRwf : lateRwf;
   const reason = onTime
     ? "On-time: submission within payroll window"
     : "Late: submission outside payroll window";
+
+  const existing = findFieldDayPayrollRow(reqUser.id, flockId, ymd);
+  if (existing) {
+    if (existing.onTime && existing.rwfDelta > 0) return existing;
+    if (onTime && (!existing.onTime || existing.rwfDelta <= 0)) {
+      existing.logId = logId;
+      existing.logType = logType;
+      existing.submittedAt = submittedAtIso;
+      existing.onTime = true;
+      existing.rwfDelta = onTimeRwf;
+      existing.reason = reason;
+      if (!(existing.flockId != null)) existing.flockId = flockId;
+      appendAudit(reqUser.id, reqUser.role, "payroll.impact.auto_upgrade", "payroll_impact", existing.id, {
+        logType,
+        logId,
+        flockId,
+        rwfDelta: onTimeRwf,
+      });
+      return existing;
+    }
+    return existing;
+  }
+
   return createPayrollEntry({
     userId: reqUser.id,
     logId,
@@ -682,6 +772,16 @@ function hasLogInWindowForUserOnDay(userId, flockId, ymd, sched) {
     if (logDay !== ymd) continue;
     if (isSubmissionWithinPayrollWindow(L.receivedAt, sched.windowOpen, sched.windowClose)) return true;
   }
+  for (const e of flockFeedEntries) {
+    if (String(e.flockId) !== String(flockId) || e.enteredByUserId !== userId) continue;
+    if (kigaliYmd(new Date(e.recordedAt)) !== ymd) continue;
+    if (isSubmissionWithinPayrollWindow(e.recordedAt, sched.windowOpen, sched.windowClose)) return true;
+  }
+  for (const m of mortalityEvents) {
+    if (String(m.flockId) !== String(flockId) || m.laborerId !== userId) continue;
+    if (kigaliYmd(new Date(m.at)) !== ymd) continue;
+    if (isSubmissionWithinPayrollWindow(m.at, sched.windowOpen, sched.windowClose)) return true;
+  }
   return false;
 }
 
@@ -698,18 +798,22 @@ function runMissedPayrollScan() {
     for (const u of usersById.values()) {
       if (u.role !== sched.role) continue;
       if (!hasFarmAccess(u)) continue;
+      if (fieldPayrollMonthlyTargetRwf(u) <= 0) continue;
       const missKey = `missed|${sched.id}|${u.id}|${ymd}`;
       if (payrollMissedKeys.has(missKey)) continue;
       if (hasLogInWindowForUserOnDay(u.id, sched.flockId, ymd, sched)) continue;
-      const dup = payrollImpacts.some(
+      if (hasPayrollFieldCreditForDay(u.id, sched.flockId, ymd)) continue;
+      const dupMissed = payrollImpacts.some(
         (p) =>
           p.userId === u.id &&
+          p.flockId === sched.flockId &&
           p.periodStart === ymd &&
-          p.logType === "check_in" &&
-          p.reason?.includes("Missed")
+          typeof p.reason === "string" &&
+          p.reason.startsWith("Missed")
       );
-      if (dup) continue;
+      if (dupMissed) continue;
       payrollMissedKeys.add(missKey);
+      const { lateRwf } = fieldPayrollRwfAmounts(u, now.toISOString());
       createPayrollEntry({
         userId: u.id,
         logId: `missed_${sched.id}_${ymd}`,
@@ -717,7 +821,7 @@ function runMissedPayrollScan() {
         submittedAtIso: now.toISOString(),
         flockId: sched.flockId,
         onTime: false,
-        rwfDelta: -300,
+        rwfDelta: lateRwf,
         reason: "Missed: no log in payroll window by end of day segment",
       });
     }
@@ -1381,6 +1485,68 @@ app.get("/api/flocks/:id/checkin-status", requireAuth, requireFarmAccess, requir
   res.json(payload);
 });
 
+app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requireAction("flock.view"), async (_req, res) => {
+  if (hasDb()) {
+    try {
+      await syncFlocksFromDbToMemory();
+    } catch {
+      /* ignore */
+    }
+  }
+  const now = Date.now();
+  const flocks = [...flocksById.values()];
+  const perFlock = flocks.map((f) => {
+    const status = checkinStatusPayload(f);
+    return { flockId: f.id, label: f.label ?? f.code ?? f.id, status };
+  });
+
+  let anyOverdue = false;
+  let maxOverdueMinutes = 0;
+  const overdueLabels = [];
+  let soonestNextMs = Infinity;
+  let soonestFlockId = null;
+  let soonestFlockLabel = null;
+  let worstOverdueFlockId = null;
+
+  for (const { flockId, label, status } of perFlock) {
+    if (status.isOverdue) {
+      anyOverdue = true;
+      const mins = Math.floor(status.overdueMs / 60000);
+      if (mins >= maxOverdueMinutes) {
+        maxOverdueMinutes = mins;
+        worstOverdueFlockId = flockId;
+      }
+      if (overdueLabels.length < 3) overdueLabels.push(String(label));
+    } else {
+      const nextMs = new Date(status.nextDueAt).getTime();
+      if (nextMs < soonestNextMs) {
+        soonestNextMs = nextMs;
+        soonestFlockId = flockId;
+        soonestFlockLabel = String(label);
+      }
+    }
+  }
+
+  const primaryFlockId = anyOverdue ? worstOverdueFlockId : soonestFlockId;
+  let primaryStatus = null;
+  if (primaryFlockId) {
+    primaryStatus = (await checkinStatusPayloadWithFcrHint(primaryFlockId)) ?? checkinStatusPayload(flocksById.get(primaryFlockId));
+  }
+
+  const summary = {
+    anyOverdue,
+    maxOverdueMinutes,
+    overdueLabels,
+    minutesUntilSoonestNext:
+      anyOverdue || soonestNextMs === Infinity ? null : Math.max(0, Math.floor((soonestNextMs - now) / 60000)),
+    soonestFlockLabel: anyOverdue ? null : soonestFlockLabel,
+    soonestFlockId: anyOverdue ? null : soonestFlockId,
+    primaryFlockId,
+  };
+
+  res.json({ summary, primaryFlockId, primaryStatus });
+});
+
 app.patch("/api/flocks/:id/checkin-schedule", requireAuth, requireFarmAccess, requireCheckinScheduleEditor, (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
@@ -1536,6 +1702,7 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
     }
   }
   flockFeedEntries.push(row);
+  const payrollImpact = maybeAutoPayrollForSubmit(req.authUser, f.id, "feed_entry", id, row.recordedAt);
   appendAudit(req.authUser.id, req.authUser.role, "farm.feed_entry.create", "flock", f.id, {
     feedEntryId: row.id,
     feedKg,
@@ -1545,6 +1712,7 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
     ok: true,
     entry: { id: row.id, recordedAt: row.recordedAt, feedKg: row.feedKg, notes: row.notes },
     feedToDateKg: summary?.feedToDateKg ?? Number(totalFeedKgForFlock(f.id).toFixed(2)),
+    payrollImpact,
   });
 });
 
@@ -1625,12 +1793,13 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, (re
   };
   mortalityEvents.push(row);
   mortalityRecentByKey.set(dedupeKey, nowMs);
+  const payrollImpact = maybeAutoPayrollForSubmit(req.authUser, f.id, "mortality_event", id, at);
   appendAudit(req.authUser.id, req.authUser.role, "farm.mortality.create", "flock", f.id, {
     mortalityId: id,
     count,
     isEmergency,
   });
-  res.json({ ok: true, mortality: row, status: checkinStatusPayload(f) });
+  res.json({ ok: true, mortality: row, status: checkinStatusPayload(f), payrollImpact });
 });
 
 app.get("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, (req, res) => {
@@ -2864,6 +3033,7 @@ app.post("/api/payroll-impact", requireAuth, requireFarmAccess, (req, res) => {
     createdAt: new Date().toISOString(),
     submittedAt,
     onTime: null,
+    flockId: null,
   };
   payrollImpacts.unshift(row);
   appendAudit(req.authUser.id, req.authUser.role, "payroll.impact.manual", "payroll_impact", row.id, {
@@ -2874,7 +3044,7 @@ app.post("/api/payroll-impact", requireAuth, requireFarmAccess, (req, res) => {
 });
 
 app.get("/api/payroll-impact", requireAuth, requireFarmAccess, (req, res) => {
-  const isField = req.authUser.role === "laborer" || req.authUser.role === "dispatcher";
+  const isField = isFieldPayrollViewer(req.authUser);
   const isPayrollManager = canManageLogScheduleAndPayroll(req.authUser);
   if (!isField && !isPayrollManager) {
     res.status(403).json({ error: "Forbidden" });
@@ -2885,6 +3055,10 @@ app.get("/api/payroll-impact", requireAuth, requireFarmAccess, (req, res) => {
   const periodStart = String(req.query.period_start ?? "").trim();
   const periodEnd = String(req.query.period_end ?? "").trim();
   const approvedQ = req.query.approved;
+  if (isField && userIdQ && userIdQ !== req.authUser.id) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
   let list = [...payrollImpacts];
   if (isField) list = list.filter((p) => p.userId === req.authUser.id);
   else if (userIdQ) list = list.filter((p) => p.userId === userIdQ);
@@ -2900,7 +3074,28 @@ app.get("/api/payroll-impact", requireAuth, requireFarmAccess, (req, res) => {
       workerRole: u?.role ?? "",
     };
   });
-  res.json({ entries: enriched });
+
+  let summary = null;
+  if (isField && periodStart && periodEnd && /^\d{4}-\d{2}-\d{2}$/.test(periodStart)) {
+    const target = fieldPayrollMonthlyTargetRwf(req.authUser);
+    const slots = expectedFieldPayrollSlotsForMonth(req.authUser, periodStart);
+    const netRwf = enriched.reduce((s, p) => s + Number(p.rwfDelta), 0);
+    const frac = kigaliMonthElapsedFraction(periodStart, periodEnd);
+    const expectedToDate = target * frac;
+    const paceRatio = expectedToDate > 0 ? netRwf / expectedToDate : netRwf === 0 ? 1 : null;
+    summary = {
+      monthlyTargetRwf: target,
+      expectedSlotsThisMonth: slots,
+      periodFrom: periodStart,
+      periodTo: periodEnd,
+      netRwf,
+      monthElapsedFraction: frac,
+      expectedNetToDate: Math.round(expectedToDate),
+      paceRatio,
+    };
+  }
+
+  res.json({ entries: enriched, summary });
 });
 
 app.patch("/api/payroll-impact/:id/approve", requireAuth, requireFarmAccess, requirePayrollApprover, (req, res) => {

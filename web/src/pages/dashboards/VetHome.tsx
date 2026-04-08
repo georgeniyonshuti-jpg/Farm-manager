@@ -48,25 +48,39 @@ export function VetHome() {
   const navFeed = useLaborerT("Feed");
   const navHistory = useLaborerT("History");
   const navSchedule = useLaborerT("Schedule");
+  const linkEarnings = useLaborerT("My earnings");
+
+  const [bannerSummary, setBannerSummary] = useState<{
+    anyOverdue: boolean;
+    maxOverdueMinutes: number;
+    overdueLabels: string[];
+    minutesUntilSoonestNext: number | null;
+    soonestFlockLabel: string | null;
+  } | null>(null);
 
   const load = useCallback(async () => {
     setLoadError(null);
     setLoading(true);
     try {
-      const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
-      const fd = await fr.json();
-      if (!fr.ok) throw new Error(fd.error ?? "Flocks failed");
-      const flocks = (fd.flocks as { id: string }[]) ?? [];
-      const id = flocks[0]?.id ?? null;
-      setPrimaryFlockId(id);
-      if (!id) {
-        setStatus(null);
-        return;
+      const ar = await fetch(`${API_BASE_URL}/api/me/aggregate-checkin-status`, { headers: readAuthHeaders(token) });
+      const ad = await ar.json();
+      if (!ar.ok) throw new Error(ad.error ?? "Status failed");
+      const pid = ad.primaryFlockId != null ? String(ad.primaryFlockId) : null;
+      setPrimaryFlockId(pid);
+      const primary = ad.primaryStatus as CheckinStatus | null | undefined;
+      setStatus(primary ?? null);
+      const s = ad.summary;
+      if (s) {
+        setBannerSummary({
+          anyOverdue: Boolean(s.anyOverdue),
+          maxOverdueMinutes: Number(s.maxOverdueMinutes) || 0,
+          overdueLabels: Array.isArray(s.overdueLabels) ? s.overdueLabels.map(String) : [],
+          minutesUntilSoonestNext: s.minutesUntilSoonestNext != null ? Number(s.minutesUntilSoonestNext) : null,
+          soonestFlockLabel: s.soonestFlockLabel != null ? String(s.soonestFlockLabel) : null,
+        });
+      } else {
+        setBannerSummary(null);
       }
-      const sr = await fetch(`${API_BASE_URL}/api/flocks/${id}/checkin-status`, { headers: readAuthHeaders(token) });
-      const sd = await sr.json();
-      if (!sr.ok) throw new Error(sd.error ?? "Status failed");
-      setStatus(sd as CheckinStatus);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Could not load schedule");
     } finally {
@@ -88,8 +102,32 @@ export function VetHome() {
   const roundBanner = useMemo(() => {
     if (loading) return { tone: "bg-neutral-200 text-neutral-700", text: tLoadingBanner };
     if (loadError) return { tone: "bg-red-100 text-red-800", text: tErrBanner };
-    if (!status) return { tone: "bg-amber-100 text-amber-900", text: tNoScheduleBanner };
+    if (!status && !bannerSummary) return { tone: "bg-amber-100 text-amber-900", text: tNoScheduleBanner };
     void tick;
+    if (bannerSummary?.anyOverdue) {
+      const mins = Math.max(1, bannerSummary.maxOverdueMinutes);
+      const extra =
+        bannerSummary.overdueLabels.length > 0
+          ? ` (${bannerSummary.overdueLabels.slice(0, 3).join(", ")})`
+          : "";
+      return {
+        tone: "bg-red-100 text-red-900",
+        text: `${tOverduePrefix} ${mins} ${tOverdueSuffix}${extra}`,
+      };
+    }
+    if (
+      bannerSummary &&
+      !bannerSummary.anyOverdue &&
+      bannerSummary.minutesUntilSoonestNext != null &&
+      bannerSummary.soonestFlockLabel
+    ) {
+      const minsLeft = Math.max(1, bannerSummary.minutesUntilSoonestNext);
+      return {
+        tone: "bg-emerald-100 text-emerald-900",
+        text: `${tOnTrack} ${tAbout} ${minsLeft} ${tUntilNext} (${bannerSummary.soonestFlockLabel})`,
+      };
+    }
+    if (!status) return { tone: "bg-amber-100 text-amber-900", text: tNoScheduleBanner };
     const now = kigaliNowDate().getTime();
     const next = new Date(status.nextDueAt).getTime();
     if (now > next) {
@@ -108,6 +146,7 @@ export function VetHome() {
     loading,
     loadError,
     status,
+    bannerSummary,
     tick,
     tLoadingBanner,
     tErrBanner,
@@ -120,7 +159,7 @@ export function VetHome() {
   ]);
 
   const bottomNav: Array<{ to: string; label: string }> = [
-    { to: "/dashboard/laborer", label: navHome },
+    { to: "/dashboard/vet", label: navHome },
     { to: "/farm/checkin", label: navRound },
     { to: "/farm/mortality-log", label: navMort },
     { to: "/farm/feed", label: navFeed },
@@ -139,12 +178,20 @@ export function VetHome() {
         title={hTitle}
         subtitle={hSub}
         action={
-          <Link
-            to="/farm/batch-schedule"
-            className="bounce-tap rounded-xl bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)]"
-          >
-            {batchCta}
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              to="/laborer/earnings"
+              className="bounce-tap rounded-xl border border-[var(--primary-color)]/40 px-4 py-2 text-sm font-semibold text-[var(--primary-color-dark)] hover:bg-[var(--primary-color-soft)]"
+            >
+              {linkEarnings}
+            </Link>
+            <Link
+              to="/farm/batch-schedule"
+              className="bounce-tap rounded-xl bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)]"
+            >
+              {batchCta}
+            </Link>
+          </div>
         }
       />
 

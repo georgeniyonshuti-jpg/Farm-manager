@@ -81,7 +81,11 @@ export function SidebarNav({ onNavigate }: Props) {
       : null;
 
   const laborerEarningsItem: NavItem | null =
-    activeWorkspace === "farm" && (user.role === "laborer" || user.role === "dispatcher")
+    activeWorkspace === "farm" &&
+    (user.role === "laborer" ||
+      user.role === "dispatcher" ||
+      user.role === "vet" ||
+      user.departmentKeys.includes("junior_vet"))
       ? { to: "/laborer/earnings", label: "My earnings" }
       : null;
 
