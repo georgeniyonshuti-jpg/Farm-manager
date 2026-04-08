@@ -1,6 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
-import { hasPermission } from "../../auth/permissions";
+import { canFlockAction, hasPermission } from "../../auth/permissions";
 import { canEditFlockScheduleRole } from "../../farm/scheduleAccess";
 import { useLaborerT } from "../../i18n/laborerI18n";
 
@@ -51,12 +51,7 @@ export function SidebarNav({ onNavigate }: Props) {
   const flocksItem: NavItem | null =
     activeWorkspace === "farm" &&
     user &&
-    (user.role === "manager" ||
-      user.role === "vet_manager" ||
-      user.role === "vet" ||
-      user.role === "superuser" ||
-      user.role === "procurement_officer" ||
-      user.role === "sales_coordinator")
+    canFlockAction(user, "flock.view")
       ? { to: "/farm/flocks", label: "Flocks" }
       : null;
 
@@ -73,12 +68,12 @@ export function SidebarNav({ onNavigate }: Props) {
       : null;
   const treatmentNavItem: NavItem | null =
     activeWorkspace === "farm" &&
-    (user.role === "manager" || user.role === "vet_manager" || user.role === "vet" || user.role === "superuser")
+    canFlockAction(user, "treatment.execute")
       ? { to: "/farm/treatments", label: "Medicine tracking" }
       : null;
   const slaughterNavItem: NavItem | null =
     activeWorkspace === "farm" &&
-    (user.role === "manager" || user.role === "vet_manager" || user.role === "vet" || user.role === "superuser")
+    canFlockAction(user, "slaughter.schedule")
       ? { to: "/farm/slaughter", label: "Slaughter & FCR" }
       : null;
 

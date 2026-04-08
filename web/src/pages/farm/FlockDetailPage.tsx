@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
+import { canFlockAction } from "../../auth/permissions";
 import { readAuthHeaders } from "../../lib/authHeaders";
 import { CheckinUrgencyBadge } from "../../components/farm/CheckinUrgencyBadge";
 import { PageHeader } from "../../components/PageHeader";
@@ -12,7 +13,7 @@ type WeighIn = { id: string; weighDate: string; avgWeightKg: number; fcr: number
 
 export function FlockDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [flockMeta, setFlockMeta] = useState<{ label: string; placementDate: string } | null>(null);
   const [status, setStatus] = useState<CheckinStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -81,7 +82,8 @@ export function FlockDetailPage() {
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
 
       {flockMeta && status && !loading && !error ? (
-        <div className="space-y-4">
+        <div className="grid gap-4 lg:grid-cols-3">
+          <div className="space-y-4 lg:col-span-2">
           {performance ? (
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">Feed to date</p><p className="font-semibold">{performance.feedToDateKg} kg</p></div>
@@ -91,7 +93,7 @@ export function FlockDetailPage() {
           ) : null}
           {eligibility ? (
             <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
-              <p className="mb-2 font-semibold text-neutral-800">Treatment Status</p>
+              <p className="mb-2 font-semibold text-neutral-800">Slaughter Eligibility</p>
               {eligibility.eligibleForSlaughter ? (
                 <p className="text-emerald-700">Eligible for slaughter.</p>
               ) : (
@@ -108,6 +110,16 @@ export function FlockDetailPage() {
             </div>
           ) : null}
           <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
+            <p className="mb-2 font-semibold text-neutral-800">Today&apos;s Critical Tasks</p>
+            <ul className="space-y-1">
+              {eligibility && !eligibility.eligibleForSlaughter ? (
+                <li className="text-amber-700">Resolve withdrawal/missed treatment blockers before slaughter actions.</li>
+              ) : null}
+              <li className="text-neutral-700">Check-in due: {new Date(status.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}</li>
+              <li className="text-neutral-700">Review mortality and feed trends for this flock.</li>
+            </ul>
+          </div>
+          <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
             <p className="mb-2 font-semibold text-neutral-800">Weight & FCR History</p>
             {weighIns.length ? (
               <div className="space-y-1">
@@ -123,6 +135,15 @@ export function FlockDetailPage() {
             ) : (
               <p className="text-neutral-500">No weigh-ins yet.</p>
             )}
+          </div>
+          <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
+            <p className="mb-2 font-semibold text-neutral-800">Mortality & Health</p>
+            <p className="text-neutral-700">
+              Current live estimate: <span className="font-semibold">{performance?.birdsLiveEstimate ?? "—"}</span>
+            </p>
+            <p className="text-neutral-700">
+              Current FCR: <span className="font-semibold">{performance?.fcr != null ? performance.fcr.toFixed(2) : "—"}</span>
+            </p>
           </div>
           <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 pb-4">
@@ -154,6 +175,46 @@ export function FlockDetailPage() {
             </div>
           </dl>
         </div>
+        </div>
+          <div className="space-y-3">
+            <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
+              <p className="mb-2 font-semibold text-neutral-800">Allowed Actions</p>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  disabled={!canFlockAction(user, "treatment.execute")}
+                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs disabled:opacity-50"
+                  title={!canFlockAction(user, "treatment.execute") ? "Requires vet or higher" : ""}
+                >
+                  Execute treatment round
+                </button>
+                <button
+                  type="button"
+                  disabled={!canFlockAction(user, "weighin.record")}
+                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs disabled:opacity-50"
+                  title={!canFlockAction(user, "weighin.record") ? "Requires vet or higher" : ""}
+                >
+                  Record weigh-in
+                </button>
+                <button
+                  type="button"
+                  disabled={!canFlockAction(user, "slaughter.schedule")}
+                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs disabled:opacity-50"
+                  title={!canFlockAction(user, "slaughter.schedule") ? "Requires vet_manager/manager" : ""}
+                >
+                  Schedule slaughter
+                </button>
+                <button
+                  type="button"
+                  disabled={!canFlockAction(user, "alert.acknowledge")}
+                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs disabled:opacity-50"
+                  title={!canFlockAction(user, "alert.acknowledge") ? "Requires vet_manager/manager" : ""}
+                >
+                  Acknowledge critical alert
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

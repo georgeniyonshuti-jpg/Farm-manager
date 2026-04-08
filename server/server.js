@@ -333,6 +333,60 @@ function requireFarmAccess(req, res, next) {
   next();
 }
 
+const FLOCK_ACTION_MIN_ROLE = {
+  "flock.view": "laborer",
+  "treatment.execute": "vet",
+  "weighin.record": "vet",
+  "mortality.record": "vet",
+  "slaughter.schedule": "vet_manager",
+  "slaughter.record": "vet_manager",
+  "flock.close": "vet_manager",
+  "alert.acknowledge": "vet_manager",
+};
+
+const ROLE_RANK = {
+  laborer: 1,
+  dispatcher: 1,
+  procurement_officer: 1,
+  sales_coordinator: 1,
+  vet: 2,
+  vet_manager: 3,
+  manager: 3,
+  investor: 0,
+  superuser: 99,
+};
+
+function actionAllowed(user, action) {
+  if (!user) return false;
+  if (user.role === "superuser") return true;
+  const minRole = FLOCK_ACTION_MIN_ROLE[action];
+  if (!minRole) return false;
+  const userRank = ROLE_RANK[user.role] ?? -1;
+  const minRank = ROLE_RANK[minRole] ?? 999;
+  return userRank >= minRank;
+}
+
+function denyAction(res, action, blockedBy = null) {
+  const requiredRole = FLOCK_ACTION_MIN_ROLE[action] ?? "manager";
+  res.status(403).json({
+    error: `Forbidden for action ${action}`,
+    requiredRole,
+    blockedBy,
+    suggestedAction: `Request a ${requiredRole} or higher user to perform this action.`,
+  });
+}
+
+function requireAction(action, blockedByResolver = null) {
+  return (req, res, next) => {
+    if (!actionAllowed(req.authUser, action)) {
+      const blockedBy = typeof blockedByResolver === "function" ? blockedByResolver(req) : blockedByResolver;
+      denyAction(res, action, blockedBy ?? null);
+      return;
+    }
+    next();
+  };
+}
+
 function canEditCheckinSchedule(user) {
   if (!user) return false;
   return ["superuser", "manager", "vet_manager", "vet"].includes(user.role);
@@ -498,8 +552,7 @@ function maybeAutoPayrollForSubmit(reqUser, flockId, logType, logId, submittedAt
 }
 
 function canLogTreatments(user) {
-  if (!user) return false;
-  return ["superuser", "manager", "vet_manager", "vet"].includes(user.role);
+  return actionAllowed(user, "treatment.execute");
 }
 
 function canCreateProcurement(user) {
@@ -532,16 +585,16 @@ function canEditInventoryRow(user, row) {
 }
 
 function requireTreatmentLogger(req, res, next) {
-  if (!canLogTreatments(req.authUser)) {
-    res.status(403).json({ error: "Only vet, vet manager, manager, or superuser can log treatments" });
+  if (!actionAllowed(req.authUser, "treatment.execute")) {
+    denyAction(res, "treatment.execute");
     return;
   }
   next();
 }
 
 function requireSlaughterEventLogger(req, res, next) {
-  if (!canLogTreatments(req.authUser)) {
-    res.status(403).json({ error: "Only vet, vet manager, manager, or superuser can record slaughter events" });
+  if (!actionAllowed(req.authUser, "slaughter.record")) {
+    denyAction(res, "slaughter.record");
     return;
   }
   next();
@@ -978,7 +1031,7 @@ app.post("/api/laborer/translate", requireAuth, requireLaborer, async (req, res)
   res.json({ translation: out.translation, usedGemini: out.usedGemini, cached: Boolean(out.cached) });
 });
 
-app.get("/api/flocks", requireAuth, requireFarmAccess, (_req, res) => {
+app.get("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.view"), (_req, res) => {
   // FIX: embed check-in urgency per flock for list + detail views
   const flocks = [...flocksById.values()].map((f) => {
     const st = checkinStatusPayload(f);
@@ -995,7 +1048,7 @@ app.get("/api/flocks", requireAuth, requireFarmAccess, (_req, res) => {
   res.json({ flocks });
 });
 
-app.get("/api/flocks/:id/checkin-status", requireAuth, requireFarmAccess, (req, res) => {
+app.get("/api/flocks/:id/checkin-status", requireAuth, requireFarmAccess, requireAction("flock.view"), (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -1281,7 +1334,7 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
   };
 }
 
-app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireTreatmentLogger, async (req, res) => {
+app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -1339,7 +1392,7 @@ app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireTr
   res.status(201).json({ treatment: row });
 });
 
-app.get("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, async (req, res) => {
+app.get("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -1355,7 +1408,7 @@ app.get("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, async (req
   }
 });
 
-app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requireSlaughterEventLogger, async (req, res) => {
+app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requireAction("slaughter.record"), requireSlaughterEventLogger, async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -1437,7 +1490,7 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
   res.status(201).json({ slaughter: row, fcr: perf?.fcr ?? null, performance: perf });
 });
 
-app.get("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, async (req, res) => {
+app.get("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -1453,7 +1506,7 @@ app.get("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, asyn
   }
 });
 
-app.get("/api/flocks/:id/performance-summary", requireAuth, requireFarmAccess, async (req, res) => {
+app.get("/api/flocks/:id/performance-summary", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
   let summary = null;
   try {
     summary = await buildFlockPerformanceSummary(req.params.id);
@@ -2039,7 +2092,7 @@ app.post("/api/payroll-impact/bulk-approve", requireAuth, requireFarmAccess, req
 // Medicine ops v2
 // -------------------------
 
-app.get("/api/medicine", requireAuth, requireFarmAccess, requireTreatmentLogger, async (_req, res) => {
+app.get("/api/medicine", requireAuth, requireFarmAccess, requireAction("flock.view"), requireTreatmentLogger, async (_req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -2058,7 +2111,7 @@ app.get("/api/medicine", requireAuth, requireFarmAccess, requireTreatmentLogger,
   }
 });
 
-app.post("/api/medicine", requireAuth, requireFarmAccess, requireTreatmentLogger, async (req, res) => {
+app.post("/api/medicine", requireAuth, requireFarmAccess, requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -2096,7 +2149,7 @@ app.post("/api/medicine", requireAuth, requireFarmAccess, requireTreatmentLogger
   }
 });
 
-app.get("/api/medicine/lots", requireAuth, requireFarmAccess, requireTreatmentLogger, async (req, res) => {
+app.get("/api/medicine/lots", requireAuth, requireFarmAccess, requireAction("flock.view"), requireTreatmentLogger, async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -2121,7 +2174,7 @@ app.get("/api/medicine/lots", requireAuth, requireFarmAccess, requireTreatmentLo
   }
 });
 
-app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requireTreatmentLogger, async (req, res) => {
+app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -2166,7 +2219,7 @@ app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requireTreatmentL
   }
 });
 
-app.get("/api/treatment-rounds", requireAuth, requireFarmAccess, requireTreatmentLogger, async (req, res) => {
+app.get("/api/treatment-rounds", requireAuth, requireFarmAccess, requireAction("flock.view"), requireTreatmentLogger, async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -2194,7 +2247,89 @@ app.get("/api/treatment-rounds", requireAuth, requireFarmAccess, requireTreatmen
   }
 });
 
-app.post("/api/treatment-rounds", requireAuth, requireFarmAccess, requireTreatmentLogger, async (req, res) => {
+app.get("/api/treatment-rounds/overdue", requireAuth, requireFarmAccess, requireAction("flock.view"), requireTreatmentLogger, async (req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
+  const flockId = String(req.query.flock_id ?? "").trim();
+  try {
+    const r = await dbQuery(
+      `SELECT r.id, r.flock_id AS "flockId", r.medicine_id AS "medicineId", m.name AS "medicineName",
+              r.planned_for AS "plannedFor", r.status, r.planned_quantity AS "plannedQuantity"
+         FROM treatment_rounds r
+         JOIN medicine_inventory m ON m.id = r.medicine_id
+        WHERE ($1 = '' OR r.flock_id = $1)
+          AND r.status IN ('planned','in_progress')
+          AND r.planned_for < now()
+        ORDER BY r.planned_for ASC`,
+      [flockId]
+    );
+    const rows = r.rows.map((x) => {
+      const dueMs = new Date(x.plannedFor).getTime();
+      const mins = Math.max(0, Math.floor((Date.now() - dueMs) / (60 * 1000)));
+      return { ...x, overdueMinutes: mins };
+    });
+    res.json({ overdueRounds: rows });
+  } catch (e) {
+    console.error("[ERROR]", "[db] GET /api/treatment-rounds/overdue:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to load overdue rounds." });
+  }
+});
+
+app.get("/api/medicine/forecast", requireAuth, requireFarmAccess, requireAction("flock.view"), requireTreatmentLogger, async (req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
+  const lookbackDays = Math.max(7, Math.min(90, Number(req.query.lookback_days) || 30));
+  try {
+    const r = await dbQuery(
+      `WITH daily_use AS (
+         SELECT r.medicine_id,
+                date_trunc('day', e.event_at)::date AS use_day,
+                SUM(COALESCE(e.quantity_used, 0)) AS qty
+           FROM treatment_round_events e
+           JOIN treatment_rounds r ON r.id = e.round_id
+          WHERE e.event_type = 'completed'
+            AND e.event_at >= now() - ($1::text || ' days')::interval
+          GROUP BY r.medicine_id, date_trunc('day', e.event_at)::date
+       ),
+       agg AS (
+         SELECT medicine_id,
+                COALESCE(SUM(qty), 0) AS total_used,
+                COALESCE(AVG(qty), 0) AS avg_daily_used
+           FROM daily_use
+          GROUP BY medicine_id
+       )
+       SELECT m.id, m.name, m.unit, m.quantity,
+              m.low_stock_threshold AS "lowStockThreshold",
+              COALESCE(a.total_used, 0) AS "totalUsedInWindow",
+              ROUND(COALESCE(a.avg_daily_used, 0)::numeric, 3) AS "avgDailyUse",
+              CASE
+                WHEN COALESCE(a.avg_daily_used, 0) > 0
+                THEN ROUND((m.quantity / a.avg_daily_used)::numeric, 1)
+                ELSE NULL
+              END AS "daysOfCover",
+              CASE
+                WHEN COALESCE(a.avg_daily_used, 0) > 0
+                  AND (m.quantity / a.avg_daily_used) <= 7
+                THEN true
+                ELSE false
+              END AS "stockoutRisk7d"
+         FROM medicine_inventory m
+         LEFT JOIN agg a ON a.medicine_id = m.id
+        ORDER BY "daysOfCover" ASC NULLS LAST, m.name ASC`,
+      [String(lookbackDays)]
+    );
+    res.json({ lookbackDays, forecast: r.rows });
+  } catch (e) {
+    console.error("[ERROR]", "[db] GET /api/medicine/forecast:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to compute stock forecast." });
+  }
+});
+
+app.post("/api/treatment-rounds", requireAuth, requireFarmAccess, requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -2241,7 +2376,7 @@ app.post("/api/treatment-rounds", requireAuth, requireFarmAccess, requireTreatme
   }
 });
 
-app.patch("/api/treatment-rounds/:id/status", requireAuth, requireFarmAccess, requireTreatmentLogger, async (req, res) => {
+app.patch("/api/treatment-rounds/:id/status", requireAuth, requireFarmAccess, requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -2321,7 +2456,7 @@ app.patch("/api/treatment-rounds/:id/status", requireAuth, requireFarmAccess, re
   }
 });
 
-app.get("/api/flocks/:id/eligibility", requireAuth, requireFarmAccess, async (req, res) => {
+app.get("/api/flocks/:id/eligibility", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
   if (!hasDb()) {
     res.json({ eligibleForSlaughter: true, blockers: [] });
     return;
@@ -2373,6 +2508,135 @@ app.get("/api/flocks/:id/eligibility", requireAuth, requireFarmAccess, async (re
   } catch (e) {
     console.error("[ERROR]", "[db] GET /api/flocks/:id/eligibility:", e instanceof Error ? e.message : e);
     res.status(503).json({ error: "Unable to compute eligibility." });
+  }
+});
+
+app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("flock.view"), async (_req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
+  try {
+    const flocks = await dbQuery(
+      `SELECT id,
+              COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
+              placement_date AS "placementDate",
+              status
+         FROM poultry_flocks
+        WHERE status = 'active'
+        ORDER BY placement_date DESC`
+    );
+
+    const rows = [];
+    for (const f of flocks.rows) {
+      const weigh = await dbQuery(
+        `SELECT fcr, avg_weight_kg AS "avgWeightKg", weigh_date AS "weighDate"
+           FROM weigh_ins
+          WHERE flock_id = $1
+          ORDER BY weigh_date DESC
+          LIMIT 1`,
+        [f.id]
+      ).catch(() => ({ rows: [] }));
+
+      const overdue = await dbQuery(
+        `SELECT COUNT(*)::int AS c, MIN(planned_for) AS "oldestPlannedFor"
+           FROM treatment_rounds
+          WHERE flock_id = $1
+            AND status IN ('planned','in_progress')
+            AND planned_for < now()`,
+        [f.id]
+      ).catch(() => ({ rows: [{ c: 0 }] }));
+
+      const withdrawal = await dbQuery(
+        `SELECT COUNT(*)::int AS c,
+                MIN((at + (withdrawal_days || ' days')::interval)) AS "safeAfterAt"
+           FROM flock_treatments
+          WHERE flock_id = $1
+            AND (at + (withdrawal_days || ' days')::interval) > now()`,
+        [f.id]
+      ).catch(() => ({ rows: [{ c: 0 }] }));
+
+      const mortality7d = await dbQuery(
+        `SELECT COALESCE(SUM(mortality), 0) AS c
+           FROM poultry_daily_logs
+          WHERE flock_id = $1
+            AND log_date >= CURRENT_DATE - INTERVAL '7 days'`,
+        [f.id]
+      ).catch(() => ({ rows: [{ c: 0 }] }));
+
+      const label = String(f.label ?? "");
+      const barn = label.includes("-") ? label.split("-")[0].trim() : "Unassigned";
+
+      const overdueCount = Number(overdue.rows[0]?.c ?? 0);
+      const withdrawalCount = Number(withdrawal.rows[0]?.c ?? 0);
+      const mortality7dCount = Number(mortality7d.rows[0]?.c ?? 0);
+      const latestFcr = weigh.rows[0]?.fcr != null ? Number(weigh.rows[0].fcr) : null;
+      const poorFcr = latestFcr != null && latestFcr >= 2.4;
+      const riskScore =
+        (withdrawalCount > 0 ? 60 : 0) +
+        overdueCount * 10 +
+        Math.min(mortality7dCount, 20) +
+        (poorFcr ? 15 : 0);
+      const topIssue = withdrawalCount > 0
+        ? "Withdrawal blocker"
+        : overdueCount > 0
+          ? "Overdue treatment rounds"
+          : mortality7dCount > 0
+            ? "Recent mortality spike"
+            : poorFcr
+              ? "Poor FCR trend"
+              : "Stable";
+      const needsRole = withdrawalCount > 0 ? "vet_manager" : riskScore >= 10 ? "vet" : "laborer";
+      const pendingSince = overdue.rows[0]?.oldestPlannedFor ?? withdrawal.rows[0]?.safeAfterAt ?? null;
+
+      rows.push({
+        flockId: f.id,
+        label,
+        barn,
+        latestFcr,
+        latestWeightKg: weigh.rows[0]?.avgWeightKg ?? null,
+        latestWeighDate: weigh.rows[0]?.weighDate ?? null,
+        overdueRounds: overdueCount,
+        withdrawalBlockers: withdrawalCount,
+        mortality7d: mortality7dCount,
+        riskScore,
+        topIssue,
+        needsRole,
+        pendingSince,
+      });
+    }
+
+    const barns = new Map();
+    for (const r of rows) {
+      const prev = barns.get(r.barn) ?? {
+        barn: r.barn,
+        flockCount: 0,
+        blockedFlocks: 0,
+        overdueRounds: 0,
+        mortality7d: 0,
+        fcrVals: [],
+      };
+      prev.flockCount += 1;
+      if (r.withdrawalBlockers > 0) prev.blockedFlocks += 1;
+      prev.overdueRounds += r.overdueRounds;
+      prev.mortality7d += r.mortality7d;
+      if (r.latestFcr != null) prev.fcrVals.push(Number(r.latestFcr));
+      barns.set(r.barn, prev);
+    }
+
+    const barnSummary = [...barns.values()].map((b) => ({
+      barn: b.barn,
+      flockCount: b.flockCount,
+      blockedFlocks: b.blockedFlocks,
+      overdueRounds: b.overdueRounds,
+      mortality7d: b.mortality7d,
+      avgFcr: b.fcrVals.length ? Number((b.fcrVals.reduce((s, x) => s + x, 0) / b.fcrVals.length).toFixed(2)) : null,
+    }));
+
+    res.json({ flocks: rows, barns: barnSummary });
+  } catch (e) {
+    console.error("[ERROR]", "[db] GET /api/farm/ops-board:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to build operations board." });
   }
 });
 

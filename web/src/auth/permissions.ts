@@ -61,6 +61,34 @@ export type PermissionKey =
   | "view_investor_memos"
   | "manage_users";
 
+export type FlockActionKey =
+  | "flock.view"
+  | "treatment.execute"
+  | "weighin.record"
+  | "mortality.record"
+  | "slaughter.schedule"
+  | "slaughter.record"
+  | "flock.close"
+  | "alert.acknowledge";
+
+const FLOCK_ACTION_MIN_ROLE: Record<FlockActionKey, UserRole> = {
+  "flock.view": "laborer",
+  "treatment.execute": "vet",
+  "weighin.record": "vet",
+  "mortality.record": "vet",
+  "slaughter.schedule": "vet_manager",
+  "slaughter.record": "vet_manager",
+  "flock.close": "vet_manager",
+  "alert.acknowledge": "vet_manager",
+};
+
+export function canFlockAction(user: SessionUser | null, action: FlockActionKey): boolean {
+  if (!user) return false;
+  if (!canAccessWorkspace(user, "farm")) return false;
+  if (user.role === "superuser") return true;
+  return roleAtLeast(user, FLOCK_ACTION_MIN_ROLE[action]);
+}
+
 export function hasPermission(user: SessionUser | null, key: PermissionKey): boolean {
   if (!user) return false;
   if (user.role === "superuser") return true;

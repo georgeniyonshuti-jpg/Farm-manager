@@ -40,6 +40,18 @@ type Round = {
   status: "planned" | "in_progress" | "completed" | "missed" | "cancelled";
   assignedToUserId?: string | null;
 };
+type OverdueRound = Round & { overdueMinutes: number };
+type ForecastRow = {
+  id: string;
+  name: string;
+  unit: string;
+  quantity: number;
+  lowStockThreshold: number;
+  totalUsedInWindow: number;
+  avgDailyUse: number;
+  daysOfCover: number | null;
+  stockoutRisk7d: boolean;
+};
 
 const TREATMENT_REASON_OPTIONS = [
   { value: "routine_prevention", label: "Routine prevention" },
@@ -65,6 +77,8 @@ export function FarmTreatmentPage() {
   const [flockId, setFlockId] = useState("");
   const [rows, setRows] = useState<Treatment[]>([]);
   const [rounds, setRounds] = useState<Round[]>([]);
+  const [overdueRounds, setOverdueRounds] = useState<OverdueRound[]>([]);
+  const [forecastRows, setForecastRows] = useState<ForecastRow[]>([]);
   const [startAt, setStartAt] = useState("");
   const [endAt, setEndAt] = useState("");
   const [loading, setLoading] = useState(true);
@@ -144,19 +158,29 @@ export function FarmTreatmentPage() {
       const q = new URLSearchParams();
       if (startAt) q.set("start_at", `${startAt}T00:00:00.000Z`);
       if (endAt) q.set("end_at", `${endAt}T23:59:59.999Z`);
-      const [tr, rr] = await Promise.all([
+      const [tr, rr, orr, frs] = await Promise.all([
         fetch(`${API_BASE_URL}/api/flocks/${selected}/treatments?${q.toString()}`, {
           headers: readAuthHeaders(token),
         }),
         fetch(`${API_BASE_URL}/api/treatment-rounds?flock_id=${encodeURIComponent(selected)}`, {
           headers: readAuthHeaders(token),
         }),
+        fetch(`${API_BASE_URL}/api/treatment-rounds/overdue?flock_id=${encodeURIComponent(selected)}`, {
+          headers: readAuthHeaders(token),
+        }),
+        fetch(`${API_BASE_URL}/api/medicine/forecast?lookback_days=30`, {
+          headers: readAuthHeaders(token),
+        }),
       ]);
       const td = await tr.json();
       const rd = await rr.json().catch(() => ({ rounds: [] }));
+      const od = await orr.json().catch(() => ({ overdueRounds: [] }));
+      const fd2 = await frs.json().catch(() => ({ forecast: [] }));
       if (!tr.ok) throw new Error(td.error ?? "Failed to load treatments");
       setRows((td.treatments as Treatment[]) ?? []);
       setRounds((rd.rounds as Round[]) ?? []);
+      setOverdueRounds((od.overdueRounds as OverdueRound[]) ?? []);
+      setForecastRows((fd2.forecast as ForecastRow[]) ?? []);
       setRoundForm((prev) => ({ ...prev, medicineId: prev.medicineId || ((md.medicines as Medicine[])?.[0]?.id ?? "") }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
@@ -279,6 +303,35 @@ export function FarmTreatmentPage() {
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
       {!loading && !error ? (
         <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+              <p className="text-sm font-semibold text-neutral-800">Round compliance alerts</p>
+              <div className="mt-2 space-y-2">
+                {overdueRounds.slice(0, 5).map((r) => (
+                  <div key={r.id} className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+                    {r.medicineName} overdue by {Math.max(1, Math.floor(r.overdueMinutes / 60))}h ({r.flockId})
+                  </div>
+                ))}
+                {!overdueRounds.length ? <p className="text-sm text-emerald-700">No overdue rounds.</p> : null}
+              </div>
+            </div>
+            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+              <p className="text-sm font-semibold text-neutral-800">Stock forecast (30d)</p>
+              <div className="mt-2 space-y-2">
+                {forecastRows.slice(0, 5).map((f) => (
+                  <div key={f.id} className="rounded-lg border border-neutral-200 p-2 text-xs">
+                    <p className="font-medium text-neutral-900">{f.name}</p>
+                    <p className="text-neutral-700">
+                      Cover: {f.daysOfCover != null ? `${f.daysOfCover} days` : "insufficient usage data"} · Avg/day {Number(f.avgDailyUse).toFixed(2)} {f.unit}
+                    </p>
+                    {f.stockoutRisk7d ? <p className="font-semibold text-red-700">Risk: stockout within 7 days</p> : null}
+                  </div>
+                ))}
+                {!forecastRows.length ? <p className="text-sm text-neutral-500">No forecast data yet.</p> : null}
+              </div>
+            </div>
+          </div>
+
           <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
             <p className="mb-3 text-sm font-semibold text-neutral-800">Medicine inventory</p>
             <div className="grid gap-3 sm:grid-cols-2">
