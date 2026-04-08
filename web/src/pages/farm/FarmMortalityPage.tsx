@@ -7,6 +7,8 @@ import { PageHeader } from "../../components/PageHeader";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
+import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
+import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 
 type MortalityRow = {
   id: string;
@@ -20,9 +22,10 @@ type MortalityRow = {
 
 export function FarmMortalityPage() {
   const { token } = useAuth();
+  const tFlock = useLaborerT("Flock");
   const tTitle = useLaborerT("Mortality tracking");
   const tLead = useLaborerT(
-    "Events from round check-ins and ad-hoc / emergency logs (with photos stored on server in demo)."
+    "Events from round check-ins and ad-hoc / emergency logs (with photos stored on server in demo).",
   );
   const tLog = useLaborerT("Log mortality");
   const tTime = useLaborerT("Time");
@@ -31,38 +34,54 @@ export function FarmMortalityPage() {
   const tNotes = useLaborerT("Notes");
   const tEmptyTitle = useLaborerT("No mortality logged yet");
   const tEmptyBody = useLaborerT("Submit losses from the mortality log — photos are required.");
-  const [rows, setRows] = useState<MortalityRow[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const tNoFlocks = useLaborerT("No flock available");
 
-  const load = useCallback(async () => {
-    setError(null);
-    setLoading(true);
+  const {
+    flocks,
+    flockId,
+    setFlockId,
+    status,
+    performance,
+    listLoading,
+    detailLoading,
+    error: ctxError,
+    loadFlocks,
+    loadDetails,
+  } = useFlockFieldContext(token);
+
+  const [rows, setRows] = useState<MortalityRow[]>([]);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const [eventsLoading, setEventsLoading] = useState(false);
+
+  const loadEvents = useCallback(async () => {
+    if (!token || !flockId) {
+      setRows([]);
+      setEventsLoading(false);
+      return;
+    }
+    setEventsError(null);
+    setEventsLoading(true);
     try {
-      // ENV: moved to environment variable
-      const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
-      const fd = await fr.json();
-      if (!fr.ok) throw new Error(fd.error);
-      const id = (fd.flocks as { id: string }[])[0]?.id;
-      if (!id) {
-        setRows([]);
-        return;
-      }
-      // ENV: moved to environment variable
-      const mr = await fetch(`${API_BASE_URL}/api/flocks/${id}/mortality-events`, { headers: readAuthHeaders(token) });
+      const mr = await fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/mortality-events`, {
+        headers: readAuthHeaders(token),
+      });
       const md = await mr.json();
-      if (!mr.ok) throw new Error(md.error);
+      if (!mr.ok) throw new Error((md as { error?: string }).error ?? "Load failed");
       setRows((md.events as MortalityRow[]) ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Load failed");
+      setEventsError(e instanceof Error ? e.message : "Load failed");
+      setRows([]);
     } finally {
-      setLoading(false);
+      setEventsLoading(false);
     }
-  }, [token]);
+  }, [token, flockId]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadEvents();
+  }, [loadEvents]);
+
+  const loading = listLoading || (eventsLoading && rows.length === 0);
+  const pageError = ctxError ?? eventsError;
 
   return (
     <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-6">
@@ -79,14 +98,66 @@ export function FarmMortalityPage() {
         }
       />
 
-      {loading && <SkeletonList rows={4} />}
-      {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
+      {!listLoading && !ctxError && flocks.length === 0 ? (
+        <p className="mt-4 text-sm text-neutral-600">{tNoFlocks}</p>
+      ) : null}
 
-      {!loading && !error && rows.length === 0 && (
-        <EmptyState title={tEmptyTitle} description={tEmptyBody} />
+      {!listLoading && !ctxError && flocks.length > 0 ? (
+        <label className="mt-4 block text-sm font-medium text-neutral-700">
+          {tFlock}
+          <select
+            className="mt-1 w-full max-w-md min-h-[44px] rounded-lg border border-neutral-300 px-3 text-base"
+            value={flockId}
+            onChange={(e) => setFlockId(e.target.value)}
+          >
+            {flocks.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
+      {!listLoading && !ctxError && flockId && !status && detailLoading ? (
+        <div className="mt-4">
+          <SkeletonList rows={2} />
+        </div>
+      ) : null}
+
+      {!listLoading && !ctxError && status ? (
+        <div className="mt-4">
+          <FlockContextStrip
+            label={status.label}
+            code={flocks.find((f) => f.id === flockId)?.code}
+            placementDate={status.placementDate}
+            ageDays={status.ageDays}
+            feedToDateKg={status.feedToDateKg}
+            initialCount={flocks.find((f) => f.id === flockId)?.initialCount}
+            birdsLiveEstimate={performance?.birdsLiveEstimate}
+            verifiedLiveCount={performance?.verifiedLiveCount}
+            mortalityToDate={performance?.mortalityToDate}
+          />
+        </div>
+      ) : null}
+
+      {loading && <SkeletonList rows={4} />}
+      {!loading && pageError && (
+        <ErrorState
+          message={pageError}
+          onRetry={() => {
+            void loadFlocks();
+            void loadDetails();
+            void loadEvents();
+          }}
+        />
       )}
 
-      {!loading && !error && rows.length > 0 ? (
+      {!loading && !pageError && rows.length === 0 && flockId ? (
+        <EmptyState title={tEmptyTitle} description={tEmptyBody} />
+      ) : null}
+
+      {!loading && !pageError && rows.length > 0 ? (
         <>
           <ul className="mt-4 space-y-3 sm:hidden">
             {rows.map((r) => (
@@ -101,9 +172,7 @@ export function FarmMortalityPage() {
                   {r.isEmergency ? (
                     <TranslatedText text="Emergency" />
                   ) : (
-                    <TranslatedText
-                      text={r.source?.replace(/_/g, " ").trim() || "—"}
-                    />
+                    <TranslatedText text={r.source?.replace(/_/g, " ").trim() || "—"} />
                   )}
                 </p>
                 <p className="mt-1 text-neutral-600">{r.notes || "—"}</p>
@@ -129,9 +198,7 @@ export function FarmMortalityPage() {
                       {r.isEmergency ? (
                         <TranslatedText text="Emergency" />
                       ) : (
-                        <TranslatedText
-                          text={r.source?.replace(/_/g, " ").trim() || "—"}
-                        />
+                        <TranslatedText text={r.source?.replace(/_/g, " ").trim() || "—"} />
                       )}
                     </td>
                     <td>{r.notes || <TranslatedText text="—" />}</td>

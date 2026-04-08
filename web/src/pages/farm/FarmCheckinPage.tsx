@@ -1,37 +1,21 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { PhotoCaptureInput } from "../../components/farm/PhotoCaptureInput";
 import { useAuth } from "../../auth/AuthContext";
-import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
+import { jsonAuthHeaders } from "../../lib/authHeaders";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { CheckinBandLine } from "./CheckinBandLine";
 import { CheckinUrgencyBadge } from "../../components/farm/CheckinUrgencyBadge";
+import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { API_BASE_URL } from "../../api/config";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
+import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
+import type { CheckinBadge, CheckinStatus } from "./checkinStatusTypes";
 
-export type CheckinBadge = "ok" | "upcoming" | "overdue";
-
-export type CheckinStatus = {
-  flockId: string;
-  label: string;
-  placementDate: string;
-  ageDays: number;
-  targetSlaughterDays: { min: number; max: number };
-  intervalHours: number;
-  intervalSource: string;
-  lastCheckinAt: string | null;
-  nextDueAt: string;
-  overdueMs: number;
-  isOverdue: boolean;
-  checkinBadge: CheckinBadge;
-  photosRequiredPerRound: number;
-  bands: { untilDay: number; intervalHours: number }[];
-  fcrCheckinHint?: { severity: string; message: string } | null;
-  feedToDateKg?: number | null;
-};
+export type { CheckinBadge, CheckinStatus } from "./checkinStatusTypes";
 
 function kigaliNowDate(): Date {
   const asKigali = new Date(
@@ -142,6 +126,7 @@ function CheckinPhotoBlock({
 export function FarmCheckinPage() {
   const { token } = useAuth();
   const { showToast } = useToast();
+  const lblFlock = useLaborerT("Flock");
   const title = useLaborerT("Round check-in");
   const subtitle = useLaborerT(
     "Photos required • feed & water • optional birds lost at this round"
@@ -160,47 +145,31 @@ export function FarmCheckinPage() {
   );
   const savedMsg = useLaborerT("Round check-in saved.");
   const errSave = useLaborerT("Save failed");
+  const noFlockTitle = useLaborerT("No flock available");
+  const noFlockBody = useLaborerT("Add a flock before submitting round check-ins.");
 
-  const [flockId, setFlockId] = useState<string | null>(null);
-  const [status, setStatus] = useState<CheckinStatus | null>(null);
+  const {
+    flocks,
+    flockId,
+    setFlockId,
+    status,
+    performance,
+    listLoading,
+    detailLoading,
+    error: loadError,
+    loadDetails,
+    loadFlocks,
+  } = useFlockFieldContext(token);
   const [photos, setPhotos] = useState<string[]>([]);
   const [feedKg, setFeedKg] = useState("");
   const [waterL, setWaterL] = useState("");
   const [mortalityAtCheckin, setMortalityAtCheckin] = useState("");
   const [notes, setNotes] = useState("");
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [pageLoading, setPageLoading] = useState(true);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [fcrHintDismissed, setFcrHintDismissed] = useState(false);
 
-  const loadStatus = useCallback(async () => {
-    setLoadError(null);
-    setPageLoading(true);
-    try {
-      // ENV: moved to environment variable
-      const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
-      const fd = await fr.json();
-      if (!fr.ok) throw new Error(fd.error ?? "Flocks failed");
-      const flocks = fd.flocks as { id: string }[];
-      const id = flocks[0]?.id ?? null;
-      setFlockId(id);
-      if (!id) return;
-      // ENV: moved to environment variable
-      const sr = await fetch(`${API_BASE_URL}/api/flocks/${id}/checkin-status`, { headers: readAuthHeaders(token) });
-      const sd = await sr.json();
-      if (!sr.ok) throw new Error(sd.error ?? "Status failed");
-      setStatus(sd as CheckinStatus);
-    } catch (e) {
-      setLoadError(e instanceof Error ? e.message : "Load failed");
-    } finally {
-      setPageLoading(false);
-    }
-  }, [token]);
-
-  useEffect(() => {
-    void loadStatus();
-  }, [loadStatus]);
+  const pageLoading = listLoading;
 
   useEffect(() => {
     setFcrHintDismissed(false);
@@ -240,9 +209,7 @@ export function FarmCheckinPage() {
       setWaterL("");
       setMortalityAtCheckin("");
       setNotes("");
-      if ((data as { status?: CheckinStatus }).status) {
-        setStatus((data as { status: CheckinStatus }).status);
-      } else void loadStatus();
+      void loadDetails();
       const pay = (data as { payrollImpact?: { rwfDelta?: number } }).payrollImpact;
       const flockDay = (data as { flockDay?: number }).flockDay;
       const bonus =
@@ -273,7 +240,38 @@ export function FarmCheckinPage() {
       />
 
       {pageLoading && <SkeletonList rows={3} />}
-      {!pageLoading && loadError && <ErrorState message={loadError} onRetry={() => void loadStatus()} />}
+      {!pageLoading && loadError && (
+        <ErrorState
+          message={loadError}
+          onRetry={() => {
+            void loadFlocks();
+            void loadDetails();
+          }}
+        />
+      )}
+
+      {!pageLoading && !loadError && flocks.length === 0 ? (
+        <EmptyState title={noFlockTitle} description={noFlockBody} />
+      ) : null}
+
+      {!pageLoading && !loadError && flocks.length > 0 ? (
+        <label className="block text-sm font-medium text-neutral-700">
+          {lblFlock}
+          <select
+            className="mt-1 w-full min-h-[48px] rounded-xl border border-neutral-300 px-3 text-base"
+            value={flockId}
+            onChange={(e) => setFlockId(e.target.value)}
+          >
+            {flocks.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+
+      {!pageLoading && !loadError && flockId && !status && detailLoading ? <SkeletonList rows={2} /> : null}
 
       {!pageLoading && !loadError && status?.fcrCheckinHint && !fcrHintDismissed ? (
         <div
@@ -310,9 +308,14 @@ export function FarmCheckinPage() {
       {!pageLoading && !loadError && status ? (
         <FlockContextStrip
           label={status.label}
+          code={flocks.find((f) => f.id === flockId)?.code}
           placementDate={status.placementDate}
           ageDays={status.ageDays}
           feedToDateKg={status.feedToDateKg}
+          initialCount={flocks.find((f) => f.id === flockId)?.initialCount}
+          birdsLiveEstimate={performance?.birdsLiveEstimate}
+          verifiedLiveCount={performance?.verifiedLiveCount}
+          mortalityToDate={performance?.mortalityToDate}
           footer={
             <Link
               to="/farm/feed"
@@ -326,7 +329,7 @@ export function FarmCheckinPage() {
 
       {!pageLoading && !loadError && status && <CheckinStatusBlock status={status} />}
 
-      {!pageLoading && !loadError ? (
+      {!pageLoading && !loadError && status ? (
       <form
         onSubmit={(e) => void handleSubmit(e)}
         className="space-y-5 rounded-2xl border border-[var(--border-color)] bg-white p-4 shadow-sm sm:p-5"
@@ -393,7 +396,7 @@ export function FarmCheckinPage() {
         )}
         <button
           type="submit"
-          disabled={busy || !flockId}
+          disabled={busy || !flockId || !status}
           className="bounce-tap w-full min-h-[52px] rounded-xl bg-[var(--primary-color)] text-lg font-semibold text-white hover:bg-[var(--primary-color-dark)] disabled:opacity-50"
         >
           {busy ? btnSaving : btnSubmit}

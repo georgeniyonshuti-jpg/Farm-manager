@@ -7,15 +7,7 @@ import { API_BASE_URL } from "../../api/config";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
-import type { CheckinStatus } from "./FarmCheckinPage";
-
-type Flock = {
-  id: string;
-  label: string;
-  code?: string | null;
-  placementDate?: string;
-  initialCount?: number;
-};
+import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 
 type FeedEntry = {
   id: string;
@@ -27,72 +19,49 @@ type FeedEntry = {
 export function FarmFeedPage() {
   const { token } = useAuth();
   const { showToast } = useToast();
-  const [flocks, setFlocks] = useState<Flock[]>([]);
-  const [flockId, setFlockId] = useState("");
-  const [strip, setStrip] = useState<CheckinStatus | null>(null);
+  const {
+    flocks,
+    flockId,
+    setFlockId,
+    status,
+    performance,
+    listLoading,
+    detailLoading,
+    error: ctxError,
+    loadFlocks,
+    loadDetails,
+  } = useFlockFieldContext(token);
+
   const [entries, setEntries] = useState<FeedEntry[]>([]);
-  const [feedToDateKg, setFeedToDateKg] = useState<number | null>(null);
   const [feedKg, setFeedKg] = useState("");
   const [notes, setNotes] = useState("");
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [entriesError, setEntriesError] = useState<string | null>(null);
 
-  const loadFlocks = useCallback(async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const r = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
-      const d = await r.json();
-      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Failed to load flocks");
-      const list = (d.flocks as Flock[]) ?? [];
-      setFlocks(list);
-      setFlockId((prev) => (prev && list.some((f) => f.id === prev) ? prev : list[0]?.id ?? ""));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Load failed");
-    } finally {
-      setLoading(false);
-    }
-  }, [token]);
-
-  const loadContext = useCallback(async () => {
+  const loadFeedEntries = useCallback(async () => {
     if (!flockId || !token) {
-      setStrip(null);
       setEntries([]);
-      setFeedToDateKg(null);
+      setEntriesError(null);
       return;
     }
     try {
-      const [sr, er] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/checkin-status`, {
-          headers: readAuthHeaders(token),
-        }),
-        fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/feed-entries?limit=25`, {
-          headers: readAuthHeaders(token),
-        }),
-      ]);
-      const sd = await sr.json();
+      const er = await fetch(
+        `${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/feed-entries?limit=25`,
+        { headers: readAuthHeaders(token) },
+      );
       const ed = await er.json();
-      if (!sr.ok) throw new Error((sd as { error?: string }).error ?? "Status failed");
       if (!er.ok) throw new Error((ed as { error?: string }).error ?? "Entries failed");
-      setStrip(sd as CheckinStatus);
       setEntries(((ed as { entries?: FeedEntry[] }).entries) ?? []);
-      const td = (ed as { feedToDateKg?: number }).feedToDateKg;
-      setFeedToDateKg(typeof td === "number" ? td : null);
-    } catch {
-      setStrip(null);
+      setEntriesError(null);
+    } catch (e) {
       setEntries([]);
-      setFeedToDateKg(null);
+      setEntriesError(e instanceof Error ? e.message : "Entries failed");
     }
   }, [flockId, token]);
 
   useEffect(() => {
-    void loadFlocks();
-  }, [loadFlocks]);
-
-  useEffect(() => {
-    void loadContext();
-  }, [loadContext]);
+    void loadFeedEntries();
+  }, [loadFeedEntries]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -114,12 +83,11 @@ export function FarmFeedPage() {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Save failed");
-      const td = (d as { feedToDateKg?: number }).feedToDateKg;
-      if (typeof td === "number") setFeedToDateKg(td);
       showToast("success", "Feed logged.");
       setFeedKg("");
       setNotes("");
-      await loadContext();
+      void loadDetails();
+      await loadFeedEntries();
     } catch (err) {
       showToast("error", err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -128,6 +96,7 @@ export function FarmFeedPage() {
   }
 
   const selected = flocks.find((f) => f.id === flockId);
+  const loading = listLoading;
 
   return (
     <div className="mx-auto max-w-lg space-y-5 sm:max-w-xl">
@@ -145,9 +114,18 @@ export function FarmFeedPage() {
       />
 
       {loading && <SkeletonList rows={3} />}
-      {!loading && error && <ErrorState message={error} onRetry={() => void loadFlocks()} />}
+      {!loading && ctxError && (
+        <ErrorState
+          message={ctxError}
+          onRetry={() => {
+            void loadFlocks();
+            void loadDetails();
+            void loadFeedEntries();
+          }}
+        />
+      )}
 
-      {!loading && !error ? (
+      {!loading && !ctxError ? (
         <>
           <label className="block text-sm font-medium text-neutral-700">
             Flock
@@ -164,19 +142,23 @@ export function FarmFeedPage() {
             </select>
           </label>
 
-          {strip ? (
+          {status ? (
             <FlockContextStrip
-              label={strip.label}
+              label={status.label}
               code={selected?.code}
-              placementDate={strip.placementDate}
-              ageDays={strip.ageDays}
-              feedToDateKg={feedToDateKg ?? strip.feedToDateKg}
+              placementDate={status.placementDate}
+              ageDays={status.ageDays}
+              feedToDateKg={status.feedToDateKg}
+              initialCount={selected?.initialCount}
+              birdsLiveEstimate={performance?.birdsLiveEstimate}
+              verifiedLiveCount={performance?.verifiedLiveCount}
+              mortalityToDate={performance?.mortalityToDate}
             />
-          ) : flockId ? (
+          ) : flockId && detailLoading ? (
             <p className="text-sm text-neutral-500">Loading flock context…</p>
-          ) : (
+          ) : !flockId ? (
             <p className="text-sm text-amber-800">No active flocks. Create a flock to start logging feed.</p>
-          )}
+          ) : null}
 
           <form
             onSubmit={(ev) => void submit(ev)}
@@ -203,12 +185,25 @@ export function FarmFeedPage() {
             </label>
             <button
               type="submit"
-              disabled={busy || !flockId}
+              disabled={busy || !flockId || !status}
               className="w-full rounded-xl bg-emerald-700 py-3 text-lg font-semibold text-white disabled:opacity-50"
             >
               {busy ? "Saving…" : "Save feed entry"}
             </button>
           </form>
+
+          {entriesError ? (
+            <p className="text-sm text-amber-800" role="status">
+              Could not load recent entries.{" "}
+              <button
+                type="button"
+                className="font-semibold underline"
+                onClick={() => void loadFeedEntries()}
+              >
+                Retry
+              </button>
+            </p>
+          ) : null}
 
           {entries.length > 0 ? (
             <section className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">

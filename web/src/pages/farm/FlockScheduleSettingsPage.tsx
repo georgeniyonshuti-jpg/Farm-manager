@@ -7,7 +7,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { API_BASE_URL } from "../../api/config";
-import type { CheckinStatus } from "./FarmCheckinPage";
+import type { CheckinStatus } from "./checkinStatusTypes";
 
 type Band = { untilDay: number; intervalHours: number };
 

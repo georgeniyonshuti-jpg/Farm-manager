@@ -6,9 +6,10 @@ import { API_BASE_URL } from "../../api/config";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
-import type { CheckinStatus } from "./FarmCheckinPage";
+import type { FieldPerformanceSummary } from "../../hooks/useFlockFieldContext";
+import type { CheckinStatus } from "./checkinStatusTypes";
 
-type Flock = { id: string; label: string; code?: string | null };
+type Flock = { id: string; label: string; code?: string | null; initialCount?: number };
 type Medicine = {
   id: string;
   name: string;
@@ -122,23 +123,47 @@ export function FarmTreatmentPage() {
   });
   const [tab, setTab] = useState<MedTab>("treatments");
   const [flockStrip, setFlockStrip] = useState<CheckinStatus | null>(null);
+  const [flockPerformance, setFlockPerformance] = useState<FieldPerformanceSummary | null>(null);
 
   useEffect(() => {
     if (!flockId || !token) {
       setFlockStrip(null);
+      setFlockPerformance(null);
       return;
     }
     let cancelled = false;
     void (async () => {
       try {
-        const r = await fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/checkin-status`, {
-          headers: readAuthHeaders(token),
-        });
+        const [r, pr] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/checkin-status`, {
+            headers: readAuthHeaders(token),
+          }),
+          fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/performance-summary`, {
+            headers: readAuthHeaders(token),
+          }),
+        ]);
         const d = await r.json();
+        const pd = await pr.json();
         if (!r.ok) throw new Error((d as { error?: string }).error ?? "status");
         if (!cancelled) setFlockStrip(d as CheckinStatus);
+        if (!cancelled) {
+          if (pr.ok) {
+            setFlockPerformance({
+              birdsLiveEstimate: Number((pd as { birdsLiveEstimate?: number }).birdsLiveEstimate) || 0,
+              computedBirdsLiveEstimate: (pd as { computedBirdsLiveEstimate?: number })
+                .computedBirdsLiveEstimate,
+              verifiedLiveCount: (pd as { verifiedLiveCount?: number | null }).verifiedLiveCount ?? null,
+              mortalityToDate: Number((pd as { mortalityToDate?: number }).mortalityToDate) || 0,
+            });
+          } else {
+            setFlockPerformance(null);
+          }
+        }
       } catch {
-        if (!cancelled) setFlockStrip(null);
+        if (!cancelled) {
+          setFlockStrip(null);
+          setFlockPerformance(null);
+        }
       }
     })();
     return () => {
@@ -362,6 +387,10 @@ export function FarmTreatmentPage() {
           placementDate={flockStrip.placementDate}
           ageDays={flockStrip.ageDays}
           feedToDateKg={flockStrip.feedToDateKg}
+          initialCount={flocks.find((x) => x.id === flockId)?.initialCount}
+          birdsLiveEstimate={flockPerformance?.birdsLiveEstimate}
+          verifiedLiveCount={flockPerformance?.verifiedLiveCount}
+          mortalityToDate={flockPerformance?.mortalityToDate}
         />
       ) : null}
       {loading && <SkeletonList rows={3} />}

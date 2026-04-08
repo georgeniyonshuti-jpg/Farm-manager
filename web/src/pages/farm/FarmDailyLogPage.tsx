@@ -1,22 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useLaborerT } from "../../i18n/laborerI18n";
 import { DailyLogForm, type DailyLogPayload } from "../../components/DailyLogForm";
 import { useAuth } from "../../auth/AuthContext";
-import { useLaborerT } from "../../i18n/laborerI18n";
 import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/Toast";
 import { API_BASE_URL } from "../../api/config";
-import { readAuthHeaders } from "../../lib/authHeaders";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
-import type { CheckinStatus } from "./FarmCheckinPage";
-
-type Flock = {
-  id: string;
-  label: string;
-  code?: string | null;
-  placementDate?: string;
-  initialCount?: number;
-};
+import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 
 export function FarmDailyLogPage() {
   const { token } = useAuth();
@@ -24,56 +14,24 @@ export function FarmDailyLogPage() {
   const savedMsg = useLaborerT("Daily log saved.");
   const pageTitle = useLaborerT("Daily log");
   const pageSub = useLaborerT("Large fields for quick coop entry.");
+  const lblFlock = useLaborerT("Flock");
 
-  const [flocks, setFlocks] = useState<Flock[]>([]);
-  const [flockId, setFlockId] = useState("");
-  const [strip, setStrip] = useState<CheckinStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    flocks,
+    flockId,
+    setFlockId,
+    status,
+    performance,
+    listLoading,
+    detailLoading,
+    error,
+    loadFlocks,
+    loadDetails,
+  } = useFlockFieldContext(token);
 
-  const loadFlocks = useCallback(async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const r = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
-      const d = await r.json();
-      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Load failed");
-      const list = (d.flocks as Flock[]) ?? [];
-      setFlocks(list);
-      setFlockId((prev) => (prev && list.some((f) => f.id === prev) ? prev : list[0]?.id ?? ""));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Load failed");
-    } finally {
-      setLoading(false);
-    }
-  }, [token]);
-
-  useEffect(() => {
-    void loadFlocks();
-  }, [loadFlocks]);
-
-  useEffect(() => {
-    if (!flockId || !token) {
-      setStrip(null);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const r = await fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/checkin-status`, {
-          headers: readAuthHeaders(token),
-        });
-        const d = await r.json();
-        if (!r.ok) throw new Error((d as { error?: string }).error ?? "status");
-        if (!cancelled) setStrip(d as CheckinStatus);
-      } catch {
-        if (!cancelled) setStrip(null);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [flockId, token]);
+  const loading = listLoading;
+  const selected = flocks.find((f) => f.id === flockId);
+  const initialCount = Math.max(1, Number(selected?.initialCount) || 1);
 
   async function postDailyLog(payload: DailyLogPayload) {
     const headers: HeadersInit = { "Content-Type": "application/json" };
@@ -107,20 +65,25 @@ export function FarmDailyLogPage() {
     return data as { warnings: string[] };
   }
 
-  const selected = flocks.find((f) => f.id === flockId);
-  const initialCount = Math.max(1, Number(selected?.initialCount) || 1);
-
   return (
     <div className="space-y-4">
       <PageHeader title={pageTitle} subtitle={pageSub} />
 
       {loading && <SkeletonList rows={2} />}
-      {!loading && error && <ErrorState message={error} onRetry={() => void loadFlocks()} />}
+      {!loading && error && (
+        <ErrorState
+          message={error}
+          onRetry={() => {
+            void loadFlocks();
+            void loadDetails();
+          }}
+        />
+      )}
 
       {!loading && !error ? (
         <>
           <label className="block text-sm font-medium text-neutral-700">
-            Flock
+            {lblFlock}
             <select
               className="mt-1 w-full min-h-[48px] rounded-xl border border-neutral-300 px-3 text-base"
               value={flockId}
@@ -135,14 +98,20 @@ export function FarmDailyLogPage() {
             </select>
           </label>
 
-          {strip ? (
+          {status ? (
             <FlockContextStrip
-              label={strip.label}
+              label={status.label}
               code={selected?.code}
-              placementDate={strip.placementDate}
-              ageDays={strip.ageDays}
-              feedToDateKg={strip.feedToDateKg}
+              placementDate={status.placementDate}
+              ageDays={status.ageDays}
+              feedToDateKg={status.feedToDateKg}
+              initialCount={selected?.initialCount}
+              birdsLiveEstimate={performance?.birdsLiveEstimate}
+              verifiedLiveCount={performance?.verifiedLiveCount}
+              mortalityToDate={performance?.mortalityToDate}
             />
+          ) : flockId && detailLoading ? (
+            <SkeletonList rows={2} />
           ) : flockId ? (
             <p className="text-sm text-neutral-500">Loading context…</p>
           ) : null}
@@ -156,6 +125,7 @@ export function FarmDailyLogPage() {
                 onSubmit={async (payload) => {
                   try {
                     const out = await postDailyLog(payload);
+                    void loadDetails();
                     const pay = out.payrollImpact;
                     const bonus =
                       pay != null && typeof pay.rwfDelta === "number"

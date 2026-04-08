@@ -8,7 +8,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
 import { useToast } from "../../components/Toast";
-import type { CheckinStatus } from "./FarmCheckinPage";
+import type { CheckinStatus } from "./checkinStatusTypes";
 
 type Eligibility = {
   eligibleForSlaughter: boolean;
