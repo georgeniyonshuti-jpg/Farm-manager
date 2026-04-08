@@ -86,6 +86,10 @@ export const DEFAULT_APP_SETTINGS = {
   rate_limit_api_window_ms: "60000",
   max_image_upload_bytes: "5242880",
   demo_initial_count: "1000",
+  field_payroll_check_in_rwf: "100",
+  field_payroll_feed_rwf: "300",
+  field_payroll_missed_check_in_rwf: "200",
+  field_payroll_missed_feed_rwf: "200",
 };
 
 /** @type {Array<{ category: string, value: string, label: string, sortOrder: number, active: boolean, metadata: object }>} */
@@ -187,6 +191,58 @@ export function getAppSettingNumber(key, defaultValue) {
   if (raw == null || raw === "") return defaultValue;
   const n = Number(raw);
   return Number.isFinite(n) ? n : defaultValue;
+}
+
+/** Fixed RWF amounts for field auto payroll (laborer-facing check-in / feed). */
+export function getFieldPayrollRates() {
+  return {
+    checkInRwf: Math.max(0, Math.floor(getAppSettingNumber("field_payroll_check_in_rwf", 100))),
+    feedRwf: Math.max(0, Math.floor(getAppSettingNumber("field_payroll_feed_rwf", 300))),
+    missedCheckInRwf: Math.max(0, Math.floor(getAppSettingNumber("field_payroll_missed_check_in_rwf", 200))),
+    missedFeedRwf: Math.max(0, Math.floor(getAppSettingNumber("field_payroll_missed_feed_rwf", 200))),
+  };
+}
+
+const FIELD_PAYROLL_DB_KEYS = [
+  "field_payroll_check_in_rwf",
+  "field_payroll_feed_rwf",
+  "field_payroll_missed_check_in_rwf",
+  "field_payroll_missed_feed_rwf",
+];
+
+/**
+ * Persist field payroll rate settings (manager/superuser). Updates memory and DB when configured.
+ * @param {(sql: string, params?: unknown[]) => Promise<unknown>} dbQuery
+ * @param {() => boolean} hasDbFn
+ * @param {{ checkInRwf: unknown, feedRwf: unknown, missedCheckInRwf: unknown, missedFeedRwf: unknown }} body
+ */
+export async function persistFieldPayrollRates(dbQuery, hasDbFn, body) {
+  const clamp = (v) => {
+    const n = Math.floor(Number(v));
+    if (!Number.isFinite(n)) return 0;
+    return Math.max(0, Math.min(1_000_000, n));
+  };
+  const nextVals = {
+    field_payroll_check_in_rwf: clamp(body.checkInRwf),
+    field_payroll_feed_rwf: clamp(body.feedRwf),
+    field_payroll_missed_check_in_rwf: clamp(body.missedCheckInRwf),
+    field_payroll_missed_feed_rwf: clamp(body.missedFeedRwf),
+  };
+  memAppSettings = {
+    ...memAppSettings,
+    ...Object.fromEntries(Object.entries(nextVals).map(([k, v]) => [k, String(v)])),
+  };
+  if (hasDbFn()) {
+    for (const k of FIELD_PAYROLL_DB_KEYS) {
+      const v = nextVals[k];
+      if (v == null) continue;
+      await dbQuery(
+        `INSERT INTO app_settings (setting_key, setting_value) VALUES ($1,$2)
+         ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = now()`,
+        [k, String(v)]
+      );
+    }
+  }
 }
 
 export function getAppSettingsSnapshot() {

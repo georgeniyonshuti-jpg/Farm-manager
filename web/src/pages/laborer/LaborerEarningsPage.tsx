@@ -45,21 +45,16 @@ function kigaliMonthRange(): { from: string; to: string } {
   return { from, to: `${y}-${ms}-${String(last).padStart(2, "0")}` };
 }
 
-type PayrollSummary = {
-  monthlyTargetRwf: number;
-  expectedSlotsThisMonth: number;
-  periodFrom: string;
-  periodTo: string;
-  netRwf: number;
-  monthElapsedFraction: number;
-  expectedNetToDate: number;
-  paceRatio: number | null;
+type PayrollTotals = {
+  netAll: number;
+  netApproved: number;
+  netPending: number;
 };
 
 export function LaborerEarningsPage() {
   const { token, user } = useAuth();
   const title = useLaborerT("My earnings");
-  const subtitle = useLaborerT("Bonuses and deductions from on-time logs this month (read-only).");
+  const subtitle = useLaborerT("Credits and deductions from round check-ins and feed logs this month (read-only).");
   const back = useLaborerT("Back to action center");
   const colType = useLaborerT("Type");
   const colAmount = useLaborerT("Amount");
@@ -68,20 +63,18 @@ export function LaborerEarningsPage() {
   const colWhen = useLaborerT("When");
   const colReason = useLaborerT("Reason");
   const emptyMsg = useLaborerT("No entries yet this month.");
-  const netLabel = useLaborerT("Net this month");
   const yes = useLaborerT("Yes");
   const no = useLaborerT("No");
   const pending = useLaborerT("Pending");
   const approvalLbl = useLaborerT("Approval");
   const onTimeLbl = useLaborerT("On-time");
-  const targetLbl = useLaborerT("Monthly target");
-  const paceWarn = useLaborerT("Below expected pace for this point in the month.");
-  const paceOk = useLaborerT("On pace relative to the month so far.");
-  const expectedToDateLbl = useLaborerT("Expected net by today (prorated)");
+  const netAllLbl = useLaborerT("Net (all)");
+  const approvedTotalLbl = useLaborerT("Approved");
+  const pendingTotalLbl = useLaborerT("Pending approval");
 
   const initial = useMemo(() => kigaliMonthRange(), []);
   const [entries, setEntries] = useState<PayrollRow[]>([]);
-  const [summary, setSummary] = useState<PayrollSummary | null>(null);
+  const [totals, setTotals] = useState<PayrollTotals | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -106,8 +99,8 @@ export function LaborerEarningsPage() {
       const d = await r.json();
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Load failed");
       setEntries((d.entries as PayrollRow[]) ?? []);
-      const s = (d as { summary?: PayrollSummary | null }).summary;
-      setSummary(s ?? null);
+      const t = (d as { totals?: PayrollTotals | null }).totals;
+      setTotals(t ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -119,14 +112,17 @@ export function LaborerEarningsPage() {
     void load();
   }, [load]);
 
-  const net = entries.reduce((s, e) => s + e.rwfDelta, 0);
-  const paceRatio = summary?.paceRatio;
-  const showPace =
-    summary &&
-    summary.monthlyTargetRwf > 0 &&
-    paceRatio != null &&
-    summary.monthElapsedFraction > 0;
-  const belowPace = showPace && paceRatio != null && paceRatio < 0.9;
+  const fallbackTotals = useMemo((): PayrollTotals => {
+    let netApproved = 0;
+    let netPending = 0;
+    for (const e of entries) {
+      if (e.approvedAt != null) netApproved += e.rwfDelta;
+      else netPending += e.rwfDelta;
+    }
+    return { netAll: netApproved + netPending, netApproved, netPending };
+  }, [entries]);
+
+  const displayTotals = totals ?? fallbackTotals;
 
   return (
     <div className="mx-auto max-w-lg space-y-6">
@@ -144,29 +140,16 @@ export function LaborerEarningsPage() {
         <div className="space-y-3">
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
             <p className="text-sm font-medium text-emerald-900">
-              <TranslatedText text={netLabel} />:{" "}
-              <span className="text-lg font-bold text-emerald-950">{formatRwf(net)}</span>
+              <TranslatedText text={netAllLbl} />:{" "}
+              <span className="text-lg font-bold text-emerald-950">{formatRwf(displayTotals.netAll)}</span>
             </p>
-            {summary && summary.monthlyTargetRwf > 0 ? (
-              <p className="mt-2 text-sm text-emerald-900/90">
-                <TranslatedText text={targetLbl} />: {formatRwf(summary.monthlyTargetRwf)}
-              </p>
-            ) : null}
-            {summary && summary.monthlyTargetRwf > 0 ? (
-              <p className="mt-1 text-xs text-emerald-900/80">
-                <TranslatedText text={expectedToDateLbl} />: {formatRwf(summary.expectedNetToDate)}
-              </p>
-            ) : null}
+            <p className="mt-2 text-sm text-emerald-900/90">
+              <TranslatedText text={approvedTotalLbl} />: {formatRwf(displayTotals.netApproved)}
+            </p>
+            <p className="mt-1 text-sm text-emerald-900/90">
+              <TranslatedText text={pendingTotalLbl} />: {formatRwf(displayTotals.netPending)}
+            </p>
           </div>
-          {showPace ? (
-            <div
-              className={`rounded-xl border px-4 py-3 text-sm font-medium ${
-                belowPace ? "border-amber-200 bg-amber-50 text-amber-950" : "border-emerald-200 bg-white text-emerald-900"
-              }`}
-            >
-              <TranslatedText text={belowPace ? paceWarn : paceOk} />
-            </div>
-          ) : null}
         </div>
       ) : null}
 

@@ -35,9 +35,17 @@ function monthRange(): { from: string; to: string } {
   };
 }
 
+type FieldPayrollRates = {
+  checkInRwf: number;
+  feedRwf: number;
+  missedCheckInRwf: number;
+  missedFeedRwf: number;
+};
+
 export function PayrollImpactPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { showToast } = useToast();
+  const canEditFieldRates = user?.role === "manager" || user?.role === "superuser";
   const initial = useMemo(() => monthRange(), []);
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
@@ -45,6 +53,40 @@ export function PayrollImpactPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  const [fieldRates, setFieldRates] = useState<FieldPayrollRates | null>(null);
+  const [fieldRatesBusy, setFieldRatesBusy] = useState(false);
+  const [fieldRatesForm, setFieldRatesForm] = useState({
+    checkInRwf: "",
+    feedRwf: "",
+    missedCheckInRwf: "",
+    missedFeedRwf: "",
+  });
+
+  const loadFieldRates = useCallback(async () => {
+    if (!canEditFieldRates || !token) return;
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/admin/field-payroll-rates`, {
+        headers: readAuthHeaders(token),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Load failed");
+      const fr = d as FieldPayrollRates;
+      setFieldRates(fr);
+      setFieldRatesForm({
+        checkInRwf: String(fr.checkInRwf),
+        feedRwf: String(fr.feedRwf),
+        missedCheckInRwf: String(fr.missedCheckInRwf),
+        missedFeedRwf: String(fr.missedFeedRwf),
+      });
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Could not load field payroll rates");
+    }
+  }, [canEditFieldRates, token, showToast]);
+
+  useEffect(() => {
+    void loadFieldRates();
+  }, [loadFieldRates]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -156,12 +198,120 @@ export function PayrollImpactPage() {
     showToast("success", "CSV downloaded.");
   }
 
+  async function saveFieldRates() {
+    if (!canEditFieldRates || !token) return;
+    const parsed = {
+      checkInRwf: Number(fieldRatesForm.checkInRwf),
+      feedRwf: Number(fieldRatesForm.feedRwf),
+      missedCheckInRwf: Number(fieldRatesForm.missedCheckInRwf),
+      missedFeedRwf: Number(fieldRatesForm.missedFeedRwf),
+    };
+    for (const v of Object.values(parsed)) {
+      if (!Number.isFinite(v) || v < 0) {
+        showToast("error", "Each value must be a non-negative number.");
+        return;
+      }
+    }
+    setFieldRatesBusy(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/admin/field-payroll-rates`, {
+        method: "PUT",
+        headers: jsonAuthHeaders(token),
+        body: JSON.stringify(parsed),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Save failed");
+      setFieldRates(d as FieldPayrollRates);
+      showToast("success", "Field payroll rates saved.");
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setFieldRatesBusy(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
         title="Payroll impact"
         subtitle="Bonuses and deductions from log timing. Approve before payroll closes."
       />
+
+      {canEditFieldRates ? (
+        <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+          <h2 className="text-sm font-semibold text-neutral-900">Field laborer payroll rates (RWF)</h2>
+          <p className="mt-1 text-xs text-neutral-600">
+            In-window round check-in and feed credits, and missed-window deductions (per schedule day). Applies to the
+            next auto payroll rows.
+          </p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <label className="block text-xs font-medium text-neutral-700">
+              Check-in credit
+              <input
+                type="number"
+                min={0}
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                value={fieldRatesForm.checkInRwf}
+                onChange={(e) => setFieldRatesForm((f) => ({ ...f, checkInRwf: e.target.value }))}
+              />
+            </label>
+            <label className="block text-xs font-medium text-neutral-700">
+              Feed entry credit
+              <input
+                type="number"
+                min={0}
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                value={fieldRatesForm.feedRwf}
+                onChange={(e) => setFieldRatesForm((f) => ({ ...f, feedRwf: e.target.value }))}
+              />
+            </label>
+            <label className="block text-xs font-medium text-neutral-700">
+              Missed check-in deduction
+              <input
+                type="number"
+                min={0}
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                value={fieldRatesForm.missedCheckInRwf}
+                onChange={(e) => setFieldRatesForm((f) => ({ ...f, missedCheckInRwf: e.target.value }))}
+              />
+            </label>
+            <label className="block text-xs font-medium text-neutral-700">
+              Missed feed deduction
+              <input
+                type="number"
+                min={0}
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                value={fieldRatesForm.missedFeedRwf}
+                onChange={(e) => setFieldRatesForm((f) => ({ ...f, missedFeedRwf: e.target.value }))}
+              />
+            </label>
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={fieldRatesBusy}
+              onClick={() => void saveFieldRates()}
+              className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Save rates
+            </button>
+            <button
+              type="button"
+              disabled={fieldRatesBusy}
+              onClick={() => void loadFieldRates()}
+              className="rounded-lg border border-neutral-300 bg-neutral-50 px-4 py-2 text-sm font-medium disabled:opacity-50"
+            >
+              Reload
+            </button>
+          </div>
+          {fieldRates ? (
+            <p className="mt-3 text-xs text-neutral-500">
+              Current: check-in {fieldRates.checkInRwf} · feed {fieldRates.feedRwf} · missed check-in −
+              {fieldRates.missedCheckInRwf} · missed feed −{fieldRates.missedFeedRwf}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
         <div>
