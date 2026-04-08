@@ -10,6 +10,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { API_BASE_URL } from "../../api/config";
+import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 
 export type CheckinBadge = "ok" | "upcoming" | "overdue";
 
@@ -29,6 +30,7 @@ export type CheckinStatus = {
   photosRequiredPerRound: number;
   bands: { untilDay: number; intervalHours: number }[];
   fcrCheckinHint?: { severity: string; message: string } | null;
+  feedToDateKg?: number | null;
 };
 
 function kigaliNowDate(): Date {
@@ -303,6 +305,23 @@ export function FarmCheckinPage() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {!pageLoading && !loadError && status ? (
+        <FlockContextStrip
+          label={status.label}
+          placementDate={status.placementDate}
+          ageDays={status.ageDays}
+          feedToDateKg={status.feedToDateKg}
+          footer={
+            <Link
+              to="/farm/feed"
+              className="text-xs font-semibold text-emerald-800 underline hover:text-emerald-950"
+            >
+              Log feed only (no photos)
+            </Link>
+          }
+        />
       ) : null}
 
       {!pageLoading && !loadError && status && <CheckinStatusBlock status={status} />}

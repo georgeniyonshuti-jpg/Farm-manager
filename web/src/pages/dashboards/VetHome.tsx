@@ -45,6 +45,7 @@ export function VetHome() {
   const navRound = useLaborerT("Round");
   const navMort = useLaborerT("Mortality");
   const navLog = useLaborerT("Log");
+  const navFeed = useLaborerT("Feed");
   const navHistory = useLaborerT("History");
   const navSchedule = useLaborerT("Schedule");
 
@@ -122,6 +123,7 @@ export function VetHome() {
     { to: "/dashboard/laborer", label: navHome },
     { to: "/farm/checkin", label: navRound },
     { to: "/farm/mortality-log", label: navMort },
+    { to: "/farm/feed", label: navFeed },
     { to: "/farm/daily-log", label: navLog },
     { to: "/farm/mortality", label: navHistory },
     { to: "/farm/batch-schedule", label: navSchedule },
@@ -190,7 +192,7 @@ export function VetHome() {
       </div>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border-color)] bg-white/95 px-2 py-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur sm:hidden">
-        <div className="grid grid-cols-6 gap-1">
+        <div className="grid grid-cols-7 gap-1">
           {bottomNav.map((item) => (
             <Link
               key={item.to}

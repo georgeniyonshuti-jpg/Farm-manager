@@ -5,6 +5,7 @@ import { readAuthHeaders } from "../../lib/authHeaders";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
+import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 
 export type FcrBroilerSnapshot = {
   fcrCumulative: number | null;
@@ -33,6 +34,8 @@ export function FlockFcrPage() {
   const { id } = useParams<{ id: string }>();
   const { token } = useAuth();
   const [label, setLabel] = useState<string | null>(null);
+  const [flockCode, setFlockCode] = useState<string | null>(null);
+  const [placementDate, setPlacementDate] = useState<string | null>(null);
   const [snap, setSnap] = useState<FcrBroilerSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -50,8 +53,12 @@ export function FlockFcrPage() {
       const sd = await sr.json();
       if (!fr.ok) throw new Error((fd as { error?: string }).error ?? "Flocks failed");
       if (!sr.ok) throw new Error((sd as { error?: string }).error ?? "FCR snapshot failed");
-      const f = ((fd.flocks as { id: string; label: string }[]) ?? []).find((x) => x.id === id);
+      const f = (
+        (fd.flocks as { id: string; label: string; code?: string | null; placementDate?: string }[]) ?? []
+      ).find((x) => x.id === id);
       setLabel(f?.label ?? null);
+      setFlockCode(f?.code ?? null);
+      setPlacementDate(f?.placementDate ?? null);
       setSnap(sd as FcrBroilerSnapshot);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
@@ -83,6 +90,24 @@ export function FlockFcrPage() {
           </Link>
         }
       />
+
+      {!loading && !error && snap ? (
+        <FlockContextStrip
+          label={label ?? "Flock"}
+          code={flockCode}
+          placementDate={placementDate ?? ""}
+          ageDays={snap.ageDays}
+          feedToDateKg={snap.feedToDateKg}
+          footer={
+            <Link
+              to="/farm/feed"
+              className="text-xs font-semibold text-emerald-800 underline hover:text-emerald-950"
+            >
+              Open feed log
+            </Link>
+          }
+        />
+      ) : null}
 
       {loading && <SkeletonList rows={2} />}
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
@@ -124,7 +149,8 @@ export function FlockFcrPage() {
             <p className="font-semibold text-neutral-900">Inputs used</p>
             <ul className="mt-2 space-y-1 text-neutral-600">
               <li>
-                Feed to date: <span className="font-medium text-neutral-900">{snap.feedToDateKg} kg</span> (from round check-ins)
+                Feed to date: <span className="font-medium text-neutral-900">{snap.feedToDateKg} kg</span> (round check-ins
+                + feed log)
               </li>
               <li>
                 Live birds (est.): <span className="font-medium text-neutral-900">{snap.birdsLiveEstimate}</span>

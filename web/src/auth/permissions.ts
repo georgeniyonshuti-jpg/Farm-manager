@@ -51,6 +51,7 @@ export type FarmNavItem = { to: string; label: string; end?: boolean };
 
 const FARM_CORE_FULL: FarmNavItem[] = [
   { to: "/farm/checkin", label: "Round check-in" },
+  { to: "/farm/feed", label: "Feed log" },
   { to: "/farm/mortality-log", label: "Log mortality" },
   { to: "/farm/daily-log", label: "Daily logs" },
   { to: "/farm/mortality", label: "Mortality tracking" },

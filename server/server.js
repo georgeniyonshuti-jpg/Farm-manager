@@ -11,7 +11,7 @@ import session from "express-session";
 import pgSession from "connect-pg-simple";
 import pg from "pg";
 import { runMigrations } from "./migrate.js";
-import { checkinSchema, dailyLogSchema, loginSchema } from "./utils/validation.js";
+import { checkinSchema, dailyLogSchema, feedEntrySchema, loginSchema } from "./utils/validation.js";
 
 // PROD-FIX: run migrations on boot without crashing API startup on failure
 runMigrations().then((result) => {
@@ -763,7 +763,52 @@ function initialTotalWeightKgForFlock(flock) {
 const roundCheckins = [];
 
 /** @type {Array<object>} */
+const flockFeedEntries = [];
+
+/** @type {Array<object>} */
 const mortalityEvents = [];
+
+function totalFeedKgForFlock(flockId, cutoffMs = Number.POSITIVE_INFINITY) {
+  const fid = String(flockId);
+  let s = 0;
+  for (const c of roundCheckins) {
+    if (String(c.flockId) !== fid) continue;
+    if (new Date(c.at).getTime() > cutoffMs) continue;
+    s += Number(c.feedKg) || 0;
+  }
+  for (const e of flockFeedEntries) {
+    if (String(e.flockId) !== fid) continue;
+    if (new Date(e.recordedAt).getTime() > cutoffMs) continue;
+    s += Number(e.feedKg) || 0;
+  }
+  return s;
+}
+
+async function syncFlockFeedEntriesFromDb() {
+  if (!hasDb()) return;
+  const r = await dbQuery(
+    `SELECT id::text AS id,
+            flock_id::text AS "flockId",
+            recorded_at AS "recordedAt",
+            feed_kg AS "feedKg",
+            COALESCE(notes, '') AS notes,
+            entered_by_user_id::text AS "enteredByUserId"
+       FROM flock_feed_entries
+       ORDER BY recorded_at ASC`
+  );
+  flockFeedEntries.length = 0;
+  for (const row of r.rows) {
+    const ra = row.recordedAt;
+    flockFeedEntries.push({
+      id: String(row.id),
+      flockId: String(row.flockId),
+      recordedAt: ra instanceof Date ? ra.toISOString() : String(ra),
+      feedKg: Number(row.feedKg) || 0,
+      notes: String(row.notes ?? ""),
+      enteredByUserId: String(row.enteredByUserId),
+    });
+  }
+}
 
 function normalizeBands(bands) {
   if (!Array.isArray(bands) || bands.length === 0) return null;
@@ -850,8 +895,10 @@ async function checkinStatusPayloadWithFcrHint(flockId) {
   if (!f) return null;
   const base = checkinStatusPayload(f);
   let fcrCheckinHint = null;
+  let feedToDateKg = null;
   try {
     const summary = await buildFlockPerformanceSummary(flockId);
+    if (summary?.feedToDateKg != null) feedToDateKg = summary.feedToDateKg;
     const b = summary?.fcrBroiler;
     if (
       b?.fcrCumulative != null &&
@@ -867,7 +914,10 @@ async function checkinStatusPayloadWithFcrHint(flockId) {
   } catch {
     /* optional */
   }
-  return { ...base, fcrCheckinHint };
+  if (feedToDateKg == null) {
+    feedToDateKg = Number(totalFeedKgForFlock(flockId).toFixed(2));
+  }
+  return { ...base, fcrCheckinHint, feedToDateKg };
 }
 
 function seedFlock() {
@@ -1099,6 +1149,7 @@ async function syncFlocksFromDbToMemory() {
   if (!hasDb()) return;
   const r = await dbQuery(
     `SELECT id::text AS id,
+            code AS "code",
             COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
             placement_date::text AS "placementDate",
             initial_count AS "initialCount",
@@ -1118,6 +1169,7 @@ async function syncFlocksFromDbToMemory() {
     flocksById.set(row.id, {
       ...prev,
       id: row.id,
+      code: row.code != null ? String(row.code) : (prev.code ?? null),
       label: String(row.label ?? `Flock ${String(row.id).slice(0, 8)}`),
       placementDate: String(row.placementDate ?? new Date().toISOString().slice(0, 10)),
       initialCount: Math.max(1, Number(row.initialCount ?? prev.initialCount ?? 1)),
@@ -1133,6 +1185,11 @@ async function syncFlocksFromDbToMemory() {
       targetSlaughterDayMax: prev.targetSlaughterDayMax ?? 50,
       status: String(row.status ?? "active"),
     });
+  }
+  try {
+    await syncFlockFeedEntriesFromDb();
+  } catch (e) {
+    console.error("[ERROR]", "[db] syncFlockFeedEntriesFromDb:", e instanceof Error ? e.message : e);
   }
 }
 
@@ -1187,6 +1244,13 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.cre
   let createdLabel = labelInput || `Flock ${createdId.slice(0, 8)}`;
   try {
     if (hasDb()) {
+      let codeForInsert = labelInput || null;
+      if (!codeForInsert) {
+        const cq = await dbQuery(
+          `SELECT 'FL-' || lpad(nextval('poultry_flock_code_seq')::text, 6, '0') AS code`
+        );
+        codeForInsert = String(cq.rows[0]?.code ?? "");
+      }
       const inserted = await dbQuery(
         `INSERT INTO poultry_flocks
           (breed_code, placement_date, initial_count, target_weight_kg, status, code)
@@ -1194,7 +1258,7 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.cre
          RETURNING id::text AS id,
                    COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
                    code`,
-        [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, status, labelInput || null]
+        [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, status, codeForInsert]
       );
       createdId = String(inserted.rows[0]?.id ?? createdId);
       createdCode = inserted.rows[0]?.code ?? null;
@@ -1350,6 +1414,87 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, async
     status: statusOut,
     payrollImpact,
   });
+});
+
+app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+  const flockId = String(req.params.id ?? "").trim();
+  const f = flocksById.get(flockId);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
+  const parsed = feedEntrySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid feed entry" });
+    return;
+  }
+  const { feedKg, notes } = parsed.data;
+  let atIso = new Date().toISOString();
+  const recRaw = parsed.data.recordedAt;
+  if (recRaw) {
+    const p = parseOptionalIsoDate(recRaw);
+    if (p) atIso = p;
+  }
+  let id = `ffe_${crypto.randomBytes(8).toString("hex")}`;
+  const row = {
+    id,
+    flockId: f.id,
+    recordedAt: atIso,
+    feedKg,
+    notes: notes ?? "",
+    enteredByUserId: req.authUser.id,
+  };
+  if (hasDb()) {
+    try {
+      const ins = await dbQuery(
+        `INSERT INTO flock_feed_entries (flock_id, recorded_at, feed_kg, notes, entered_by_user_id)
+         VALUES ($1::uuid, $2::timestamptz, $3::numeric, $4, $5::uuid)
+         RETURNING id::text AS id, recorded_at AS "recordedAt"`,
+        [f.id, atIso, feedKg, notes && String(notes).trim() ? String(notes).slice(0, 4000) : null, req.authUser.id]
+      );
+      const r0 = ins.rows[0];
+      id = String(r0?.id ?? id);
+      const ra = r0?.recordedAt;
+      row.id = id;
+      row.recordedAt = ra instanceof Date ? ra.toISOString() : String(ra ?? atIso);
+    } catch (e) {
+      console.error("[ERROR]", "[db] POST /api/flocks/:id/feed-entries:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not save feed entry." });
+      return;
+    }
+  }
+  flockFeedEntries.push(row);
+  appendAudit(req.authUser.id, req.authUser.role, "farm.feed_entry.create", "flock", f.id, {
+    feedEntryId: row.id,
+    feedKg,
+  });
+  const summary = await buildFlockPerformanceSummary(f.id);
+  res.json({
+    ok: true,
+    entry: { id: row.id, recordedAt: row.recordedAt, feedKg: row.feedKg, notes: row.notes },
+    feedToDateKg: summary?.feedToDateKg ?? Number(totalFeedKgForFlock(f.id).toFixed(2)),
+  });
+});
+
+app.get("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+  const flockId = String(req.params.id ?? "").trim();
+  const f = flocksById.get(flockId);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
+  const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 40));
+  const list = flockFeedEntries
+    .filter((e) => String(e.flockId) === flockId)
+    .sort((a, b) => (a.recordedAt < b.recordedAt ? 1 : -1))
+    .slice(0, limit)
+    .map((e) => ({
+      id: e.id,
+      recordedAt: e.recordedAt,
+      feedKg: e.feedKg,
+      notes: e.notes,
+    }));
+  res.json({ entries: list, feedToDateKg: Number(totalFeedKgForFlock(flockId).toFixed(2)) });
 });
 
 app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, (req, res) => {
@@ -1613,9 +1758,7 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
   const flock = flocksById.get(flockId);
   if (!flock) return null;
   const cutoffMs = atIso ? new Date(atIso).getTime() : Number.POSITIVE_INFINITY;
-  const feedToDate = roundCheckins
-    .filter((c) => c.flockId === flockId && new Date(c.at).getTime() <= cutoffMs)
-    .reduce((s, c) => s + (Number(c.feedKg) || 0), 0);
+  const feedToDate = totalFeedKgForFlock(flockId, cutoffMs);
   const mortalityToDate = mortalityEvents
     .filter((m) => m.flockId === flockId && new Date(m.at).getTime() <= cutoffMs)
     .reduce((s, m) => s + (Number(m.count) || 0), 0);
@@ -3278,9 +3421,7 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("fl
         };
       }
 
-      const feedToDate = roundCheckins
-        .filter((c) => c.flockId === String(f.id))
-        .reduce((s, c) => s + (Number(c.feedKg) || 0), 0);
+      const feedToDate = totalFeedKgForFlock(String(f.id));
 
       const broiler = computeBroilerFcrPack(mem, {
         feedToDate,

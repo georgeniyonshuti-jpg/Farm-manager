@@ -24,6 +24,7 @@ export function LaborerHome() {
   const linkCheckin = useLaborerT("Round check-in");
   const linkMort = useLaborerT("Log mortality");
   const linkDaily = useLaborerT("Daily log");
+  const linkFeed = useLaborerT("Feed log");
   const linkTable = useLaborerT("Mortality table");
   const linkInv = useLaborerT("Feed inventory");
   const linkEarnings = useLaborerT("My earnings");
@@ -122,6 +123,7 @@ export function LaborerHome() {
     { to: "/dashboard/laborer", label: navHome },
     { to: "/farm/checkin", label: navRound },
     { to: "/farm/mortality-log", label: navMort },
+    { to: "/farm/feed", label: linkFeed },
     { to: "/farm/daily-log", label: navLog },
     { to: "/farm/mortality", label: navHistory },
     { to: "/farm/inventory", label: navStock },
@@ -166,6 +168,12 @@ export function LaborerHome() {
           {linkMort}
         </Link>
         <Link
+          to="/farm/feed"
+          className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-white px-4 text-lg font-medium text-neutral-900 hover:bg-[var(--primary-color-soft)]"
+        >
+          {linkFeed}
+        </Link>
+        <Link
           to="/farm/daily-log"
           className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-white px-4 text-lg font-medium text-neutral-900 hover:bg-[var(--primary-color-soft)]"
         >
@@ -192,7 +200,7 @@ export function LaborerHome() {
       </div>
 
       <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border-color)] bg-white/95 px-2 py-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur sm:hidden">
-        <div className="grid grid-cols-6 gap-1">
+        <div className="grid grid-cols-7 gap-1">
           {bottomNav.map((item) => (
             <Link
               key={item.to}

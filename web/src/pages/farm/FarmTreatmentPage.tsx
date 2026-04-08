@@ -5,8 +5,10 @@ import { readAuthHeaders, jsonAuthHeaders } from "../../lib/authHeaders";
 import { API_BASE_URL } from "../../api/config";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
+import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
+import type { CheckinStatus } from "./FarmCheckinPage";
 
-type Flock = { id: string; label: string };
+type Flock = { id: string; label: string; code?: string | null };
 type Medicine = {
   id: string;
   name: string;
@@ -119,6 +121,30 @@ export function FarmTreatmentPage() {
     notes: "",
   });
   const [tab, setTab] = useState<MedTab>("treatments");
+  const [flockStrip, setFlockStrip] = useState<CheckinStatus | null>(null);
+
+  useEffect(() => {
+    if (!flockId || !token) {
+      setFlockStrip(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/checkin-status`, {
+          headers: readAuthHeaders(token),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error((d as { error?: string }).error ?? "status");
+        if (!cancelled) setFlockStrip(d as CheckinStatus);
+      } catch {
+        if (!cancelled) setFlockStrip(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [flockId, token]);
 
   const preset = useMemo(() => ({
     set7d: () => {
@@ -329,6 +355,15 @@ export function FarmTreatmentPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader title="Medicine tracking" subtitle="Record treatments and withdrawal windows by flock." />
+      {!loading && flockStrip ? (
+        <FlockContextStrip
+          label={flockStrip.label}
+          code={flocks.find((x) => x.id === flockId)?.code}
+          placementDate={flockStrip.placementDate}
+          ageDays={flockStrip.ageDays}
+          feedToDateKg={flockStrip.feedToDateKg}
+        />
+      ) : null}
       {loading && <SkeletonList rows={3} />}
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
       {!loading && !error ? (

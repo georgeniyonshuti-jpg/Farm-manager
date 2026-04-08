@@ -11,6 +11,7 @@ import { LaborerHome } from "./pages/dashboards/LaborerHome";
 import { VetHome } from "./pages/dashboards/VetHome";
 import { ManagementHome } from "./pages/dashboards/ManagementHome";
 import { FarmDailyLogPage } from "./pages/farm/FarmDailyLogPage";
+import { FarmFeedPage } from "./pages/farm/FarmFeedPage";
 import { FarmInventoryPage } from "./pages/farm/FarmInventoryPage";
 import { FarmCheckinPage } from "./pages/farm/FarmCheckinPage";
 import { FarmMortalityLogPage } from "./pages/farm/FarmMortalityLogPage";
@@ -153,6 +154,14 @@ export default function App() {
                   element={
                     <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
                       <FarmDailyLogPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="feed"
+                  element={
+                    <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+                      <FarmFeedPage />
                     </ProtectedRoute>
                   }
                 />
