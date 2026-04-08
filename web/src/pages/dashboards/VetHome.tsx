@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { readAuthHeaders } from "../../lib/authHeaders";
@@ -7,6 +7,7 @@ import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { PageHeader } from "../../components/PageHeader";
 import { API_BASE_URL } from "../../api/config";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
+import { useHubAggregatePoll } from "../../hooks/useHubAggregatePoll";
 
 export function VetHome() {
   const { token } = useAuth();
@@ -90,11 +91,7 @@ export function VetHome() {
     }
   }, [token]);
 
-  useEffect(() => {
-    void load();
-    const id = window.setInterval(() => void load(), 15000);
-    return () => window.clearInterval(id);
-  }, [load]);
+  useHubAggregatePoll(load);
 
   const roundBanner = useMemo((): { tone: string; text: string } | null => {
     if (loading) return { tone: "bg-neutral-200 text-neutral-700", text: tLoadingBanner };

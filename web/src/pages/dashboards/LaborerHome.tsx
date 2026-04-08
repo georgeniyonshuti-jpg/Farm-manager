@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { readAuthHeaders } from "../../lib/authHeaders";
@@ -8,6 +8,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
+import { useHubAggregatePoll } from "../../hooks/useHubAggregatePoll";
 
 export function LaborerHome() {
   const { token, user } = useAuth();
@@ -89,11 +90,7 @@ export function LaborerHome() {
     }
   }, [token]);
 
-  useEffect(() => {
-    void load();
-    const t = window.setInterval(() => void load(), 15_000);
-    return () => window.clearInterval(t);
-  }, [load]);
+  useHubAggregatePoll(load);
 
   const roundBanner = useMemo((): { tone: string; text: string } | null => {
     if (loading) return { tone: "bg-neutral-200 text-neutral-700", text: tLoadingBanner };
