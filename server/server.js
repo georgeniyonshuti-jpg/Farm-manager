@@ -1223,7 +1223,6 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.cre
   const placementDate = /^\d{4}-\d{2}-\d{2}$/.test(placementDateRaw) ? placementDateRaw : "";
   const initialCount = Number(body.initialCount);
   const breedCode = String(body.breedCode ?? "").trim().toLowerCase();
-  const labelInput = String(body.label ?? "").trim();
   const statusInput = String(body.status ?? "active").trim().toLowerCase();
   const targetWeightKgRaw = body.targetWeightKg;
   const targetWeightKg =
@@ -1240,17 +1239,14 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.cre
   const status = statusInput === "planned" ? "planned" : "active";
 
   let createdId = `flk_${crypto.randomBytes(6).toString("hex")}`;
-  let createdCode = null;
-  let createdLabel = labelInput || `Flock ${createdId.slice(0, 8)}`;
+  let createdCode = `FL-MEM-${createdId.slice(4)}`;
+  let createdLabel = createdCode;
   try {
     if (hasDb()) {
-      let codeForInsert = labelInput || null;
-      if (!codeForInsert) {
-        const cq = await dbQuery(
-          `SELECT 'FL-' || lpad(nextval('poultry_flock_code_seq')::text, 6, '0') AS code`
-        );
-        codeForInsert = String(cq.rows[0]?.code ?? "");
-      }
+      const cq = await dbQuery(
+        `SELECT 'FL-' || lpad(nextval('poultry_flock_code_seq')::text, 6, '0') AS code`
+      );
+      const codeForInsert = String(cq.rows[0]?.code ?? "");
       const inserted = await dbQuery(
         `INSERT INTO poultry_flocks
           (breed_code, placement_date, initial_count, target_weight_kg, status, code)
@@ -1261,13 +1257,13 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.cre
         [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, status, codeForInsert]
       );
       createdId = String(inserted.rows[0]?.id ?? createdId);
-      createdCode = inserted.rows[0]?.code ?? null;
-      createdLabel = String(inserted.rows[0]?.label ?? createdLabel);
+      createdCode = inserted.rows[0]?.code != null ? String(inserted.rows[0].code) : codeForInsert;
+      createdLabel = String(inserted.rows[0]?.label ?? createdCode);
     }
     const flockRow = {
       id: createdId,
       label: createdLabel,
-      code: createdCode ?? (labelInput || null),
+      code: createdCode,
       placementDate,
       initialCount: Math.floor(initialCount),
       breedCode,

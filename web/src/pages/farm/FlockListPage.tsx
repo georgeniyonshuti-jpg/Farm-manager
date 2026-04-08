@@ -68,7 +68,6 @@ export function FlockListPage() {
   const [farmHealthScore, setFarmHealthScore] = useState<number | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
   const [createForm, setCreateForm] = useState({
-    label: "",
     placementDate: new Date().toISOString().slice(0, 10),
     initialCount: "",
     breedCode: "generic_broiler",
@@ -233,7 +232,6 @@ export function FlockListPage() {
         method: "POST",
         headers: jsonAuthHeaders(token),
         body: JSON.stringify({
-          label: createForm.label.trim() || null,
           placementDate: createForm.placementDate,
           initialCount: Number(createForm.initialCount),
           breedCode: createForm.breedCode.trim().toLowerCase(),
@@ -243,8 +241,10 @@ export function FlockListPage() {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Failed to create flock");
-      showToast("success", "Flock added");
-      setCreateForm((prev) => ({ ...prev, label: "", initialCount: "", targetWeightKg: "" }));
+      const created = d as { flock?: { label?: string; code?: string | null } };
+      const name = created.flock?.label ?? created.flock?.code ?? "Flock";
+      showToast("success", `Flock ${name} added`);
+      setCreateForm((prev) => ({ ...prev, initialCount: "", targetWeightKg: "" }));
       await load();
     } catch (e2) {
       showToast("error", e2 instanceof Error ? e2.message : "Failed to create flock");
@@ -279,13 +279,8 @@ export function FlockListPage() {
       {canCreateFlock ? (
         <form onSubmit={(e) => void submitCreateFlock(e)} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
           <p className="text-sm font-semibold text-neutral-900">Add purchased flock</p>
-          <div className="mt-3 grid gap-2 sm:grid-cols-5">
-            <input
-              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-              placeholder="Label (optional)"
-              value={createForm.label}
-              onChange={(e) => setCreateForm((v) => ({ ...v, label: e.target.value }))}
-            />
+          <p className="mt-1 text-xs text-neutral-600">The system assigns a unique flock name (e.g. FL-000042).</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-4">
             <input
               className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
               type="date"
