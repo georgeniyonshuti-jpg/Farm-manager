@@ -13,22 +13,9 @@ import { useToast } from "../../components/Toast";
 import { API_BASE_URL } from "../../api/config";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
-import type { CheckinBadge, CheckinStatus } from "./checkinStatusTypes";
+import type { CheckinStatus } from "./checkinStatusTypes";
 
 export type { CheckinBadge, CheckinStatus } from "./checkinStatusTypes";
-
-function kigaliNowDate(): Date {
-  const asKigali = new Date(
-    new Date().toLocaleString("en-US", { timeZone: "Africa/Kigali" })
-  );
-  return asKigali;
-}
-
-function computeLiveOverdue(status: CheckinStatus): boolean {
-  const nextDue = new Date(status.nextDueAt);
-  const now = kigaliNowDate();
-  return now.getTime() > nextDue.getTime();
-}
 
 function formatDurationMs(ms: number): string {
   const abs = Math.max(0, Math.floor(ms / 1000));
@@ -46,9 +33,12 @@ function TranslatedFlockName({ name }: { name: string }) {
 export function CheckinStatusBlock({
   status,
   showWarning = true,
+  otherOverdueCount = 0,
 }: {
   status: CheckinStatus;
   showWarning?: boolean;
+  /** Other flocks (besides this card) that are overdue — multi-flock hint only. */
+  otherOverdueCount?: number;
 }) {
   const onSiteLine = useLaborerT(
     `Day ${status.ageDays} on-site • target harvest ~days ${status.targetSlaughterDays.min}–${status.targetSlaughterDays.max}`
@@ -61,24 +51,20 @@ export function CheckinStatusBlock({
   const nextDueLbl = useLaborerT("Next due:");
   const overdueMsg = useLaborerT("Overdue — please complete check-in as soon as possible.");
   const onTrackMsg = useLaborerT("You are on track.");
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const id = window.setInterval(() => setTick((x) => x + 1), 15000);
-    return () => window.clearInterval(id);
-  }, []);
-  void tick;
-  const liveIsOverdue = computeLiveOverdue(status);
-  const liveBadge: CheckinBadge = liveIsOverdue ? "overdue" : status.checkinBadge;
-  const now = kigaliNowDate();
+  const otherFlocksOverdue = useLaborerT("other flock(s) are also overdue.");
   const nextDueMs = new Date(status.nextDueAt).getTime();
-  const deltaMs = nextDueMs - now.getTime();
+  const remainingMs = Math.max(0, nextDueMs - Date.now());
   return (
     <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <TranslatedFlockName name={status.label} />
-        {/* FIX: age-based schedule urgency badge */}
-        <CheckinUrgencyBadge badge={liveBadge} />
+        <CheckinUrgencyBadge badge={status.checkinBadge} />
       </div>
+      {otherOverdueCount > 0 ? (
+        <p className="mt-2 text-xs font-medium text-amber-900">
+          +{otherOverdueCount} <TranslatedText text={otherFlocksOverdue} />
+        </p>
+      ) : null}
       <p className="mt-1 text-xs text-neutral-600">{onSiteLine}</p>
       <p className="mt-2 text-sm text-neutral-800">{policyLine}</p>
       <p className="mt-1 text-sm">
@@ -88,13 +74,13 @@ export function CheckinStatusBlock({
         </time>
       </p>
       {showWarning ? (
-        liveIsOverdue ? (
+        status.isOverdue ? (
           <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-900">
-            {overdueMsg} ({formatDurationMs(Math.abs(deltaMs))})
+            {overdueMsg} ({formatDurationMs(status.overdueMs)})
           </p>
         ) : (
           <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900">
-            {onTrackMsg} ({formatDurationMs(deltaMs)} remaining)
+            {onTrackMsg} ({formatDurationMs(remainingMs)} remaining)
           </p>
         )
       ) : null}

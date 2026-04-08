@@ -8,17 +8,12 @@ import { PageHeader } from "../../components/PageHeader";
 import { API_BASE_URL } from "../../api/config";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 
-function kigaliNowDate(): Date {
-  return new Date(new Date().toLocaleString("en-US", { timeZone: "Africa/Kigali" }));
-}
-
 export function VetHome() {
   const { token } = useAuth();
   const [status, setStatus] = useState<CheckinStatus | null>(null);
   const [primaryFlockId, setPrimaryFlockId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tick, setTick] = useState(0);
 
   const hTitle = useLaborerT("Vet hub");
   const hSub = useLaborerT("Track rounds, flock health, and urgent work.");
@@ -40,6 +35,7 @@ export function VetHome() {
   const tOnTrack = useLaborerT("You are on track.");
   const tAbout = useLaborerT("About");
   const tUntilNext = useLaborerT("minutes until the next round.");
+  const tMultiFlockBanner = useLaborerT("flocks need check-in — details below for the most overdue.");
   const tRetry = useLaborerT("Try again");
   const navHome = useLaborerT("Home");
   const navRound = useLaborerT("Round");
@@ -52,6 +48,7 @@ export function VetHome() {
 
   const [bannerSummary, setBannerSummary] = useState<{
     anyOverdue: boolean;
+    overdueCount: number;
     maxOverdueMinutes: number;
     overdueLabels: string[];
     minutesUntilSoonestNext: number | null;
@@ -71,8 +68,13 @@ export function VetHome() {
       setStatus(primary ?? null);
       const s = ad.summary;
       if (s) {
+        let overdueCount = Number(s.overdueCount);
+        if (!Number.isFinite(overdueCount)) {
+          overdueCount = s.anyOverdue ? Math.max(1, Array.isArray(s.overdueLabels) ? s.overdueLabels.length : 1) : 0;
+        }
         setBannerSummary({
           anyOverdue: Boolean(s.anyOverdue),
+          overdueCount,
           maxOverdueMinutes: Number(s.maxOverdueMinutes) || 0,
           overdueLabels: Array.isArray(s.overdueLabels) ? s.overdueLabels.map(String) : [],
           minutesUntilSoonestNext: s.minutesUntilSoonestNext != null ? Number(s.minutesUntilSoonestNext) : null,
@@ -94,17 +96,20 @@ export function VetHome() {
     return () => window.clearInterval(id);
   }, [load]);
 
-  useEffect(() => {
-    const id = window.setInterval(() => setTick((x) => x + 1), 15000);
-    return () => window.clearInterval(id);
-  }, []);
-
-  const roundBanner = useMemo(() => {
+  const roundBanner = useMemo((): { tone: string; text: string } | null => {
     if (loading) return { tone: "bg-neutral-200 text-neutral-700", text: tLoadingBanner };
     if (loadError) return { tone: "bg-red-100 text-red-800", text: tErrBanner };
     if (!status && !bannerSummary) return { tone: "bg-amber-100 text-amber-900", text: tNoScheduleBanner };
-    void tick;
-    if (bannerSummary?.anyOverdue) {
+    if (bannerSummary?.anyOverdue && status) {
+      if (bannerSummary.overdueCount > 1) {
+        return {
+          tone: "bg-amber-100 text-amber-950",
+          text: `${bannerSummary.overdueCount} ${tMultiFlockBanner}`,
+        };
+      }
+      return null;
+    }
+    if (bannerSummary?.anyOverdue && !status) {
       const mins = Math.max(1, bannerSummary.maxOverdueMinutes);
       const extra =
         bannerSummary.overdueLabels.length > 0
@@ -128,7 +133,7 @@ export function VetHome() {
       };
     }
     if (!status) return { tone: "bg-amber-100 text-amber-900", text: tNoScheduleBanner };
-    const now = kigaliNowDate().getTime();
+    const now = Date.now();
     const next = new Date(status.nextDueAt).getTime();
     if (now > next) {
       const mins = Math.floor((now - next) / 60000);
@@ -147,7 +152,6 @@ export function VetHome() {
     loadError,
     status,
     bannerSummary,
-    tick,
     tLoadingBanner,
     tErrBanner,
     tNoScheduleBanner,
@@ -156,7 +160,11 @@ export function VetHome() {
     tOnTrack,
     tAbout,
     tUntilNext,
+    tMultiFlockBanner,
   ]);
+
+  const otherOverdueCount =
+    status && bannerSummary?.anyOverdue ? Math.max(0, bannerSummary.overdueCount - 1) : 0;
 
   const bottomNav: Array<{ to: string; label: string }> = [
     { to: "/dashboard/vet", label: navHome },
@@ -170,9 +178,11 @@ export function VetHome() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <div className={`rounded-xl px-4 py-3 text-sm font-semibold leading-6 ${roundBanner.tone}`}>
-        {roundBanner.text}
-      </div>
+      {roundBanner ? (
+        <div className={`rounded-xl px-4 py-3 text-sm font-semibold leading-6 ${roundBanner.tone}`}>
+          {roundBanner.text}
+        </div>
+      ) : null}
       <PageHeader
         className="mb-3 gap-3"
         title={hTitle}
@@ -203,7 +213,9 @@ export function VetHome() {
           onRetry={() => void load()}
         />
       ) : null}
-      {!loading && !loadError && status ? <CheckinStatusBlock status={status} showWarning={false} /> : null}
+      {!loading && !loadError && status ? (
+        <CheckinStatusBlock status={status} showWarning={false} otherOverdueCount={otherOverdueCount} />
+      ) : null}
 
       <div className="grid gap-4">
         <section className="app-surface p-4">

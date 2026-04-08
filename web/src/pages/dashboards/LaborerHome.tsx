@@ -9,10 +9,6 @@ import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 
-function kigaliNowDate(): Date {
-  return new Date(new Date().toLocaleString("en-US", { timeZone: "Africa/Kigali" }));
-}
-
 export function LaborerHome() {
   const { token, user } = useAuth();
   const isJuniorVet = user?.role === "vet" || user?.departmentKeys.includes("junior_vet");
@@ -38,6 +34,7 @@ export function LaborerHome() {
   const tOnTrack = useLaborerT("You are on track.");
   const tAbout = useLaborerT("About");
   const tUntilNext = useLaborerT("minutes until the next round.");
+  const tMultiFlockBanner = useLaborerT("flocks need check-in — details below for the most overdue.");
   const tRetry = useLaborerT("Try again");
   const navHome = useLaborerT("Home");
   const navRound = useLaborerT("Round");
@@ -52,6 +49,7 @@ export function LaborerHome() {
 
   const [bannerSummary, setBannerSummary] = useState<{
     anyOverdue: boolean;
+    overdueCount: number;
     maxOverdueMinutes: number;
     overdueLabels: string[];
     minutesUntilSoonestNext: number | null;
@@ -69,8 +67,13 @@ export function LaborerHome() {
       setStatus(primary ?? null);
       const s = ad.summary;
       if (s) {
+        let overdueCount = Number(s.overdueCount);
+        if (!Number.isFinite(overdueCount)) {
+          overdueCount = s.anyOverdue ? Math.max(1, Array.isArray(s.overdueLabels) ? s.overdueLabels.length : 1) : 0;
+        }
         setBannerSummary({
           anyOverdue: Boolean(s.anyOverdue),
+          overdueCount,
           maxOverdueMinutes: Number(s.maxOverdueMinutes) || 0,
           overdueLabels: Array.isArray(s.overdueLabels) ? s.overdueLabels.map(String) : [],
           minutesUntilSoonestNext: s.minutesUntilSoonestNext != null ? Number(s.minutesUntilSoonestNext) : null,
@@ -92,18 +95,20 @@ export function LaborerHome() {
     return () => window.clearInterval(t);
   }, [load]);
 
-  const [clockTick, setClockTick] = useState(0);
-  useEffect(() => {
-    const t = window.setInterval(() => setClockTick((x) => x + 1), 15000);
-    return () => window.clearInterval(t);
-  }, []);
-
-  const roundBanner = useMemo(() => {
+  const roundBanner = useMemo((): { tone: string; text: string } | null => {
     if (loading) return { tone: "bg-neutral-200 text-neutral-700", text: tLoadingBanner };
     if (loadError) return { tone: "bg-red-100 text-red-800", text: tErrBanner };
     if (!status && !bannerSummary) return { tone: "bg-amber-100 text-amber-900", text: tNoScheduleBanner };
-    void clockTick;
-    if (bannerSummary?.anyOverdue) {
+    if (bannerSummary?.anyOverdue && status) {
+      if (bannerSummary.overdueCount > 1) {
+        return {
+          tone: "bg-amber-100 text-amber-950",
+          text: `${bannerSummary.overdueCount} ${tMultiFlockBanner}`,
+        };
+      }
+      return null;
+    }
+    if (bannerSummary?.anyOverdue && !status) {
       const mins = Math.max(1, bannerSummary.maxOverdueMinutes);
       const extra =
         bannerSummary.overdueLabels.length > 0
@@ -127,7 +132,7 @@ export function LaborerHome() {
       };
     }
     if (!status) return { tone: "bg-amber-100 text-amber-900", text: tNoScheduleBanner };
-    const now = kigaliNowDate().getTime();
+    const now = Date.now();
     const next = new Date(status.nextDueAt).getTime();
     if (now > next) {
       const mins = Math.floor((now - next) / 60000);
@@ -146,7 +151,6 @@ export function LaborerHome() {
     loadError,
     status,
     bannerSummary,
-    clockTick,
     tLoadingBanner,
     tErrBanner,
     tNoScheduleBanner,
@@ -155,7 +159,11 @@ export function LaborerHome() {
     tOnTrack,
     tAbout,
     tUntilNext,
+    tMultiFlockBanner,
   ]);
+
+  const otherOverdueCount =
+    status && bannerSummary?.anyOverdue ? Math.max(0, bannerSummary.overdueCount - 1) : 0;
 
   const bottomNav: Array<{ to: string; label: string }> = [
     { to: "/dashboard/laborer", label: navHome },
@@ -169,9 +177,11 @@ export function LaborerHome() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <div className={`rounded-xl px-4 py-3 text-sm font-semibold leading-6 ${roundBanner.tone}`}>
-        {roundBanner.text}
-      </div>
+      {roundBanner ? (
+        <div className={`rounded-xl px-4 py-3 text-sm font-semibold leading-6 ${roundBanner.tone}`}>
+          {roundBanner.text}
+        </div>
+      ) : null}
       <PageHeader
         className="mb-3 gap-3"
         title={isJuniorVet ? hTitleJunior : hTitleLaborer}
@@ -187,7 +197,9 @@ export function LaborerHome() {
         />
       )}
 
-      {!loading && !loadError && status && <CheckinStatusBlock status={status} showWarning={false} />}
+      {!loading && !loadError && status ? (
+        <CheckinStatusBlock status={status} showWarning={false} otherOverdueCount={otherOverdueCount} />
+      ) : null}
       {!loading && !loadError && !status ? (
         <EmptyState title={noFlockTitle} description={noFlockBody} />
       ) : null}

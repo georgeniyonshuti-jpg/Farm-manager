@@ -1787,6 +1787,7 @@ app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requ
   });
 
   let anyOverdue = false;
+  let overdueCount = 0;
   let maxOverdueMinutes = 0;
   const overdueLabels = [];
   let soonestNextMs = Infinity;
@@ -1797,6 +1798,7 @@ app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requ
   for (const { flockId, label, status } of perFlock) {
     if (status.isOverdue) {
       anyOverdue = true;
+      overdueCount += 1;
       const mins = Math.floor(status.overdueMs / 60000);
       if (mins >= maxOverdueMinutes) {
         maxOverdueMinutes = mins;
@@ -1821,6 +1823,7 @@ app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requ
 
   const summary = {
     anyOverdue,
+    overdueCount,
     maxOverdueMinutes,
     overdueLabels,
     minutesUntilSoonestNext:
