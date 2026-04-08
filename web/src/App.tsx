@@ -31,6 +31,7 @@ import { VersionBadge } from "./components/VersionBadge";
 import { SystemStatus } from "./components/SystemStatus";
 import { FarmTreatmentPage } from "./pages/farm/FarmTreatmentPage";
 import { FarmSlaughterPage } from "./pages/farm/FarmSlaughterPage";
+import { FARM_FIELD_OPS_ROLES } from "./auth/permissions";
 
 export default function App() {
   return (
@@ -109,10 +110,38 @@ export default function App() {
                     </ProtectedRoute>
                   }
                 />
-                <Route path="checkin" element={<FarmCheckinPage />} />
-                <Route path="mortality-log" element={<FarmMortalityLogPage />} />
-                <Route path="daily-log" element={<FarmDailyLogPage />} />
-                <Route path="mortality" element={<FarmMortalityPage />} />
+                <Route
+                  path="checkin"
+                  element={
+                    <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+                      <FarmCheckinPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="mortality-log"
+                  element={
+                    <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+                      <FarmMortalityLogPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="daily-log"
+                  element={
+                    <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+                      <FarmDailyLogPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="mortality"
+                  element={
+                    <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+                      <FarmMortalityPage />
+                    </ProtectedRoute>
+                  }
+                />
                 <Route path="inventory" element={<FarmInventoryPage />} />
                 <Route
                   path="treatments"

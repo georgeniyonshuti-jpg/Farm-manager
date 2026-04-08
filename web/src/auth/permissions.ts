@@ -32,6 +32,42 @@ export function canAccessWorkspace(user: SessionUser | null, workspace: ActiveWo
   return a === workspace;
 }
 
+/** Roles that may use field-ops farm routes (check-in, mortality log, daily log, mortality table). */
+export const FARM_FIELD_OPS_ROLES: UserRole[] = [
+  "laborer",
+  "dispatcher",
+  "vet",
+  "vet_manager",
+  "manager",
+  "superuser",
+];
+
+export function farmFieldOpsNavEligible(user: SessionUser | null): boolean {
+  if (!user) return false;
+  return FARM_FIELD_OPS_ROLES.includes(user.role);
+}
+
+export type FarmNavItem = { to: string; label: string; end?: boolean };
+
+const FARM_CORE_FULL: FarmNavItem[] = [
+  { to: "/farm/checkin", label: "Round check-in" },
+  { to: "/farm/mortality-log", label: "Log mortality" },
+  { to: "/farm/daily-log", label: "Daily logs" },
+  { to: "/farm/mortality", label: "Mortality tracking" },
+  { to: "/farm/inventory", label: "Feed inventory" },
+];
+
+/**
+ * Core farm sidebar links (before clinical/workforce extras).
+ * Office roles: procurement sees inventory only; sales/investor see none here (flocks etc. stay in extras).
+ */
+export function farmCoreNavItems(user: SessionUser | null): FarmNavItem[] {
+  if (!user || !canAccessWorkspace(user, "farm")) return [];
+  if (farmFieldOpsNavEligible(user)) return [...FARM_CORE_FULL];
+  if (user.role === "procurement_officer") return [{ to: "/farm/inventory", label: "Feed inventory" }];
+  return [];
+}
+
 /** Effective workspace: null if user has no access */
 export function defaultWorkspaceForUser(user: SessionUser | null): ActiveWorkspace | null {
   if (!user) return null;

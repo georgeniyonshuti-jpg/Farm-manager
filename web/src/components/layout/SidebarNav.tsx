@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { useMemo, useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
-import { canFlockAction, hasPermission } from "../../auth/permissions";
+import { canFlockAction, farmCoreNavItems, hasPermission } from "../../auth/permissions";
 import { canEditFlockScheduleRole } from "../../farm/scheduleAccess";
 import { useLaborerT } from "../../i18n/laborerI18n";
 
@@ -12,14 +12,6 @@ function NavText({ text }: { text: string }) {
 
 type NavItem = { to: string; label: string; end?: boolean };
 type Props = { onNavigate?: () => void };
-
-const FARM_NAV_BASE: NavItem[] = [
-  { to: "/farm/checkin", label: "Round check-in" },
-  { to: "/farm/mortality-log", label: "Log mortality" },
-  { to: "/farm/daily-log", label: "Daily logs" },
-  { to: "/farm/mortality", label: "Mortality tracking" },
-  { to: "/farm/inventory", label: "Feed inventory" },
-];
 
 const CLEVA_NAV: NavItem[] = [
   { to: "/cleva/portfolio", label: "Portfolio analytics", end: true },
@@ -98,7 +90,8 @@ export function SidebarNav({ onNavigate }: Props) {
     treatmentNavItem,
     slaughterNavItem,
   ].filter(Boolean) as NavItem[];
-  const farmNav = farmExtras.length ? [...FARM_NAV_BASE, ...farmExtras] : FARM_NAV_BASE;
+  const farmCore = farmCoreNavItems(user);
+  const farmNav = [...farmCore, ...farmExtras];
   const nav = activeWorkspace === "farm" ? farmNav : clevaNav;
 
   const dashLink =
@@ -111,14 +104,14 @@ export function SidebarNav({ onNavigate }: Props) {
   const adminLink =
     user.role === "superuser" ? { to: "/admin/users", label: "User management" } : null;
 
-  const groupedFarmNav = useMemo(
-    () => ({
-      core: FARM_NAV_BASE,
+  const groupedFarmNav = useMemo(() => {
+    const core = farmCoreNavItems(user);
+    return {
+      core,
       clinical: farmNav.filter((i) => ["/farm/flocks", "/farm/batch-schedule", "/farm/treatments", "/farm/slaughter"].includes(i.to)),
       workforce: farmNav.filter((i) => ["/farm/schedule-settings", "/farm/payroll", "/laborer/earnings"].includes(i.to)),
-    }),
-    [farmNav]
-  );
+    };
+  }, [user, farmNav]);
 
   function toggleGroup(id: "core" | "clinical" | "workforce") {
     setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
