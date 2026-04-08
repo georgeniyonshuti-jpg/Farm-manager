@@ -1204,6 +1204,16 @@ app.post("/api/laborer/translate", requireAuth, requireLaborer, async (req, res)
   res.json({ translation: out.translation, usedGemini: out.usedGemini, cached: Boolean(out.cached) });
 });
 
+async function ensurePoultryFlockCodeSequence() {
+  if (!hasDb()) return;
+  try {
+    await dbQuery("CREATE SEQUENCE IF NOT EXISTS poultry_flock_code_seq");
+  } catch (e) {
+    console.error("[ERROR]", "[db] ensurePoultryFlockCodeSequence:", e instanceof Error ? e.message : e);
+    throw e;
+  }
+}
+
 async function syncFlocksFromDbToMemory() {
   if (!hasDb()) return;
   const r = await dbQuery(
@@ -1306,21 +1316,19 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.cre
   let createdLabel = createdCode;
   try {
     if (hasDb()) {
-      const cq = await dbQuery(
-        `SELECT 'FL-' || lpad(nextval('poultry_flock_code_seq')::text, 6, '0') AS code`
-      );
-      const codeForInsert = String(cq.rows[0]?.code ?? "");
+      await ensurePoultryFlockCodeSequence();
       const inserted = await dbQuery(
         `INSERT INTO poultry_flocks
           (breed_code, placement_date, initial_count, target_weight_kg, status, code)
-         VALUES ($1, $2::date, $3, $4, $5, $6)
+         VALUES ($1, $2::date, $3, $4, $5,
+                 'FL-' || lpad(nextval('poultry_flock_code_seq')::text, 6, '0'))
          RETURNING id::text AS id,
                    COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
                    code`,
-        [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, status, codeForInsert]
+        [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, status]
       );
       createdId = String(inserted.rows[0]?.id ?? createdId);
-      createdCode = inserted.rows[0]?.code != null ? String(inserted.rows[0].code) : codeForInsert;
+      createdCode = inserted.rows[0]?.code != null ? String(inserted.rows[0].code) : createdCode;
       createdLabel = String(inserted.rows[0]?.label ?? createdCode);
     }
     const flockRow = {
@@ -1347,8 +1355,13 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.cre
     });
     res.status(201).json({ flock: flockRow });
   } catch (e) {
-    console.error("[ERROR]", "[db] POST /api/flocks:", e instanceof Error ? e.message : e);
-    res.status(503).json({ error: "Unable to create flock right now." });
+    const msg = e instanceof Error ? e.message : String(e);
+    const pgCode = typeof e === "object" && e && "code" in e ? String(e.code) : "";
+    console.error("[ERROR]", "[db] POST /api/flocks:", msg, pgCode ? `(pg: ${pgCode})` : "");
+    res.status(503).json({
+      error: "Unable to create flock right now.",
+      ...(process.env.NODE_ENV !== "production" ? { detail: msg, pgCode: pgCode || undefined } : {}),
+    });
   }
 });
 

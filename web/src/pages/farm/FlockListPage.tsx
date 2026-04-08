@@ -248,7 +248,11 @@ export function FlockListPage() {
         }),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Failed to create flock");
+      if (!r.ok) {
+        const err = (d as { error?: string; detail?: string }).error ?? "Failed to create flock";
+        const detail = (d as { detail?: string }).detail;
+        throw new Error(detail ? `${err} — ${detail}` : err);
+      }
       const created = d as { flock?: { label?: string; code?: string | null } };
       const name = created.flock?.label ?? created.flock?.code ?? "Flock";
       showToast("success", `Flock ${name} added`);
