@@ -3,7 +3,7 @@ import { PermissionGuard } from "../../components/PermissionGuard";
 
 export function ManagementHome() {
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-7xl space-y-6">
       <PageHeader
         title="Command center"
         subtitle="Cross-unit KPIs — Clevafarm operations and finance (subject to permissions)."

@@ -297,7 +297,7 @@ export function FarmTreatmentPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
+    <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader title="Medicine tracking" subtitle="Record treatments and withdrawal windows by flock." />
       {loading && <SkeletonList rows={3} />}
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}

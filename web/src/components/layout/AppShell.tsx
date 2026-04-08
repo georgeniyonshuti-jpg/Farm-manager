@@ -25,7 +25,7 @@ export function AppShell() {
           onClick={() => setSidebarOpen(false)}
         />
       ) : null}
-      <div className="flex flex-1 flex-col sm:flex-row">
+      <div className="mx-auto flex w-full max-w-[1600px] flex-1 flex-col sm:flex-row">
         {!compactFieldView ? (
           <>
             <button
@@ -36,13 +36,13 @@ export function AppShell() {
               ☰ Menu
             </button>
             <div
-              className={`fixed inset-y-0 left-0 z-40 w-[18rem] transform bg-[var(--surface-elevated)] transition-transform sm:static sm:z-auto sm:w-[17rem] sm:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
+              className={`fixed inset-y-0 left-0 z-40 w-[19rem] transform border-r border-[var(--border-color)] bg-[var(--surface-elevated)] transition-transform sm:static sm:z-auto sm:w-[18rem] sm:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
             >
               <SidebarNav onNavigate={() => setSidebarOpen(false)} />
             </div>
           </>
         ) : null}
-            <main className={`app-page-enter flex-1 overflow-auto p-3 sm:p-6 ${compactFieldView ? "pb-24 sm:pb-6" : ""}`}>
+            <main className={`app-page-enter flex-1 overflow-auto px-4 py-4 sm:px-8 sm:py-7 ${compactFieldView ? "pb-24 sm:pb-7" : ""}`}>
           <Outlet />
         </main>
       </div>

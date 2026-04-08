@@ -119,7 +119,7 @@ export function LoginPage() {
 
   return (
     <div className="flex min-h-screen flex-col justify-center bg-[var(--background-color)] px-4 py-8">
-      <div className="mx-auto w-full max-w-lg rounded-2xl border border-[var(--border-color)] bg-white p-8 shadow-sm">
+      <div className="mx-auto w-full max-w-3xl rounded-2xl border border-[var(--border-color)] bg-white p-8 shadow-sm lg:p-10">
         <div className="mb-2 flex justify-center">
           <BrandLogo size={66} />
         </div>
@@ -180,7 +180,7 @@ export function LoginPage() {
           <p className="text-center text-xs font-semibold uppercase tracking-wider text-neutral-500">
             Demo — tap to sign in
           </p>
-          <ul className="mt-3 space-y-2">
+          <ul className="mt-3 grid gap-2 sm:grid-cols-2">
             {DEMO_ACCOUNTS.map((d) => (
               <DemoAccountRow key={d.id} account={d} busy={busy} onPick={() => void handleDemoClick(d)} />
             ))}

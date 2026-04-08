@@ -128,7 +128,7 @@ export function LaborerHome() {
   ];
 
   return (
-    <div className="mx-auto max-w-2xl space-y-5">
+    <div className="mx-auto max-w-6xl space-y-6">
       <div className={`rounded-xl px-4 py-3 text-sm font-semibold leading-6 ${roundBanner.tone}`}>
         {roundBanner.text}
       </div>

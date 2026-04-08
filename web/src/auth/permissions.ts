@@ -91,6 +91,34 @@ export function canFlockAction(user: SessionUser | null, action: FlockActionKey)
   return roleAtLeast(user, FLOCK_ACTION_MIN_ROLE[action]);
 }
 
+export type ActionPresentationMode = "enabled" | "disabled_with_reason" | "hidden";
+export type ActionPresentation = { mode: ActionPresentationMode; reason?: string };
+
+const ACTION_REASON: Record<FlockActionKey, string> = {
+  "flock.view": "Requires farm access.",
+  "flock.create": "Requires vet manager, manager, or superuser.",
+  "treatment.execute": "Requires vet or higher.",
+  "weighin.record": "Requires vet or higher.",
+  "mortality.record": "Requires vet or higher.",
+  "slaughter.schedule": "Requires vet manager, manager, or superuser.",
+  "slaughter.record": "Requires vet manager, manager, or superuser.",
+  "flock.close": "Requires vet manager, manager, or superuser.",
+  "alert.acknowledge": "Requires vet manager, manager, or superuser.",
+};
+
+export function flockActionPresentation(
+  user: SessionUser | null,
+  action: FlockActionKey,
+  options?: { allowDisabledContext?: boolean }
+): ActionPresentation {
+  const allowed = canFlockAction(user, action);
+  if (allowed) return { mode: "enabled" };
+  if (options?.allowDisabledContext) {
+    return { mode: "disabled_with_reason", reason: ACTION_REASON[action] };
+  }
+  return { mode: "hidden" };
+}
+
 export function hasPermission(user: SessionUser | null, key: PermissionKey): boolean {
   if (!user) return false;
   if (user.role === "superuser") return true;

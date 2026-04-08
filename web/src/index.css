@@ -34,6 +34,7 @@ body {
   background: var(--background-color);
   color: var(--text-primary);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.45;
 }
 
 button,
@@ -108,6 +109,22 @@ textarea:focus {
 
 .app-page-enter {
   animation: app-page-in 220ms ease;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid rgba(15, 143, 120, 0.45);
+  outline-offset: 2px;
+}
+
+@media (min-width: 1024px) {
+  .institutional-table th,
+  .institutional-table td {
+    padding: 0.7rem 0.95rem;
+  }
 }
 
 @keyframes app-page-in {

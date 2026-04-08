@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
-import { canFlockAction } from "../../auth/permissions";
+import { flockActionPresentation } from "../../auth/permissions";
 import { readAuthHeaders } from "../../lib/authHeaders";
 import { CheckinUrgencyBadge } from "../../components/farm/CheckinUrgencyBadge";
 import { PageHeader } from "../../components/PageHeader";
@@ -21,6 +21,11 @@ export function FlockDetailPage() {
   const [performance, setPerformance] = useState<{ feedToDateKg: number; fcr: number | null; birdsLiveEstimate: number } | null>(null);
   const [eligibility, setEligibility] = useState<Eligibility | null>(null);
   const [weighIns, setWeighIns] = useState<WeighIn[]>([]);
+
+  const treatmentAction = flockActionPresentation(user, "treatment.execute");
+  const weighinAction = flockActionPresentation(user, "weighin.record");
+  const slaughterAction = flockActionPresentation(user, "slaughter.schedule");
+  const alertAction = flockActionPresentation(user, "alert.acknowledge", { allowDisabledContext: true });
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -66,7 +71,7 @@ export function FlockDetailPage() {
   }, [load]);
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
         title={flockMeta?.label ?? "Flock"}
         subtitle={flockMeta ? <>Placement {flockMeta.placementDate}</> : undefined}
@@ -177,41 +182,34 @@ export function FlockDetailPage() {
         </div>
         </div>
           <div className="space-y-3">
-            <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
+            <div className="rounded-xl border border-neutral-200 bg-white p-4 text-sm">
               <p className="mb-2 font-semibold text-neutral-800">Allowed Actions</p>
               <div className="space-y-2">
-                <button
-                  type="button"
-                  disabled={!canFlockAction(user, "treatment.execute")}
-                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs disabled:opacity-50"
-                  title={!canFlockAction(user, "treatment.execute") ? "Requires vet or higher" : ""}
-                >
-                  Execute treatment round
-                </button>
-                <button
-                  type="button"
-                  disabled={!canFlockAction(user, "weighin.record")}
-                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs disabled:opacity-50"
-                  title={!canFlockAction(user, "weighin.record") ? "Requires vet or higher" : ""}
-                >
-                  Record weigh-in
-                </button>
-                <button
-                  type="button"
-                  disabled={!canFlockAction(user, "slaughter.schedule")}
-                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs disabled:opacity-50"
-                  title={!canFlockAction(user, "slaughter.schedule") ? "Requires vet_manager/manager" : ""}
-                >
-                  Schedule slaughter
-                </button>
-                <button
-                  type="button"
-                  disabled={!canFlockAction(user, "alert.acknowledge")}
-                  className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs disabled:opacity-50"
-                  title={!canFlockAction(user, "alert.acknowledge") ? "Requires vet_manager/manager" : ""}
-                >
-                  Acknowledge critical alert
-                </button>
+                {treatmentAction.mode === "enabled" ? (
+                  <Link to="/farm/treatments" className="block w-full rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs hover:bg-neutral-50">
+                    Execute treatment round
+                  </Link>
+                ) : null}
+                {weighinAction.mode === "enabled" ? (
+                  <Link to="/farm/treatments" className="block w-full rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs hover:bg-neutral-50">
+                    Record weigh-in
+                  </Link>
+                ) : null}
+                {slaughterAction.mode === "enabled" ? (
+                  <Link to="/farm/slaughter" className="block w-full rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs hover:bg-neutral-50">
+                    Schedule slaughter
+                  </Link>
+                ) : null}
+                {alertAction.mode !== "hidden" ? (
+                  <button
+                    type="button"
+                    disabled={alertAction.mode !== "enabled"}
+                    className="w-full cursor-not-allowed rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs disabled:opacity-60"
+                    title={alertAction.reason ?? ""}
+                  >
+                    Acknowledge critical alert
+                  </button>
+                ) : null}
               </div>
             </div>
           </div>

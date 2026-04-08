@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
-import { canFlockAction } from "../../auth/permissions";
+import { canFlockAction, flockActionPresentation } from "../../auth/permissions";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { CheckinUrgencyBadge, type CheckinBadge } from "../../components/farm/CheckinUrgencyBadge";
 import { EmptyState } from "../../components/EmptyState";
@@ -267,7 +267,7 @@ export function FlockListPage() {
     .sort((a, b) => Number(b.riskScore ?? 0) - Number(a.riskScore ?? 0));
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-7xl space-y-6">
       <PageHeader
         title="Flocks"
         subtitle="Real-time flock risk prioritization with explainable alerts."
@@ -449,22 +449,16 @@ export function FlockListPage() {
                 {(f.alerts?.length ?? 0) > 0 ? <p className="mt-1 text-xs text-amber-800">{f.alerts?.slice(0, 2).join(" · ")}</p> : null}
                 {f.withdrawalActive ? <p className="mt-1 inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-800">🔴 Withdrawal</p> : null}
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={!canFlockAction(user, "treatment.execute")}
-                    title={!canFlockAction(user, "treatment.execute") ? "Requires vet or higher" : ""}
-                    className="rounded border border-neutral-300 px-2 py-1 text-xs disabled:opacity-50"
-                  >
-                    Resolve round
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!canFlockAction(user, "slaughter.schedule")}
-                    title={!canFlockAction(user, "slaughter.schedule") ? "Requires vet manager or manager" : ""}
-                    className="rounded border border-neutral-300 px-2 py-1 text-xs disabled:opacity-50"
-                  >
-                    Schedule slaughter
-                  </button>
+                  {flockActionPresentation(user, "treatment.execute").mode === "enabled" ? (
+                    <Link to="/farm/treatments" className="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50">
+                      Resolve round
+                    </Link>
+                  ) : null}
+                  {flockActionPresentation(user, "slaughter.schedule").mode === "enabled" ? (
+                    <Link to="/farm/slaughter" className="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50">
+                      Schedule slaughter
+                    </Link>
+                  ) : null}
                 </div>
               </li>
             ))}

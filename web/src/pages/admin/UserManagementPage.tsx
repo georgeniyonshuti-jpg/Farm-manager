@@ -138,7 +138,7 @@ export function UserManagementPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto w-full max-w-7xl space-y-8">
       <PageHeader
         title="User management"
         subtitle="Superuser only — invites, roles, and audit trail."

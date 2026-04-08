@@ -151,7 +151,7 @@ export function FarmInventoryPage() {
   );
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader title={tTitle} subtitle={tBody} />
 
       {loading ? <SkeletonList rows={3} /> : null}

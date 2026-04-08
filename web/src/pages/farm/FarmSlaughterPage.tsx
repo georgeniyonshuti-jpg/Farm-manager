@@ -181,7 +181,7 @@ export function FarmSlaughterPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
+    <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader title="Slaughter and FCR" subtitle="Capture slaughter metrics and monitor feed conversion ratio." />
       {loading && <SkeletonList rows={3} />}
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}

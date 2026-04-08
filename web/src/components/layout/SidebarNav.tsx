@@ -164,12 +164,12 @@ export function SidebarNav({ onNavigate }: Props) {
   }
 
   return (
-    <aside className="w-full border-b border-neutral-200 bg-neutral-50 sm:w-56 sm:border-b-0 sm:border-r">
-      <div className="p-4">
+    <aside className="w-full border-b border-neutral-200 bg-neutral-50 sm:w-[18rem] sm:border-b-0 sm:border-r">
+      <div className="p-4 sm:p-5">
         <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
           {activeWorkspace === "farm" ? farmSectionTitle : clevaSectionTitle}
         </p>
-        <nav className="mt-3 flex flex-col gap-2 sm:flex-col">
+        <nav className="mt-4 flex flex-col gap-2.5 sm:flex-col">
           <NavLink
             to={dashLink.to}
             onClick={onNavigate}
