@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import type { SessionUser } from "../../auth/types";
 import { PageHeader } from "../../components/PageHeader";
@@ -142,6 +143,14 @@ export function UserManagementPage() {
       <PageHeader
         title="User management"
         subtitle="Superuser only — invites, roles, and audit trail."
+        action={
+          <Link
+            to="/admin/system-config"
+            className="inline-flex items-center rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+          >
+            System configuration
+          </Link>
+        }
       />
 
       <AddUserForm onCreated={() => void loadUsers()} />

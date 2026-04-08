@@ -5,6 +5,7 @@ import { readAuthHeaders, jsonAuthHeaders } from "../../lib/authHeaders";
 import { API_BASE_URL } from "../../api/config";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
+import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import type { FieldPerformanceSummary } from "../../hooks/useFlockFieldContext";
 import type { CheckinStatus } from "./checkinStatusTypes";
@@ -70,16 +71,40 @@ const DOSE_UNIT_OPTIONS = ["ml", "g", "mg", "tablet", "drop", "other"];
 /** Must match `medicine_inventory.unit` CHECK in database migrations. */
 const MED_STOCK_UNITS = ["ml", "g", "doses", "sachets"] as const;
 
+const FALLBACK_ROUTE_OPTIONS = ROUTE_OPTIONS.map((r) => ({ value: r, label: r }));
+const FALLBACK_DOSE_UNITS = DOSE_UNIT_OPTIONS.map((r) => ({ value: r, label: r }));
+const FALLBACK_MED_STOCK = MED_STOCK_UNITS.map((r) => ({ value: r, label: r }));
+const FALLBACK_MED_CATEGORIES = [
+  { value: "vaccine", label: "vaccine" },
+  { value: "antibiotic", label: "antibiotic" },
+  { value: "coccidiostat", label: "coccidiostat" },
+  { value: "vitamin", label: "vitamin" },
+  { value: "electrolyte", label: "electrolyte" },
+  { value: "other", label: "other" },
+];
+const FALLBACK_ADMIN_ROUTES = [
+  { value: "drinking_water", label: "drinking water" },
+  { value: "feed_additive", label: "feed additive" },
+  { value: "injection", label: "injection" },
+  { value: "topical", label: "topical" },
+];
+
 type MedTab = "treatments" | "rounds" | "inventory";
 
-function treatmentReasonLabel(row: Treatment): string {
+function treatmentReasonLabel(row: Treatment, reasons: { value: string; label: string }[]): string {
   const source = row.reasonCode ?? row.diseaseOrReason;
-  return TREATMENT_REASON_OPTIONS.find((r) => r.value === source)?.label ?? row.diseaseOrReason;
+  return reasons.find((r) => r.value === source)?.label ?? row.diseaseOrReason;
 }
 
 export function FarmTreatmentPage() {
   const { token } = useAuth();
   const { showToast } = useToast();
+  const treatmentReasonOptions = useReferenceOptions("treatment_reason", token, TREATMENT_REASON_OPTIONS);
+  const routeOptions = useReferenceOptions("treatment_route", token, FALLBACK_ROUTE_OPTIONS);
+  const doseUnitOptions = useReferenceOptions("treatment_dose_unit", token, FALLBACK_DOSE_UNITS);
+  const medStockOptions = useReferenceOptions("medicine_stock_unit", token, FALLBACK_MED_STOCK);
+  const medCategoryOptions = useReferenceOptions("medicine_category", token, FALLBACK_MED_CATEGORIES);
+  const adminRouteOptions = useReferenceOptions("medicine_admin_route", token, FALLBACK_ADMIN_ROUTES);
   const [flocks, setFlocks] = useState<Flock[]>([]);
   const [medicines, setMedicines] = useState<Medicine[]>([]);
   const [flockId, setFlockId] = useState("");
@@ -287,8 +312,8 @@ export function FarmTreatmentPage() {
       showToast("error", "Medicine name is required.");
       return;
     }
-    if (!MED_STOCK_UNITS.includes(medForm.unit as (typeof MED_STOCK_UNITS)[number])) {
-      showToast("error", "Choose a stock unit allowed by the catalog (ml, g, doses, sachets).");
+    if (!medStockOptions.some((o) => o.value === medForm.unit)) {
+      showToast("error", "Choose a stock unit allowed by the catalog.");
       return;
     }
     if (!Number.isFinite(qty) || qty < 0) {
@@ -432,7 +457,7 @@ export function FarmTreatmentPage() {
                 ))}
               </select>
               <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.reasonCode} onChange={(e) => setForm((v) => ({ ...v, reasonCode: e.target.value }))}>
-                {TREATMENT_REASON_OPTIONS.map((o) => (
+                {treatmentReasonOptions.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
@@ -440,13 +465,17 @@ export function FarmTreatmentPage() {
               <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Medicine name" value={form.medicineName} onChange={(e) => setForm((v) => ({ ...v, medicineName: e.target.value }))} />
               <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Dose" inputMode="decimal" value={form.dose} onChange={(e) => setForm((v) => ({ ...v, dose: e.target.value }))} />
               <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.doseUnit} onChange={(e) => setForm((v) => ({ ...v, doseUnit: e.target.value }))}>
-                {DOSE_UNIT_OPTIONS.map((u) => (
-                  <option key={u} value={u}>{u}</option>
+                {doseUnitOptions.map((u) => (
+                  <option key={u.value} value={u.value}>
+                    {u.label}
+                  </option>
                 ))}
               </select>
               <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.route} onChange={(e) => setForm((v) => ({ ...v, route: e.target.value }))}>
-                {ROUTE_OPTIONS.map((r) => (
-                  <option key={r} value={r}>{r}</option>
+                {routeOptions.map((r) => (
+                  <option key={r.value} value={r.value}>
+                    {r.label}
+                  </option>
                 ))}
               </select>
               <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Duration days" inputMode="numeric" value={form.durationDays} onChange={(e) => setForm((v) => ({ ...v, durationDays: e.target.value }))} />
@@ -476,7 +505,9 @@ export function FarmTreatmentPage() {
                 <div className="space-y-2">
                   {rows.map((r) => (
                     <div key={r.id} className="rounded-lg border border-neutral-200 p-3 text-sm">
-                      <p className="font-medium">{r.medicineName} - {treatmentReasonLabel(r)}</p>
+                      <p className="font-medium">
+                        {r.medicineName} - {treatmentReasonLabel(r, treatmentReasonOptions)}
+                      </p>
                       <p className="text-neutral-600">{r.dose} {r.doseUnit} via {r.route}, withdrawal {r.withdrawalDays} day(s)</p>
                       <p className="text-xs text-neutral-500">
                         {(() => {
@@ -522,10 +553,11 @@ export function FarmTreatmentPage() {
                   </select>
                   <input className="rounded-lg border border-neutral-300 px-3 py-2" type="datetime-local" value={roundForm.plannedFor} onChange={(e) => setRoundForm((v) => ({ ...v, plannedFor: e.target.value }))} />
                   <select className="rounded-lg border border-neutral-300 px-3 py-2" value={roundForm.route} onChange={(e) => setRoundForm((v) => ({ ...v, route: e.target.value }))}>
-                    <option value="drinking_water">drinking water</option>
-                    <option value="feed_additive">feed additive</option>
-                    <option value="injection">injection</option>
-                    <option value="topical">topical</option>
+                    {adminRouteOptions.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
                   </select>
                   <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Planned qty" inputMode="decimal" value={roundForm.plannedQuantity} onChange={(e) => setRoundForm((v) => ({ ...v, plannedQuantity: e.target.value }))} />
                   <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Assign to user id (optional)" value={roundForm.assignedToUserId} onChange={(e) => setRoundForm((v) => ({ ...v, assignedToUserId: e.target.value }))} />
@@ -589,16 +621,17 @@ export function FarmTreatmentPage() {
               <form onSubmit={submitMedicine} className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
                 <input className="rounded-lg border border-neutral-300 px-3 py-2 lg:col-span-2" placeholder="Medicine name" value={medForm.name} onChange={(e) => setMedForm((v) => ({ ...v, name: e.target.value }))} />
                 <select className="rounded-lg border border-neutral-300 px-3 py-2" value={medForm.category} onChange={(e) => setMedForm((v) => ({ ...v, category: e.target.value }))}>
-                  <option value="vaccine">vaccine</option>
-                  <option value="antibiotic">antibiotic</option>
-                  <option value="coccidiostat">coccidiostat</option>
-                  <option value="vitamin">vitamin</option>
-                  <option value="electrolyte">electrolyte</option>
-                  <option value="other">other</option>
+                  {medCategoryOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
                 </select>
                 <select className="rounded-lg border border-neutral-300 px-3 py-2" value={medForm.unit} onChange={(e) => setMedForm((v) => ({ ...v, unit: e.target.value }))} title="Stock unit (database-enforced)">
-                  {MED_STOCK_UNITS.map((u) => (
-                    <option key={u} value={u}>{u}</option>
+                  {medStockOptions.map((u) => (
+                    <option key={u.value} value={u.value}>
+                      {u.label}
+                    </option>
                   ))}
                 </select>
                 <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Opening qty" inputMode="decimal" value={medForm.quantity} onChange={(e) => setMedForm((v) => ({ ...v, quantity: e.target.value }))} />

@@ -9,6 +9,13 @@ import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
 import { useToast } from "../../components/Toast";
+import { useReferenceOptions } from "../../hooks/useReferenceOptions";
+
+const FALLBACK_BREED_OPTIONS = [
+  { value: "generic_broiler", label: "generic_broiler" },
+  { value: "cobb_500", label: "cobb_500" },
+  { value: "ross_308", label: "ross_308" },
+];
 
 type FlockRow = {
   id: string;
@@ -55,6 +62,7 @@ type BarnSummary = {
 export function FlockListPage() {
   const { token, user } = useAuth();
   const { showToast } = useToast();
+  const breedOptions = useReferenceOptions("breed", token, FALLBACK_BREED_OPTIONS);
   const isManagerView = user?.role === "manager" || user?.role === "superuser" || user?.role === "investor";
   const isVetView = user?.role === "vet" || user?.role === "vet_manager";
   const canCreateFlock = canFlockAction(user, "flock.create");
@@ -301,9 +309,11 @@ export function FlockListPage() {
               value={createForm.breedCode}
               onChange={(e) => setCreateForm((v) => ({ ...v, breedCode: e.target.value }))}
             >
-              <option value="generic_broiler">generic_broiler</option>
-              <option value="cobb_500">cobb_500</option>
-              <option value="ross_308">ross_308</option>
+              {breedOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
             </select>
             <input
               className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"

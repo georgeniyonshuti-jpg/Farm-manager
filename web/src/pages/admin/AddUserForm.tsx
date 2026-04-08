@@ -3,6 +3,7 @@ import type { BusinessUnitAccess, UserRole } from "../../auth/types";
 import { useAuth } from "../../auth/AuthContext";
 import { useApiFetch } from "../../api/fetchClient";
 import { useToast } from "../../components/Toast";
+import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 
 export type AddUserPayload = {
   email: string;
@@ -43,6 +44,16 @@ type Props = {
 export function AddUserForm({ onCreated }: Props) {
   const { token } = useAuth();
   const { showToast } = useToast();
+  const roleLabelOptions = useReferenceOptions(
+    "role_label",
+    token,
+    ROLE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+  );
+  const departmentRefOptions = useReferenceOptions(
+    "department_key",
+    token,
+    DEPARTMENT_OPTIONS.map((d) => ({ value: d.key, label: d.label })),
+  );
   const apiFetch = useApiFetch();
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -169,7 +180,7 @@ export function AddUserForm({ onCreated }: Props) {
             onChange={(e) => setRole(e.target.value as UserRole)}
             className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-neutral-900 shadow-sm focus:border-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-700/30"
           >
-            {ROLE_OPTIONS.map((o) => (
+            {roleLabelOptions.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
@@ -218,13 +229,13 @@ export function AddUserForm({ onCreated }: Props) {
         <legend className="text-sm font-medium text-neutral-700">Department visibility</legend>
         <p className="text-xs text-neutral-500">Restrict navigation slices (demo keys).</p>
         <div className="mt-3 flex flex-col gap-2">
-          {DEPARTMENT_OPTIONS.map((d) => (
-            <label key={d.key} className="flex items-center gap-2 text-sm text-neutral-800">
+          {departmentRefOptions.map((d) => (
+            <label key={d.value} className="flex items-center gap-2 text-sm text-neutral-800">
               <input
                 type="checkbox"
                 className="h-4 w-4 rounded border-neutral-300 text-emerald-800"
-                checked={departmentKeys.includes(d.key)}
-                onChange={() => toggleDept(d.key)}
+                checked={departmentKeys.includes(d.value)}
+                onChange={() => toggleDept(d.value)}
               />
               {d.label}
             </label>

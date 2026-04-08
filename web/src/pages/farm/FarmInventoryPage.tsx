@@ -6,6 +6,7 @@ import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { API_BASE_URL } from "../../api/config";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
+import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 
 type Flock = { id: string; label: string };
 type LedgerRow = {
@@ -41,18 +42,27 @@ const ADJUST_REASON_OPTIONS = [
   { value: "other", label: "Other" },
 ];
 
-function reasonLabel(type: LedgerRow["type"], reason: string): string {
+function reasonLabel(
+  type: LedgerRow["type"],
+  reason: string,
+  procurement: { value: string; label: string }[],
+  consumption: { value: string; label: string }[],
+  adjust: { value: string; label: string }[],
+): string {
   const table =
     type === "procurement_receipt"
-      ? PROCUREMENT_REASON_OPTIONS
+      ? procurement
       : type === "feed_consumption"
-        ? CONSUMPTION_REASON_OPTIONS
-        : ADJUST_REASON_OPTIONS;
+        ? consumption
+        : adjust;
   return table.find((x) => x.value === reason)?.label ?? reason;
 }
 
 export function FarmInventoryPage() {
   const { token, user } = useAuth();
+  const procurementReasons = useReferenceOptions("inventory_procurement_reason", token, PROCUREMENT_REASON_OPTIONS);
+  const consumptionReasons = useReferenceOptions("inventory_consumption_reason", token, CONSUMPTION_REASON_OPTIONS);
+  const adjustReasons = useReferenceOptions("inventory_adjust_reason", token, ADJUST_REASON_OPTIONS);
   const { showToast } = useToast();
   const tTitle = useLaborerT("Feed inventory");
   const tBody = useLaborerT("Role-based stock controls for procurement, feeding, and adjustments.");
@@ -219,7 +229,7 @@ export function FarmInventoryPage() {
               <div className="mt-3 grid gap-3 sm:grid-cols-3">
                 <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Quantity kg" inputMode="decimal" value={procQty} onChange={(e) => setProcQty(e.target.value)} />
                 <select className="rounded-lg border border-neutral-300 px-3 py-2" value={procReasonCode} onChange={(e) => setProcReasonCode(e.target.value)}>
-                  {PROCUREMENT_REASON_OPTIONS.map((o) => (
+                  {procurementReasons.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
@@ -256,7 +266,7 @@ export function FarmInventoryPage() {
                   </div>
                 </div>
                 <select className="rounded-lg border border-neutral-300 px-3 py-2" value={feedReasonCode} onChange={(e) => setFeedReasonCode(e.target.value)}>
-                  {CONSUMPTION_REASON_OPTIONS.map((o) => (
+                  {consumptionReasons.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
@@ -277,7 +287,7 @@ export function FarmInventoryPage() {
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
                 <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Delta kg (+/-)" inputMode="decimal" value={adjDelta} onChange={(e) => setAdjDelta(e.target.value)} />
                 <select className="rounded-lg border border-neutral-300 px-3 py-2" value={adjReasonCode} onChange={(e) => setAdjReasonCode(e.target.value)}>
-                  {ADJUST_REASON_OPTIONS.map((o) => (
+                  {adjustReasons.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
@@ -300,7 +310,9 @@ export function FarmInventoryPage() {
                   <p className="font-medium text-neutral-900">
                     {r.type} - {r.deltaKg >= 0 ? "+" : ""}{r.deltaKg} kg
                   </p>
-                  <p className="text-neutral-600">{reasonLabel(r.type, r.reason) || "—"}</p>
+                  <p className="text-neutral-600">
+                    {reasonLabel(r.type, r.reason, procurementReasons, consumptionReasons, adjustReasons) || "—"}
+                  </p>
                   <p className="text-xs text-neutral-500">
                     {new Date(r.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
                   </p>

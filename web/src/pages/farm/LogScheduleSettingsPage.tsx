@@ -7,6 +7,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { API_BASE_URL } from "../../api/config";
+import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 
 type Schedule = {
   id: string;
@@ -30,8 +31,11 @@ const ROLE_OPTIONS: UserRole[] = [
   "sales_coordinator",
 ];
 
+const FALLBACK_LOG_SCHEDULE_ROLES = ROLE_OPTIONS.map((r) => ({ value: r, label: r }));
+
 export function LogScheduleSettingsPage() {
   const { token } = useAuth();
+  const logScheduleRoleOptions = useReferenceOptions("log_schedule_role", token, FALLBACK_LOG_SCHEDULE_ROLES);
   const { showToast } = useToast();
   const [flocks, setFlocks] = useState<FlockRow[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -282,9 +286,9 @@ export function LogScheduleSettingsPage() {
                   value={formRole}
                   onChange={(e) => setFormRole(e.target.value as UserRole)}
                 >
-                  {ROLE_OPTIONS.map((r) => (
-                    <option key={r} value={r}>
-                      {r}
+                  {logScheduleRoleOptions.map((r) => (
+                    <option key={r.value} value={r.value}>
+                      {r.label}
                     </option>
                   ))}
                 </select>

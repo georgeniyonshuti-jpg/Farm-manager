@@ -25,6 +25,7 @@ import { CreditScoringPage } from "./pages/cleva/CreditScoringPage";
 import { InvestorMemosPage } from "./pages/cleva/InvestorMemosPage";
 import { PortfolioPage } from "./pages/cleva/PortfolioPage";
 import { UserManagementPage } from "./pages/admin/UserManagementPage";
+import { SystemConfigPage } from "./pages/admin/SystemConfigPage";
 import { UnauthorizedPage } from "./pages/UnauthorizedPage";
 import { LogScheduleSettingsPage } from "./pages/farm/LogScheduleSettingsPage";
 import { PayrollImpactPage } from "./pages/farm/PayrollImpactPage";
@@ -227,6 +228,14 @@ export default function App() {
                 element={
                   <ProtectedRoute superuserOnly>
                     <UserManagementPage />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/admin/system-config"
+                element={
+                  <ProtectedRoute superuserOnly>
+                    <SystemConfigPage />
                   </ProtectedRoute>
                 }
               />

@@ -7,6 +7,7 @@ import { API_BASE_URL } from "../../api/config";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
+import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 
 type Flock = { id: string; label: string };
 type Slaughter = {
@@ -28,7 +29,7 @@ type Eligibility = {
   eligibleForSlaughter: boolean;
   blockers: Array<{ type: string; medicineName?: string; safeAfter?: string; plannedFor?: string }>;
 };
-const SLAUGHTER_REASON_OPTIONS = [
+const FALLBACK_SLAUGHTER_REASONS = [
   { value: "planned_market", label: "Planned market harvest" },
   { value: "target_weight_reached", label: "Target weight reached" },
   { value: "emergency_cull", label: "Emergency cull" },
@@ -36,13 +37,14 @@ const SLAUGHTER_REASON_OPTIONS = [
   { value: "other", label: "Other" },
 ];
 
-function slaughterReasonLabel(row: Slaughter): string {
+function slaughterReasonLabel(row: Slaughter, reasons: { value: string; label: string }[]): string {
   const source = row.reasonCode ?? row.notes;
-  return SLAUGHTER_REASON_OPTIONS.find((r) => r.value === source)?.label ?? row.notes;
+  return reasons.find((r) => r.value === source)?.label ?? row.notes;
 }
 
 export function FarmSlaughterPage() {
   const { token, user } = useAuth();
+  const slaughterReasonOptions = useReferenceOptions("slaughter_reason", token, FALLBACK_SLAUGHTER_REASONS);
   const { showToast } = useToast();
   const canRecordSlaughter = canFlockAction(user, "slaughter.record");
   const [flocks, setFlocks] = useState<Flock[]>([]);
@@ -218,7 +220,7 @@ export function FarmSlaughterPage() {
                 {flocks.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
               </select>
               <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.reasonCode} onChange={(e) => setForm((v) => ({ ...v, reasonCode: e.target.value }))}>
-                {SLAUGHTER_REASON_OPTIONS.map((o) => (
+                {slaughterReasonOptions.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
@@ -246,7 +248,7 @@ export function FarmSlaughterPage() {
                   <p className="font-medium">
                     {r.birdsSlaughtered} birds - {r.avgLiveWeightKg} kg live avg
                   </p>
-                  <p className="text-neutral-600">{slaughterReasonLabel(r)}</p>
+                  <p className="text-neutral-600">{slaughterReasonLabel(r, slaughterReasonOptions)}</p>
                   <p className="text-neutral-600">
                     {new Date(r.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
                   </p>

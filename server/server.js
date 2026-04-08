@@ -6,12 +6,12 @@ import cors from "cors";
 import express from "express";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-import rateLimit from "express-rate-limit";
 import session from "express-session";
 import pgSession from "connect-pg-simple";
 import pg from "pg";
 import { runMigrations } from "./migrate.js";
 import { checkinSchema, dailyLogSchema, feedEntrySchema, loginSchema } from "./utils/validation.js";
+import * as systemConfig from "./systemConfig.js";
 
 // PROD-FIX: run migrations on boot without crashing API startup on failure
 runMigrations().then((result) => {
@@ -67,22 +67,32 @@ app.use(session({
   },
 }));
 
-app.use("/api/auth/login", rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  message: { error: "Too many login attempts. Try again in 15 minutes." },
-}));
+app.use(
+  "/api/auth/login",
+  systemConfig.ipWindowRateLimitMiddleware(
+    () => systemConfig.getAppSettingNumber("rate_limit_login_max", 10),
+    () => systemConfig.getAppSettingNumber("rate_limit_login_window_ms", 15 * 60 * 1000),
+    { error: "Too many login attempts. Try again in 15 minutes." },
+  ),
+);
 
-app.use("/api/laborer/translate", rateLimit({
-  windowMs: 60 * 1000,
-  max: 30,
-  message: { error: "Translation limit reached. Wait a moment." },
-}));
+app.use(
+  "/api/laborer/translate",
+  systemConfig.ipWindowRateLimitMiddleware(
+    () => systemConfig.getAppSettingNumber("rate_limit_translate_max", 30),
+    () => systemConfig.getAppSettingNumber("rate_limit_translate_window_ms", 60 * 1000),
+    { error: "Translation limit reached. Wait a moment." },
+  ),
+);
 
-app.use("/api/", rateLimit({
-  windowMs: 60 * 1000,
-  max: 200,
-}));
+app.use(
+  "/api/",
+  systemConfig.ipWindowRateLimitMiddleware(
+    () => systemConfig.getAppSettingNumber("rate_limit_api_max", 200),
+    () => systemConfig.getAppSettingNumber("rate_limit_api_window_ms", 60 * 1000),
+    { error: "Too many requests. Wait a moment." },
+  ),
+);
 
 function hashPassword(pw) {
   return crypto.createHash("sha256").update(`${PEPPER}:${pw}`).digest("hex");
@@ -98,14 +108,16 @@ function imageDataUrlMeta(value) {
   return { mime, byteLength };
 }
 
-function validateImageDataUrls(photos, maxBytes = 5 * 1024 * 1024) {
+function validateImageDataUrls(photos, maxBytes) {
+  const cap =
+    maxBytes ?? systemConfig.getAppSettingNumber("max_image_upload_bytes", 5 * 1024 * 1024);
   for (const p of photos) {
     const meta = imageDataUrlMeta(p);
     if (!meta) return "Invalid image format. Use image data URLs.";
     // PROD-FIX: prevents malicious uploads
     if (!meta.mime.startsWith("image/")) return "Only image uploads are allowed.";
     // PROD-FIX: prevents malicious uploads
-    if (meta.byteLength > maxBytes) return "Image too large (max 5MB).";
+    if (meta.byteLength > cap) return `Image too large (max ${Math.round(cap / (1024 * 1024))}MB).`;
   }
   return null;
 }
@@ -729,20 +741,24 @@ const DEFAULT_CHECKIN_BANDS = [
 const flocksById = new Map();
 
 /** @type {object | null} */
-let breedStandardsJson = null;
-function loadBreedStandardsJson() {
-  if (breedStandardsJson !== null) return breedStandardsJson;
+let breedStandardsFileCache = null;
+function loadBreedStandardsFileOnly() {
+  if (breedStandardsFileCache !== null) return breedStandardsFileCache;
   try {
     const p = path.join(__dirname, "..", "data", "breed_standards.json");
-    breedStandardsJson = JSON.parse(fs.readFileSync(p, "utf8"));
+    breedStandardsFileCache = JSON.parse(fs.readFileSync(p, "utf8"));
   } catch {
-    breedStandardsJson = { breeds: {} };
+    breedStandardsFileCache = { breeds: {} };
   }
-  return breedStandardsJson;
+  return breedStandardsFileCache;
+}
+
+function getMergedBreedStandards() {
+  return systemConfig.mergeBreedStandardsFileWithDb(loadBreedStandardsFileOnly(), systemConfig.getBreedStandardsOverride());
 }
 
 function chickWeightKgDay0(breedCode) {
-  const j = loadBreedStandardsJson();
+  const j = getMergedBreedStandards();
   const code = String(breedCode ?? "").trim() || "generic_broiler";
   const breeds = j.breeds ?? {};
   const b = breeds[code] ?? breeds.generic_broiler ?? {};
@@ -1007,6 +1023,12 @@ app.post("/api/users", requireAuth, requireSuperuser, (req, res) => {
   const businessUnitAccess = String(body.businessUnitAccess ?? "farm");
   const canViewSensitiveFinancial = Boolean(body.canViewSensitiveFinancial);
   const departmentKeys = Array.isArray(body.departmentKeys) ? body.departmentKeys.map(String) : [];
+  for (const dk of departmentKeys) {
+    if (!systemConfig.validateAgainstCategory("department_key", dk, systemConfig.getStaticFallbackCodes("department_key"))) {
+      res.status(400).json({ error: `Invalid department key: ${dk}` });
+      return;
+    }
+  }
 
   if (!email || !displayName || !password) {
     res.status(400).json({ error: "email, displayName, password required" });
@@ -1086,6 +1108,43 @@ app.post("/api/audit", requireAuth, (req, res) => {
   };
   auditEvents.unshift(row);
   res.status(201).json({ event: row });
+});
+
+app.get("/api/reference-options", requireAuth, requireFarmAccess, (_req, res) => {
+  res.json({ categories: systemConfig.getActiveReferenceOptionsGrouped() });
+});
+
+app.get("/api/admin/system-config", requireAuth, requireSuperuser, (_req, res) => {
+  res.json(systemConfig.packAdminSystemConfigPayload(loadBreedStandardsFileOnly));
+});
+
+app.put("/api/admin/system-config", requireAuth, requireSuperuser, async (req, res) => {
+  try {
+    await systemConfig.applyAdminSystemConfigPut(
+      req.body ?? {},
+      dbPool,
+      dbQuery,
+      hasDb,
+      appendAudit,
+      req.authUser.id,
+      req.authUser.role,
+    );
+    res.json(systemConfig.packAdminSystemConfigPayload(loadBreedStandardsFileOnly));
+  } catch (e) {
+    if (e?.code === "CONFLICT") {
+      res.status(409).json({
+        error: "Configuration was updated elsewhere. Reload and try again.",
+        version: e.currentVersion,
+      });
+      return;
+    }
+    if (e?.code === "INVALID_BREED" || e?.code === "INVALID_REFERENCE" || e?.code === "EMPTY") {
+      res.status(400).json({ error: String(e.message ?? "Invalid request") });
+      return;
+    }
+    console.error("[ERROR]", "[admin] PUT /api/admin/system-config:", e instanceof Error ? e.message : e);
+    res.status(500).json({ error: "Unable to save configuration." });
+  }
 });
 
 /** Rate-limited public translation (login screen when laborer_ui_locale is rw). Same Gemini cache as authenticated. */
@@ -1230,6 +1289,10 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.cre
 
   if (!placementDate || !Number.isFinite(initialCount) || initialCount <= 0 || !breedCode) {
     res.status(400).json({ error: "placementDate, initialCount (>0), and breedCode are required" });
+    return;
+  }
+  if (!systemConfig.validateAgainstCategory("breed", breedCode, systemConfig.getStaticFallbackCodes("breed"))) {
+    res.status(400).json({ error: "Invalid or inactive breedCode" });
     return;
   }
   if (targetWeightKg != null && (!Number.isFinite(targetWeightKg) || targetWeightKg <= 0)) {
@@ -1847,7 +1910,7 @@ app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireAc
   const body = req.body ?? {};
   const medicineName = String(body.medicineName ?? "").trim();
   const reasonCode = String(body.reasonCode ?? "").trim() || "other";
-  if (!TREATMENT_REASON_CODES.includes(reasonCode)) {
+  if (!systemConfig.validateAgainstCategory("treatment_reason", reasonCode, TREATMENT_REASON_CODES)) {
     res.status(400).json({ error: "Invalid reasonCode for treatment" });
     return;
   }
@@ -1855,6 +1918,14 @@ app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireAc
   const dose = Number(body.dose);
   const doseUnit = String(body.doseUnit ?? "").trim();
   const route = String(body.route ?? "").trim();
+  if (!systemConfig.validateAgainstCategory("treatment_dose_unit", doseUnit, systemConfig.getStaticFallbackCodes("treatment_dose_unit"))) {
+    res.status(400).json({ error: "Invalid doseUnit for treatment" });
+    return;
+  }
+  if (!systemConfig.validateAgainstCategory("treatment_route", route, systemConfig.getStaticFallbackCodes("treatment_route"))) {
+    res.status(400).json({ error: "Invalid route for treatment" });
+    return;
+  }
   const durationDays = Math.max(1, Number(body.durationDays) || 1);
   const withdrawalDays = Math.max(0, Number(body.withdrawalDays) || 0);
   const notes = String(body.notes ?? "").slice(0, 4000);
@@ -1924,7 +1995,7 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
   const avgCarcassWeightKg =
     body.avgCarcassWeightKg == null || body.avgCarcassWeightKg === "" ? null : Number(body.avgCarcassWeightKg);
   const reasonCode = String(body.reasonCode ?? "").trim() || "planned_market";
-  if (!SLAUGHTER_REASON_CODES.includes(reasonCode)) {
+  if (!systemConfig.validateAgainstCategory("slaughter_reason", reasonCode, SLAUGHTER_REASON_CODES)) {
     res.status(400).json({ error: "Invalid reasonCode for slaughter event" });
     return;
   }
@@ -2433,7 +2504,7 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, (req, res
   const unitCostRwfPerKg =
     body.unitCostRwfPerKg == null || body.unitCostRwfPerKg === "" ? null : Number(body.unitCostRwfPerKg);
   const reasonCode = String(body.reasonCode ?? "").trim() || "supplier_delivery";
-  if (!INVENTORY_REASON_CODES.procurement.includes(reasonCode)) {
+  if (!systemConfig.validateAgainstCategory("inventory_procurement_reason", reasonCode, INVENTORY_REASON_CODES.procurement)) {
     res.status(400).json({ error: "Invalid reasonCode for procurement" });
     return;
   }
@@ -2482,7 +2553,7 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, (req
   const flockId = String(body.flockId ?? "").trim();
   const quantityKg = Number(body.quantityKg);
   const reasonCode = String(body.reasonCode ?? "").trim() || "round_feed";
-  if (!INVENTORY_REASON_CODES.consumption.includes(reasonCode)) {
+  if (!systemConfig.validateAgainstCategory("inventory_consumption_reason", reasonCode, INVENTORY_REASON_CODES.consumption)) {
     res.status(400).json({ error: "Invalid reasonCode for feed consumption" });
     return;
   }
@@ -2531,7 +2602,7 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, (req, res
   const flockId = String(body.flockId ?? "").trim();
   const deltaKg = Number(body.deltaKg);
   const reasonCode = String(body.reasonCode ?? "").trim() || "stock_count_correction";
-  if (!INVENTORY_REASON_CODES.adjustment.includes(reasonCode)) {
+  if (!systemConfig.validateAgainstCategory("inventory_adjust_reason", reasonCode, INVENTORY_REASON_CODES.adjustment)) {
     res.status(400).json({ error: "Invalid reasonCode for adjustment" });
     return;
   }
@@ -2593,7 +2664,11 @@ app.get("/api/health", (_req, res) => {
 });
 
 function computeValidation(payload) {
-  const initial = Number(process.env.DEMO_INITIAL_COUNT) || 1000;
+  const initial =
+    systemConfig.getAppSettingNumber(
+      "demo_initial_count",
+      Number(process.env.DEMO_INITIAL_COUNT) || 1000,
+    );
   const mortality = Number(payload.mortality) || 0;
   const pct = initial > 0 ? (mortality / initial) * 100 : 0;
   const warnings = [];
@@ -2673,6 +2748,10 @@ app.post("/api/log-schedule", requireAuth, requireFarmAccess, requireLogSchedule
     res.status(400).json({ error: "intervalHours must be positive" });
     return;
   }
+  if (!systemConfig.validateAgainstCategory("log_schedule_role", role, systemConfig.getStaticFallbackCodes("log_schedule_role"))) {
+    res.status(400).json({ error: "Invalid role for log schedule" });
+    return;
+  }
   const id = `ls_${crypto.randomBytes(6).toString("hex")}`;
   const row = {
     id,
@@ -2707,7 +2786,14 @@ app.patch("/api/log-schedule/:id", requireAuth, requireFarmAccess, requireLogSch
   }
   if (body.windowOpen != null) s.windowOpen = String(body.windowOpen);
   if (body.windowClose != null) s.windowClose = String(body.windowClose);
-  if (body.role != null) s.role = String(body.role);
+  if (body.role != null) {
+    const nextRole = String(body.role);
+    if (!systemConfig.validateAgainstCategory("log_schedule_role", nextRole, systemConfig.getStaticFallbackCodes("log_schedule_role"))) {
+      res.status(400).json({ error: "Invalid role for log schedule" });
+      return;
+    }
+    s.role = nextRole;
+  }
   appendAudit(req.authUser.id, req.authUser.role, "log_schedule.update", "flock", s.flockId, { scheduleId: s.id });
   res.json({ schedule: s });
 });
@@ -2871,6 +2957,14 @@ app.post("/api/medicine", requireAuth, requireFarmAccess, requireAction("treatme
   const lowStockThreshold = body.lowStockThreshold == null || body.lowStockThreshold === "" ? 10 : Number(body.lowStockThreshold);
   if (!name || !category || !unit || !Number.isFinite(quantity) || quantity < 0) {
     res.status(400).json({ error: "name, category, unit and quantity>=0 are required" });
+    return;
+  }
+  if (!systemConfig.validateAgainstCategory("medicine_category", category, systemConfig.getStaticFallbackCodes("medicine_category"))) {
+    res.status(400).json({ error: "Invalid medicine category" });
+    return;
+  }
+  if (!systemConfig.validateAgainstCategory("medicine_stock_unit", unit, systemConfig.getStaticFallbackCodes("medicine_stock_unit"))) {
+    res.status(400).json({ error: "Invalid medicine stock unit" });
     return;
   }
   try {
@@ -3094,6 +3188,10 @@ app.post("/api/treatment-rounds", requireAuth, requireFarmAccess, requireAction(
   const notes = body.notes == null ? null : String(body.notes);
   if (!flockId || !medicineId || !plannedFor || !route || !Number.isFinite(plannedQuantity) || plannedQuantity <= 0) {
     res.status(400).json({ error: "flockId, medicineId, plannedFor, route and plannedQuantity>0 are required" });
+    return;
+  }
+  if (!systemConfig.validateAgainstCategory("medicine_admin_route", route, systemConfig.getStaticFallbackCodes("medicine_admin_route"))) {
+    res.status(400).json({ error: "Invalid route for treatment round" });
     return;
   }
   try {
@@ -3639,9 +3737,20 @@ app.use((err, _req, res, _next) => {
   });
 });
 
-app.listen(PORT, () => {
-  // PROD-SAFE: sanitized logging
-  console.log("[INFO]", `Clevafarm API listening on port ${PORT}`);
+(async () => {
+  if (hasDb()) {
+    try {
+      await systemConfig.refreshSystemConfigFromDatabase(dbQuery, hasDb);
+    } catch (e) {
+      console.error("[ERROR]", "[startup] system config load:", e instanceof Error ? e.message : e);
+    }
+  }
+  app.listen(PORT, () => {
+    console.log("[INFO]", `Clevafarm API listening on port ${PORT}`);
+  });
+})().catch((e) => {
+  console.error("[ERROR]", "[startup] fatal:", e instanceof Error ? e.message : e);
+  process.exit(1);
 });
 
 // Keep-alive ping — prevents Render free tier from sleeping
