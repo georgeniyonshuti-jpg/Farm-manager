@@ -129,11 +129,18 @@ export function initializeMemoryDefaults() {
 
 initializeMemoryDefaults();
 
+/** Normalize machine keys for validation (breed codes are always compared lowercase). */
+function normalizedOptionValue(category, value) {
+  const s = String(value ?? "").trim();
+  if (String(category) === "breed") return s.toLowerCase();
+  return s;
+}
+
 function rowToClient(row) {
   return {
     category: row.category,
-    value: row.value,
-    label: row.label,
+    value: String(row.value ?? "").trim(),
+    label: String(row.label ?? "").trim(),
     sortOrder: row.sort_order ?? row.sortOrder ?? 0,
     active: row.active !== false,
     metadata: row.metadata && typeof row.metadata === "object" ? row.metadata : {},
@@ -191,21 +198,22 @@ export function getActiveValuesForCategory(category) {
   const set = new Set();
   for (const r of memReferenceRows) {
     if (r.category !== want || !r.active) continue;
-    set.add(String(r.value));
+    set.add(normalizedOptionValue(want, r.value));
   }
   return set;
 }
 
 export function isActiveReferenceValue(category, value) {
-  const v = String(value ?? "").trim();
+  const v = normalizedOptionValue(category, value);
   if (!v) return false;
   return getActiveValuesForCategory(category).has(v);
 }
 
 export function validateAgainstCategory(category, value, fallbackCodes) {
   const active = getActiveValuesForCategory(category);
-  if (active.size > 0) return active.has(String(value ?? "").trim());
-  return fallbackCodes.includes(String(value ?? "").trim());
+  const v = normalizedOptionValue(category, value);
+  if (active.size > 0) return active.has(v);
+  return fallbackCodes.some((c) => normalizedOptionValue(category, c) === v);
 }
 
 export function mergeBreedStandardsFileWithDb(fileDoc, dbDoc) {
