@@ -6,7 +6,7 @@ type Props = {
 export function BrandLogo({ size = 36, className = "" }: Props) {
   return (
     <img
-      src="/logo.png"
+      src="/logo.svg"
       alt="Clevafarm logo"
       width={size}
       height={size}
