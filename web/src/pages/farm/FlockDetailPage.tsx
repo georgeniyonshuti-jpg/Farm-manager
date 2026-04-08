@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { flockActionPresentation } from "../../auth/permissions";
 import { readAuthHeaders, jsonAuthHeaders } from "../../lib/authHeaders";
@@ -42,10 +42,15 @@ type Performance = {
   fcrSlaughter?: number | null;
 };
 
+type FlockPickerRow = { id: string; label: string };
+
 export function FlockDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
   const { token, user } = useAuth();
   const { showToast } = useToast();
+  const [flockPickerOptions, setFlockPickerOptions] = useState<FlockPickerRow[]>([]);
   const [flockMeta, setFlockMeta] = useState<{ label: string; placementDate: string } | null>(null);
   const [status, setStatus] = useState<CheckinStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +88,9 @@ export function FlockDetailPage() {
       const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
       const fd = await fr.json();
       if (!fr.ok) throw new Error((fd as { error?: string }).error);
-      const f = ((fd.flocks as { id: string; label: string; placementDate: string }[]) ?? []).find((x) => x.id === id);
+      const list = (fd.flocks as { id: string; label: string; placementDate: string }[]) ?? [];
+      setFlockPickerOptions(list.map((row) => ({ id: row.id, label: row.label })));
+      const f = list.find((x) => x.id === id);
       if (!f) throw new Error("Flock not found");
       setFlockMeta({ label: f.label, placementDate: f.placementDate });
 
@@ -245,6 +252,28 @@ export function FlockDetailPage() {
           </Link>
         }
       />
+
+      {!loading && flockPickerOptions.length > 0 && id ? (
+        <label className="block text-sm font-medium text-neutral-700">
+          Flock
+          <select
+            className="mt-1 w-full min-h-[48px] max-w-xl rounded-xl border border-neutral-300 px-3 text-base"
+            value={id}
+            onChange={(e) => {
+              const next = e.target.value;
+              if (!next) return;
+              const hash = location.hash ?? "";
+              void navigate(`/farm/flocks/${encodeURIComponent(next)}${hash}`);
+            }}
+          >
+            {flockPickerOptions.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
 
       {loading && <SkeletonList rows={3} />}
 
