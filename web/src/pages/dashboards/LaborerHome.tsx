@@ -128,7 +128,7 @@ export function LaborerHome() {
   ];
 
   return (
-    <div className="mx-auto max-w-lg space-y-5">
+    <div className="mx-auto max-w-2xl space-y-5">
       <div className={`rounded-xl px-4 py-3 text-sm font-semibold leading-6 ${roundBanner.tone}`}>
         {roundBanner.text}
       </div>
@@ -155,43 +155,43 @@ export function LaborerHome() {
       <div className="grid gap-3">
         <Link
           to="/farm/checkin"
-          className="flex min-h-[60px] items-center justify-center rounded-2xl bg-emerald-800 px-4 text-lg font-semibold text-white shadow hover:bg-emerald-900"
+          className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl bg-[var(--primary-color)] px-4 text-lg font-semibold text-white shadow hover:bg-[var(--primary-color-dark)]"
         >
           {linkCheckin}
         </Link>
         <Link
           to="/farm/mortality-log"
-          className="flex min-h-[60px] items-center justify-center rounded-2xl border-2 border-red-200 bg-red-50/80 px-4 text-lg font-semibold text-red-900 hover:bg-red-50"
+          className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border-2 border-red-200 bg-red-50/80 px-4 text-lg font-semibold text-red-900 hover:bg-red-50"
         >
           {linkMort}
         </Link>
         <Link
           to="/farm/daily-log"
-          className="flex min-h-[60px] items-center justify-center rounded-2xl border border-neutral-300 bg-white px-4 text-lg font-medium text-neutral-900 hover:bg-neutral-50"
+          className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-white px-4 text-lg font-medium text-neutral-900 hover:bg-[var(--primary-color-soft)]"
         >
           {linkDaily}
         </Link>
         <Link
           to="/farm/mortality"
-          className="flex min-h-[60px] items-center justify-center rounded-2xl border border-neutral-300 bg-white px-4 text-lg font-medium text-neutral-900 hover:bg-neutral-50"
+          className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-white px-4 text-lg font-medium text-neutral-900 hover:bg-[var(--primary-color-soft)]"
         >
           {linkTable}
         </Link>
         <Link
           to="/farm/inventory"
-          className="flex min-h-[60px] items-center justify-center rounded-2xl border border-neutral-300 bg-white px-4 text-lg font-medium text-neutral-900 hover:bg-neutral-50"
+          className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-white px-4 text-lg font-medium text-neutral-900 hover:bg-[var(--primary-color-soft)]"
         >
           {linkInv}
         </Link>
         <Link
           to="/laborer/earnings"
-          className="flex min-h-[60px] items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 text-lg font-semibold text-emerald-900 hover:bg-emerald-50"
+          className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border border-[var(--primary-color)]/30 bg-[var(--primary-color-soft)] px-4 text-lg font-semibold text-[var(--primary-color-dark)] hover:bg-[var(--primary-color-soft)]"
         >
           {linkEarnings}
         </Link>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-neutral-200 bg-white px-2 py-2 sm:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border-color)] bg-white/95 px-2 py-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur sm:hidden">
         <div className="grid grid-cols-6 gap-1">
           {bottomNav.map((item) => (
             <Link

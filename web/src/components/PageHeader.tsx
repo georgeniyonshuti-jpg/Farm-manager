@@ -11,14 +11,14 @@ type Props = {
 export function PageHeader({ title, subtitle, action, className = "" }: Props) {
   return (
     <header
-      className={["mb-6 flex max-w-[100vw] flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4", className]
+      className={["mb-6 flex max-w-[100vw] flex-col gap-2 border-b border-[var(--border-color)] pb-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4", className]
         .filter(Boolean)
         .join(" ")}
     >
       <div className="min-w-0">
-        <h1 className="text-xl font-semibold text-neutral-900 sm:text-2xl">{title}</h1>
+        <h1 className="text-xl font-semibold text-[var(--text-primary)] sm:text-2xl">{title}</h1>
         {subtitle != null && subtitle !== "" ? (
-          <div className="mt-1 text-sm text-neutral-600">{subtitle}</div>
+          <div className="mt-1 text-sm text-[var(--text-secondary)]">{subtitle}</div>
         ) : null}
       </div>
       {action != null ? <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">{action}</div> : null}

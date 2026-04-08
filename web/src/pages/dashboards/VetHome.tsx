@@ -122,7 +122,7 @@ export function VetHome() {
   ];
 
   return (
-    <div className="mx-auto max-w-lg space-y-5">
+    <div className="mx-auto max-w-2xl space-y-5">
       <div className={`rounded-xl px-4 py-3 text-sm font-semibold leading-6 ${roundBanner.tone}`}>
         {roundBanner.text}
       </div>
@@ -133,7 +133,7 @@ export function VetHome() {
         action={
           <Link
             to="/farm/batch-schedule"
-            className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
+            className="bounce-tap rounded-xl bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)]"
           >
             {batchCta}
           </Link>
@@ -151,29 +151,29 @@ export function VetHome() {
       {!loading && !loadError && status ? <CheckinStatusBlock status={status} showWarning={false} /> : null}
 
       <div className="grid gap-4">
-        <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+        <section className="app-surface p-4">
           <h2 className="text-sm font-semibold text-neutral-800">{medTitle}</h2>
           <p className="mt-2 text-sm text-neutral-600">{medBody}</p>
           <Link
             to="/farm/treatments"
-            className="mt-3 inline-block rounded-lg border border-emerald-300 px-3 py-2 text-sm font-semibold text-emerald-800"
+            className="bounce-tap mt-3 inline-block rounded-xl border border-[var(--primary-color)]/40 px-3 py-2 text-sm font-semibold text-[var(--primary-color-dark)] hover:bg-[var(--primary-color-soft)]"
           >
             {medLink}
           </Link>
         </section>
-        <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+        <section className="app-surface p-4">
           <h2 className="text-sm font-semibold text-neutral-800">{slTitle}</h2>
           <p className="mt-2 text-sm text-neutral-600">{slBody}</p>
           <Link
             to="/farm/slaughter"
-            className="mt-3 inline-block rounded-lg border border-emerald-300 px-3 py-2 text-sm font-semibold text-emerald-800"
+            className="bounce-tap mt-3 inline-block rounded-xl border border-[var(--primary-color)]/40 px-3 py-2 text-sm font-semibold text-[var(--primary-color-dark)] hover:bg-[var(--primary-color-soft)]"
           >
             {slLink}
           </Link>
         </section>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-neutral-200 bg-white px-2 py-2 sm:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border-color)] bg-white/95 px-2 py-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur sm:hidden">
         <div className="grid grid-cols-6 gap-1">
           {bottomNav.map((item) => (
             <Link

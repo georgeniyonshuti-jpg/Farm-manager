@@ -15,20 +15,20 @@ export function BrandLogo({ size = 36, className = "" }: Props) {
       className={className}
     >
       <defs>
-        <linearGradient id="leafA" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#8BCF3F" />
-          <stop offset="100%" stopColor="#1B8D2E" />
+        <linearGradient id="crestA" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#14B8A6" />
+          <stop offset="100%" stopColor="#0F8F78" />
         </linearGradient>
-        <linearGradient id="fieldA" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#84C430" />
-          <stop offset="100%" stopColor="#2B9B37" />
+        <linearGradient id="crestB" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#22D3EE" />
+          <stop offset="100%" stopColor="#1196B5" />
         </linearGradient>
       </defs>
-      <path d="M10 30c4-12 18-20 33-18-7 6-10 10-12 15-4-1-8 0-11 3z" fill="url(#leafA)" />
-      <path d="M33 14c8-6 16-6 21-3-4 7-9 10-17 10-2-2-3-4-4-7z" fill="url(#leafA)" />
-      <circle cx="36" cy="36" r="7" fill="#F4C316" />
-      <path d="M8 42c8-9 18-12 30-8 8 3 14 3 20 1-6 8-14 13-26 14-11 1-18-2-24-7z" fill="url(#fieldA)" />
-      <path d="M10 41c8-6 17-7 26-5M13 45c8-5 16-6 24-4M18 48c7-4 13-5 20-4" stroke="#CBEA86" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+      <rect x="4" y="4" width="56" height="56" rx="16" fill="#F0FDFA" />
+      <path d="M14 39c5-11 16-18 28-18 3 0 6 .4 9 1.2-5 7-10 11-16 12.8-4 1.3-8 1.7-12 4z" fill="url(#crestA)" />
+      <path d="M23 24c6-7 14-10 23-9-2 6-6 10-11 12-4.5 1.6-8.8 1.8-12 .5z" fill="url(#crestB)" />
+      <circle cx="37" cy="37" r="4.2" fill="#0F172A" />
+      <path d="M13 45c9-4 19-4 30 0" stroke="#99F6E4" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }

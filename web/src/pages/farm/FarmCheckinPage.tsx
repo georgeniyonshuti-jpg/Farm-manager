@@ -253,12 +253,12 @@ export function FarmCheckinPage() {
   }
 
   return (
-    <div className="mx-auto max-w-lg space-y-6">
+    <div className="mx-auto max-w-2xl space-y-6">
       <PageHeader
         title={title}
         subtitle={subtitle}
         action={
-          <Link to="/dashboard/laborer" className="text-sm font-medium text-emerald-800 hover:underline">
+          <Link to="/dashboard/laborer" className="bounce-tap rounded-lg px-2 py-1 text-sm font-medium text-[var(--primary-color-dark)] hover:bg-[var(--primary-color-soft)]">
             {linkAction}
           </Link>
         }
@@ -272,7 +272,7 @@ export function FarmCheckinPage() {
       {!pageLoading && !loadError ? (
       <form
         onSubmit={(e) => void handleSubmit(e)}
-        className="space-y-5 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"
+        className="space-y-5 rounded-2xl border border-[var(--border-color)] bg-white p-4 shadow-sm sm:p-5"
       >
         <CheckinPhotoBlock
           minCount={status?.photosRequiredPerRound ?? 1}
@@ -337,7 +337,7 @@ export function FarmCheckinPage() {
         <button
           type="submit"
           disabled={busy || !flockId}
-          className="w-full min-h-[52px] rounded-xl bg-emerald-800 text-lg font-semibold text-white hover:bg-emerald-900 disabled:opacity-50"
+          className="bounce-tap w-full min-h-[52px] rounded-xl bg-[var(--primary-color)] text-lg font-semibold text-white hover:bg-[var(--primary-color-dark)] disabled:opacity-50"
         >
           {busy ? btnSaving : btnSubmit}
         </button>

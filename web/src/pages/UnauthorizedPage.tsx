@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { PageHeader } from "../components/PageHeader";
+import { BrandLogo } from "../components/BrandLogo";
 import { defaultHomeForUser } from "../routes/ProtectedRoute";
 
 /**
@@ -13,6 +14,11 @@ export function UnauthorizedPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-neutral-100 px-4 py-12">
       <div className="w-full max-w-md rounded-2xl border border-neutral-200 bg-white p-8 text-center shadow-sm">
+        <div className="mb-3 flex justify-center">
+          <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--primary-color-soft)]">
+            <BrandLogo size={34} />
+          </span>
+        </div>
         <PageHeader
           className="items-center text-center sm:flex-col sm:items-center"
           title="Access denied"

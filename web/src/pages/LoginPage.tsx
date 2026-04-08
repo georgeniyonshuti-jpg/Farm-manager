@@ -118,8 +118,8 @@ export function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col justify-center bg-neutral-100 px-4 py-8">
-      <div className="mx-auto w-full max-w-lg rounded-2xl border border-neutral-200 bg-white p-8 shadow-sm">
+    <div className="flex min-h-screen flex-col justify-center bg-[var(--background-color)] px-4 py-8">
+      <div className="mx-auto w-full max-w-lg rounded-2xl border border-[var(--border-color)] bg-white p-8 shadow-sm">
         <div className="mb-2 flex justify-center">
           <BrandLogo size={66} />
         </div>
@@ -170,7 +170,7 @@ export function LoginPage() {
           <button
             type="submit"
             disabled={busy}
-            className="w-full rounded-xl bg-emerald-800 py-3 text-base font-semibold text-white hover:bg-emerald-900 disabled:opacity-60"
+            className="bounce-tap w-full rounded-xl bg-[var(--primary-color)] py-3 text-base font-semibold text-white hover:bg-[var(--primary-color-dark)] disabled:opacity-60"
           >
             {busy ? "Signing in…" : "Sign in"}
           </button>

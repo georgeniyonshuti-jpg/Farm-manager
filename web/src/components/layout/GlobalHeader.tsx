@@ -41,64 +41,65 @@ export function GlobalHeader() {
   ];
 
   return (
-    <header className="flex min-h-14 flex-wrap items-start justify-between gap-3 border-b border-neutral-200 bg-white px-3 py-3 shadow-sm sm:px-4">
-      <div className="flex min-w-0 flex-1 flex-col sm:flex-row sm:items-center sm:gap-3">
-        <span className="inline-flex items-center gap-2 text-sm font-semibold text-neutral-900">
-          <BrandLogo size={24} />
-          <span>{appName}</span>
-        </span>
-        <span className="truncate text-sm font-medium text-neutral-800">{user.displayName}</span>
-        <span className="text-xs text-neutral-500">
-          <span className="rounded bg-neutral-100 px-2 py-0.5 font-medium uppercase tracking-wide text-neutral-700">
-            {roleBadge}
-          </span>
-          {!user.canViewSensitiveFinancial && (
-            <span className="ml-2 rounded bg-amber-50 px-2 py-0.5 text-amber-900">
-              {financialRestricted}
+    <header className="border-b border-[var(--border-color)] bg-white/95 px-3 py-3 shadow-sm backdrop-blur sm:px-4">
+      <div className="mx-auto flex w-full max-w-[1440px] flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-[var(--primary-color-soft)]">
+              <BrandLogo size={22} />
             </span>
-          )}
-        </span>
-      </div>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{appName}</p>
+              <p className="truncate text-xs text-[var(--text-muted)]">{user.displayName}</p>
+            </div>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+            <span className="rounded-full bg-[var(--secondary-soft)] px-2 py-0.5 font-semibold uppercase tracking-wide text-[var(--secondary-color)]">
+              {roleBadge}
+            </span>
+            {!user.canViewSensitiveFinancial ? (
+              <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-900">{financialRestricted}</span>
+            ) : null}
+          </div>
+        </div>
 
-      <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
-        {showFieldHome && (
-          <Link
-            to="/dashboard/laborer"
-            className="inline-flex min-h-[44px] items-center gap-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
-          >
-            <span aria-hidden>🏠</span>
-            {homeLabel}
-          </Link>
-        )}
-        <LaborerLanguageToggle />
-
-        {showSwitcher && (
-          <label className="flex items-center gap-2 text-sm text-neutral-700">
-            <span className="hidden sm:inline">{businessLabel}</span>
-            <select
-              className="max-w-[11rem] rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-900 shadow-sm focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-600/30 sm:max-w-none"
-              value={activeWorkspace ?? "farm"}
-              onChange={(e) => setActiveWorkspace(e.target.value as ActiveWorkspace)}
-              aria-label={switchWorkspaceAria}
+        <div className="flex flex-shrink-0 flex-wrap items-center justify-end gap-2">
+          {showSwitcher ? (
+            <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+              <span className="hidden md:inline">{businessLabel}</span>
+              <select
+                className="bounce-tap max-w-[11rem] rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-sm font-medium text-[var(--text-primary)] shadow-sm sm:max-w-none"
+                value={activeWorkspace ?? "farm"}
+                onChange={(e) => setActiveWorkspace(e.target.value as ActiveWorkspace)}
+                aria-label={switchWorkspaceAria}
+              >
+                {workspaces.map((w) => (
+                  <option key={w.id} value={w.id} disabled={!canAccessWorkspace(user, w.id)}>
+                    {w.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <LaborerLanguageToggle />
+          {showFieldHome ? (
+            <Link
+              to="/dashboard/laborer"
+              className="bounce-tap inline-flex min-h-[44px] items-center rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)]"
             >
-              {workspaces.map((w) => (
-                <option key={w.id} value={w.id} disabled={!canAccessWorkspace(user, w.id)}>
-                  {w.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-
-        <button
-          type="button"
-          onClick={() => void logout()}
-          className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
-          aria-label="Sign out"
-          title="Sign out"
-        >
-          <span aria-hidden>↪</span>
-        </button>
+              {homeLabel}
+            </Link>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => void logout()}
+            className="bounce-tap rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)]"
+            aria-label="Sign out"
+            title="Sign out"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
     </header>
   );

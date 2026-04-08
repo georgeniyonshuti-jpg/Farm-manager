@@ -15,7 +15,7 @@ export function AppShell() {
   const compactFieldView = laborerLikeView || juniorVetMode || fieldOpsMode;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   return (
-    <div className="flex min-h-screen flex-col bg-neutral-100">
+    <div className="flex min-h-screen flex-col bg-[var(--background-color)]">
       <GlobalHeader />
       {!compactFieldView && sidebarOpen ? (
         <button
@@ -31,18 +31,18 @@ export function AppShell() {
             <button
               type="button"
               onClick={() => setSidebarOpen((v) => !v)}
-              className="mx-4 mb-2 mt-2 inline-flex min-h-[44px] items-center justify-center rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-700 sm:hidden"
+              className="bounce-tap mx-4 mb-2 mt-2 inline-flex min-h-[44px] items-center justify-center rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-sm font-semibold text-[var(--text-primary)] sm:hidden"
             >
               ☰ Menu
             </button>
             <div
-              className={`fixed inset-y-0 left-0 z-40 w-64 transform bg-neutral-50 transition-transform sm:static sm:z-auto sm:w-56 sm:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
+              className={`fixed inset-y-0 left-0 z-40 w-[18rem] transform bg-[var(--surface-elevated)] transition-transform sm:static sm:z-auto sm:w-[17rem] sm:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}
             >
               <SidebarNav onNavigate={() => setSidebarOpen(false)} />
             </div>
           </>
         ) : null}
-            <main className={`app-page-enter flex-1 overflow-auto p-4 sm:p-6 ${compactFieldView ? "pb-24 sm:pb-6" : ""}`}>
+            <main className={`app-page-enter flex-1 overflow-auto p-3 sm:p-6 ${compactFieldView ? "pb-24 sm:pb-6" : ""}`}>
           <Outlet />
         </main>
       </div>

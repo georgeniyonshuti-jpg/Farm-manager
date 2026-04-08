@@ -1,4 +1,5 @@
 import { NavLink } from "react-router-dom";
+import { useMemo, useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
 import { canFlockAction, hasPermission } from "../../auth/permissions";
 import { canEditFlockScheduleRole } from "../../farm/scheduleAccess";
@@ -32,6 +33,12 @@ export function SidebarNav({ onNavigate }: Props) {
   const clevaSectionTitle = useLaborerT("Clevafarm Finance");
 
   if (!user || !activeWorkspace) return null;
+
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    core: true,
+    clinical: true,
+    workforce: true,
+  });
 
   const clevaNav = CLEVA_NAV.filter((item) => {
     if (item.to !== "/cleva/investor-memos") return true;
@@ -104,13 +111,65 @@ export function SidebarNav({ onNavigate }: Props) {
   const adminLink =
     user.role === "superuser" ? { to: "/admin/users", label: "User management" } : null;
 
+  const groupedFarmNav = useMemo(
+    () => ({
+      core: FARM_NAV_BASE,
+      clinical: farmNav.filter((i) => ["/farm/flocks", "/farm/batch-schedule", "/farm/treatments", "/farm/slaughter"].includes(i.to)),
+      workforce: farmNav.filter((i) => ["/farm/schedule-settings", "/farm/payroll", "/laborer/earnings"].includes(i.to)),
+    }),
+    [farmNav]
+  );
+
+  function toggleGroup(id: "core" | "clinical" | "workforce") {
+    setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  function GroupSection({ id, title, items }: { id: "core" | "clinical" | "workforce"; title: string; items: NavItem[] }) {
+    if (!items.length) return null;
+    const isOpen = openGroups[id];
+    return (
+      <section className="rounded-lg border border-neutral-200 bg-white/70">
+        <button
+          type="button"
+          onClick={() => toggleGroup(id)}
+          className="bounce-tap flex w-full items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-neutral-600"
+        >
+          <span>{title}</span>
+          <span aria-hidden>{isOpen ? "−" : "+"}</span>
+        </button>
+        {isOpen ? (
+          <div className="flex flex-col gap-1 px-2 pb-2">
+            {items.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                onClick={onNavigate}
+                className={({ isActive }) =>
+                  [
+                    "bounce-tap rounded-lg px-3 py-2 text-sm font-medium",
+                    isActive
+                      ? "bg-[var(--primary-color)] text-white"
+                      : "text-neutral-800 hover:bg-[var(--primary-color-soft)]",
+                  ].join(" ")
+                }
+              >
+                <NavText text={item.label} />
+              </NavLink>
+            ))}
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
   return (
     <aside className="w-full border-b border-neutral-200 bg-neutral-50 sm:w-56 sm:border-b-0 sm:border-r">
       <div className="p-4">
         <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
           {activeWorkspace === "farm" ? farmSectionTitle : clevaSectionTitle}
         </p>
-        <nav className="mt-3 flex flex-col gap-1 sm:flex-col">
+        <nav className="mt-3 flex flex-col gap-2 sm:flex-col">
           <NavLink
             to={dashLink.to}
             onClick={onNavigate}
@@ -125,24 +184,32 @@ export function SidebarNav({ onNavigate }: Props) {
           >
             <NavText text={dashLink.label} />
           </NavLink>
-          {nav.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              onClick={onNavigate}
-              className={({ isActive }) =>
-                [
-                  "rounded-lg px-3 py-2 text-sm font-medium",
-                  isActive
-                    ? "bg-emerald-800 text-white"
-                    : "text-neutral-800 hover:bg-neutral-200/80",
-                ].join(" ")
-              }
-            >
-              <NavText text={item.label} />
-            </NavLink>
-          ))}
+          {activeWorkspace === "farm" ? (
+            <>
+              <GroupSection id="core" title="Core operations" items={groupedFarmNav.core} />
+              <GroupSection id="clinical" title="Clinical & flock control" items={groupedFarmNav.clinical} />
+              <GroupSection id="workforce" title="Workforce & admin" items={groupedFarmNav.workforce} />
+            </>
+          ) : (
+            nav.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                onClick={onNavigate}
+                className={({ isActive }) =>
+                  [
+                    "bounce-tap rounded-lg px-3 py-2 text-sm font-medium",
+                    isActive
+                      ? "bg-[var(--primary-color)] text-white"
+                      : "text-neutral-800 hover:bg-[var(--primary-color-soft)]",
+                  ].join(" ")
+                }
+              >
+                <NavText text={item.label} />
+              </NavLink>
+            ))
+          )}
           {adminLink && (
             <NavLink
               to={adminLink.to}
