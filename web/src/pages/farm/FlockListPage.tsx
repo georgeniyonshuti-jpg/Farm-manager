@@ -87,15 +87,13 @@ export function FlockListPage() {
       const enriched = await Promise.all(
         base.map(async (f) => {
           try {
-            const [wr, er] = await Promise.all([
-              fetch(`${API_BASE_URL}/api/weigh-ins/${encodeURIComponent(f.id)}/latest`, { headers: readAuthHeaders(token) }),
-              fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(f.id)}/eligibility`, { headers: readAuthHeaders(token) }),
-            ]);
-            const wd = await wr.json().catch(() => ({}));
+            const er = await fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(f.id)}/eligibility`, {
+              headers: readAuthHeaders(token),
+            });
             const ed = await er.json().catch(() => ({ eligibleForSlaughter: true, blockers: [] }));
             return {
               ...f,
-              latestFcr: (wd as { weighIn?: { fcr?: number | null } }).weighIn?.fcr ?? null,
+              latestFcr: null,
               withdrawalActive: !Boolean((ed as { eligibleForSlaughter?: boolean }).eligibleForSlaughter ?? true),
               overdueRounds: 0,
               mortality7d: 0,

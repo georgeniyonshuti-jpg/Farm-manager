@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
 import { canFlockAction } from "../../auth/permissions";
@@ -27,8 +28,6 @@ type Eligibility = {
   eligibleForSlaughter: boolean;
   blockers: Array<{ type: string; medicineName?: string; safeAfter?: string; plannedFor?: string }>;
 };
-type WeighInLatest = { weighIn?: { fcr?: number | null; avgWeightKg?: number | null; totalFeedUsedKg?: number | null } | null };
-
 const SLAUGHTER_REASON_OPTIONS = [
   { value: "planned_market", label: "Planned market harvest" },
   { value: "target_weight_reached", label: "Target weight reached" },
@@ -99,29 +98,19 @@ export function FarmSlaughterPage() {
       const q = new URLSearchParams();
       if (startAt) q.set("start_at", `${startAt}T00:00:00.000Z`);
       if (endAt) q.set("end_at", `${endAt}T23:59:59.999Z`);
-      const [sr, pr, er, wr] = await Promise.all([
+      const [sr, pr, er] = await Promise.all([
         fetch(`${API_BASE_URL}/api/flocks/${selected}/slaughter-events?${q.toString()}`, { headers: readAuthHeaders(token) }),
         fetch(`${API_BASE_URL}/api/flocks/${selected}/performance-summary`, { headers: readAuthHeaders(token) }),
         fetch(`${API_BASE_URL}/api/flocks/${selected}/eligibility`, { headers: readAuthHeaders(token) }),
-        fetch(`${API_BASE_URL}/api/weigh-ins/${selected}/latest`, { headers: readAuthHeaders(token) }),
       ]);
       const sd = await sr.json();
       const pd = await pr.json();
       const ed = await er.json().catch(() => ({ eligibleForSlaughter: true, blockers: [] }));
-      const wd = await wr.json().catch(() => ({}));
       if (!sr.ok) throw new Error(sd.error ?? "Failed to load slaughter events");
       if (!pr.ok) throw new Error(pd.error ?? "Failed to load summary");
       setRows((sd.slaughterEvents as Slaughter[]) ?? []);
       setSummary(pd as PerformanceSummary);
       setEligibility(ed as Eligibility);
-      const w = (wd as WeighInLatest).weighIn;
-      if (w?.avgWeightKg != null || w?.totalFeedUsedKg != null || w?.fcr != null) {
-        setSummary((prev) => prev ? ({
-          ...prev,
-          feedToDateKg: w.totalFeedUsedKg != null ? Number(w.totalFeedUsedKg) : prev.feedToDateKg,
-          fcr: w.fcr != null ? Number(w.fcr) : prev.fcr,
-        }) : prev);
-      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -207,6 +196,14 @@ export function FarmSlaughterPage() {
             <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">Mortality</p><p className="font-semibold">{summary?.mortalityToDate ?? 0}</p></div>
             <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">FCR</p><p className="font-semibold">{summary?.fcr != null ? summary.fcr.toFixed(2) : "-"}</p></div>
           </div>
+          <p className="text-xs text-neutral-600">
+            This screen focuses on harvest-oriented metrics. For full-cycle broiler FCR (feed ÷ flock weight gained),
+            open the{" "}
+            <Link className="font-medium text-emerald-800 underline" to={`/farm/flocks/${encodeURIComponent(flockId)}/fcr`}>
+              Cycle FCR action center
+            </Link>{" "}
+            for this flock.
+          </p>
 
           <form onSubmit={submit} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
             {!canRecordSlaughter ? (

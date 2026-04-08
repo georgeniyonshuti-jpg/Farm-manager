@@ -28,6 +28,7 @@ export type CheckinStatus = {
   checkinBadge: CheckinBadge;
   photosRequiredPerRound: number;
   bands: { untilDay: number; intervalHours: number }[];
+  fcrCheckinHint?: { severity: string; message: string } | null;
 };
 
 function kigaliNowDate(): Date {
@@ -169,6 +170,7 @@ export function FarmCheckinPage() {
   const [pageLoading, setPageLoading] = useState(true);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [fcrHintDismissed, setFcrHintDismissed] = useState(false);
 
   const loadStatus = useCallback(async () => {
     setLoadError(null);
@@ -197,6 +199,10 @@ export function FarmCheckinPage() {
   useEffect(() => {
     void loadStatus();
   }, [loadStatus]);
+
+  useEffect(() => {
+    setFcrHintDismissed(false);
+  }, [flockId, status?.fcrCheckinHint?.message]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -266,6 +272,38 @@ export function FarmCheckinPage() {
 
       {pageLoading && <SkeletonList rows={3} />}
       {!pageLoading && loadError && <ErrorState message={loadError} onRetry={() => void loadStatus()} />}
+
+      {!pageLoading && !loadError && status?.fcrCheckinHint && !fcrHintDismissed ? (
+        <div
+          className={
+            status.fcrCheckinHint.severity === "warning"
+              ? "rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-950"
+              : "rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+          }
+          role="status"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <p className="font-medium">{status.fcrCheckinHint.message}</p>
+            <div className="flex gap-2">
+              {flockId ? (
+                <Link
+                  to={`/farm/flocks/${encodeURIComponent(flockId)}/fcr`}
+                  className="shrink-0 rounded-lg bg-white/80 px-2 py-1 text-xs font-semibold text-emerald-900 underline"
+                >
+                  FCR
+                </Link>
+              ) : null}
+              <button
+                type="button"
+                className="shrink-0 text-xs font-semibold text-neutral-600 underline"
+                onClick={() => setFcrHintDismissed(true)}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {!pageLoading && !loadError && status && <CheckinStatusBlock status={status} />}
 

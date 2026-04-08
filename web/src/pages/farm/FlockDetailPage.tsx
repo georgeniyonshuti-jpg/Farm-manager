@@ -14,15 +14,31 @@ type Eligibility = {
   eligibleForSlaughter: boolean;
   blockers: Array<{ type: string; medicineName?: string; safeAfter?: string; plannedFor?: string }>;
 };
-type WeighIn = { id: string; weighDate: string; avgWeightKg: number; fcr: number | null; variancePct: number | null };
+type WeighIn = {
+  id: string;
+  weighDate: string;
+  avgWeightKg: number;
+  fcr: number | null;
+  feedPerKgSampleBiomass?: number | null;
+  variancePct: number | null;
+};
+
+type FcrBroiler = {
+  fcrCumulative: number | null;
+  fcrTargetMin: number;
+  fcrTargetMax: number;
+  status: string;
+};
 
 type Performance = {
   feedToDateKg: number;
   fcr: number | null;
+  ageDays?: number;
   birdsLiveEstimate: number;
   computedBirdsLiveEstimate?: number;
   verifiedLiveCount?: number | null;
-  fcrWeighIn?: number | null;
+  fcrBroiler?: FcrBroiler;
+  fcrSampleBiomassRatio?: number | null;
   fcrSlaughter?: number | null;
 };
 
@@ -144,7 +160,10 @@ export function FlockDetailPage() {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Save failed");
-      showToast("success", "Weigh-in saved. FCR is estimated from feed and sample weights.");
+      showToast(
+        "success",
+        "Weigh-in saved. Cycle FCR on the dashboard uses this weight with check-in feed totals.",
+      );
       setWeighForm((v) => ({
         ...v,
         avgWeightKg: "",
@@ -251,12 +270,25 @@ export function FlockDetailPage() {
                   )}
                 </div>
                 <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
-                  <p className="text-neutral-500">FCR</p>
+                  <p className="text-neutral-500">Cycle FCR</p>
                   <p className="font-semibold">{performance.fcr != null ? performance.fcr.toFixed(2) : "-"}</p>
-                  {performance.fcrWeighIn != null ? (
-                    <p className="mt-1 text-xs text-neutral-500">From latest weigh-in</p>
+                  {performance.fcrBroiler?.fcrCumulative != null ? (
+                    <p className="mt-1 text-xs text-neutral-500">
+                      Feed ÷ flock weight gained (broiler). Target band day {performance.ageDays ?? "?"}:{" "}
+                      {performance.fcrBroiler.fcrTargetMin.toFixed(2)}–{performance.fcrBroiler.fcrTargetMax.toFixed(2)}
+                    </p>
                   ) : performance.fcrSlaughter != null ? (
-                    <p className="mt-1 text-xs text-neutral-500">From last harvest weights</p>
+                    <p className="mt-1 text-xs text-neutral-500">From last harvest weights (no cycle estimate yet)</p>
+                  ) : (
+                    <p className="mt-1 text-xs text-neutral-500">Add a weigh-in to compute cycle FCR</p>
+                  )}
+                  {id ? (
+                    <Link
+                      to={`/farm/flocks/${id}/fcr`}
+                      className="mt-2 inline-block text-xs font-medium text-emerald-800 hover:underline"
+                    >
+                      Open FCR action center
+                    </Link>
                   ) : null}
                 </div>
               </div>
@@ -266,8 +298,9 @@ export function FlockDetailPage() {
               <section id="weigh-in" className="rounded-xl border border-neutral-200 bg-white p-4 text-sm shadow-sm scroll-mt-4">
                 <p className="mb-3 font-semibold text-neutral-800">Record weigh-in</p>
                 <p className="mb-3 text-xs text-neutral-600">
-                  Sample average weight and cumulative feed (kg) for this flock up to the weigh date. FCR on the row uses
-                  feed ÷ (avg weight × sample size) as stored for trending.
+                  Sample average weight and cumulative feed (kg) to this date. Cycle FCR on the dashboard uses check-in
+                  feed totals and this weight × live headcount vs placement weight; the table below also shows feed per kg
+                  of sampled biomass for reference.
                 </p>
                 <form onSubmit={(ev) => void submitWeighIn(ev)} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   <label className="flex flex-col gap-1">
@@ -425,17 +458,22 @@ export function FlockDetailPage() {
               </ul>
             </div>
             <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
-              <p className="mb-2 font-semibold text-neutral-800">Weight & FCR History</p>
+              <p className="mb-2 font-semibold text-neutral-800">Weigh-in history</p>
               {weighIns.length ? (
                 <div className="space-y-1">
-                  {weighIns.map((w) => (
-                    <div key={w.id} className="grid grid-cols-4 gap-2 text-xs">
-                      <span className="font-medium text-neutral-800">{w.weighDate}</span>
-                      <span className="text-neutral-700">{w.avgWeightKg.toFixed(2)} kg</span>
-                      <span className="text-neutral-700">FCR {w.fcr != null ? w.fcr.toFixed(2) : "—"}</span>
-                      <span className="text-neutral-600">{w.variancePct != null ? `${w.variancePct > 0 ? "+" : ""}${w.variancePct}%` : "—"}</span>
-                    </div>
-                  ))}
+                  {weighIns.map((w) => {
+                    const ratio = w.feedPerKgSampleBiomass ?? w.fcr;
+                    return (
+                      <div key={w.id} className="grid grid-cols-4 gap-2 text-xs">
+                        <span className="font-medium text-neutral-800">{w.weighDate}</span>
+                        <span className="text-neutral-700">{w.avgWeightKg.toFixed(2)} kg</span>
+                        <span className="text-neutral-700" title="Feed per kg of sampled bird biomass (not cumulative FCR)">
+                          {ratio != null ? `${ratio.toFixed(2)} feed/kg sample` : "—"}
+                        </span>
+                        <span className="text-neutral-600">{w.variancePct != null ? `${w.variancePct > 0 ? "+" : ""}${w.variancePct}%` : "—"}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="text-neutral-500">No weigh-ins yet.</p>
@@ -447,7 +485,7 @@ export function FlockDetailPage() {
                 Current live estimate: <span className="font-semibold">{performance?.birdsLiveEstimate ?? "—"}</span>
               </p>
               <p className="text-neutral-700">
-                Current FCR: <span className="font-semibold">{performance?.fcr != null ? performance.fcr.toFixed(2) : "—"}</span>
+                Cycle FCR: <span className="font-semibold">{performance?.fcr != null ? performance.fcr.toFixed(2) : "—"}</span>
               </p>
             </div>
             <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">

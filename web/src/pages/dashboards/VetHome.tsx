@@ -15,6 +15,7 @@ function kigaliNowDate(): Date {
 export function VetHome() {
   const { token } = useAuth();
   const [status, setStatus] = useState<CheckinStatus | null>(null);
+  const [primaryFlockId, setPrimaryFlockId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
@@ -28,6 +29,9 @@ export function VetHome() {
   const slTitle = useLaborerT("Slaughter & FCR");
   const slBody = useLaborerT("Record slaughter timing and weights, and review FCR reports.");
   const slLink = useLaborerT("Open slaughter & FCR");
+  const fcrTitle = useLaborerT("Cycle FCR");
+  const fcrBody = useLaborerT("Feed ÷ flock weight gained vs day-age targets. Mobile-friendly action center.");
+  const fcrLink = useLaborerT("Open cycle FCR");
   const tLoadingBanner = useLaborerT("Preparing round check-in status…");
   const tErrBanner = useLaborerT("Could not load round check-in. Try again.");
   const tNoScheduleBanner = useLaborerT("No round schedule available right now.");
@@ -51,7 +55,9 @@ export function VetHome() {
       const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
       const fd = await fr.json();
       if (!fr.ok) throw new Error(fd.error ?? "Flocks failed");
-      const id = (fd.flocks as { id: string }[])[0]?.id;
+      const flocks = (fd.flocks as { id: string }[]) ?? [];
+      const id = flocks[0]?.id ?? null;
+      setPrimaryFlockId(id);
       if (!id) {
         setStatus(null);
         return;
@@ -159,6 +165,16 @@ export function VetHome() {
             className="bounce-tap mt-3 inline-block rounded-xl border border-[var(--primary-color)]/40 px-3 py-2 text-sm font-semibold text-[var(--primary-color-dark)] hover:bg-[var(--primary-color-soft)]"
           >
             {medLink}
+          </Link>
+        </section>
+        <section className="app-surface p-4">
+          <h2 className="text-sm font-semibold text-neutral-800">{fcrTitle}</h2>
+          <p className="mt-2 text-sm text-neutral-600">{fcrBody}</p>
+          <Link
+            to={primaryFlockId ? `/farm/flocks/${encodeURIComponent(primaryFlockId)}/fcr` : "/farm/fcr"}
+            className="bounce-tap mt-3 inline-block rounded-xl border border-[var(--primary-color)]/40 px-3 py-2 text-sm font-semibold text-[var(--primary-color-dark)] hover:bg-[var(--primary-color-soft)]"
+          >
+            {fcrLink}
           </Link>
         </section>
         <section className="app-surface p-4">

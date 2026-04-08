@@ -18,6 +18,8 @@ import { FarmMortalityPage } from "./pages/farm/FarmMortalityPage";
 import { FlockScheduleSettingsPage } from "./pages/farm/FlockScheduleSettingsPage";
 import { FlockListPage } from "./pages/farm/FlockListPage";
 import { FlockDetailPage } from "./pages/farm/FlockDetailPage";
+import { FlockFcrPage } from "./pages/farm/FlockFcrPage";
+import { FarmFcrRedirectPage } from "./pages/farm/FarmFcrRedirectPage";
 import { CreditScoringPage } from "./pages/cleva/CreditScoringPage";
 import { InvestorMemosPage } from "./pages/cleva/InvestorMemosPage";
 import { PortfolioPage } from "./pages/cleva/PortfolioPage";
@@ -107,6 +109,26 @@ export default function App() {
                       roles={["manager", "vet_manager", "vet", "superuser", "procurement_officer", "sales_coordinator"]}
                     >
                       <FlockDetailPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="flocks/:id/fcr"
+                  element={
+                    <ProtectedRoute
+                      roles={["manager", "vet_manager", "vet", "superuser", "procurement_officer", "sales_coordinator"]}
+                    >
+                      <FlockFcrPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="fcr"
+                  element={
+                    <ProtectedRoute
+                      roles={["manager", "vet_manager", "vet", "superuser", "procurement_officer", "sales_coordinator"]}
+                    >
+                      <FarmFcrRedirectPage />
                     </ProtectedRoute>
                   }
                 />

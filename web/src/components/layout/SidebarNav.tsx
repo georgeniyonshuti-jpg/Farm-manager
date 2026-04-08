@@ -75,6 +75,10 @@ export function SidebarNav({ onNavigate }: Props) {
     canFlockAction(user, "slaughter.schedule")
       ? { to: "/farm/slaughter", label: "Slaughter & FCR" }
       : null;
+  const cycleFcrNavItem: NavItem | null =
+    activeWorkspace === "farm" && canFlockAction(user, "flock.view")
+      ? { to: "/farm/fcr", label: "Cycle FCR" }
+      : null;
 
   const laborerEarningsItem: NavItem | null =
     activeWorkspace === "farm" && (user.role === "laborer" || user.role === "dispatcher")
@@ -89,6 +93,7 @@ export function SidebarNav({ onNavigate }: Props) {
     payrollNavItem,
     treatmentNavItem,
     slaughterNavItem,
+    cycleFcrNavItem,
   ].filter(Boolean) as NavItem[];
   const farmCore = farmCoreNavItems(user);
   const farmNav = [...farmCore, ...farmExtras];
@@ -108,7 +113,9 @@ export function SidebarNav({ onNavigate }: Props) {
     const core = farmCoreNavItems(user);
     return {
       core,
-      clinical: farmNav.filter((i) => ["/farm/flocks", "/farm/batch-schedule", "/farm/treatments", "/farm/slaughter"].includes(i.to)),
+      clinical: farmNav.filter((i) =>
+        ["/farm/flocks", "/farm/batch-schedule", "/farm/treatments", "/farm/slaughter", "/farm/fcr"].includes(i.to)
+      ),
       workforce: farmNav.filter((i) => ["/farm/schedule-settings", "/farm/payroll", "/laborer/earnings"].includes(i.to)),
     };
   }, [user, farmNav]);

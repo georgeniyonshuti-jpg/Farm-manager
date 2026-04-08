@@ -1,6 +1,11 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import rateLimit from "express-rate-limit";
 import session from "express-session";
 import pgSession from "connect-pg-simple";
@@ -723,6 +728,37 @@ const DEFAULT_CHECKIN_BANDS = [
 /** @type {Map<string, object>} */
 const flocksById = new Map();
 
+/** @type {object | null} */
+let breedStandardsJson = null;
+function loadBreedStandardsJson() {
+  if (breedStandardsJson !== null) return breedStandardsJson;
+  try {
+    const p = path.join(__dirname, "..", "data", "breed_standards.json");
+    breedStandardsJson = JSON.parse(fs.readFileSync(p, "utf8"));
+  } catch {
+    breedStandardsJson = { breeds: {} };
+  }
+  return breedStandardsJson;
+}
+
+function chickWeightKgDay0(breedCode) {
+  const j = loadBreedStandardsJson();
+  const code = String(breedCode ?? "").trim() || "generic_broiler";
+  const breeds = j.breeds ?? {};
+  const b = breeds[code] ?? breeds.generic_broiler ?? {};
+  const curve = b.curve_kg_avg_weight_by_day ?? {};
+  const w = curve["0"] ?? curve[0];
+  const n = Number(w);
+  return Number.isFinite(n) && n > 0 ? n : 0.04;
+}
+
+function initialTotalWeightKgForFlock(flock) {
+  const raw = Number(flock.initialWeightKg);
+  if (Number.isFinite(raw) && raw > 0) return raw;
+  const n = Math.max(1, Number(flock.initialCount) || 1);
+  return n * chickWeightKgDay0(flock.breedCode);
+}
+
 /** @type {Array<object>} */
 const roundCheckins = [];
 
@@ -809,6 +845,31 @@ function checkinStatusPayload(flock) {
   };
 }
 
+async function checkinStatusPayloadWithFcrHint(flockId) {
+  const f = flocksById.get(flockId);
+  if (!f) return null;
+  const base = checkinStatusPayload(f);
+  let fcrCheckinHint = null;
+  try {
+    const summary = await buildFlockPerformanceSummary(flockId);
+    const b = summary?.fcrBroiler;
+    if (
+      b?.fcrCumulative != null &&
+      Number.isFinite(b.fcrCumulative) &&
+      Number.isFinite(b.fcrTargetMax) &&
+      b.fcrCumulative > b.fcrTargetMax
+    ) {
+      fcrCheckinHint = {
+        severity: b.fcrCumulative > b.fcrTargetMax * 1.08 ? "warning" : "watch",
+        message: `Cycle FCR ${b.fcrCumulative.toFixed(2)} is above the day-${b.ageDays} target ceiling (${b.fcrTargetMax.toFixed(2)}). Check feed loss, water, and house temperature.`,
+      };
+    }
+  } catch {
+    /* optional */
+  }
+  return { ...base, fcrCheckinHint };
+}
+
 function seedFlock() {
   const placement = new Date();
   placement.setUTCDate(placement.getUTCDate() - 10);
@@ -821,6 +882,8 @@ function seedFlock() {
     targetSlaughterDayMin: 45,
     targetSlaughterDayMax: 50,
     initialCount: 1000,
+    initialWeightKg: 0,
+    breedCode: "generic_broiler",
     checkinBands: null,
     photosRequiredPerRound: 1,
   });
@@ -1040,6 +1103,8 @@ async function syncFlocksFromDbToMemory() {
             placement_date::text AS "placementDate",
             initial_count AS "initialCount",
             target_weight_kg AS "targetWeightKg",
+            initial_weight_kg AS "initialWeightKg",
+            breed_code AS "breedCode",
             verified_live_count AS "verifiedLiveCount",
             verified_live_note AS "verifiedLiveNote",
             verified_live_at AS "verifiedLiveAt",
@@ -1057,6 +1122,8 @@ async function syncFlocksFromDbToMemory() {
       placementDate: String(row.placementDate ?? new Date().toISOString().slice(0, 10)),
       initialCount: Math.max(1, Number(row.initialCount ?? prev.initialCount ?? 1)),
       targetWeightKg: row.targetWeightKg != null ? Number(row.targetWeightKg) : (prev.targetWeightKg ?? null),
+      initialWeightKg: row.initialWeightKg != null ? Number(row.initialWeightKg) : (prev.initialWeightKg ?? 0),
+      breedCode: row.breedCode != null ? String(row.breedCode) : (prev.breedCode ?? "generic_broiler"),
       verifiedLiveCount: row.verifiedLiveCount != null ? Math.max(0, Number(row.verifiedLiveCount)) : null,
       verifiedLiveNote: row.verifiedLiveNote != null ? String(row.verifiedLiveNote) : null,
       verifiedLiveAt: row.verifiedLiveAt != null ? String(row.verifiedLiveAt) : null,
@@ -1140,6 +1207,7 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.cre
       placementDate,
       initialCount: Math.floor(initialCount),
       breedCode,
+      initialWeightKg: 0,
       targetWeightKg,
       status,
       targetSlaughterDayMin: 45,
@@ -1161,13 +1229,20 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.cre
   }
 });
 
-app.get("/api/flocks/:id/checkin-status", requireAuth, requireFarmAccess, requireAction("flock.view"), (req, res) => {
-  const f = flocksById.get(req.params.id);
-  if (!f) {
+app.get("/api/flocks/:id/checkin-status", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+  if (hasDb()) {
+    try {
+      await syncFlocksFromDbToMemory();
+    } catch {
+      /* ignore */
+    }
+  }
+  const payload = await checkinStatusPayloadWithFcrHint(req.params.id);
+  if (!payload) {
     res.status(404).json({ error: "Flock not found" });
     return;
   }
-  res.json(checkinStatusPayload(f));
+  res.json(payload);
 });
 
 app.patch("/api/flocks/:id/checkin-schedule", requireAuth, requireFarmAccess, requireCheckinScheduleEditor, (req, res) => {
@@ -1197,7 +1272,7 @@ app.patch("/api/flocks/:id/checkin-schedule", requireAuth, requireFarmAccess, re
   res.json({ flock: f, status: checkinStatusPayload(f) });
 });
 
-app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, (req, res) => {
+app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -1266,11 +1341,13 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, (req,
       count: mortalityAtCheckin,
     });
   }
+  const statusOut =
+    (await checkinStatusPayloadWithFcrHint(f.id)) ?? checkinStatusPayload(f);
   res.json({
     ok: true,
     checkin: row,
     flockDay: flockAgeDays(f, new Date(at)),
-    status: checkinStatusPayload(f),
+    status: statusOut,
     payrollImpact,
   });
 });
@@ -1413,6 +1490,125 @@ async function listSlaughterForFlock(flockId, startIso = null, endIso = null) {
     .sort((a, b) => (a.at < b.at ? 1 : -1));
 }
 
+const BENCHMARK_CACHE = {
+  expectedWeightByDay: [
+    [0, 0.04],
+    [7, 0.15],
+    [14, 0.4],
+    [21, 0.88],
+    [28, 1.55],
+    [35, 2.3],
+    [42, 3.05],
+  ],
+  expectedMortalityByDay: [
+    [0, 0],
+    [7, 1.0],
+    [14, 2.0],
+    [21, 2.8],
+    [28, 3.5],
+    [35, 4.2],
+    [42, 5.0],
+  ],
+  expectedFcrRangeByDay: [
+    [14, [1.2, 1.6]],
+    [21, [1.35, 1.8]],
+    [28, [1.5, 1.95]],
+    [35, [1.65, 2.1]],
+    [42, [1.75, 2.25]],
+    [50, [1.85, 2.4]],
+  ],
+};
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function interpolateCurve(curve, x) {
+  if (!curve.length) return 0;
+  const sorted = [...curve].sort((a, b) => Number(a[0]) - Number(b[0]));
+  if (x <= sorted[0][0]) return Number(sorted[0][1]);
+  if (x >= sorted[sorted.length - 1][0]) return Number(sorted[sorted.length - 1][1]);
+  for (let i = 1; i < sorted.length; i += 1) {
+    const [x1, y1] = sorted[i - 1];
+    const [x2, y2] = sorted[i];
+    if (x <= x2) {
+      const t = (x - x1) / (x2 - x1 || 1);
+      return Number(y1) + (Number(y2) - Number(y1)) * t;
+    }
+  }
+  return Number(sorted[sorted.length - 1][1]);
+}
+
+function expectedFcrRangeForDay(day) {
+  const curve = BENCHMARK_CACHE.expectedFcrRangeByDay;
+  if (day <= curve[0][0]) return curve[0][1];
+  for (let i = 1; i < curve.length; i += 1) {
+    if (day <= curve[i][0]) return curve[i][1];
+  }
+  return curve[curve.length - 1][1];
+}
+
+/**
+ * Broiler cumulative FCR: kg feed to date / kg flock biomass gained since placement.
+ * Gain = (live head × latest avg weight) − initial batch weight at placement.
+ */
+function computeBroilerFcrPack(flock, { feedToDate, birdsLiveEstimate, latestAvgWeightKg, latestWeighDate, ageDays }) {
+  const [fcrTargetMin, fcrTargetMax] = expectedFcrRangeForDay(ageDays);
+  const initialTotalWeightKg = initialTotalWeightKgForFlock(flock);
+  if (latestAvgWeightKg == null || !Number.isFinite(latestAvgWeightKg) || latestAvgWeightKg <= 0) {
+    return {
+      fcrCumulative: null,
+      reason: "no_weigh_in",
+      fcrTargetMin,
+      fcrTargetMax,
+      ageDays,
+      feedToDateKg: Number(feedToDate.toFixed(2)),
+      weightGainedKg: null,
+      initialTotalWeightKg: Number(initialTotalWeightKg.toFixed(3)),
+      currentTotalBiomassKg: null,
+      birdsLiveEstimate,
+      latestWeighDate: latestWeighDate ?? null,
+      status: "unknown",
+      playbook: [],
+    };
+  }
+  const currentTotalBiomassKg = birdsLiveEstimate * latestAvgWeightKg;
+  const weightGainedKg = Math.max(0, currentTotalBiomassKg - initialTotalWeightKg);
+  const fcrCumulative =
+    weightGainedKg > 1e-9 ? feedToDate / weightGainedKg : null;
+  let status = "on_track";
+  if (fcrCumulative == null || !Number.isFinite(fcrCumulative)) {
+    status = "unknown";
+  } else if (fcrCumulative > fcrTargetMax * 1.08) {
+    status = "warning";
+  } else if (fcrCumulative > fcrTargetMax) {
+    status = "watch";
+  }
+  const playbook =
+    status === "warning" || status === "watch"
+      ? [
+        "Check feed wastage (spillage, flicking from trays).",
+        "Confirm drinker flow and water quality.",
+        "Review house temperature and ventilation (cold stress increases feed use for heat).",
+      ]
+      : [];
+  return {
+    fcrCumulative: fcrCumulative != null ? Number(fcrCumulative.toFixed(3)) : null,
+    reason: fcrCumulative == null && weightGainedKg <= 1e-9 ? "no_weight_gain" : null,
+    fcrTargetMin,
+    fcrTargetMax,
+    ageDays,
+    feedToDateKg: Number(feedToDate.toFixed(2)),
+    weightGainedKg: Number(weightGainedKg.toFixed(2)),
+    initialTotalWeightKg: Number(initialTotalWeightKg.toFixed(3)),
+    currentTotalBiomassKg: Number(currentTotalBiomassKg.toFixed(2)),
+    birdsLiveEstimate,
+    latestWeighDate: latestWeighDate ?? null,
+    status,
+    playbook,
+  };
+}
+
 async function buildFlockPerformanceSummary(flockId, atIso = null) {
   const flock = flocksById.get(flockId);
   if (!flock) return null;
@@ -1439,8 +1635,8 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
       ? feedToDate / (latestSlaughter.birdsSlaughtered * latestSlaughter.avgLiveWeightKg)
       : null;
 
-  /** Prefer FCR from latest weigh-in (feed/sample formula on row); else slaughter-based. */
-  let fcrWeighIn = null;
+  /** DB column: feed_kg / (avg_weight_kg * sample_size) — sample biomass ratio, not cumulative FCR. */
+  let fcrSampleBiomassRatio = null;
   let latestWeighIn = null;
   if (hasDb()) {
     try {
@@ -1459,12 +1655,12 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
       );
       const row = wr.rows[0];
       if (row) {
-        fcrWeighIn = row.fcr != null ? Number(row.fcr) : null;
+        fcrSampleBiomassRatio = row.fcr != null ? Number(row.fcr) : null;
         latestWeighIn = {
           id: String(row.id),
           weighDate: String(row.weighDate ?? ""),
           avgWeightKg: Number(row.avgWeightKg),
-          fcr: fcrWeighIn,
+          feedPerKgSampleBiomass: fcrSampleBiomassRatio,
           variancePct: row.variancePct != null ? Number(row.variancePct) : null,
           totalFeedUsedKg: row.totalFeedUsedKg != null ? Number(row.totalFeedUsedKg) : null,
         };
@@ -1474,12 +1670,21 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
     }
   }
 
-  const fcr = fcrWeighIn != null ? fcrWeighIn : fcrSlaughter;
+  const ageDaysNow = flockAgeDays(flock, new Date());
+  const fcrBroiler = computeBroilerFcrPack(flock, {
+    feedToDate,
+    birdsLiveEstimate,
+    latestAvgWeightKg: latestWeighIn?.avgWeightKg ?? null,
+    latestWeighDate: latestWeighIn?.weighDate ?? null,
+    ageDays: ageDaysNow,
+  });
+
+  const fcr = fcrBroiler.fcrCumulative ?? fcrSlaughter ?? null;
 
   return {
     flockId,
     placementDate: flock.placementDate,
-    ageDays: flockAgeDays(flock, new Date()),
+    ageDays: ageDaysNow,
     feedToDateKg: Number(feedToDate.toFixed(2)),
     mortalityToDate,
     birdsLiveEstimate,
@@ -1488,7 +1693,8 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
     latestSlaughter,
     latestWeighIn,
     fcr,
-    fcrWeighIn,
+    fcrBroiler,
+    fcrSampleBiomassRatio,
     fcrSlaughter,
   };
 }
@@ -1680,12 +1886,27 @@ app.get("/api/flocks/:id/performance-summary", requireAuth, requireFarmAccess, r
   res.json(summary);
 });
 
+app.get("/api/flocks/:id/fcr-snapshot", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+  try {
+    const summary = await buildFlockPerformanceSummary(req.params.id);
+    if (!summary) {
+      res.status(404).json({ error: "Flock not found" });
+      return;
+    }
+    res.json(summary.fcrBroiler ?? {});
+  } catch {
+    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+  }
+});
+
 function mapWeighInRow(row) {
+  const feedPerKgSampleBiomass = row.fcr != null ? Number(row.fcr) : null;
   return {
     id: String(row.id),
     weighDate: String(row.weighDate ?? row.weigh_date ?? ""),
     avgWeightKg: Number(row.avgWeightKg ?? row.avg_weight_kg),
-    fcr: row.fcr != null ? Number(row.fcr) : null,
+    feedPerKgSampleBiomass,
+    fcr: feedPerKgSampleBiomass,
     variancePct: row.variancePct != null ? Number(row.variancePct) : row.variance_pct != null ? Number(row.variance_pct) : null,
     totalFeedUsedKg: row.totalFeedUsedKg != null ? Number(row.totalFeedUsedKg) : row.total_feed_used_kg != null ? Number(row.total_feed_used_kg) : null,
   };
@@ -2895,64 +3116,6 @@ app.get("/api/flocks/:id/eligibility", requireAuth, requireFarmAccess, requireAc
   }
 });
 
-const BENCHMARK_CACHE = {
-  expectedWeightByDay: [
-    [0, 0.04],
-    [7, 0.15],
-    [14, 0.4],
-    [21, 0.88],
-    [28, 1.55],
-    [35, 2.3],
-    [42, 3.05],
-  ],
-  expectedMortalityByDay: [
-    [0, 0],
-    [7, 1.0],
-    [14, 2.0],
-    [21, 2.8],
-    [28, 3.5],
-    [35, 4.2],
-    [42, 5.0],
-  ],
-  expectedFcrRangeByDay: [
-    [14, [1.2, 1.6]],
-    [21, [1.35, 1.8]],
-    [28, [1.5, 1.95]],
-    [35, [1.65, 2.1]],
-    [42, [1.75, 2.25]],
-    [50, [1.85, 2.4]],
-  ],
-};
-
-function clamp(n, min, max) {
-  return Math.max(min, Math.min(max, n));
-}
-
-function interpolateCurve(curve, x) {
-  if (!curve.length) return 0;
-  const sorted = [...curve].sort((a, b) => Number(a[0]) - Number(b[0]));
-  if (x <= sorted[0][0]) return Number(sorted[0][1]);
-  if (x >= sorted[sorted.length - 1][0]) return Number(sorted[sorted.length - 1][1]);
-  for (let i = 1; i < sorted.length; i += 1) {
-    const [x1, y1] = sorted[i - 1];
-    const [x2, y2] = sorted[i];
-    if (x <= x2) {
-      const t = (x - x1) / (x2 - x1 || 1);
-      return Number(y1) + (Number(y2) - Number(y1)) * t;
-    }
-  }
-  return Number(sorted[sorted.length - 1][1]);
-}
-
-function expectedFcrRangeForDay(day) {
-  const curve = BENCHMARK_CACHE.expectedFcrRangeByDay;
-  if (day <= curve[0][0]) return curve[0][1];
-  for (let i = 1; i < curve.length; i += 1) {
-    if (day <= curve[i][0]) return curve[i][1];
-  }
-  return curve[curve.length - 1][1];
-}
-
 function trendArrow(delta, epsilon = 0.0001) {
   if (delta > epsilon) return "↑ improving";
   if (delta < -epsilon) return "↓ worsening";
@@ -2977,11 +3140,20 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("fl
     return;
   }
   try {
+    try {
+      await syncFlocksFromDbToMemory();
+    } catch {
+      /* ignore */
+    }
+
     const flocks = await dbQuery(
       `SELECT id,
               COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
               placement_date AS "placementDate",
               initial_count AS "initialCount",
+              initial_weight_kg AS "initialWeightKg",
+              breed_code AS "breedCode",
+              verified_live_count AS "verifiedLiveCount",
               target_weight_kg AS "targetWeightKg",
               status
          FROM poultry_flocks
@@ -2995,7 +3167,7 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("fl
                 weigh_date AS "latestWeighDate",
                 age_days AS "latestAgeDays",
                 avg_weight_kg AS "latestWeightKg",
-                fcr AS "latestFcr",
+                fcr AS "sampleFcrBiomass",
                 LAG(avg_weight_kg) OVER (PARTITION BY flock_id ORDER BY weigh_date DESC) AS "prevWeightKg",
                 LAG(weigh_date) OVER (PARTITION BY flock_id ORDER BY weigh_date DESC) AS "prevWeighDate"
            FROM weigh_ins
@@ -3006,11 +3178,19 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("fl
               "latestWeighDate",
               "latestAgeDays",
               "latestWeightKg",
-              "latestFcr",
+              "sampleFcrBiomass",
               "prevWeightKg",
               "prevWeighDate"
          FROM ranked
         ORDER BY flock_id, "latestWeighDate" DESC`
+    ).catch(() => ({ rows: [] }));
+
+    const slaughterAgg = await dbQuery(
+      `SELECT flock_id::text AS "flockId",
+              COALESCE(SUM(birds_slaughtered), 0)::float AS "slaughterTotal"
+         FROM flock_slaughter_events
+        WHERE flock_id IN (SELECT id::text FROM poultry_flocks WHERE status = 'active')
+        GROUP BY flock_id`
     ).catch(() => ({ rows: [] }));
 
     const mortalityAgg = await dbQuery(
@@ -3048,6 +3228,7 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("fl
 
     const weighByFlock = new Map(latestWeigh.rows.map((r) => [String(r.flockId), r]));
     const mortalityByFlock = new Map(mortalityAgg.rows.map((r) => [String(r.flockId), r]));
+    const slaughterByFlock = new Map(slaughterAgg.rows.map((r) => [String(r.flockId), r]));
     const overdueByFlock = new Map(overdueAgg.rows.map((r) => [String(r.flockId), r]));
     const withdrawalByFlock = new Map(withdrawalAgg.rows.map((r) => [String(r.flockId), r]));
 
@@ -3055,6 +3236,7 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("fl
     for (const f of flocks.rows) {
       const weigh = weighByFlock.get(String(f.id)) ?? {};
       const mortality = mortalityByFlock.get(String(f.id)) ?? {};
+      const slaughter = slaughterByFlock.get(String(f.id)) ?? {};
       const overdue = overdueByFlock.get(String(f.id)) ?? {};
       const withdrawal = withdrawalByFlock.get(String(f.id)) ?? {};
       const label = String(f.label ?? "");
@@ -3069,11 +3251,46 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("fl
       const [expectedFcrMin, expectedFcrMax] = expectedFcrRangeForDay(ageDays);
 
       const latestWeightKg = weigh.latestWeightKg != null ? Number(weigh.latestWeightKg) : null;
-      const latestFcr = weigh.latestFcr != null ? Number(weigh.latestFcr) : null;
+      const fcrSampleBiomassRatio = weigh.sampleFcrBiomass != null ? Number(weigh.sampleFcrBiomass) : null;
       const prevWeightKg = weigh.prevWeightKg != null ? Number(weigh.prevWeightKg) : null;
       const initialCount = Math.max(1, Number(f.initialCount || 1));
 
       const mortalityTotal = Number(mortality.mortalityTotal ?? 0);
+      const slaughterToDate = Number(slaughter.slaughterTotal ?? 0);
+      const verifiedLive =
+        f.verifiedLiveCount != null && f.verifiedLiveCount !== ""
+          ? Math.max(0, Math.floor(Number(f.verifiedLiveCount)))
+          : null;
+      const computedBirdsLive = Math.max(0, initialCount - mortalityTotal - slaughterToDate);
+      const birdsLiveEstimate = verifiedLive != null ? verifiedLive : computedBirdsLive;
+
+      let mem = flocksById.get(String(f.id));
+      if (!mem) {
+        mem = {
+          id: String(f.id),
+          label,
+          placementDate: String(f.placementDate),
+          initialCount,
+          initialWeightKg: f.initialWeightKg != null ? Number(f.initialWeightKg) : 0,
+          breedCode: f.breedCode != null ? String(f.breedCode) : "generic_broiler",
+          verifiedLiveCount: verifiedLive,
+          checkinBands: null,
+        };
+      }
+
+      const feedToDate = roundCheckins
+        .filter((c) => c.flockId === String(f.id))
+        .reduce((s, c) => s + (Number(c.feedKg) || 0), 0);
+
+      const broiler = computeBroilerFcrPack(mem, {
+        feedToDate,
+        birdsLiveEstimate,
+        latestAvgWeightKg: latestWeightKg,
+        latestWeighDate: weigh.latestWeighDate ?? null,
+        ageDays,
+      });
+      const latestFcr = broiler.fcrCumulative;
+
       const mortality7dCount = Number(mortality.mortality7d ?? 0);
       const mortality24h = Number(mortality.mortality24h ?? 0);
       const mortalityPrev24h = Number(mortality.mortalityPrev24h ?? 0);
