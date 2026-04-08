@@ -23,7 +23,24 @@ type FlockRow = {
   mortality7d?: number;
   topIssue?: string;
   riskScore?: number;
+  riskClass?: "healthy" | "watch" | "at_risk" | "critical";
   needsRole?: string;
+  latestWeightKg?: number | null;
+  expectedWeightKg?: number;
+  weightDeviationPct?: number;
+  mortalityRatePct?: number;
+  mortality24hDeltaPct?: number;
+  expectedFcrRange?: { min: number; max: number };
+  fcrDeviation?: number | null;
+  dataFreshnessScore?: number;
+  timeStatus?: { label: string; severity: "healthy" | "warning" | "critical" | "watch"; overdueHours: number };
+  trends?: { mortality: string; weight: string; fcr: string };
+  alerts?: string[];
+  projections?: {
+    projectedHarvestWeightKg?: number | null;
+    projectedHarvestDeltaPct?: number | null;
+    projectedMortalityPct?: number;
+  };
 };
 type BarnSummary = {
   barn: string;
@@ -36,11 +53,16 @@ type BarnSummary = {
 
 export function FlockListPage() {
   const { token, user } = useAuth();
+  const isManagerView = user?.role === "manager" || user?.role === "superuser" || user?.role === "investor";
+  const isVetView = user?.role === "vet" || user?.role === "vet_manager";
   const [flocks, setFlocks] = useState<FlockRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [barns, setBarns] = useState<BarnSummary[]>([]);
-  const [riskFilter, setRiskFilter] = useState<"all" | "at_risk" | "blocked" | "needs_vet" | "needs_manager">("all");
+  const [riskFilter, setRiskFilter] = useState<"all" | "at_risk" | "blocked" | "needs_vet" | "needs_manager" | "overdue_checkins">("all");
+  const [focusMode, setFocusMode] = useState(false);
+  const [insights, setInsights] = useState<string[]>([]);
+  const [farmHealthScore, setFarmHealthScore] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -78,50 +100,109 @@ export function FlockListPage() {
       setFlocks(enriched);
       try {
         const br = await fetch(`${API_BASE_URL}/api/farm/ops-board`, { headers: readAuthHeaders(token) });
-        const bd = await br.json().catch(() => ({ barns: [] }));
+        const bd = await br.json().catch(() => ({ barns: [], flocks: [], insights: [] }));
         if (br.ok) {
           setBarns((bd.barns as BarnSummary[]) ?? []);
-            const byFlock = new Map(
-              (((bd as { flocks?: Array<{ flockId: string; overdueRounds?: number; mortality7d?: number; withdrawalBlockers?: number; latestFcr?: number | null }> }).flocks) ?? []).map((x) => [x.flockId, x])
-            );
-            setFlocks((prev) =>
-              prev
-                .map((p) => {
-                  const o = byFlock.get(p.id);
-                  const overdue = Number(o?.overdueRounds ?? 0);
-                  const mortality = Number(o?.mortality7d ?? 0);
-                  const withdrawal = Number(o?.withdrawalBlockers ?? 0) > 0 || Boolean(p.withdrawalActive);
-                  const fcr = p.latestFcr ?? (o?.latestFcr ?? null);
-                  const poorFcr = fcr != null && Number(fcr) >= 2.4;
-                  const riskScore = (withdrawal ? 60 : 0) + overdue * 10 + Math.min(mortality, 20) + (poorFcr ? 15 : 0);
-                  const topIssue = withdrawal
-                    ? "Withdrawal blocker"
-                    : overdue > 0
-                      ? "Overdue treatment rounds"
-                      : mortality > 0
-                        ? "Recent mortality spike"
-                        : poorFcr
-                          ? "Poor FCR trend"
-                          : "Stable";
-                  const needsRole = withdrawal ? "vet_manager" : overdue > 0 || mortality > 0 || poorFcr ? "vet" : "laborer";
-                  return {
-                    ...p,
-                    latestFcr: fcr,
-                    overdueRounds: overdue,
-                    mortality7d: mortality,
-                    withdrawalActive: withdrawal,
-                    riskScore,
-                    topIssue,
-                    needsRole,
-                  };
-                })
-                .sort((a, b) => Number(b.riskScore ?? 0) - Number(a.riskScore ?? 0))
-            );
+          setInsights(((bd as { insights?: string[] }).insights) ?? []);
+          setFarmHealthScore((bd as { farmHealthScore?: number }).farmHealthScore ?? null);
+          type OpsRow = {
+            flockId: string;
+            label?: string;
+            ageDays?: number;
+            latestFcr?: number | null;
+            latestWeightKg?: number | null;
+            expectedWeightKg?: number;
+            weightDeviationPct?: number;
+            mortalityRatePct?: number;
+            mortality24hDeltaPct?: number;
+            overdueRounds?: number;
+            withdrawalBlockers?: number;
+            mortality7d?: number;
+            expectedFcrRange?: { min: number; max: number };
+            fcrDeviation?: number | null;
+            riskScore?: number;
+            riskClass?: "healthy" | "watch" | "at_risk" | "critical";
+            topIssue?: string;
+            needsRole?: string;
+            dataFreshnessScore?: number;
+            timeStatus?: FlockRow["timeStatus"];
+            trends?: FlockRow["trends"];
+            alerts?: string[];
+            projections?: FlockRow["projections"];
+          };
+          const boardFlocks = (((bd as { flocks?: OpsRow[] }).flocks) ?? []);
+          const byFlock = new Map(boardFlocks.map((x) => [x.flockId, x]));
+          setFlocks((prev) => {
+            const merged = prev.map((p) => {
+              const o = byFlock.get(p.id);
+              if (!o) return p;
+              return {
+                ...p,
+                label: o.label ?? p.label,
+                ageDays: o.ageDays ?? p.ageDays,
+                latestFcr: p.latestFcr ?? (o.latestFcr ?? null),
+                latestWeightKg: o.latestWeightKg ?? null,
+                expectedWeightKg: o.expectedWeightKg,
+                weightDeviationPct: o.weightDeviationPct,
+                mortalityRatePct: o.mortalityRatePct,
+                mortality24hDeltaPct: o.mortality24hDeltaPct,
+                overdueRounds: Number(o.overdueRounds ?? 0),
+                mortality7d: Number(o.mortality7d ?? 0),
+                withdrawalActive: Number(o.withdrawalBlockers ?? 0) > 0 || Boolean(p.withdrawalActive),
+                expectedFcrRange: o.expectedFcrRange,
+                fcrDeviation: o.fcrDeviation ?? null,
+                riskScore: o.riskScore ?? 0,
+                riskClass: o.riskClass,
+                topIssue: o.topIssue ?? p.topIssue ?? "Stable",
+                needsRole: o.needsRole ?? p.needsRole ?? "laborer",
+                dataFreshnessScore: o.dataFreshnessScore,
+                timeStatus: o.timeStatus,
+                trends: o.trends,
+                alerts: o.alerts ?? [],
+                projections: o.projections,
+              } as FlockRow;
+            });
+            const seen = new Set(merged.map((m) => m.id));
+            for (const o of boardFlocks) {
+              if (seen.has(o.flockId)) continue;
+              merged.push({
+                id: o.flockId,
+                label: o.label ?? `Flock ${o.flockId.slice(0, 8)}`,
+                placementDate: "",
+                ageDays: o.ageDays,
+                latestFcr: o.latestFcr ?? null,
+                latestWeightKg: o.latestWeightKg ?? null,
+                expectedWeightKg: o.expectedWeightKg,
+                weightDeviationPct: o.weightDeviationPct,
+                mortalityRatePct: o.mortalityRatePct,
+                mortality24hDeltaPct: o.mortality24hDeltaPct,
+                overdueRounds: Number(o.overdueRounds ?? 0),
+                mortality7d: Number(o.mortality7d ?? 0),
+                withdrawalActive: Number(o.withdrawalBlockers ?? 0) > 0,
+                expectedFcrRange: o.expectedFcrRange,
+                fcrDeviation: o.fcrDeviation ?? null,
+                riskScore: o.riskScore ?? 0,
+                riskClass: o.riskClass,
+                topIssue: o.topIssue ?? "Stable",
+                needsRole: o.needsRole ?? "laborer",
+                dataFreshnessScore: o.dataFreshnessScore,
+                timeStatus: o.timeStatus,
+                trends: o.trends,
+                alerts: o.alerts ?? [],
+                projections: o.projections,
+              });
+            }
+            return merged.sort((a, b) => Number(b.riskScore ?? 0) - Number(a.riskScore ?? 0));
+          });
         } else {
           setBarns([]);
+          setInsights([]);
+          setFarmHealthScore(null);
         }
       } catch {
         setBarns([]);
+        setInsights([]);
+        setFarmHealthScore(null);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
@@ -137,18 +218,26 @@ export function FlockListPage() {
   const visibleFlocks = flocks.filter((f) => {
     if (riskFilter === "all") return true;
     if (riskFilter === "blocked") return Boolean(f.withdrawalActive);
-    if (riskFilter === "at_risk") return Number(f.riskScore ?? 0) >= 25;
+    if (riskFilter === "at_risk") return Number(f.riskScore ?? 0) > 60;
     if (riskFilter === "needs_vet") return f.needsRole === "vet";
     if (riskFilter === "needs_manager") return f.needsRole === "vet_manager";
+    if (riskFilter === "overdue_checkins") return (f.timeStatus?.overdueHours ?? 0) > 0;
     return true;
-  });
+  }).filter((f) => (focusMode ? Number(f.riskScore ?? 0) > 60 : true))
+    .sort((a, b) => Number(b.riskScore ?? 0) - Number(a.riskScore ?? 0));
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
         title="Flocks"
-        subtitle="Check-in urgency from bird age and hours-between-rounds policy."
+        subtitle="Real-time flock risk prioritization with explainable alerts."
       />
+      {farmHealthScore != null ? (
+        <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm shadow-sm">
+          <p className="font-semibold text-neutral-900">Farm health score: {farmHealthScore}/100</p>
+          {!!insights.length ? <p className="mt-1 text-neutral-700">{insights[0]}</p> : null}
+        </div>
+      ) : null}
 
       {loading && <SkeletonList rows={4} />}
 
@@ -164,12 +253,23 @@ export function FlockListPage() {
       {!loading && !error && flocks.length > 0 ? (
         <>
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setFocusMode((v) => !v)}
+              className={[
+                "rounded-full border px-3 py-1 text-xs font-semibold",
+                focusMode ? "border-red-700 bg-red-50 text-red-900" : "border-neutral-300 text-neutral-700",
+              ].join(" ")}
+            >
+              Focus Mode {focusMode ? "ON" : "OFF"}
+            </button>
             {[
               ["all", "All"],
               ["at_risk", "At risk"],
               ["blocked", "Blocked"],
               ["needs_vet", "Needs vet"],
               ["needs_manager", "Needs manager"],
+              ["overdue_checkins", "Overdue check-ins"],
             ].map(([id, label]) => (
               <button
                 key={id}
@@ -185,6 +285,16 @@ export function FlockListPage() {
                 {label}
               </button>
             ))}
+            <button
+              type="button"
+              onClick={() => {
+                const highest = [...visibleFlocks].sort((a, b) => Number(b.riskScore ?? 0) - Number(a.riskScore ?? 0))[0];
+                if (highest) window.location.href = `/farm/flocks/${highest.id}`;
+              }}
+              className="rounded-full border border-neutral-300 px-3 py-1 text-xs font-semibold text-neutral-700"
+            >
+              Jump to highest risk flock
+            </button>
           </div>
 
           {!!barns.length ? (
@@ -214,13 +324,36 @@ export function FlockListPage() {
                   {f.checkinBadge && <CheckinUrgencyBadge badge={f.checkinBadge} />}
                 </div>
                 <p className="mt-1 text-xs text-neutral-500">
-                  Day {f.ageDays ?? "—"} · next due{" "}
-                  {f.nextDueAt
-                    ? new Date(f.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })
-                    : "—"}
+                  Day {f.ageDays ?? "—"} · {f.timeStatus?.label ?? "Updated recently"}
                 </p>
-                <p className="mt-1 text-xs text-neutral-700">FCR: {f.latestFcr != null ? f.latestFcr.toFixed(2) : "—"}</p>
-                <p className="mt-1 text-xs text-neutral-700">Issue: {f.topIssue ?? "—"} · Risk {f.riskScore ?? 0}</p>
+                <p className="mt-1 text-xs text-neutral-700">
+                  Weight: {f.latestWeightKg != null ? `${f.latestWeightKg.toFixed(2)}kg` : "—"} ({(f.weightDeviationPct ?? 0) >= 0 ? "+" : ""}{(f.weightDeviationPct ?? 0).toFixed(1)}% vs expected)
+                </p>
+                <p className="mt-1 text-xs text-neutral-700">
+                  Mortality {f.mortalityRatePct?.toFixed(2) ?? "0.00"}% ({(f.mortality24hDeltaPct ?? 0) >= 0 ? "+" : ""}{(f.mortality24hDeltaPct ?? 0).toFixed(2)}% last 24h)
+                </p>
+                <p className="mt-1 text-xs text-neutral-700">
+                  FCR {f.latestFcr != null ? f.latestFcr.toFixed(2) : "—"} ({f.fcrDeviation != null ? `${f.fcrDeviation >= 0 ? "+" : ""}${f.fcrDeviation.toFixed(2)} vs target` : "vs target —"})
+                </p>
+                <p className="mt-1 text-xs text-neutral-700">
+                  Risk {f.riskScore ?? 0} · {f.riskClass ?? "healthy"} · {f.topIssue ?? "—"}
+                </p>
+                {!!f.trends ? (
+                  <p className="mt-1 text-xs text-neutral-600">
+                    Trends: M {f.trends.mortality} · W {f.trends.weight} · FCR {f.trends.fcr}
+                  </p>
+                ) : null}
+                {isManagerView && f.projections?.projectedHarvestWeightKg != null ? (
+                  <p className="mt-1 text-xs text-emerald-800">
+                    Projected harvest: {f.projections.projectedHarvestWeightKg.toFixed(2)}kg ({(f.projections.projectedHarvestDeltaPct ?? 0) >= 0 ? "+" : ""}{(f.projections.projectedHarvestDeltaPct ?? 0).toFixed(1)}% vs target)
+                  </p>
+                ) : null}
+                {isVetView ? (
+                  <p className="mt-1 text-xs text-red-800">
+                    Vet priority: mortality trend {f.trends?.mortality ?? "→ stable"} · projected mortality {(f.projections?.projectedMortalityPct ?? 0).toFixed(2)}%
+                  </p>
+                ) : null}
+                {(f.alerts?.length ?? 0) > 0 ? <p className="mt-1 text-xs text-amber-800">{f.alerts?.slice(0, 2).join(" · ")}</p> : null}
                 {f.withdrawalActive ? <p className="mt-1 inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-800">🔴 Withdrawal</p> : null}
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
@@ -252,7 +385,7 @@ export function FlockListPage() {
                   <th>Age (days)</th>
                   <th>Interval (h)</th>
                   <th>FCR</th>
-                  <th>Next due (Kigali)</th>
+                  <th>Priority</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -266,18 +399,21 @@ export function FlockListPage() {
                     </td>
                     <td>{f.ageDays ?? "—"}</td>
                     <td>{f.intervalHours ?? "—"}</td>
-                    <td>{f.latestFcr != null ? f.latestFcr.toFixed(2) : "—"}</td>
-                    <td className="font-mono text-xs">
-                      {f.nextDueAt
-                        ? new Date(f.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })
-                        : "—"}
+                    <td className="text-xs">
+                      {f.latestFcr != null ? `${f.latestFcr.toFixed(2)} (${f.fcrDeviation != null ? `${f.fcrDeviation >= 0 ? "+" : ""}${f.fcrDeviation.toFixed(2)} vs target` : "target —"})` : "—"}
+                    </td>
+                    <td className="text-xs">
+                      Risk <span className="font-semibold">{f.riskScore ?? 0}</span> · {f.timeStatus?.label ?? "updated"}
                     </td>
                     <td>
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-1">
                         {f.checkinBadge ? <CheckinUrgencyBadge badge={f.checkinBadge} /> : null}
                         {f.withdrawalActive ? <span className="inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-800">🔴 Withdrawal</span> : null}
                         {(f.overdueRounds ?? 0) > 0 ? <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">Overdue {f.overdueRounds}</span> : null}
-                        {(f.mortality7d ?? 0) > 0 ? <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">Mortality7d {f.mortality7d}</span> : null}
+                        <span className="text-xs text-neutral-700">
+                          {(f.latestWeightKg != null ? `${f.latestWeightKg.toFixed(2)}kg` : "—")} ({(f.weightDeviationPct ?? 0) >= 0 ? "+" : ""}{(f.weightDeviationPct ?? 0).toFixed(1)}%)
+                        </span>
+                        {(f.alerts?.length ?? 0) > 0 ? <span className="text-xs text-amber-800">{f.alerts?.[0]}</span> : null}
                         {!f.checkinBadge && !f.withdrawalActive ? "—" : null}
                       </div>
                     </td>

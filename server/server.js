@@ -2511,6 +2511,82 @@ app.get("/api/flocks/:id/eligibility", requireAuth, requireFarmAccess, requireAc
   }
 });
 
+const BENCHMARK_CACHE = {
+  expectedWeightByDay: [
+    [0, 0.04],
+    [7, 0.15],
+    [14, 0.4],
+    [21, 0.88],
+    [28, 1.55],
+    [35, 2.3],
+    [42, 3.05],
+  ],
+  expectedMortalityByDay: [
+    [0, 0],
+    [7, 1.0],
+    [14, 2.0],
+    [21, 2.8],
+    [28, 3.5],
+    [35, 4.2],
+    [42, 5.0],
+  ],
+  expectedFcrRangeByDay: [
+    [14, [1.2, 1.6]],
+    [21, [1.35, 1.8]],
+    [28, [1.5, 1.95]],
+    [35, [1.65, 2.1]],
+    [42, [1.75, 2.25]],
+    [50, [1.85, 2.4]],
+  ],
+};
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function interpolateCurve(curve, x) {
+  if (!curve.length) return 0;
+  const sorted = [...curve].sort((a, b) => Number(a[0]) - Number(b[0]));
+  if (x <= sorted[0][0]) return Number(sorted[0][1]);
+  if (x >= sorted[sorted.length - 1][0]) return Number(sorted[sorted.length - 1][1]);
+  for (let i = 1; i < sorted.length; i += 1) {
+    const [x1, y1] = sorted[i - 1];
+    const [x2, y2] = sorted[i];
+    if (x <= x2) {
+      const t = (x - x1) / (x2 - x1 || 1);
+      return Number(y1) + (Number(y2) - Number(y1)) * t;
+    }
+  }
+  return Number(sorted[sorted.length - 1][1]);
+}
+
+function expectedFcrRangeForDay(day) {
+  const curve = BENCHMARK_CACHE.expectedFcrRangeByDay;
+  if (day <= curve[0][0]) return curve[0][1];
+  for (let i = 1; i < curve.length; i += 1) {
+    if (day <= curve[i][0]) return curve[i][1];
+  }
+  return curve[curve.length - 1][1];
+}
+
+function trendArrow(delta, epsilon = 0.0001) {
+  if (delta > epsilon) return "↑ improving";
+  if (delta < -epsilon) return "↓ worsening";
+  return "→ stable";
+}
+
+function relativeTimeStatus(targetIso, nowMs = Date.now()) {
+  if (!targetIso) return { label: "No check-in data", severity: "watch", overdueHours: 0 };
+  const ms = new Date(targetIso).getTime() - nowMs;
+  const absMin = Math.max(1, Math.floor(Math.abs(ms) / 60000));
+  if (ms < 0) {
+    const h = Math.max(1, Math.floor(absMin / 60));
+    return { label: `Overdue by ${h}h`, severity: "critical", overdueHours: h };
+  }
+  if (absMin <= 90) return { label: `Due in ${absMin}m`, severity: "warning", overdueHours: 0 };
+  return { label: `Due in ${Math.floor(absMin / 60)}h`, severity: "healthy", overdueHours: 0 };
+}
+
 app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("flock.view"), async (_req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
@@ -2521,85 +2597,218 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("fl
       `SELECT id,
               COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
               placement_date AS "placementDate",
+              initial_count AS "initialCount",
+              target_weight_kg AS "targetWeightKg",
               status
          FROM poultry_flocks
         WHERE status = 'active'
         ORDER BY placement_date DESC`
     );
 
+    const latestWeigh = await dbQuery(
+      `WITH ranked AS (
+         SELECT flock_id,
+                weigh_date AS "latestWeighDate",
+                age_days AS "latestAgeDays",
+                avg_weight_kg AS "latestWeightKg",
+                fcr AS "latestFcr",
+                LAG(avg_weight_kg) OVER (PARTITION BY flock_id ORDER BY weigh_date DESC) AS "prevWeightKg",
+                LAG(weigh_date) OVER (PARTITION BY flock_id ORDER BY weigh_date DESC) AS "prevWeighDate"
+           FROM weigh_ins
+          WHERE flock_id IN (SELECT id::text FROM poultry_flocks WHERE status = 'active')
+       )
+       SELECT DISTINCT ON (flock_id)
+              flock_id AS "flockId",
+              "latestWeighDate",
+              "latestAgeDays",
+              "latestWeightKg",
+              "latestFcr",
+              "prevWeightKg",
+              "prevWeighDate"
+         FROM ranked
+        ORDER BY flock_id, "latestWeighDate" DESC`
+    ).catch(() => ({ rows: [] }));
+
+    const mortalityAgg = await dbQuery(
+      `SELECT flock_id::text AS "flockId",
+              COALESCE(SUM(mortality), 0)::float AS "mortalityTotal",
+              COALESCE(SUM(CASE WHEN log_date >= CURRENT_DATE - INTERVAL '7 days' THEN mortality ELSE 0 END), 0)::float AS "mortality7d",
+              COALESCE(SUM(CASE WHEN log_date >= CURRENT_DATE - INTERVAL '1 day' THEN mortality ELSE 0 END), 0)::float AS "mortality24h",
+              COALESCE(SUM(CASE WHEN log_date >= CURRENT_DATE - INTERVAL '2 days' AND log_date < CURRENT_DATE - INTERVAL '1 day' THEN mortality ELSE 0 END), 0)::float AS "mortalityPrev24h",
+              MAX(log_date)::text AS "latestLogDate"
+         FROM poultry_daily_logs
+        WHERE flock_id IN (SELECT id FROM poultry_flocks WHERE status = 'active')
+        GROUP BY flock_id`
+    ).catch(() => ({ rows: [] }));
+
+    const overdueAgg = await dbQuery(
+      `SELECT flock_id::text AS "flockId",
+              COUNT(*)::int AS "overdueRounds",
+              MIN(planned_for) AS "oldestPlannedFor"
+         FROM treatment_rounds
+        WHERE status IN ('planned','in_progress')
+          AND planned_for < now()
+          AND flock_id IN (SELECT id::text FROM poultry_flocks WHERE status = 'active')
+        GROUP BY flock_id`
+    ).catch(() => ({ rows: [] }));
+
+    const withdrawalAgg = await dbQuery(
+      `SELECT flock_id::text AS "flockId",
+              COUNT(*)::int AS "withdrawalBlockers",
+              MIN((at + (withdrawal_days || ' days')::interval)) AS "safeAfterAt"
+         FROM flock_treatments
+        WHERE (at + (withdrawal_days || ' days')::interval) > now()
+          AND flock_id IN (SELECT id::text FROM poultry_flocks WHERE status = 'active')
+        GROUP BY flock_id`
+    ).catch(() => ({ rows: [] }));
+
+    const weighByFlock = new Map(latestWeigh.rows.map((r) => [String(r.flockId), r]));
+    const mortalityByFlock = new Map(mortalityAgg.rows.map((r) => [String(r.flockId), r]));
+    const overdueByFlock = new Map(overdueAgg.rows.map((r) => [String(r.flockId), r]));
+    const withdrawalByFlock = new Map(withdrawalAgg.rows.map((r) => [String(r.flockId), r]));
+
     const rows = [];
     for (const f of flocks.rows) {
-      const weigh = await dbQuery(
-        `SELECT fcr, avg_weight_kg AS "avgWeightKg", weigh_date AS "weighDate"
-           FROM weigh_ins
-          WHERE flock_id = $1
-          ORDER BY weigh_date DESC
-          LIMIT 1`,
-        [f.id]
-      ).catch(() => ({ rows: [] }));
-
-      const overdue = await dbQuery(
-        `SELECT COUNT(*)::int AS c, MIN(planned_for) AS "oldestPlannedFor"
-           FROM treatment_rounds
-          WHERE flock_id = $1
-            AND status IN ('planned','in_progress')
-            AND planned_for < now()`,
-        [f.id]
-      ).catch(() => ({ rows: [{ c: 0 }] }));
-
-      const withdrawal = await dbQuery(
-        `SELECT COUNT(*)::int AS c,
-                MIN((at + (withdrawal_days || ' days')::interval)) AS "safeAfterAt"
-           FROM flock_treatments
-          WHERE flock_id = $1
-            AND (at + (withdrawal_days || ' days')::interval) > now()`,
-        [f.id]
-      ).catch(() => ({ rows: [{ c: 0 }] }));
-
-      const mortality7d = await dbQuery(
-        `SELECT COALESCE(SUM(mortality), 0) AS c
-           FROM poultry_daily_logs
-          WHERE flock_id = $1
-            AND log_date >= CURRENT_DATE - INTERVAL '7 days'`,
-        [f.id]
-      ).catch(() => ({ rows: [{ c: 0 }] }));
-
+      const weigh = weighByFlock.get(String(f.id)) ?? {};
+      const mortality = mortalityByFlock.get(String(f.id)) ?? {};
+      const overdue = overdueByFlock.get(String(f.id)) ?? {};
+      const withdrawal = withdrawalByFlock.get(String(f.id)) ?? {};
       const label = String(f.label ?? "");
       const barn = label.includes("-") ? label.split("-")[0].trim() : "Unassigned";
+      const ageDays = Math.max(
+        0,
+        Math.floor((Date.now() - new Date(`${String(f.placementDate)}T00:00:00Z`).getTime()) / 86400000)
+      );
 
-      const overdueCount = Number(overdue.rows[0]?.c ?? 0);
-      const withdrawalCount = Number(withdrawal.rows[0]?.c ?? 0);
-      const mortality7dCount = Number(mortality7d.rows[0]?.c ?? 0);
-      const latestFcr = weigh.rows[0]?.fcr != null ? Number(weigh.rows[0].fcr) : null;
-      const poorFcr = latestFcr != null && latestFcr >= 2.4;
-      const riskScore =
-        (withdrawalCount > 0 ? 60 : 0) +
-        overdueCount * 10 +
-        Math.min(mortality7dCount, 20) +
-        (poorFcr ? 15 : 0);
-      const topIssue = withdrawalCount > 0
-        ? "Withdrawal blocker"
-        : overdueCount > 0
-          ? "Overdue treatment rounds"
-          : mortality7dCount > 0
-            ? "Recent mortality spike"
-            : poorFcr
-              ? "Poor FCR trend"
-              : "Stable";
-      const needsRole = withdrawalCount > 0 ? "vet_manager" : riskScore >= 10 ? "vet" : "laborer";
-      const pendingSince = overdue.rows[0]?.oldestPlannedFor ?? withdrawal.rows[0]?.safeAfterAt ?? null;
+      const expectedWeight = interpolateCurve(BENCHMARK_CACHE.expectedWeightByDay, ageDays);
+      const expectedMortality = interpolateCurve(BENCHMARK_CACHE.expectedMortalityByDay, ageDays);
+      const [expectedFcrMin, expectedFcrMax] = expectedFcrRangeForDay(ageDays);
+
+      const latestWeightKg = weigh.latestWeightKg != null ? Number(weigh.latestWeightKg) : null;
+      const latestFcr = weigh.latestFcr != null ? Number(weigh.latestFcr) : null;
+      const prevWeightKg = weigh.prevWeightKg != null ? Number(weigh.prevWeightKg) : null;
+      const initialCount = Math.max(1, Number(f.initialCount || 1));
+
+      const mortalityTotal = Number(mortality.mortalityTotal ?? 0);
+      const mortality7dCount = Number(mortality.mortality7d ?? 0);
+      const mortality24h = Number(mortality.mortality24h ?? 0);
+      const mortalityPrev24h = Number(mortality.mortalityPrev24h ?? 0);
+      const mortalityRatePct = (mortalityTotal / initialCount) * 100;
+      const mortality24hDeltaPct = ((mortality24h - mortalityPrev24h) / initialCount) * 100;
+
+      const weightDeviationPct = latestWeightKg != null && expectedWeight > 0
+        ? ((latestWeightKg - expectedWeight) / expectedWeight) * 100
+        : 0;
+      const weightDeficitPct = Math.max(0, -weightDeviationPct);
+      const mortalityDeviationPct = expectedMortality > 0
+        ? Math.max(0, ((mortalityRatePct - expectedMortality) / expectedMortality) * 100)
+        : 0;
+      const fcrDeviationPct = latestFcr != null
+        ? Math.max(0, ((latestFcr - expectedFcrMax) / Math.max(0.1, expectedFcrMax)) * 100)
+        : 0;
+
+      const statusRef = flocksById.get(String(f.id)) ?? {
+        id: String(f.id),
+        label,
+        placementDate: String(f.placementDate),
+        checkinBands: null,
+      };
+      const checkinStatus = checkinStatusPayload(statusRef);
+      const timeStatus = relativeTimeStatus(checkinStatus.nextDueAt);
+      const overdueCount = Number(overdue.overdueRounds ?? 0);
+      const withdrawalCount = Number(withdrawal.withdrawalBlockers ?? 0);
+
+      const latestLogMs = mortality.latestLogDate ? new Date(`${mortality.latestLogDate}T00:00:00Z`).getTime() : null;
+      const latestWeighMs = weigh.latestWeighDate ? new Date(`${weigh.latestWeighDate}T00:00:00Z`).getTime() : null;
+      const latestCheckinMs = checkinStatus.lastCheckinAt ? new Date(checkinStatus.lastCheckinAt).getTime() : null;
+      const freshestMs = [latestLogMs, latestWeighMs, latestCheckinMs].filter((x) => x != null).reduce((m, x) => Math.max(m, x), 0);
+      const freshnessHours = freshestMs ? (Date.now() - freshestMs) / 3600000 : 999;
+      const dataFreshnessScore = freshnessHours <= 6 ? 100 : freshnessHours <= 24 ? 75 : freshnessHours <= 48 ? 45 : 15;
+
+      const mortalitySpikePct = Math.max(0, mortality24hDeltaPct);
+      const weightTrendDelta = latestWeightKg != null && prevWeightKg != null ? latestWeightKg - prevWeightKg : 0;
+      const volatilityBase = mortalitySpikePct * 30 + Math.max(0, -weightTrendDelta) * 40;
+      const volatilityScore = clamp(volatilityBase * (mortalitySpikePct > 0.5 ? 1.6 : 1), 0, 100);
+
+      const mortalityComponent = clamp(mortalityDeviationPct * (mortalitySpikePct > 0.5 ? 1.4 : 1), 0, 100);
+      const weightComponent = clamp(weightDeficitPct * 3, 0, 100);
+      const fcrComponent = clamp(fcrDeviationPct * 2.5, 0, 100);
+      const missedCheckinComponent = clamp((timeStatus.overdueHours * 8) + (overdueCount * 12) + (100 - dataFreshnessScore) * 0.4, 0, 100);
+
+      let riskScore = Math.round(
+        mortalityComponent * 0.30 +
+        weightComponent * 0.25 +
+        fcrComponent * 0.15 +
+        missedCheckinComponent * 0.15 +
+        volatilityScore * 0.15
+      );
+      if (withdrawalCount > 0) riskScore = Math.max(riskScore, 70);
+      riskScore = clamp(riskScore, 0, 100);
+
+      const riskClass = riskScore <= 30
+        ? "healthy"
+        : riskScore <= 60
+          ? "watch"
+          : riskScore <= 80
+            ? "at_risk"
+            : "critical";
+
+      const alerts = [];
+      if (mortality24hDeltaPct > 0.5) alerts.push(`Mortality increased by ${mortality24hDeltaPct.toFixed(2)}% in 24h (threshold 0.5%)`);
+      if (weightDeficitPct >= 5) alerts.push(`Weight is ${weightDeficitPct.toFixed(1)}% below expected for day ${ageDays}`);
+      if (timeStatus.overdueHours > 0) alerts.push(`Check-in overdue by ${timeStatus.overdueHours}h`);
+      if (latestFcr != null && latestFcr > expectedFcrMax) alerts.push(`FCR ${latestFcr.toFixed(2)} is above target max ${expectedFcrMax.toFixed(2)}`);
+      if (dataFreshnessScore < 50) alerts.push(`Data is stale (updated ${Math.max(1, Math.round(freshnessHours))}h ago)`);
+
+      const trendMortality = trendArrow(-mortality24hDeltaPct, 0.05);
+      const trendWeight = trendArrow(weightTrendDelta, 0.01);
+      const trendFcr = trendArrow((expectedFcrMax - (latestFcr ?? expectedFcrMax)), 0.02);
+
+      const gainPerDay = latestWeightKg != null && prevWeightKg != null && weigh.latestWeighDate && weigh.prevWeighDate
+        ? (latestWeightKg - prevWeightKg) / Math.max(1, (new Date(weigh.latestWeighDate).getTime() - new Date(weigh.prevWeighDate).getTime()) / 86400000)
+        : 0;
+      const daysTo42 = Math.max(0, 42 - ageDays);
+      const projectedHarvestWeightKg = latestWeightKg != null ? latestWeightKg + gainPerDay * daysTo42 : null;
+      const projectedMortalityPct = mortalityRatePct + (Math.max(0, mortality24h / initialCount) * 100 * Math.max(0, 30 - ageDays));
+
+      const topIssue = alerts[0] ?? "Stable";
+      const needsRole = withdrawalCount > 0 || mortalitySpikePct > 0.5 ? "vet_manager" : riskScore > 45 ? "vet" : "laborer";
+      const pendingSince = overdue.oldestPlannedFor ?? withdrawal.safeAfterAt ?? null;
 
       rows.push({
         flockId: f.id,
         label,
         barn,
+        ageDays,
         latestFcr,
-        latestWeightKg: weigh.rows[0]?.avgWeightKg ?? null,
-        latestWeighDate: weigh.rows[0]?.weighDate ?? null,
+        latestWeightKg,
+        latestWeighDate: weigh.latestWeighDate ?? null,
         overdueRounds: overdueCount,
         withdrawalBlockers: withdrawalCount,
         mortality7d: mortality7dCount,
+        mortality24hDeltaPct: Number(mortality24hDeltaPct.toFixed(2)),
+        mortalityRatePct: Number(mortalityRatePct.toFixed(2)),
+        expectedWeightKg: Number(expectedWeight.toFixed(3)),
+        weightDeviationPct: Number(weightDeviationPct.toFixed(1)),
+        expectedFcrRange: { min: expectedFcrMin, max: expectedFcrMax },
+        fcrDeviation: latestFcr != null ? Number((latestFcr - expectedFcrMax).toFixed(2)) : null,
+        dataFreshnessScore,
+        timeStatus,
+        trends: {
+          mortality: trendMortality,
+          weight: trendWeight,
+          fcr: trendFcr,
+        },
+        alerts: alerts.slice(0, 2),
+        projections: {
+          projectedHarvestWeightKg: projectedHarvestWeightKg != null ? Number(projectedHarvestWeightKg.toFixed(2)) : null,
+          projectedHarvestDeltaPct: projectedHarvestWeightKg != null && expectedWeight > 0
+            ? Number((((projectedHarvestWeightKg - expectedWeight) / expectedWeight) * 100).toFixed(1))
+            : null,
+          projectedMortalityPct: Number(projectedMortalityPct.toFixed(2)),
+        },
         riskScore,
+        riskClass,
         topIssue,
         needsRole,
         pendingSince,
@@ -2632,8 +2841,46 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("fl
       mortality7d: b.mortality7d,
       avgFcr: b.fcrVals.length ? Number((b.fcrVals.reduce((s, x) => s + x, 0) / b.fcrVals.length).toFixed(2)) : null,
     }));
+    const farmHealthScore = rows.length
+      ? Math.round(100 - (rows.reduce((sum, r) => sum + Number(r.riskScore || 0), 0) / rows.length))
+      : 100;
+    const worstDeclining = [...rows]
+      .sort((a, b) => (b.mortality24hDeltaPct || 0) - (a.mortality24hDeltaPct || 0))[0] ?? null;
+    const mostImproved = [...rows]
+      .sort((a, b) => (Number(b.weightDeviationPct || 0) - Number(a.weightDeviationPct || 0)))[0] ?? null;
 
-    res.json({ flocks: rows, barns: barnSummary });
+    const insights = [];
+    const barnByWeight = new Map();
+    for (const r of rows) {
+      const prev = barnByWeight.get(r.barn) ?? { sum: 0, count: 0 };
+      if (r.weightDeviationPct != null) {
+        prev.sum += Number(r.weightDeviationPct);
+        prev.count += 1;
+      }
+      barnByWeight.set(r.barn, prev);
+    }
+    const barnAvgs = [...barnByWeight.entries()]
+      .map(([barn, v]) => ({ barn, avgWeightDev: v.count ? v.sum / v.count : 0 }))
+      .sort((a, b) => b.avgWeightDev - a.avgWeightDev);
+    if (barnAvgs.length >= 2) {
+      const best = barnAvgs[0];
+      const worst = barnAvgs[barnAvgs.length - 1];
+      const gap = best.avgWeightDev - worst.avgWeightDev;
+      if (gap >= 4) {
+        insights.push(`Barn ${worst.barn} underperforming vs Barn ${best.barn} (${Math.abs(gap).toFixed(1)}% avg weight gap)`);
+      }
+    }
+    const elevatedMortality = rows.filter((r) => (r.mortality24hDeltaPct || 0) > 0.5).length;
+    if (elevatedMortality >= 2) insights.push("Multiple flocks showing elevated mortality");
+
+    res.json({
+      flocks: rows.sort((a, b) => Number(b.riskScore || 0) - Number(a.riskScore || 0)),
+      barns: barnSummary,
+      insights,
+      farmHealthScore,
+      mostImprovedFlockId: mostImproved?.flockId ?? null,
+      worstDecliningFlockId: worstDeclining?.flockId ?? null,
+    });
   } catch (e) {
     console.error("[ERROR]", "[db] GET /api/farm/ops-board:", e instanceof Error ? e.message : e);
     res.status(503).json({ error: "Unable to build operations board." });
