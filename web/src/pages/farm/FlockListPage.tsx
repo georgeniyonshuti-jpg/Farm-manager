@@ -2,12 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { canFlockAction } from "../../auth/permissions";
-import { readAuthHeaders } from "../../lib/authHeaders";
+import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { CheckinUrgencyBadge, type CheckinBadge } from "../../components/farm/CheckinUrgencyBadge";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
+import { useToast } from "../../components/Toast";
 
 type FlockRow = {
   id: string;
@@ -53,8 +54,10 @@ type BarnSummary = {
 
 export function FlockListPage() {
   const { token, user } = useAuth();
+  const { showToast } = useToast();
   const isManagerView = user?.role === "manager" || user?.role === "superuser" || user?.role === "investor";
   const isVetView = user?.role === "vet" || user?.role === "vet_manager";
+  const canCreateFlock = canFlockAction(user, "flock.create");
   const [flocks, setFlocks] = useState<FlockRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,6 +66,14 @@ export function FlockListPage() {
   const [focusMode, setFocusMode] = useState(false);
   const [insights, setInsights] = useState<string[]>([]);
   const [farmHealthScore, setFarmHealthScore] = useState<number | null>(null);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [createForm, setCreateForm] = useState({
+    label: "",
+    placementDate: new Date().toISOString().slice(0, 10),
+    initialCount: "",
+    breedCode: "generic_broiler",
+    targetWeightKg: "",
+  });
 
   const load = useCallback(async () => {
     setError(null);
@@ -215,6 +226,35 @@ export function FlockListPage() {
     void load();
   }, [load]);
 
+  async function submitCreateFlock(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canCreateFlock) return;
+    setCreateBusy(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/flocks`, {
+        method: "POST",
+        headers: jsonAuthHeaders(token),
+        body: JSON.stringify({
+          label: createForm.label.trim() || null,
+          placementDate: createForm.placementDate,
+          initialCount: Number(createForm.initialCount),
+          breedCode: createForm.breedCode.trim().toLowerCase(),
+          targetWeightKg: createForm.targetWeightKg ? Number(createForm.targetWeightKg) : null,
+          status: "active",
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Failed to create flock");
+      showToast("success", "Flock added");
+      setCreateForm((prev) => ({ ...prev, label: "", initialCount: "", targetWeightKg: "" }));
+      await load();
+    } catch (e2) {
+      showToast("error", e2 instanceof Error ? e2.message : "Failed to create flock");
+    } finally {
+      setCreateBusy(false);
+    }
+  }
+
   const visibleFlocks = flocks.filter((f) => {
     if (riskFilter === "all") return true;
     if (riskFilter === "blocked") return Boolean(f.withdrawalActive);
@@ -237,6 +277,59 @@ export function FlockListPage() {
           <p className="font-semibold text-neutral-900">Farm health score: {farmHealthScore}/100</p>
           {!!insights.length ? <p className="mt-1 text-neutral-700">{insights[0]}</p> : null}
         </div>
+      ) : null}
+      {canCreateFlock ? (
+        <form onSubmit={(e) => void submitCreateFlock(e)} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+          <p className="text-sm font-semibold text-neutral-900">Add purchased flock</p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-5">
+            <input
+              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              placeholder="Label (optional)"
+              value={createForm.label}
+              onChange={(e) => setCreateForm((v) => ({ ...v, label: e.target.value }))}
+            />
+            <input
+              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              type="date"
+              value={createForm.placementDate}
+              onChange={(e) => setCreateForm((v) => ({ ...v, placementDate: e.target.value }))}
+              required
+            />
+            <input
+              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              placeholder="Initial birds"
+              inputMode="numeric"
+              value={createForm.initialCount}
+              onChange={(e) => setCreateForm((v) => ({ ...v, initialCount: e.target.value }))}
+              required
+            />
+            <select
+              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              value={createForm.breedCode}
+              onChange={(e) => setCreateForm((v) => ({ ...v, breedCode: e.target.value }))}
+            >
+              <option value="generic_broiler">generic_broiler</option>
+              <option value="cobb_500">cobb_500</option>
+              <option value="ross_308">ross_308</option>
+            </select>
+            <input
+              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              placeholder="Target kg (optional)"
+              inputMode="decimal"
+              value={createForm.targetWeightKg}
+              onChange={(e) => setCreateForm((v) => ({ ...v, targetWeightKg: e.target.value }))}
+            />
+          </div>
+          <div className="mt-3 flex justify-end">
+            <button
+              type="submit"
+              disabled={createBusy || !createForm.placementDate || !createForm.initialCount}
+              className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {createBusy ? "Saving..." : "Add flock"}
+            </button>
+          </div>
+        </form>
       ) : null}
 
       {loading && <SkeletonList rows={4} />}

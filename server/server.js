@@ -335,6 +335,7 @@ function requireFarmAccess(req, res, next) {
 
 const FLOCK_ACTION_MIN_ROLE = {
   "flock.view": "laborer",
+  "flock.create": "vet_manager",
   "treatment.execute": "vet",
   "weighin.record": "vet",
   "mortality.record": "vet",
@@ -1031,7 +1032,45 @@ app.post("/api/laborer/translate", requireAuth, requireLaborer, async (req, res)
   res.json({ translation: out.translation, usedGemini: out.usedGemini, cached: Boolean(out.cached) });
 });
 
-app.get("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.view"), (_req, res) => {
+async function syncFlocksFromDbToMemory() {
+  if (!hasDb()) return;
+  const r = await dbQuery(
+    `SELECT id::text AS id,
+            COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
+            placement_date::text AS "placementDate",
+            initial_count AS "initialCount",
+            target_weight_kg AS "targetWeightKg",
+            status
+       FROM poultry_flocks
+      WHERE status IN ('active','planned')
+      ORDER BY placement_date DESC`
+  );
+  for (const row of r.rows) {
+    const prev = flocksById.get(row.id) ?? {};
+    flocksById.set(row.id, {
+      ...prev,
+      id: row.id,
+      label: String(row.label ?? `Flock ${String(row.id).slice(0, 8)}`),
+      placementDate: String(row.placementDate ?? new Date().toISOString().slice(0, 10)),
+      initialCount: Math.max(1, Number(row.initialCount ?? prev.initialCount ?? 1)),
+      targetWeightKg: row.targetWeightKg != null ? Number(row.targetWeightKg) : (prev.targetWeightKg ?? null),
+      checkinBands: prev.checkinBands ?? null,
+      photosRequiredPerRound: prev.photosRequiredPerRound ?? 1,
+      targetSlaughterDayMin: prev.targetSlaughterDayMin ?? 45,
+      targetSlaughterDayMax: prev.targetSlaughterDayMax ?? 50,
+      status: String(row.status ?? "active"),
+    });
+  }
+}
+
+app.get("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.view"), async (_req, res) => {
+  if (hasDb()) {
+    try {
+      await syncFlocksFromDbToMemory();
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET /api/flocks:", e instanceof Error ? e.message : e);
+    }
+  }
   // FIX: embed check-in urgency per flock for list + detail views
   const flocks = [...flocksById.values()].map((f) => {
     const st = checkinStatusPayload(f);
@@ -1046,6 +1085,74 @@ app.get("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.view
     };
   });
   res.json({ flocks });
+});
+
+app.post("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.create"), async (req, res) => {
+  const body = req.body ?? {};
+  const placementDateRaw = String(body.placementDate ?? "").trim();
+  const placementDate = /^\d{4}-\d{2}-\d{2}$/.test(placementDateRaw) ? placementDateRaw : "";
+  const initialCount = Number(body.initialCount);
+  const breedCode = String(body.breedCode ?? "").trim().toLowerCase();
+  const labelInput = String(body.label ?? "").trim();
+  const statusInput = String(body.status ?? "active").trim().toLowerCase();
+  const targetWeightKgRaw = body.targetWeightKg;
+  const targetWeightKg =
+    targetWeightKgRaw == null || targetWeightKgRaw === "" ? null : Number(targetWeightKgRaw);
+
+  if (!placementDate || !Number.isFinite(initialCount) || initialCount <= 0 || !breedCode) {
+    res.status(400).json({ error: "placementDate, initialCount (>0), and breedCode are required" });
+    return;
+  }
+  if (targetWeightKg != null && (!Number.isFinite(targetWeightKg) || targetWeightKg <= 0)) {
+    res.status(400).json({ error: "targetWeightKg must be a positive number when provided" });
+    return;
+  }
+  const status = statusInput === "planned" ? "planned" : "active";
+
+  let createdId = `flk_${crypto.randomBytes(6).toString("hex")}`;
+  let createdCode = null;
+  let createdLabel = labelInput || `Flock ${createdId.slice(0, 8)}`;
+  try {
+    if (hasDb()) {
+      const inserted = await dbQuery(
+        `INSERT INTO poultry_flocks
+          (breed_code, placement_date, initial_count, target_weight_kg, status, code)
+         VALUES ($1, $2::date, $3, $4, $5, $6)
+         RETURNING id::text AS id,
+                   COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
+                   code`,
+        [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, status, labelInput || null]
+      );
+      createdId = String(inserted.rows[0]?.id ?? createdId);
+      createdCode = inserted.rows[0]?.code ?? null;
+      createdLabel = String(inserted.rows[0]?.label ?? createdLabel);
+    }
+    const flockRow = {
+      id: createdId,
+      label: createdLabel,
+      code: createdCode ?? (labelInput || null),
+      placementDate,
+      initialCount: Math.floor(initialCount),
+      breedCode,
+      targetWeightKg,
+      status,
+      targetSlaughterDayMin: 45,
+      targetSlaughterDayMax: 50,
+      checkinBands: null,
+      photosRequiredPerRound: 1,
+    };
+    flocksById.set(createdId, flockRow);
+    appendAudit(req.authUser.id, req.authUser.role, "flock.create", "flock", createdId, {
+      placementDate,
+      initialCount: Math.floor(initialCount),
+      breedCode,
+      status,
+    });
+    res.status(201).json({ flock: flockRow });
+  } catch (e) {
+    console.error("[ERROR]", "[db] POST /api/flocks:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to create flock right now." });
+  }
 });
 
 app.get("/api/flocks/:id/checkin-status", requireAuth, requireFarmAccess, requireAction("flock.view"), (req, res) => {

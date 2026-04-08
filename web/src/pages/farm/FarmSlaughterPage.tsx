@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
+import { canFlockAction } from "../../auth/permissions";
 import { API_BASE_URL } from "../../api/config";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
@@ -42,8 +43,9 @@ function slaughterReasonLabel(row: Slaughter): string {
 }
 
 export function FarmSlaughterPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { showToast } = useToast();
+  const canRecordSlaughter = canFlockAction(user, "slaughter.record");
   const [flocks, setFlocks] = useState<Flock[]>([]);
   const [flockId, setFlockId] = useState("");
   const [rows, setRows] = useState<Slaughter[]>([]);
@@ -134,6 +136,10 @@ export function FarmSlaughterPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!flockId) return;
+    if (!canRecordSlaughter) {
+      showToast("error", "You can view slaughter data, but only vet manager or manager can save events.");
+      return;
+    }
     if (eligibility && !eligibility.eligibleForSlaughter) {
       showToast("error", "Cannot record slaughter while withdrawal/missed-round blockers are active.");
       return;
@@ -203,6 +209,11 @@ export function FarmSlaughterPage() {
           </div>
 
           <form onSubmit={submit} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+            {!canRecordSlaughter ? (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                View-only mode: only vet manager, manager, or superuser can save slaughter events.
+              </div>
+            ) : null}
             <div className="grid gap-3 sm:grid-cols-2">
               <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={startAt} onChange={(e) => setStartAt(e.target.value)} />
               <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
@@ -227,7 +238,7 @@ export function FarmSlaughterPage() {
             <div className="mt-3 flex justify-end gap-2">
               <a className="rounded-lg border border-neutral-300 px-3 py-2 text-sm" href={`${API_BASE_URL}/api/reports/slaughter.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`} target="_blank" rel="noreferrer">Slaughter CSV</a>
               <a className="rounded-lg border border-neutral-300 px-3 py-2 text-sm" href={`${API_BASE_URL}/api/reports/flock-performance.csv?flock_id=${encodeURIComponent(flockId)}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`} target="_blank" rel="noreferrer">Performance CSV</a>
-              <button disabled={busy || (eligibility != null && !eligibility.eligibleForSlaughter)} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">{busy ? "Saving..." : "Save slaughter"}</button>
+              <button disabled={!canRecordSlaughter || busy || (eligibility != null && !eligibility.eligibleForSlaughter)} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">{busy ? "Saving..." : "Save slaughter"}</button>
             </div>
           </form>
           <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">

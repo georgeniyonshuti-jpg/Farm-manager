@@ -63,6 +63,7 @@ export type PermissionKey =
 
 export type FlockActionKey =
   | "flock.view"
+  | "flock.create"
   | "treatment.execute"
   | "weighin.record"
   | "mortality.record"
@@ -73,6 +74,7 @@ export type FlockActionKey =
 
 const FLOCK_ACTION_MIN_ROLE: Record<FlockActionKey, UserRole> = {
   "flock.view": "laborer",
+  "flock.create": "vet_manager",
   "treatment.execute": "vet",
   "weighin.record": "vet",
   "mortality.record": "vet",
