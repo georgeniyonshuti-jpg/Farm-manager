@@ -1040,6 +1040,9 @@ async function syncFlocksFromDbToMemory() {
             placement_date::text AS "placementDate",
             initial_count AS "initialCount",
             target_weight_kg AS "targetWeightKg",
+            verified_live_count AS "verifiedLiveCount",
+            verified_live_note AS "verifiedLiveNote",
+            verified_live_at AS "verifiedLiveAt",
             status
        FROM poultry_flocks
       WHERE status IN ('active','planned')
@@ -1054,6 +1057,9 @@ async function syncFlocksFromDbToMemory() {
       placementDate: String(row.placementDate ?? new Date().toISOString().slice(0, 10)),
       initialCount: Math.max(1, Number(row.initialCount ?? prev.initialCount ?? 1)),
       targetWeightKg: row.targetWeightKg != null ? Number(row.targetWeightKg) : (prev.targetWeightKg ?? null),
+      verifiedLiveCount: row.verifiedLiveCount != null ? Math.max(0, Number(row.verifiedLiveCount)) : null,
+      verifiedLiveNote: row.verifiedLiveNote != null ? String(row.verifiedLiveNote) : null,
+      verifiedLiveAt: row.verifiedLiveAt != null ? String(row.verifiedLiveAt) : null,
       checkinBands: prev.checkinBands ?? null,
       photosRequiredPerRound: prev.photosRequiredPerRound ?? 1,
       targetSlaughterDayMin: prev.targetSlaughterDayMin ?? 45,
@@ -1421,14 +1427,55 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
   const slaughterToDate = slRows
     .filter((s) => new Date(s.at).getTime() <= cutoffMs)
     .reduce((sum, s) => sum + (Number(s.birdsSlaughtered) || 0), 0);
-  const birdsLiveEstimate = Math.max(0, (Number(flock.initialCount) || 0) - mortalityToDate - slaughterToDate);
+  const computedBirdsLive = Math.max(0, (Number(flock.initialCount) || 0) - mortalityToDate - slaughterToDate);
+  const v = flock.verifiedLiveCount;
+  const birdsLiveEstimate =
+    v != null && Number.isFinite(Number(v)) ? Math.max(0, Math.floor(Number(v))) : computedBirdsLive;
   const latestSlaughter = slRows
     .filter((s) => new Date(s.at).getTime() <= cutoffMs)
     .sort((a, b) => (a.at < b.at ? 1 : -1))[0] ?? null;
-  const fcr =
+  const fcrSlaughter =
     latestSlaughter && latestSlaughter.birdsSlaughtered > 0 && latestSlaughter.avgLiveWeightKg > 0
       ? feedToDate / (latestSlaughter.birdsSlaughtered * latestSlaughter.avgLiveWeightKg)
       : null;
+
+  /** Prefer FCR from latest weigh-in (feed/sample formula on row); else slaughter-based. */
+  let fcrWeighIn = null;
+  let latestWeighIn = null;
+  if (hasDb()) {
+    try {
+      const wr = await dbQuery(
+        `SELECT id,
+                weigh_date::text AS "weighDate",
+                avg_weight_kg AS "avgWeightKg",
+                fcr,
+                variance_pct AS "variancePct",
+                total_feed_used_kg AS "totalFeedUsedKg"
+           FROM weigh_ins
+          WHERE flock_id = $1
+          ORDER BY weigh_date DESC, created_at DESC
+          LIMIT 1`,
+        [flockId]
+      );
+      const row = wr.rows[0];
+      if (row) {
+        fcrWeighIn = row.fcr != null ? Number(row.fcr) : null;
+        latestWeighIn = {
+          id: String(row.id),
+          weighDate: String(row.weighDate ?? ""),
+          avgWeightKg: Number(row.avgWeightKg),
+          fcr: fcrWeighIn,
+          variancePct: row.variancePct != null ? Number(row.variancePct) : null,
+          totalFeedUsedKg: row.totalFeedUsedKg != null ? Number(row.totalFeedUsedKg) : null,
+        };
+      }
+    } catch (e) {
+      console.error("[ERROR]", "[db] buildFlockPerformanceSummary weigh_ins:", e instanceof Error ? e.message : e);
+    }
+  }
+
+  const fcr = fcrWeighIn != null ? fcrWeighIn : fcrSlaughter;
+
   return {
     flockId,
     placementDate: flock.placementDate,
@@ -1436,8 +1483,13 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
     feedToDateKg: Number(feedToDate.toFixed(2)),
     mortalityToDate,
     birdsLiveEstimate,
+    computedBirdsLiveEstimate: computedBirdsLive,
+    verifiedLiveCount: flock.verifiedLiveCount != null ? Math.floor(Number(flock.verifiedLiveCount)) : null,
     latestSlaughter,
+    latestWeighIn,
     fcr,
+    fcrWeighIn,
+    fcrSlaughter,
   };
 }
 
@@ -1626,6 +1678,231 @@ app.get("/api/flocks/:id/performance-summary", requireAuth, requireFarmAccess, r
     return;
   }
   res.json(summary);
+});
+
+function mapWeighInRow(row) {
+  return {
+    id: String(row.id),
+    weighDate: String(row.weighDate ?? row.weigh_date ?? ""),
+    avgWeightKg: Number(row.avgWeightKg ?? row.avg_weight_kg),
+    fcr: row.fcr != null ? Number(row.fcr) : null,
+    variancePct: row.variancePct != null ? Number(row.variancePct) : row.variance_pct != null ? Number(row.variance_pct) : null,
+    totalFeedUsedKg: row.totalFeedUsedKg != null ? Number(row.totalFeedUsedKg) : row.total_feed_used_kg != null ? Number(row.total_feed_used_kg) : null,
+  };
+}
+
+app.patch("/api/flocks/:id/live-verification", requireAuth, requireFarmAccess, async (req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
+  if (req.authUser.role !== "manager" && req.authUser.role !== "superuser") {
+    res.status(403).json({ error: "Only managers can set verified head count." });
+    return;
+  }
+  const flockId = String(req.params.id ?? "").trim();
+  const body = req.body ?? {};
+  const clear = body.clear === true || body.liveCount === null || body.liveCount === "";
+  try {
+    await syncFlocksFromDbToMemory();
+  } catch {
+    /* ignore */
+  }
+  if (!flocksById.has(flockId)) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
+  try {
+    if (clear) {
+      await dbQuery(
+        `UPDATE poultry_flocks
+            SET verified_live_count = NULL, verified_live_note = NULL, verified_live_at = NULL, updated_at = now()
+          WHERE id::text = $1`,
+        [flockId]
+      );
+    } else {
+      const liveCount = Math.floor(Number(body.liveCount));
+      if (!Number.isFinite(liveCount) || liveCount < 0) {
+        res.status(400).json({ error: "liveCount must be a non-negative integer (or send clear: true)." });
+        return;
+      }
+      const note = body.note == null ? null : String(body.note).trim().slice(0, 2000) || null;
+      await dbQuery(
+        `UPDATE poultry_flocks
+            SET verified_live_count = $2,
+                verified_live_note = $3,
+                verified_live_at = now(),
+                updated_at = now()
+          WHERE id::text = $1`,
+        [flockId, liveCount, note]
+      );
+    }
+    await syncFlocksFromDbToMemory();
+    appendAudit(req.authUser.id, req.authUser.role, "flock.live_verification", "flock", flockId, {
+      clear,
+      liveCount: clear ? null : Math.floor(Number(body.liveCount)),
+    });
+    const summary = await buildFlockPerformanceSummary(flockId);
+    res.json({ ok: true, performance: summary });
+  } catch (e) {
+    console.error("[ERROR]", "[db] PATCH live-verification:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to save verified head count." });
+  }
+});
+
+app.get("/api/weigh-ins/:flockId/latest", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+  const flockId = String(req.params.flockId ?? "").trim();
+  try {
+    if (hasDb()) await syncFlocksFromDbToMemory();
+  } catch {
+    /* ignore */
+  }
+  if (!flocksById.has(flockId)) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
+  if (!hasDb()) {
+    res.json({ weighIn: null });
+    return;
+  }
+  try {
+    const wr = await dbQuery(
+      `SELECT id,
+              weigh_date::text AS "weighDate",
+              avg_weight_kg AS "avgWeightKg",
+              fcr,
+              variance_pct AS "variancePct",
+              total_feed_used_kg AS "totalFeedUsedKg"
+         FROM weigh_ins
+        WHERE flock_id = $1
+        ORDER BY weigh_date DESC, created_at DESC
+        LIMIT 1`,
+      [flockId]
+    );
+    const row = wr.rows[0];
+    res.json({ weighIn: row ? mapWeighInRow(row) : null });
+  } catch (e) {
+    console.error("[ERROR]", "[db] GET weigh-ins latest:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to load weigh-in." });
+  }
+});
+
+app.get("/api/weigh-ins/:flockId", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+  const flockId = String(req.params.flockId ?? "").trim();
+  try {
+    if (hasDb()) await syncFlocksFromDbToMemory();
+  } catch {
+    /* ignore */
+  }
+  if (!flocksById.has(flockId)) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
+  if (!hasDb()) {
+    res.json({ weighIns: [] });
+    return;
+  }
+  try {
+    const wr = await dbQuery(
+      `SELECT id,
+              weigh_date::text AS "weighDate",
+              avg_weight_kg AS "avgWeightKg",
+              fcr,
+              variance_pct AS "variancePct",
+              total_feed_used_kg AS "totalFeedUsedKg"
+         FROM weigh_ins
+        WHERE flock_id = $1
+        ORDER BY weigh_date DESC, created_at DESC`,
+      [flockId]
+    );
+    res.json({ weighIns: wr.rows.map((row) => mapWeighInRow(row)) });
+  } catch (e) {
+    console.error("[ERROR]", "[db] GET weigh-ins:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to load weigh-ins." });
+  }
+});
+
+app.post("/api/weigh-ins/:flockId", requireAuth, requireFarmAccess, requireAction("weighin.record"), async (req, res) => {
+  const flockId = String(req.params.flockId ?? "").trim();
+  try {
+    if (hasDb()) await syncFlocksFromDbToMemory();
+  } catch {
+    /* ignore */
+  }
+  if (!flocksById.has(flockId)) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
+  if (!hasDb()) {
+    res.status(503).json({ error: "Weigh-ins require database." });
+    return;
+  }
+  const body = req.body ?? {};
+  const weighDateRaw = String(body.weighDate ?? body.weigh_date ?? "").trim().slice(0, 10);
+  const weighDate = /^\d{4}-\d{2}-\d{2}$/.test(weighDateRaw) ? weighDateRaw : "";
+  const ageDays = Math.max(0, Math.floor(Number(body.ageDays ?? body.age_days)));
+  const sampleSize = Math.max(1, Math.floor(Number(body.sampleSize ?? body.sample_size)));
+  const avgWeightKg = Number(body.avgWeightKg ?? body.avg_weight_kg);
+  const totalFeedUsedKg = Number(body.totalFeedUsedKg ?? body.total_feed_used_kg);
+  const targetWeightKgRaw = body.targetWeightKg ?? body.target_weight_kg;
+  const targetWeightKg =
+    targetWeightKgRaw == null || targetWeightKgRaw === "" ? null : Number(targetWeightKgRaw);
+  const cvPctRaw = body.cvPct ?? body.cv_pct;
+  const cvPct = cvPctRaw == null || cvPctRaw === "" ? null : Number(cvPctRaw);
+  const underweightPctRaw = body.underweightPct ?? body.underweight_pct;
+  const underweightPct = underweightPctRaw == null || underweightPctRaw === "" ? null : Number(underweightPctRaw);
+  const notes = body.notes == null ? null : String(body.notes).trim().slice(0, 4000) || null;
+
+  if (!weighDate || !Number.isFinite(ageDays) || !Number.isFinite(sampleSize) || sampleSize < 1) {
+    res.status(400).json({ error: "weighDate (YYYY-MM-DD), ageDays, and sampleSize (>=1) are required" });
+    return;
+  }
+  if (!Number.isFinite(avgWeightKg) || avgWeightKg <= 0 || !Number.isFinite(totalFeedUsedKg) || totalFeedUsedKg < 0) {
+    res.status(400).json({ error: "avgWeightKg (>0) and totalFeedUsedKg (>=0) are required" });
+    return;
+  }
+  if (targetWeightKg != null && (!Number.isFinite(targetWeightKg) || targetWeightKg <= 0)) {
+    res.status(400).json({ error: "targetWeightKg must be positive when provided" });
+    return;
+  }
+
+  try {
+    const ins = await dbQuery(
+      `INSERT INTO weigh_ins
+        (flock_id, weigh_date, age_days, sample_size, avg_weight_kg, total_feed_used_kg,
+         target_weight_kg, cv_pct, underweight_pct, notes, recorded_by)
+       VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING id,
+                 weigh_date::text AS "weighDate",
+                 avg_weight_kg AS "avgWeightKg",
+                 fcr,
+                 variance_pct AS "variancePct",
+                 total_feed_used_kg AS "totalFeedUsedKg"`,
+      [
+        flockId,
+        weighDate,
+        ageDays,
+        sampleSize,
+        avgWeightKg,
+        totalFeedUsedKg,
+        targetWeightKg,
+        cvPct,
+        underweightPct,
+        notes,
+        String(req.authUser.id),
+      ]
+    );
+    const row = ins.rows[0];
+    appendAudit(req.authUser.id, req.authUser.role, "flock.weigh_in.create", "flock", flockId, {
+      weighDate,
+      avgWeightKg,
+      sampleSize,
+    });
+    res.status(201).json({ weighIn: row ? mapWeighInRow(row) : null });
+  } catch (e) {
+    console.error("[ERROR]", "[db] POST weigh-ins:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to save weigh-in." });
+  }
 });
 
 app.get("/api/reports/flock-performance.csv", requireAuth, requireFarmAccess, async (req, res) => {
