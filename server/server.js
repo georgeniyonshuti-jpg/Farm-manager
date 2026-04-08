@@ -2035,6 +2035,347 @@ app.post("/api/payroll-impact/bulk-approve", requireAuth, requireFarmAccess, req
   res.json({ ok: true, approvedCount: n });
 });
 
+// -------------------------
+// Medicine ops v2
+// -------------------------
+
+app.get("/api/medicine", requireAuth, requireFarmAccess, requireTreatmentLogger, async (_req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
+  try {
+    const r = await dbQuery(
+      `SELECT id, name, category, unit, quantity, withdrawal_days AS "withdrawalDays",
+              supplier, expiry_date AS "expiryDate", low_stock_threshold AS "lowStockThreshold", created_at AS "createdAt"
+         FROM medicine_inventory
+        ORDER BY name ASC`
+    );
+    res.json({ medicines: r.rows });
+  } catch (e) {
+    console.error("[ERROR]", "[db] GET /api/medicine:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Medicine inventory unavailable. Run latest migrations." });
+  }
+});
+
+app.post("/api/medicine", requireAuth, requireFarmAccess, requireTreatmentLogger, async (req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
+  const body = req.body ?? {};
+  const name = String(body.name ?? "").trim();
+  const category = String(body.category ?? "").trim();
+  const unit = String(body.unit ?? "").trim();
+  const quantity = Number(body.quantity ?? 0);
+  const withdrawalDays = Math.max(0, Number(body.withdrawalDays ?? 0) || 0);
+  const supplier = body.supplier == null ? null : String(body.supplier).trim() || null;
+  const expiryDate = body.expiryDate == null || body.expiryDate === "" ? null : String(body.expiryDate).slice(0, 10);
+  const lowStockThreshold = body.lowStockThreshold == null || body.lowStockThreshold === "" ? 10 : Number(body.lowStockThreshold);
+  if (!name || !category || !unit || !Number.isFinite(quantity) || quantity < 0) {
+    res.status(400).json({ error: "name, category, unit and quantity>=0 are required" });
+    return;
+  }
+  try {
+    const r = await dbQuery(
+      `INSERT INTO medicine_inventory
+        (name, category, unit, quantity, withdrawal_days, supplier, expiry_date, low_stock_threshold)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+       RETURNING id, name, category, unit, quantity, withdrawal_days AS "withdrawalDays",
+                 supplier, expiry_date AS "expiryDate", low_stock_threshold AS "lowStockThreshold", created_at AS "createdAt"`,
+      [name, category, unit, quantity, withdrawalDays, supplier, expiryDate, lowStockThreshold]
+    );
+    appendAudit(req.authUser.id, req.authUser.role, "medicine.create", "medicine_inventory", r.rows[0]?.id ?? null, {
+      name,
+      quantity,
+    });
+    res.status(201).json({ medicine: r.rows[0] });
+  } catch (e) {
+    console.error("[ERROR]", "[db] POST /api/medicine:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to save medicine item." });
+  }
+});
+
+app.get("/api/medicine/lots", requireAuth, requireFarmAccess, requireTreatmentLogger, async (req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
+  const medicineId = String(req.query.medicine_id ?? "").trim();
+  try {
+    const r = await dbQuery(
+      `SELECT l.id, l.medicine_id AS "medicineId", m.name AS "medicineName",
+              l.lot_number AS "lotNumber", l.received_at AS "receivedAt", l.expiry_date AS "expiryDate",
+              l.quantity_received AS "quantityReceived", l.quantity_remaining AS "quantityRemaining",
+              l.supplier, l.invoice_ref AS "invoiceRef", l.created_at AS "createdAt"
+         FROM medicine_lots l
+         JOIN medicine_inventory m ON m.id = l.medicine_id
+        WHERE ($1 = '' OR l.medicine_id::text = $1)
+        ORDER BY l.expiry_date ASC NULLS LAST, l.received_at ASC`,
+      [medicineId]
+    );
+    res.json({ lots: r.rows });
+  } catch (e) {
+    console.error("[ERROR]", "[db] GET /api/medicine/lots:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to load medicine lots." });
+  }
+});
+
+app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requireTreatmentLogger, async (req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
+  const body = req.body ?? {};
+  const medicineId = String(body.medicineId ?? "").trim();
+  const lotNumber = String(body.lotNumber ?? "").trim();
+  const receivedAt = String(body.receivedAt ?? new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const expiryDate = body.expiryDate == null || body.expiryDate === "" ? null : String(body.expiryDate).slice(0, 10);
+  const quantityReceived = Number(body.quantityReceived ?? 0);
+  const supplier = body.supplier == null ? null : String(body.supplier).trim() || null;
+  const invoiceRef = body.invoiceRef == null ? null : String(body.invoiceRef).trim() || null;
+  if (!medicineId || !lotNumber || !Number.isFinite(quantityReceived) || quantityReceived <= 0) {
+    res.status(400).json({ error: "medicineId, lotNumber and quantityReceived>0 are required" });
+    return;
+  }
+  const client = await dbPool.connect();
+  try {
+    await client.query("BEGIN");
+    const ins = await client.query(
+      `INSERT INTO medicine_lots
+        (medicine_id, lot_number, received_at, expiry_date, quantity_received, quantity_remaining, supplier, invoice_ref)
+       VALUES ($1,$2,$3,$4,$5,$5,$6,$7)
+       RETURNING id, medicine_id AS "medicineId", lot_number AS "lotNumber", received_at AS "receivedAt",
+                 expiry_date AS "expiryDate", quantity_received AS "quantityReceived", quantity_remaining AS "quantityRemaining",
+                 supplier, invoice_ref AS "invoiceRef", created_at AS "createdAt"`,
+      [medicineId, lotNumber, receivedAt, expiryDate, quantityReceived, supplier, invoiceRef]
+    );
+    await client.query(`UPDATE medicine_inventory SET quantity = quantity + $2 WHERE id = $1`, [medicineId, quantityReceived]);
+    await client.query("COMMIT");
+    appendAudit(req.authUser.id, req.authUser.role, "medicine.lot.receive", "medicine_lot", ins.rows[0]?.id ?? null, {
+      medicineId,
+      quantityReceived,
+    });
+    res.status(201).json({ lot: ins.rows[0] });
+  } catch (e) {
+    try { await client.query("ROLLBACK"); } catch {}
+    console.error("[ERROR]", "[db] POST /api/medicine/lots:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to receive medicine lot." });
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/treatment-rounds", requireAuth, requireFarmAccess, requireTreatmentLogger, async (req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
+  const flockId = String(req.query.flock_id ?? "").trim();
+  const status = String(req.query.status ?? "").trim();
+  try {
+    const r = await dbQuery(
+      `SELECT r.id, r.flock_id AS "flockId", r.medicine_id AS "medicineId", m.name AS "medicineName",
+              r.planned_for AS "plannedFor", r.window_start AS "windowStart", r.window_end AS "windowEnd",
+              r.route, r.dose_per_litre AS "dosePerLitre", r.dose_per_kg_feed AS "dosePerKgFeed", r.dose_per_bird AS "dosePerBird",
+              r.planned_quantity AS "plannedQuantity", r.status, r.assigned_to_user_id AS "assignedToUserId",
+              r.checklist, r.notes, r.created_by_user_id AS "createdByUserId", r.created_at AS "createdAt"
+         FROM treatment_rounds r
+         JOIN medicine_inventory m ON m.id = r.medicine_id
+        WHERE ($1 = '' OR r.flock_id = $1)
+          AND ($2 = '' OR r.status = $2)
+        ORDER BY r.planned_for DESC`,
+      [flockId, status]
+    );
+    res.json({ rounds: r.rows });
+  } catch (e) {
+    console.error("[ERROR]", "[db] GET /api/treatment-rounds:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to load treatment rounds." });
+  }
+});
+
+app.post("/api/treatment-rounds", requireAuth, requireFarmAccess, requireTreatmentLogger, async (req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
+  const body = req.body ?? {};
+  const flockId = String(body.flockId ?? "").trim();
+  const medicineId = String(body.medicineId ?? "").trim();
+  const plannedFor = String(body.plannedFor ?? "").trim();
+  const windowStart = body.windowStart == null || body.windowStart === "" ? null : String(body.windowStart);
+  const windowEnd = body.windowEnd == null || body.windowEnd === "" ? null : String(body.windowEnd);
+  const route = String(body.route ?? "").trim();
+  const dosePerLitre = body.dosePerLitre == null || body.dosePerLitre === "" ? null : Number(body.dosePerLitre);
+  const dosePerKgFeed = body.dosePerKgFeed == null || body.dosePerKgFeed === "" ? null : Number(body.dosePerKgFeed);
+  const dosePerBird = body.dosePerBird == null || body.dosePerBird === "" ? null : Number(body.dosePerBird);
+  const plannedQuantity = Number(body.plannedQuantity ?? 0);
+  const assignedToUserId = body.assignedToUserId == null || body.assignedToUserId === "" ? null : String(body.assignedToUserId);
+  const checklist = Array.isArray(body.checklist) ? body.checklist : [];
+  const notes = body.notes == null ? null : String(body.notes);
+  if (!flockId || !medicineId || !plannedFor || !route || !Number.isFinite(plannedQuantity) || plannedQuantity <= 0) {
+    res.status(400).json({ error: "flockId, medicineId, plannedFor, route and plannedQuantity>0 are required" });
+    return;
+  }
+  try {
+    const r = await dbQuery(
+      `INSERT INTO treatment_rounds
+        (flock_id, medicine_id, planned_for, window_start, window_end, route, dose_per_litre, dose_per_kg_feed, dose_per_bird,
+         planned_quantity, assigned_to_user_id, checklist, notes, created_by_user_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13,$14)
+       RETURNING id, flock_id AS "flockId", medicine_id AS "medicineId", planned_for AS "plannedFor",
+                 window_start AS "windowStart", window_end AS "windowEnd", route,
+                 dose_per_litre AS "dosePerLitre", dose_per_kg_feed AS "dosePerKgFeed", dose_per_bird AS "dosePerBird",
+                 planned_quantity AS "plannedQuantity", status, assigned_to_user_id AS "assignedToUserId",
+                 checklist, notes, created_by_user_id AS "createdByUserId", created_at AS "createdAt"`,
+      [flockId, medicineId, plannedFor, windowStart, windowEnd, route, dosePerLitre, dosePerKgFeed, dosePerBird, plannedQuantity, assignedToUserId, JSON.stringify(checklist), notes, req.authUser.id]
+    );
+    appendAudit(req.authUser.id, req.authUser.role, "treatment.round.create", "treatment_round", r.rows[0]?.id ?? null, {
+      flockId,
+      plannedFor,
+    });
+    res.status(201).json({ round: r.rows[0] });
+  } catch (e) {
+    console.error("[ERROR]", "[db] POST /api/treatment-rounds:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to create treatment round." });
+  }
+});
+
+app.patch("/api/treatment-rounds/:id/status", requireAuth, requireFarmAccess, requireTreatmentLogger, async (req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
+  const id = String(req.params.id ?? "").trim();
+  const body = req.body ?? {};
+  const status = String(body.status ?? "").trim();
+  const quantityUsed = body.quantityUsed == null || body.quantityUsed === "" ? null : Number(body.quantityUsed);
+  const note = body.note == null ? null : String(body.note);
+  if (!["planned", "in_progress", "completed", "missed", "cancelled"].includes(status)) {
+    res.status(400).json({ error: "Invalid status" });
+    return;
+  }
+  const client = await dbPool.connect();
+  try {
+    await client.query("BEGIN");
+    const rr = await client.query(`SELECT id, medicine_id, planned_quantity AS "plannedQuantity" FROM treatment_rounds WHERE id = $1 FOR UPDATE`, [id]);
+    if (!rr.rows.length) {
+      await client.query("ROLLBACK");
+      res.status(404).json({ error: "Round not found" });
+      return;
+    }
+    await client.query(`UPDATE treatment_rounds SET status = $2 WHERE id = $1`, [id, status]);
+    if (status === "completed") {
+      const q = quantityUsed != null && Number.isFinite(quantityUsed) && quantityUsed > 0
+        ? quantityUsed
+        : Number(rr.rows[0].plannedQuantity) || 0;
+      if (q > 0) {
+        // FEFO lot deduction
+        const lots = await client.query(
+          `SELECT id, quantity_remaining AS "quantityRemaining"
+             FROM medicine_lots
+            WHERE medicine_id = $1
+              AND quantity_remaining > 0
+            ORDER BY expiry_date ASC NULLS LAST, received_at ASC
+            FOR UPDATE`,
+          [rr.rows[0].medicine_id]
+        );
+        let remaining = q;
+        for (const lot of lots.rows) {
+          if (remaining <= 0) break;
+          const lotQty = Number(lot.quantityRemaining) || 0;
+          const take = Math.min(lotQty, remaining);
+          if (take <= 0) continue;
+          await client.query(`UPDATE medicine_lots SET quantity_remaining = quantity_remaining - $2 WHERE id = $1`, [lot.id, take]);
+          remaining -= take;
+        }
+        await client.query(`UPDATE medicine_inventory SET quantity = GREATEST(quantity - $2, 0) WHERE id = $1`, [rr.rows[0].medicine_id, q]);
+        await client.query(
+          `INSERT INTO treatment_round_events (round_id, event_type, quantity_used, actor_user_id, note)
+           VALUES ($1,'completed',$2,$3,$4)`,
+          [id, q, req.authUser.id, note]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO treatment_round_events (round_id, event_type, actor_user_id, note)
+           VALUES ($1,'completed',$2,$3)`,
+          [id, req.authUser.id, note]
+        );
+      }
+    } else {
+      await client.query(
+        `INSERT INTO treatment_round_events (round_id, event_type, actor_user_id, note)
+         VALUES ($1,$2,$3,$4)`,
+        [id, status === "missed" ? "missed" : "note", req.authUser.id, note]
+      );
+    }
+    await client.query("COMMIT");
+    appendAudit(req.authUser.id, req.authUser.role, "treatment.round.status", "treatment_round", id, { status });
+    res.json({ ok: true });
+  } catch (e) {
+    try { await client.query("ROLLBACK"); } catch {}
+    console.error("[ERROR]", "[db] PATCH /api/treatment-rounds/:id/status:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to update treatment round status." });
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/flocks/:id/eligibility", requireAuth, requireFarmAccess, async (req, res) => {
+  if (!hasDb()) {
+    res.json({ eligibleForSlaughter: true, blockers: [] });
+    return;
+  }
+  const flockId = String(req.params.id ?? "").trim();
+  try {
+    // Active withdrawal blockers from legacy flock_treatments
+    const t = await dbQuery(
+      `SELECT medicine_name AS "medicineName",
+              at,
+              withdrawal_days AS "withdrawalDays"
+         FROM flock_treatments
+        WHERE flock_id = $1
+        ORDER BY at DESC`,
+      [flockId]
+    );
+    const nowMs = Date.now();
+    const treatmentBlockers = t.rows
+      .map((x) => {
+        const atMs = new Date(x.at).getTime();
+        const wd = Math.max(0, Number(x.withdrawalDays) || 0);
+        const safe = new Date(atMs + wd * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        return { medicineName: x.medicineName, safeAfter: safe, active: nowMs < atMs + wd * 24 * 60 * 60 * 1000 };
+      })
+      .filter((x) => x.active);
+    // Missed rounds are operational blockers
+    const rounds = await dbQuery(
+      `SELECT id, planned_for AS "plannedFor", status
+         FROM treatment_rounds
+        WHERE flock_id = $1
+          AND status IN ('missed')
+        ORDER BY planned_for DESC
+        LIMIT 5`,
+      [flockId]
+    ).catch(() => ({ rows: [] }));
+    const missedRoundBlockers = rounds.rows.map((r) => ({
+      type: "missed_round",
+      roundId: r.id,
+      plannedFor: r.plannedFor,
+    }));
+    const blockers = [
+      ...treatmentBlockers.map((b) => ({ type: "withdrawal", ...b })),
+      ...missedRoundBlockers,
+    ];
+    res.json({
+      eligibleForSlaughter: blockers.length === 0,
+      blockers,
+    });
+  } catch (e) {
+    console.error("[ERROR]", "[db] GET /api/flocks/:id/eligibility:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to compute eligibility." });
+  }
+});
+
 // FIX: generic 404 handler
 app.use((_req, res) => {
   res.status(404).json({ status: "error", message: "Not Found" });

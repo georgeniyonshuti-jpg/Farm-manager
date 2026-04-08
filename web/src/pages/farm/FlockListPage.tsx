@@ -16,6 +16,8 @@ type FlockRow = {
   nextDueAt?: string;
   ageDays?: number;
   intervalHours?: number;
+  latestFcr?: number | null;
+  withdrawalActive?: boolean;
 };
 
 export function FlockListPage() {
@@ -32,7 +34,27 @@ export function FlockListPage() {
       const r = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
       const d = await r.json();
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Load failed");
-      setFlocks((d.flocks as FlockRow[]) ?? []);
+      const base = (d.flocks as FlockRow[]) ?? [];
+      const enriched = await Promise.all(
+        base.map(async (f) => {
+          try {
+            const [wr, er] = await Promise.all([
+              fetch(`${API_BASE_URL}/api/weigh-ins/${encodeURIComponent(f.id)}/latest`, { headers: readAuthHeaders(token) }),
+              fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(f.id)}/eligibility`, { headers: readAuthHeaders(token) }),
+            ]);
+            const wd = await wr.json().catch(() => ({}));
+            const ed = await er.json().catch(() => ({ eligibleForSlaughter: true, blockers: [] }));
+            return {
+              ...f,
+              latestFcr: (wd as { weighIn?: { fcr?: number | null } }).weighIn?.fcr ?? null,
+              withdrawalActive: !Boolean((ed as { eligibleForSlaughter?: boolean }).eligibleForSlaughter ?? true),
+            };
+          } catch {
+            return { ...f, latestFcr: null, withdrawalActive: false };
+          }
+        })
+      );
+      setFlocks(enriched);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -79,6 +101,8 @@ export function FlockListPage() {
                     ? new Date(f.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })
                     : "—"}
                 </p>
+                <p className="mt-1 text-xs text-neutral-700">FCR: {f.latestFcr != null ? f.latestFcr.toFixed(2) : "—"}</p>
+                {f.withdrawalActive ? <p className="mt-1 inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-800">🔴 Withdrawal</p> : null}
               </li>
             ))}
           </ul>
@@ -90,6 +114,7 @@ export function FlockListPage() {
                   <th>Flock</th>
                   <th>Age (days)</th>
                   <th>Interval (h)</th>
+                  <th>FCR</th>
                   <th>Next due (Kigali)</th>
                   <th>Status</th>
                 </tr>
@@ -104,12 +129,19 @@ export function FlockListPage() {
                     </td>
                     <td>{f.ageDays ?? "—"}</td>
                     <td>{f.intervalHours ?? "—"}</td>
+                    <td>{f.latestFcr != null ? f.latestFcr.toFixed(2) : "—"}</td>
                     <td className="font-mono text-xs">
                       {f.nextDueAt
                         ? new Date(f.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })
                         : "—"}
                     </td>
-                    <td>{f.checkinBadge ? <CheckinUrgencyBadge badge={f.checkinBadge} /> : "—"}</td>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        {f.checkinBadge ? <CheckinUrgencyBadge badge={f.checkinBadge} /> : null}
+                        {f.withdrawalActive ? <span className="inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-800">🔴 Withdrawal</span> : null}
+                        {!f.checkinBadge && !f.withdrawalActive ? "—" : null}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

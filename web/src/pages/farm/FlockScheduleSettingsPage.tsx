@@ -23,6 +23,7 @@ export function FlockScheduleSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
+  const [withdrawalWarning, setWithdrawalWarning] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -49,6 +50,12 @@ export function FlockScheduleSettingsPage() {
       setPhotosRequired(s.photosRequiredPerRound ?? 1);
       setTargetMin(s.targetSlaughterDays.min);
       setTargetMax(s.targetSlaughterDays.max);
+      const er = await fetch(`${API_BASE_URL}/api/flocks/${id}/eligibility`, { headers: readAuthHeaders(token) });
+      const ed = await er.json().catch(() => ({ eligibleForSlaughter: true, blockers: [] }));
+      const blocker = Array.isArray((ed as { blockers?: Array<{ type?: string; medicineName?: string; safeAfter?: string }> }).blockers)
+        ? (ed as { blockers?: Array<{ type?: string; medicineName?: string; safeAfter?: string }> }).blockers?.find((b) => b.type === "withdrawal")
+        : null;
+      setWithdrawalWarning(blocker ? `${blocker.medicineName ?? "Treatment"} withdrawal active until ${blocker.safeAfter ?? "clearance"}` : null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -131,8 +138,19 @@ export function FlockScheduleSettingsPage() {
           </p>
           {/* FIX: same check-in urgency as flock list / detail */}
           <CheckinUrgencyBadge badge={status.checkinBadge} />
+          {withdrawalWarning ? (
+            <span className="inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-800">
+              🔴 Withdrawal
+            </span>
+          ) : null}
         </div>
       )}
+
+      {!pageLoading && withdrawalWarning ? (
+        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-900">
+          {withdrawalWarning}
+        </p>
+      ) : null}
 
       {!pageLoading && status && error && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">

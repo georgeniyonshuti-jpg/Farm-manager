@@ -7,6 +7,15 @@ import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 
 type Flock = { id: string; label: string };
+type Medicine = {
+  id: string;
+  name: string;
+  category: string;
+  unit: string;
+  quantity: number;
+  withdrawalDays: number;
+  lowStockThreshold: number;
+};
 type Treatment = {
   id: string;
   at: string;
@@ -19,6 +28,17 @@ type Treatment = {
   durationDays: number;
   withdrawalDays: number;
   notes: string;
+};
+type Round = {
+  id: string;
+  flockId: string;
+  medicineId: string;
+  medicineName: string;
+  plannedFor: string;
+  route: string;
+  plannedQuantity: number;
+  status: "planned" | "in_progress" | "completed" | "missed" | "cancelled";
+  assignedToUserId?: string | null;
 };
 
 const TREATMENT_REASON_OPTIONS = [
@@ -41,8 +61,10 @@ export function FarmTreatmentPage() {
   const { token } = useAuth();
   const { showToast } = useToast();
   const [flocks, setFlocks] = useState<Flock[]>([]);
+  const [medicines, setMedicines] = useState<Medicine[]>([]);
   const [flockId, setFlockId] = useState("");
   const [rows, setRows] = useState<Treatment[]>([]);
+  const [rounds, setRounds] = useState<Round[]>([]);
   const [startAt, setStartAt] = useState("");
   const [endAt, setEndAt] = useState("");
   const [loading, setLoading] = useState(true);
@@ -57,6 +79,24 @@ export function FarmTreatmentPage() {
     route: "oral",
     durationDays: "1",
     withdrawalDays: "0",
+    notes: "",
+  });
+  const [medForm, setMedForm] = useState({
+    name: "",
+    category: "vaccine",
+    unit: "ml",
+    quantity: "",
+    withdrawalDays: "0",
+    lowStockThreshold: "10",
+    supplier: "",
+    expiryDate: "",
+  });
+  const [roundForm, setRoundForm] = useState({
+    medicineId: "",
+    plannedFor: new Date().toISOString().slice(0, 16),
+    route: "drinking_water",
+    plannedQuantity: "",
+    assignedToUserId: "",
     notes: "",
   });
 
@@ -85,11 +125,16 @@ export function FarmTreatmentPage() {
     setLoading(true);
     setError(null);
     try {
-      const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
+      const [fr, mr] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) }),
+        fetch(`${API_BASE_URL}/api/medicine`, { headers: readAuthHeaders(token) }),
+      ]);
       const fd = await fr.json();
+      const md = await mr.json().catch(() => ({ medicines: [] }));
       if (!fr.ok) throw new Error(fd.error ?? "Failed to load flocks");
       const f = (fd.flocks as Flock[]) ?? [];
       setFlocks(f);
+      setMedicines((md.medicines as Medicine[]) ?? []);
       const selected = flockId || f[0]?.id || "";
       setFlockId(selected);
       if (!selected) {
@@ -99,12 +144,20 @@ export function FarmTreatmentPage() {
       const q = new URLSearchParams();
       if (startAt) q.set("start_at", `${startAt}T00:00:00.000Z`);
       if (endAt) q.set("end_at", `${endAt}T23:59:59.999Z`);
-      const tr = await fetch(`${API_BASE_URL}/api/flocks/${selected}/treatments?${q.toString()}`, {
-        headers: readAuthHeaders(token),
-      });
+      const [tr, rr] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/flocks/${selected}/treatments?${q.toString()}`, {
+          headers: readAuthHeaders(token),
+        }),
+        fetch(`${API_BASE_URL}/api/treatment-rounds?flock_id=${encodeURIComponent(selected)}`, {
+          headers: readAuthHeaders(token),
+        }),
+      ]);
       const td = await tr.json();
+      const rd = await rr.json().catch(() => ({ rounds: [] }));
       if (!tr.ok) throw new Error(td.error ?? "Failed to load treatments");
       setRows((td.treatments as Treatment[]) ?? []);
+      setRounds((rd.rounds as Round[]) ?? []);
+      setRoundForm((prev) => ({ ...prev, medicineId: prev.medicineId || ((md.medicines as Medicine[])?.[0]?.id ?? "") }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -143,6 +196,82 @@ export function FarmTreatmentPage() {
     }
   }
 
+  async function submitMedicine(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/medicine`, {
+        method: "POST",
+        headers: jsonAuthHeaders(token),
+        body: JSON.stringify({
+          ...medForm,
+          quantity: Number(medForm.quantity),
+          withdrawalDays: Number(medForm.withdrawalDays),
+          lowStockThreshold: Number(medForm.lowStockThreshold),
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Failed to add medicine");
+      showToast("success", "Medicine stock item created.");
+      setMedForm((v) => ({ ...v, name: "", quantity: "", supplier: "", expiryDate: "" }));
+      await load();
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitRound(e: React.FormEvent) {
+    e.preventDefault();
+    if (!flockId || !roundForm.medicineId) return;
+    setBusy(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/treatment-rounds`, {
+        method: "POST",
+        headers: jsonAuthHeaders(token),
+        body: JSON.stringify({
+          flockId,
+          medicineId: roundForm.medicineId,
+          plannedFor: new Date(roundForm.plannedFor).toISOString(),
+          route: roundForm.route,
+          plannedQuantity: Number(roundForm.plannedQuantity),
+          assignedToUserId: roundForm.assignedToUserId || null,
+          notes: roundForm.notes || null,
+          checklist: ["confirm_stock", "mixing_done", "distribution_done"],
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Failed to create round");
+      showToast("success", "Treatment round scheduled.");
+      setRoundForm((v) => ({ ...v, plannedQuantity: "", notes: "" }));
+      await load();
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function updateRoundStatus(id: string, status: Round["status"]) {
+    setBusy(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/treatment-rounds/${encodeURIComponent(id)}/status`, {
+        method: "PATCH",
+        headers: jsonAuthHeaders(token),
+        body: JSON.stringify({ status }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Update failed");
+      showToast("success", `Round marked ${status}.`);
+      await load();
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <PageHeader title="Medicine tracking" subtitle="Record treatments and withdrawal windows by flock." />
@@ -150,6 +279,83 @@ export function FarmTreatmentPage() {
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
       {!loading && !error ? (
         <>
+          <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+            <p className="mb-3 text-sm font-semibold text-neutral-800">Medicine inventory</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {medicines.map((m) => {
+                const low = Number(m.quantity) < Number(m.lowStockThreshold ?? 10);
+                return (
+                  <div key={m.id} className="rounded-lg border border-neutral-200 p-3 text-sm">
+                    <p className="font-medium">{m.name}</p>
+                    <p className="text-neutral-600">{m.category} · withdrawal {m.withdrawalDays} day(s)</p>
+                    <p className={low ? "font-semibold text-red-700" : "font-semibold text-neutral-800"}>
+                      Stock: {m.quantity} {m.unit}{low ? " (LOW)" : ""}
+                    </p>
+                  </div>
+                );
+              })}
+              {!medicines.length ? <p className="text-sm text-neutral-500">No medicines in stock yet.</p> : null}
+            </div>
+            <form onSubmit={submitMedicine} className="mt-4 grid gap-2 sm:grid-cols-4">
+              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Medicine name" value={medForm.name} onChange={(e) => setMedForm((v) => ({ ...v, name: e.target.value }))} />
+              <select className="rounded-lg border border-neutral-300 px-3 py-2" value={medForm.category} onChange={(e) => setMedForm((v) => ({ ...v, category: e.target.value }))}>
+                <option value="vaccine">vaccine</option>
+                <option value="antibiotic">antibiotic</option>
+                <option value="coccidiostat">coccidiostat</option>
+                <option value="vitamin">vitamin</option>
+                <option value="electrolyte">electrolyte</option>
+                <option value="other">other</option>
+              </select>
+              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Quantity" inputMode="decimal" value={medForm.quantity} onChange={(e) => setMedForm((v) => ({ ...v, quantity: e.target.value }))} />
+              <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">
+                Add stock item
+              </button>
+            </form>
+          </div>
+
+          <form onSubmit={submitRound} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+            <p className="mb-3 text-sm font-semibold text-neutral-800">Schedule medicine/vaccine rounds</p>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <select className="rounded-lg border border-neutral-300 px-3 py-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
+                {flocks.map((f) => (
+                  <option key={f.id} value={f.id}>{f.label}</option>
+                ))}
+              </select>
+              <select className="rounded-lg border border-neutral-300 px-3 py-2" value={roundForm.medicineId} onChange={(e) => setRoundForm((v) => ({ ...v, medicineId: e.target.value }))}>
+                {medicines.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+              <input className="rounded-lg border border-neutral-300 px-3 py-2" type="datetime-local" value={roundForm.plannedFor} onChange={(e) => setRoundForm((v) => ({ ...v, plannedFor: e.target.value }))} />
+              <select className="rounded-lg border border-neutral-300 px-3 py-2" value={roundForm.route} onChange={(e) => setRoundForm((v) => ({ ...v, route: e.target.value }))}>
+                <option value="drinking_water">drinking water</option>
+                <option value="feed_additive">feed additive</option>
+                <option value="injection">injection</option>
+                <option value="topical">topical</option>
+              </select>
+              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Planned qty" inputMode="decimal" value={roundForm.plannedQuantity} onChange={(e) => setRoundForm((v) => ({ ...v, plannedQuantity: e.target.value }))} />
+              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Assign to user id (optional)" value={roundForm.assignedToUserId} onChange={(e) => setRoundForm((v) => ({ ...v, assignedToUserId: e.target.value }))} />
+            </div>
+            <div className="mt-3 flex justify-end">
+              <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">
+                Schedule round
+              </button>
+            </div>
+            <div className="mt-3 space-y-2">
+              {rounds.slice(0, 8).map((r) => (
+                <div key={r.id} className="rounded-lg border border-neutral-200 p-3 text-sm">
+                  <p className="font-medium">{r.medicineName} · {new Date(r.plannedFor).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}</p>
+                  <p className="text-neutral-600">Status: {r.status} · Qty {r.plannedQuantity}</p>
+                  <div className="mt-2 flex gap-2">
+                    {r.status !== "completed" ? <button type="button" className="rounded border border-neutral-300 px-2 py-1 text-xs" onClick={() => void updateRoundStatus(r.id, "completed")}>Mark completed</button> : null}
+                    {r.status !== "missed" ? <button type="button" className="rounded border border-neutral-300 px-2 py-1 text-xs" onClick={() => void updateRoundStatus(r.id, "missed")}>Mark missed</button> : null}
+                  </div>
+                </div>
+              ))}
+              {!rounds.length ? <p className="text-sm text-neutral-500">No rounds scheduled yet.</p> : null}
+            </div>
+          </form>
+
           <form onSubmit={submit} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
             <div className="grid gap-3 sm:grid-cols-2">
               <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={startAt} onChange={(e) => setStartAt(e.target.value)} />

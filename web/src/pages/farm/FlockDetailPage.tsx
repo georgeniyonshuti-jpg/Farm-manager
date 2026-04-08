@@ -7,6 +7,8 @@ import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
 import type { CheckinStatus } from "./FarmCheckinPage";
+type Eligibility = { eligibleForSlaughter: boolean; blockers: Array<{ type: string; medicineName?: string; safeAfter?: string; plannedFor?: string }> };
+type WeighIn = { id: string; weighDate: string; avgWeightKg: number; fcr: number | null; variancePct: number | null };
 
 export function FlockDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -16,7 +18,8 @@ export function FlockDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [performance, setPerformance] = useState<{ feedToDateKg: number; fcr: number | null; birdsLiveEstimate: number } | null>(null);
-  const [treatments, setTreatments] = useState<Array<{ at: string; medicineName: string; withdrawalDays: number }>>([]);
+  const [eligibility, setEligibility] = useState<Eligibility | null>(null);
+  const [weighIns, setWeighIns] = useState<WeighIn[]>([]);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -42,10 +45,14 @@ export function FlockDetailPage() {
       const pd = await pr.json();
       if (!pr.ok) throw new Error((pd as { error?: string }).error);
       setPerformance(pd as { feedToDateKg: number; fcr: number | null; birdsLiveEstimate: number });
-      const tr = await fetch(`${API_BASE_URL}/api/flocks/${id}/treatments`, { headers: readAuthHeaders(token) });
-      const td = await tr.json();
-      if (!tr.ok) throw new Error((td as { error?: string }).error);
-      setTreatments(((td as { treatments?: Array<{ at: string; medicineName: string; withdrawalDays: number }> }).treatments ?? []).slice(0, 5));
+      const [er, wr] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/flocks/${id}/eligibility`, { headers: readAuthHeaders(token) }),
+        fetch(`${API_BASE_URL}/api/weigh-ins/${id}`, { headers: readAuthHeaders(token) }),
+      ]);
+      const ed = await er.json().catch(() => ({ eligibleForSlaughter: true, blockers: [] }));
+      const wd = await wr.json().catch(() => ({ weighIns: [] }));
+      setEligibility(ed as Eligibility);
+      setWeighIns(((wd as { weighIns?: WeighIn[] }).weighIns ?? []).slice(-8).reverse());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -82,22 +89,41 @@ export function FlockDetailPage() {
               <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">FCR</p><p className="font-semibold">{performance.fcr != null ? performance.fcr.toFixed(2) : "-"}</p></div>
             </div>
           ) : null}
-          {!!treatments.length ? (
+          {eligibility ? (
             <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
-              <p className="mb-2 font-semibold text-neutral-800">Withdrawal compliance</p>
-              <div className="space-y-1">
-                {treatments.map((t, i) => {
-                  const endsAt = new Date(new Date(t.at).getTime() + t.withdrawalDays * 24 * 60 * 60 * 1000).getTime();
-                  const left = Math.ceil((endsAt - Date.now()) / (24 * 60 * 60 * 1000));
-                  return (
-                    <p key={`${t.at}-${i}`} className={left > 0 ? "text-amber-700" : "text-emerald-700"}>
-                      {t.medicineName}: {left > 0 ? `${left} day(s) left` : "cleared"}
+              <p className="mb-2 font-semibold text-neutral-800">Treatment Status</p>
+              {eligibility.eligibleForSlaughter ? (
+                <p className="text-emerald-700">Eligible for slaughter.</p>
+              ) : (
+                <div className="space-y-1">
+                  {eligibility.blockers.map((b, i) => (
+                    <p key={`${b.type}-${i}`} className="text-amber-700">
+                      {b.type === "withdrawal"
+                        ? `${b.medicineName ?? "Treatment"} withdrawal active until ${b.safeAfter ?? "clearance"}`
+                        : `Missed treatment round at ${b.plannedFor ?? "unknown time"}`}
                     </p>
-                  );
-                })}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : null}
+          <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
+            <p className="mb-2 font-semibold text-neutral-800">Weight & FCR History</p>
+            {weighIns.length ? (
+              <div className="space-y-1">
+                {weighIns.map((w) => (
+                  <div key={w.id} className="grid grid-cols-4 gap-2 text-xs">
+                    <span className="font-medium text-neutral-800">{w.weighDate}</span>
+                    <span className="text-neutral-700">{w.avgWeightKg.toFixed(2)} kg</span>
+                    <span className="text-neutral-700">FCR {w.fcr != null ? w.fcr.toFixed(2) : "—"}</span>
+                    <span className="text-neutral-600">{w.variancePct != null ? `${w.variancePct > 0 ? "+" : ""}${w.variancePct}%` : "—"}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-neutral-500">No weigh-ins yet.</p>
+            )}
+          </div>
           <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 pb-4">
             <p className="text-sm font-medium text-neutral-800">Round check-in</p>

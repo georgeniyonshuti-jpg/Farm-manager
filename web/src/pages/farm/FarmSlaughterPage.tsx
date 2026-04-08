@@ -22,6 +22,11 @@ type PerformanceSummary = {
   mortalityToDate: number;
   fcr: number | null;
 };
+type Eligibility = {
+  eligibleForSlaughter: boolean;
+  blockers: Array<{ type: string; medicineName?: string; safeAfter?: string; plannedFor?: string }>;
+};
+type WeighInLatest = { weighIn?: { fcr?: number | null; avgWeightKg?: number | null; totalFeedUsedKg?: number | null } | null };
 
 const SLAUGHTER_REASON_OPTIONS = [
   { value: "planned_market", label: "Planned market harvest" },
@@ -43,6 +48,7 @@ export function FarmSlaughterPage() {
   const [flockId, setFlockId] = useState("");
   const [rows, setRows] = useState<Slaughter[]>([]);
   const [summary, setSummary] = useState<PerformanceSummary | null>(null);
+  const [eligibility, setEligibility] = useState<Eligibility | null>(null);
   const [startAt, setStartAt] = useState("");
   const [endAt, setEndAt] = useState("");
   const [loading, setLoading] = useState(true);
@@ -91,16 +97,29 @@ export function FarmSlaughterPage() {
       const q = new URLSearchParams();
       if (startAt) q.set("start_at", `${startAt}T00:00:00.000Z`);
       if (endAt) q.set("end_at", `${endAt}T23:59:59.999Z`);
-      const [sr, pr] = await Promise.all([
+      const [sr, pr, er, wr] = await Promise.all([
         fetch(`${API_BASE_URL}/api/flocks/${selected}/slaughter-events?${q.toString()}`, { headers: readAuthHeaders(token) }),
         fetch(`${API_BASE_URL}/api/flocks/${selected}/performance-summary`, { headers: readAuthHeaders(token) }),
+        fetch(`${API_BASE_URL}/api/flocks/${selected}/eligibility`, { headers: readAuthHeaders(token) }),
+        fetch(`${API_BASE_URL}/api/weigh-ins/${selected}/latest`, { headers: readAuthHeaders(token) }),
       ]);
       const sd = await sr.json();
       const pd = await pr.json();
+      const ed = await er.json().catch(() => ({ eligibleForSlaughter: true, blockers: [] }));
+      const wd = await wr.json().catch(() => ({}));
       if (!sr.ok) throw new Error(sd.error ?? "Failed to load slaughter events");
       if (!pr.ok) throw new Error(pd.error ?? "Failed to load summary");
       setRows((sd.slaughterEvents as Slaughter[]) ?? []);
       setSummary(pd as PerformanceSummary);
+      setEligibility(ed as Eligibility);
+      const w = (wd as WeighInLatest).weighIn;
+      if (w?.avgWeightKg != null || w?.totalFeedUsedKg != null || w?.fcr != null) {
+        setSummary((prev) => prev ? ({
+          ...prev,
+          feedToDateKg: w.totalFeedUsedKg != null ? Number(w.totalFeedUsedKg) : prev.feedToDateKg,
+          fcr: w.fcr != null ? Number(w.fcr) : prev.fcr,
+        }) : prev);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -115,6 +134,10 @@ export function FarmSlaughterPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!flockId) return;
+    if (eligibility && !eligibility.eligibleForSlaughter) {
+      showToast("error", "Cannot record slaughter while withdrawal/missed-round blockers are active.");
+      return;
+    }
     setBusy(true);
     try {
       const r = await fetch(`${API_BASE_URL}/api/flocks/${flockId}/slaughter-events`, {
@@ -158,6 +181,20 @@ export function FarmSlaughterPage() {
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
       {!loading && !error ? (
         <>
+          {eligibility && !eligibility.eligibleForSlaughter ? (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+              <p className="font-semibold">⛔ Slaughter blocked</p>
+              <ul className="mt-2 space-y-1">
+                {eligibility.blockers.map((b, i) => (
+                  <li key={`${b.type}-${i}`}>
+                    {b.type === "withdrawal"
+                      ? `${b.medicineName ?? "Treatment"} withdrawal active until ${b.safeAfter ?? "clearance"}`
+                      : `Missed medicine round planned for ${b.plannedFor ?? "unknown date"}`}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           <div className="grid gap-3 sm:grid-cols-4">
             <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">Feed to date</p><p className="font-semibold">{summary?.feedToDateKg ?? 0} kg</p></div>
             <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">Live estimate</p><p className="font-semibold">{summary?.birdsLiveEstimate ?? 0}</p></div>
@@ -190,7 +227,7 @@ export function FarmSlaughterPage() {
             <div className="mt-3 flex justify-end gap-2">
               <a className="rounded-lg border border-neutral-300 px-3 py-2 text-sm" href={`${API_BASE_URL}/api/reports/slaughter.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`} target="_blank" rel="noreferrer">Slaughter CSV</a>
               <a className="rounded-lg border border-neutral-300 px-3 py-2 text-sm" href={`${API_BASE_URL}/api/reports/flock-performance.csv?flock_id=${encodeURIComponent(flockId)}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`} target="_blank" rel="noreferrer">Performance CSV</a>
-              <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">{busy ? "Saving..." : "Save slaughter"}</button>
+              <button disabled={busy || (eligibility != null && !eligibility.eligibleForSlaughter)} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">{busy ? "Saving..." : "Save slaughter"}</button>
             </div>
           </form>
           <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
