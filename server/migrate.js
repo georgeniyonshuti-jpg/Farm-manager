@@ -5,7 +5,23 @@ import pg from "pg";
 
 const { Client } = pg;
 
-export async function runMigrations() {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientMigrationError(err) {
+  const code = String(err?.code ?? "");
+  const msg = String(err?.message ?? "").toLowerCase();
+  if (code === "EAI_AGAIN" || code === "ENOTFOUND" || code === "ECONNRESET" || code === "ECONNREFUSED" || code === "ETIMEDOUT") {
+    return true;
+  }
+  if (msg.includes("getaddrinfo") || msg.includes("timeout") || msg.includes("connection terminated") || msg.includes("could not connect")) {
+    return true;
+  }
+  return false;
+}
+
+async function runMigrationsOnce() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     throw new Error("DATABASE_URL is required");
@@ -63,6 +79,38 @@ export async function runMigrations() {
 
   // PROD-FIX: report migration health without crashing long-running app process
   return { ok: failedCount === 0, failedCount };
+}
+
+/**
+ * Runs migrations with bounded retries for transient network/DNS failures.
+ * @param {{ maxAttempts?: number, baseDelayMs?: number }} [options]
+ */
+export async function runMigrations(options = {}) {
+  const maxAttempts = Math.max(1, Number(options.maxAttempts ?? 5));
+  const baseDelayMs = Math.max(250, Number(options.baseDelayMs ?? 1000));
+
+  let lastError = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      console.log("[INFO]", `[migrate] attempt ${attempt}/${maxAttempts}`);
+      const result = await runMigrationsOnce();
+      return { ...result, attempts: attempt };
+    } catch (e) {
+      lastError = e;
+      const transient = isTransientMigrationError(e);
+      const code = e?.code ? String(e.code) : "";
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[ERROR]", `[migrate] attempt ${attempt}/${maxAttempts} failed${code ? ` (${code})` : ""}: ${msg}`);
+      if (!transient || attempt >= maxAttempts) {
+        e.transient = transient;
+        throw e;
+      }
+      const delayMs = baseDelayMs * 2 ** (attempt - 1);
+      console.log("[INFO]", `[migrate] transient failure; retrying in ${delayMs}ms`);
+      await sleep(delayMs);
+    }
+  }
+  throw lastError ?? new Error("Migration failed without explicit error");
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

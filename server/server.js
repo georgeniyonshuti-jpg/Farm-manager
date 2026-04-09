@@ -13,25 +13,6 @@ import { runMigrations } from "./migrate.js";
 import { checkinSchema, dailyLogSchema, feedEntrySchema, loginSchema } from "./utils/validation.js";
 import * as systemConfig from "./systemConfig.js";
 
-// PROD-FIX: run migrations on boot; fail hard in production if migrations fail
-runMigrations().then((result) => {
-  if (result.ok) {
-    console.log("[INFO]", "[startup] migrations complete");
-    return;
-  }
-  console.error("[ERROR]", "[startup] migrations complete with failures:", result.failedCount);
-  if (process.env.NODE_ENV === "production") {
-    console.error("[ERROR]", "[startup] refusing to continue in production with failed migrations");
-    process.exit(1);
-  }
-}).catch(err => {
-  console.error("[ERROR]", "[startup] migration error:", err.message);
-  if (process.env.NODE_ENV === "production") {
-    console.error("[ERROR]", "[startup] refusing to continue in production after migration error");
-    process.exit(1);
-  }
-});
-
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 // FIX: move hardcoded values to environment variables
@@ -4723,6 +4704,33 @@ app.use((err, _req, res, _next) => {
 });
 
 (async () => {
+  try {
+    const migration = await runMigrations({ maxAttempts: 5, baseDelayMs: 1000 });
+    if (migration.ok) {
+      console.log("[INFO]", `[startup] migrations complete (attempt ${migration.attempts ?? 1})`);
+    } else {
+      console.error("[ERROR]", `[startup] migrations complete with failures: ${migration.failedCount}`);
+      if (process.env.NODE_ENV === "production") {
+        console.error("[ERROR]", "[startup] refusing to continue in production with failed migrations");
+        process.exit(1);
+      }
+    }
+  } catch (e) {
+    const transient = Boolean(e?.transient);
+    const code = e?.code ? String(e.code) : "";
+    console.error(
+      "[ERROR]",
+      `[startup] migration error${code ? ` (${code})` : ""}: ${e instanceof Error ? e.message : String(e)}`
+    );
+    if (process.env.NODE_ENV === "production") {
+      console.error(
+        "[ERROR]",
+        `[startup] refusing to continue in production after ${transient ? "transient-retry-exhausted" : "non-transient"} migration failure`
+      );
+      process.exit(1);
+    }
+  }
+
   if (hasDb()) {
     try {
       await systemConfig.refreshSystemConfigFromDatabase(dbQuery, hasDb);
