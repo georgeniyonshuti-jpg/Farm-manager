@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
 import { GlobalHeader } from "./GlobalHeader";
+import { FinancialRestrictedBanner } from "./FinancialRestrictedBanner";
 import { SidebarNav } from "./SidebarNav";
 
 export function AppShell() {
@@ -17,6 +18,7 @@ export function AppShell() {
   return (
     <div className="flex min-h-screen flex-col bg-[var(--background-color)]">
       <GlobalHeader />
+      {user && !user.canViewSensitiveFinancial ? <FinancialRestrictedBanner /> : null}
       {!compactFieldView && sidebarOpen ? (
         <button
           type="button"

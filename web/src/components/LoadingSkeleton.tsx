@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 type RowProps = { className?: string };
 
 export function SkeletonRow({ className = "h-14" }: RowProps) {
-  return <div className={`animate-pulse rounded-xl bg-neutral-200 ${className}`} />;
+  return <div className={`skeleton-shimmer rounded-xl ${className}`} />;
 }
 
 type ListProps = { rows?: number };

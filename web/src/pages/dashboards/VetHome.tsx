@@ -1,13 +1,21 @@
 import { useCallback, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { readAuthHeaders } from "../../lib/authHeaders";
 import { CheckinStatusBlock, type CheckinStatus } from "../farm/FarmCheckinPage";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { PageHeader } from "../../components/PageHeader";
+import { HubCheckinBanner, type HubCheckinBannerVariant } from "../../components/farm/HubCheckinBanner";
 import { API_BASE_URL } from "../../api/config";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { useHubAggregatePoll } from "../../hooks/useHubAggregatePoll";
+import type { ReactNode } from "react";
+
+type TabItem = { to: string; label: string; end?: boolean; icon: ReactNode };
+
+function tabIconClass(isActive: boolean): string {
+  return isActive ? "text-[var(--primary-color)]" : "text-neutral-500";
+}
 
 export function VetHome() {
   const { token } = useAuth();
@@ -18,7 +26,6 @@ export function VetHome() {
 
   const hTitle = useLaborerT("Vet hub");
   const hSub = useLaborerT("Track rounds, flock health, and urgent work.");
-  const batchCta = useLaborerT("Round schedule");
   const medTitle = useLaborerT("Medicine");
   const medBody = useLaborerT("Record treatments, doses, and withdrawal periods by flock.");
   const medLink = useLaborerT("Open medicine tracking");
@@ -38,14 +45,13 @@ export function VetHome() {
   const tUntilNext = useLaborerT("minutes until the next round.");
   const tMultiFlockBanner = useLaborerT("flocks need check-in — details below for the most overdue.");
   const tRetry = useLaborerT("Try again");
-  const navHome = useLaborerT("Home");
-  const navRound = useLaborerT("Round");
-  const navMort = useLaborerT("Mortality");
-  const navLog = useLaborerT("Log");
-  const navFeed = useLaborerT("Feed");
-  const navHistory = useLaborerT("History");
-  const navSchedule = useLaborerT("Schedule");
-  const linkEarnings = useLaborerT("My earnings");
+  const tabHome = useLaborerT("Home");
+  const tabRounds = useLaborerT("Rounds");
+  const tabMort = useLaborerT("Mortality");
+  const tabFeed = useLaborerT("Feed");
+  const tabLog = useLaborerT("Log");
+  const tabHistory = useLaborerT("History");
+  const tabSchedule = useLaborerT("Schedule");
 
   const [bannerSummary, setBannerSummary] = useState<{
     anyOverdue: boolean;
@@ -93,14 +99,14 @@ export function VetHome() {
 
   useHubAggregatePoll(load);
 
-  const roundBanner = useMemo((): { tone: string; text: string } | null => {
-    if (loading) return { tone: "bg-neutral-200 text-neutral-700", text: tLoadingBanner };
-    if (loadError) return { tone: "bg-red-100 text-red-800", text: tErrBanner };
-    if (!status && !bannerSummary) return { tone: "bg-amber-100 text-amber-900", text: tNoScheduleBanner };
+  const roundBanner = useMemo((): { variant: HubCheckinBannerVariant; text: string } | null => {
+    if (loading) return { variant: "loading", text: tLoadingBanner };
+    if (loadError) return { variant: "error", text: tErrBanner };
+    if (!status && !bannerSummary) return { variant: "warn", text: tNoScheduleBanner };
     if (bannerSummary?.anyOverdue && status) {
       if (bannerSummary.overdueCount > 1) {
         return {
-          tone: "bg-amber-100 text-amber-950",
+          variant: "warn",
           text: `${bannerSummary.overdueCount} ${tMultiFlockBanner}`,
         };
       }
@@ -113,7 +119,7 @@ export function VetHome() {
           ? ` (${bannerSummary.overdueLabels.slice(0, 3).join(", ")})`
           : "";
       return {
-        tone: "bg-red-100 text-red-900",
+        variant: "error",
         text: `${tOverduePrefix} ${mins} ${tOverdueSuffix}${extra}`,
       };
     }
@@ -125,23 +131,23 @@ export function VetHome() {
     ) {
       const minsLeft = Math.max(1, bannerSummary.minutesUntilSoonestNext);
       return {
-        tone: "bg-emerald-100 text-emerald-900",
+        variant: "ok",
         text: `${tOnTrack} ${tAbout} ${minsLeft} ${tUntilNext} (${bannerSummary.soonestFlockLabel})`,
       };
     }
-    if (!status) return { tone: "bg-amber-100 text-amber-900", text: tNoScheduleBanner };
+    if (!status) return { variant: "warn", text: tNoScheduleBanner };
     const now = Date.now();
     const next = new Date(status.nextDueAt).getTime();
     if (now > next) {
       const mins = Math.floor((now - next) / 60000);
       return {
-        tone: "bg-red-100 text-red-900",
+        variant: "error",
         text: `${tOverduePrefix} ${Math.max(1, mins)} ${tOverdueSuffix}`,
       };
     }
     const minsLeft = Math.floor((next - now) / 60000);
     return {
-      tone: "bg-emerald-100 text-emerald-900",
+      variant: "ok",
       text: `${tOnTrack} ${tAbout} ${Math.max(1, minsLeft)} ${tUntilNext}`,
     };
   }, [
@@ -163,44 +169,83 @@ export function VetHome() {
   const otherOverdueCount =
     status && bannerSummary?.anyOverdue ? Math.max(0, bannerSummary.overdueCount - 1) : 0;
 
-  const bottomNav: Array<{ to: string; label: string }> = [
-    { to: "/dashboard/vet", label: navHome },
-    { to: "/farm/checkin", label: navRound },
-    { to: "/farm/mortality-log", label: navMort },
-    { to: "/farm/feed", label: navFeed },
-    { to: "/farm/daily-log", label: navLog },
-    { to: "/farm/mortality", label: navHistory },
-    { to: "/farm/batch-schedule", label: navSchedule },
+  const bottomNav: TabItem[] = [
+    {
+      to: "/dashboard/vet",
+      label: tabHome,
+      end: true,
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" strokeLinejoin="round" />
+          <polyline points="9 22 9 12 15 12 15 22" />
+        </svg>
+      ),
+    },
+    {
+      to: "/farm/checkin",
+      label: tabRounds,
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 6v6l4 2" strokeLinecap="round" />
+        </svg>
+      ),
+    },
+    {
+      to: "/farm/mortality-log",
+      label: tabMort,
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+          <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
+        </svg>
+      ),
+    },
+    {
+      to: "/farm/feed",
+      label: tabFeed,
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" strokeLinecap="round" />
+        </svg>
+      ),
+    },
+    {
+      to: "/farm/daily-log",
+      label: tabLog,
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" />
+        </svg>
+      ),
+    },
+    {
+      to: "/farm/mortality",
+      label: tabHistory,
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M3 3v18h18" strokeLinecap="round" />
+          <path d="M7 16l4-4 4 4 5-6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ),
+    },
+    {
+      to: "/farm/batch-schedule",
+      label: tabSchedule,
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+          <path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" />
+        </svg>
+      ),
+    },
   ];
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      {roundBanner ? (
-        <div className={`rounded-xl px-4 py-3 text-sm font-semibold leading-6 ${roundBanner.tone}`}>
-          {roundBanner.text}
-        </div>
-      ) : null}
-      <PageHeader
-        className="mb-3 gap-3"
-        title={hTitle}
-        subtitle={hSub}
-        action={
-          <div className="flex flex-wrap items-center gap-2">
-            <Link
-              to="/laborer/earnings"
-              className="bounce-tap rounded-xl border border-[var(--primary-color)]/40 px-4 py-2 text-sm font-semibold text-[var(--primary-color-dark)] hover:bg-[var(--primary-color-soft)]"
-            >
-              {linkEarnings}
-            </Link>
-            <Link
-              to="/farm/batch-schedule"
-              className="bounce-tap rounded-xl bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)]"
-            >
-              {batchCta}
-            </Link>
-          </div>
-        }
-      />
+    <div className="mx-auto w-full max-w-[960px] space-y-6">
+      {roundBanner ? <HubCheckinBanner variant={roundBanner.variant} message={roundBanner.text} /> : null}
+      <PageHeader className="mb-3 gap-3" title={hTitle} subtitle={hSub} />
 
       {loading && <SkeletonList rows={2} />}
       {!loading && loadError ? (
@@ -214,8 +259,8 @@ export function VetHome() {
         <CheckinStatusBlock status={status} showWarning={false} otherOverdueCount={otherOverdueCount} />
       ) : null}
 
-      <div className="grid gap-4">
-        <section className="app-surface p-4">
+      <div className="grid gap-4 md:grid-cols-2">
+        <section className="app-surface h-full p-4">
           <h2 className="text-sm font-semibold text-neutral-800">{medTitle}</h2>
           <p className="mt-2 text-sm text-neutral-600">{medBody}</p>
           <Link
@@ -225,7 +270,7 @@ export function VetHome() {
             {medLink}
           </Link>
         </section>
-        <section className="app-surface p-4">
+        <section className="app-surface h-full p-4">
           <h2 className="text-sm font-semibold text-neutral-800">{fcrTitle}</h2>
           <p className="mt-2 text-sm text-neutral-600">{fcrBody}</p>
           <Link
@@ -235,7 +280,7 @@ export function VetHome() {
             {fcrLink}
           </Link>
         </section>
-        <section className="app-surface p-4">
+        <section className="app-surface h-full p-4">
           <h2 className="text-sm font-semibold text-neutral-800">{slTitle}</h2>
           <p className="mt-2 text-sm text-neutral-600">{slBody}</p>
           <Link
@@ -247,16 +292,30 @@ export function VetHome() {
         </section>
       </div>
 
-      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--border-color)] bg-white/95 px-2 py-2 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur sm:hidden">
-        <div className="grid grid-cols-7 gap-1">
+      <nav
+        className="fixed inset-x-0 bottom-0 z-40 flex h-14 flex-col justify-center border-t border-[var(--border-color)] bg-white/95 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur sm:hidden"
+        aria-label="Primary"
+      >
+        <div className="grid h-full grid-cols-7 gap-0 px-1">
           {bottomNav.map((item) => (
-            <Link
+            <NavLink
               key={item.to}
               to={item.to}
-              className="rounded-lg px-2 py-3 text-center text-[11px] font-semibold text-neutral-700 hover:bg-neutral-100"
+              end={item.end}
+              className={({ isActive }) =>
+                [
+                  "bounce-tap flex min-h-[44px] flex-col items-center justify-center gap-0.5 rounded-lg px-0.5 text-center",
+                  isActive ? "text-[var(--primary-color)]" : "text-neutral-600",
+                ].join(" ")
+              }
             >
-              {item.label}
-            </Link>
+              {({ isActive }) => (
+                <>
+                  <span className={tabIconClass(isActive)}>{item.icon}</span>
+                  <span className="text-[10px] font-semibold leading-tight">{item.label}</span>
+                </>
+              )}
+            </NavLink>
           ))}
         </div>
       </nav>
