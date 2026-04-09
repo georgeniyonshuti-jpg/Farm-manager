@@ -11,7 +11,7 @@ function NavText({ text }: { text: string }) {
 }
 
 type NavItem = { to: string; label: string; end?: boolean };
-type Props = { onNavigate?: () => void };
+type Props = { onNavigate?: () => void; collapsed?: boolean };
 
 const CLEVA_NAV: NavItem[] = [
   { to: "/cleva/portfolio", label: "Portfolio analytics", end: true },
@@ -19,7 +19,7 @@ const CLEVA_NAV: NavItem[] = [
   { to: "/cleva/credit-scoring", label: "Credit scoring" },
 ];
 
-export function SidebarNav({ onNavigate }: Props) {
+export function SidebarNav({ onNavigate, collapsed = false }: Props) {
   const { activeWorkspace, user } = useAuth();
   const farmSectionTitle = useLaborerT("Farm operations");
   const clevaSectionTitle = useLaborerT("Clevafarm Finance");
@@ -150,7 +150,7 @@ export function SidebarNav({ onNavigate }: Props) {
       : null;
 
   const groupedFarmNav = useMemo(() => {
-    const core = farmCoreNavItems(user);
+    const core = farmCore;
     return {
       core,
       clinical: farmNav.filter((i) =>
@@ -158,7 +158,7 @@ export function SidebarNav({ onNavigate }: Props) {
       ),
       workforce: farmNav.filter((i) => ["/farm/schedule-settings", "/farm/payroll", "/laborer/earnings"].includes(i.to)),
     };
-  }, [user, farmNav]);
+  }, [farmCore, farmNav]);
 
   function toggleGroup(id: "core" | "clinical" | "workforce") {
     setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -203,13 +203,73 @@ export function SidebarNav({ onNavigate }: Props) {
     );
   }
 
+  const compactItems = (() => {
+    const base = [
+      effectiveDashLink,
+      ...(activeWorkspace === "farm"
+        ? [...groupedFarmNav.core, ...groupedFarmNav.clinical, ...groupedFarmNav.workforce]
+        : nav),
+      adminLink,
+      typeLink,
+    ].filter(Boolean) as NavItem[];
+    const seen = new Set<string>();
+    return base.filter((i) => {
+      if (seen.has(i.to)) return false;
+      seen.add(i.to);
+      return true;
+    });
+  })();
+
+  function CollapsedGlyph({ label }: { label: string }) {
+    const trimmed = label.trim();
+    const parts = trimmed.split(/\s+/).filter(Boolean);
+    const glyph =
+      parts.length >= 2
+        ? `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase()
+        : (trimmed.slice(0, 2) || "?").toUpperCase();
+    return (
+      <span
+        aria-hidden
+        className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-neutral-300 bg-white text-[10px] font-semibold text-neutral-700"
+      >
+        {glyph}
+      </span>
+    );
+  }
+
   return (
-    <aside className="w-full border-b border-neutral-200 bg-neutral-50 md:h-full md:w-[240px] md:border-b-0 md:border-r">
+    <aside className="w-full border-b border-neutral-200 bg-neutral-50 md:h-full md:border-b-0 md:border-r">
       <div className="p-4 md:p-5">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500">
-          {activeWorkspace === "farm" ? farmSectionTitle : clevaSectionTitle}
-        </p>
+        {!collapsed ? (
+          <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500">
+            {activeWorkspace === "farm" ? farmSectionTitle : clevaSectionTitle}
+          </p>
+        ) : null}
         <nav className="mt-4 flex flex-col gap-2.5 pb-20 md:pb-0">
+          {collapsed
+            ? compactItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  end={item.end}
+                  onClick={onNavigate}
+                  title={item.label}
+                  className={({ isActive }) =>
+                    [
+                      "bounce-tap flex h-10 items-center justify-center rounded-lg border-l-[3px]",
+                      isActive
+                        ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
+                        : "border-l-transparent text-neutral-800 hover:bg-[var(--primary-color-soft)]",
+                    ].join(" ")
+                  }
+                >
+                  <CollapsedGlyph label={item.label} />
+                  <span className="sr-only">{item.label}</span>
+                </NavLink>
+              ))
+            : null}
+          {!collapsed ? (
+            <>
           {effectiveDashLink ? (
             <NavLink
               to={effectiveDashLink.to}
@@ -284,6 +344,8 @@ export function SidebarNav({ onNavigate }: Props) {
               <NavText text={typeLink.label} />
             </NavLink>
           )}
+            </>
+          ) : null}
         </nav>
       </div>
     </aside>

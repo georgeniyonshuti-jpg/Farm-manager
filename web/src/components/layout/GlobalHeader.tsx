@@ -141,7 +141,17 @@ function UserMenuChip({ user, roleBadge, onLogout }: UserMenuProps) {
   );
 }
 
-export function GlobalHeader() {
+type GlobalHeaderProps = {
+  showDesktopSidebarToggle?: boolean;
+  desktopSidebarCollapsed?: boolean;
+  onToggleDesktopSidebar?: () => void;
+};
+
+export function GlobalHeader({
+  showDesktopSidebarToggle = false,
+  desktopSidebarCollapsed = false,
+  onToggleDesktopSidebar,
+}: GlobalHeaderProps) {
   const { user, logout, activeWorkspace, setActiveWorkspace } = useAuth();
   const location = useLocation();
   const farmWorkspace = useLaborerT("Farm / Poultry");
@@ -217,8 +227,8 @@ export function GlobalHeader() {
   );
 
   return (
-    <header className="border-b border-[var(--border-color)] bg-[var(--surface-elevated)] shadow-sm backdrop-blur">
-      <div className="mx-auto w-full max-w-[1440px]">
+    <header className="border-b border-[var(--border-color)] bg-[var(--surface-elevated)] shadow-sm backdrop-blur md:fixed md:inset-x-0 md:top-0 md:z-[100]">
+      <div className="w-full">
         {/* Mobile */}
         <div className="md:hidden">
           <div className="flex min-h-[52px] items-center justify-between gap-2 border-b border-[var(--border-color)] px-3 py-2">
@@ -240,13 +250,26 @@ export function GlobalHeader() {
         </div>
 
         {/* Desktop */}
-        <div className="hidden min-h-[52px] items-center justify-between gap-4 px-4 py-2 md:flex">
-          <Link to="/" className="flex min-w-0 shrink-0 items-center gap-3">
+        <div className="hidden h-16 items-center justify-between gap-4 px-6 md:flex">
+          <div className="flex min-w-0 shrink-0 items-center gap-2">
+            {showDesktopSidebarToggle ? (
+              <button
+                type="button"
+                onClick={onToggleDesktopSidebar}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--border-color)] bg-white text-lg text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)]"
+                aria-label={desktopSidebarCollapsed ? "Show side menu" : "Hide side menu"}
+                title={desktopSidebarCollapsed ? "Show side menu" : "Hide side menu"}
+              >
+                {desktopSidebarCollapsed ? "☰" : "⟨"}
+              </button>
+            ) : null}
+            <Link to="/" className="flex min-w-0 shrink-0 items-center gap-3">
             <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--primary-color-soft)]">
               <BrandLogo size={36} />
             </span>
             <span className="truncate text-base font-semibold text-[var(--text-primary)]">{appName}</span>
-          </Link>
+            </Link>
+          </div>
           <div className="flex min-w-0 flex-1 justify-center px-2">
             {workspaceSelect ? (
               <div className="flex justify-center">{workspaceSelect}</div>
