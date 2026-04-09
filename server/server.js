@@ -201,6 +201,22 @@ function requirePageAccess(pageKey) {
   };
 }
 
+function requireAnyPageAccess(pageKeys) {
+  const list = Array.isArray(pageKeys) ? pageKeys.map(String) : [];
+  return (req, res, next) => {
+    if (req.authUser?.role === "superuser") {
+      next();
+      return;
+    }
+    const ok = list.some((k) => hasUserPageAccess(req.authUser, k));
+    if (!ok) {
+      res.status(403).json({ error: "Page access denied", pageKeys: list });
+      return;
+    }
+    next();
+  };
+}
+
 /** @type {Map<string, { userId: string, exp: number }>} */
 const sessions = new Map();
 
@@ -2055,7 +2071,7 @@ app.delete("/api/flocks/:id/purge", requireAuth, requireFarmAccess, requireSuper
   }
 });
 
-app.get("/api/flocks/:id/checkin-status", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+app.get("/api/flocks/:id/checkin-status", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin"), requireAction("flock.view"), async (req, res) => {
   if (hasDb()) {
     try {
       await syncFlocksFromDbToMemory();
@@ -2071,7 +2087,7 @@ app.get("/api/flocks/:id/checkin-status", requireAuth, requireFarmAccess, requir
   res.json(payload);
 });
 
-app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requireAction("flock.view"), async (_req, res) => {
+app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requireAnyPageAccess(["dashboard_laborer", "dashboard_vet", "dashboard_management"]), requireAction("flock.view"), async (_req, res) => {
   if (hasDb()) {
     try {
       await syncFlocksFromDbToMemory();
@@ -2949,7 +2965,7 @@ app.get("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requ
   }
 });
 
-app.get("/api/flocks/:id/performance-summary", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+app.get("/api/flocks/:id/performance-summary", requireAuth, requireFarmAccess, requirePageAccess("farm_flocks"), requireAction("flock.view"), async (req, res) => {
   let summary = null;
   try {
     summary = await buildFlockPerformanceSummary(req.params.id);
@@ -2964,7 +2980,7 @@ app.get("/api/flocks/:id/performance-summary", requireAuth, requireFarmAccess, r
   res.json(summary);
 });
 
-app.get("/api/flocks/:id/fcr-snapshot", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+app.get("/api/flocks/:id/fcr-snapshot", requireAuth, requireFarmAccess, requirePageAccess("farm_flocks"), requireAction("flock.view"), async (req, res) => {
   try {
     const summary = await buildFlockPerformanceSummary(req.params.id);
     if (!summary) {
@@ -3049,7 +3065,7 @@ app.patch("/api/flocks/:id/live-verification", requireAuth, requireFarmAccess, a
   }
 });
 
-app.get("/api/weigh-ins/:flockId/latest", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+app.get("/api/weigh-ins/:flockId/latest", requireAuth, requireFarmAccess, requirePageAccess("farm_flocks"), requireAction("flock.view"), async (req, res) => {
   const flockId = String(req.params.flockId ?? "").trim();
   try {
     if (hasDb()) await syncFlocksFromDbToMemory();
@@ -3086,7 +3102,7 @@ app.get("/api/weigh-ins/:flockId/latest", requireAuth, requireFarmAccess, requir
   }
 });
 
-app.get("/api/weigh-ins/:flockId", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+app.get("/api/weigh-ins/:flockId", requireAuth, requireFarmAccess, requirePageAccess("farm_flocks"), requireAction("flock.view"), async (req, res) => {
   const flockId = String(req.params.flockId ?? "").trim();
   try {
     if (hasDb()) await syncFlocksFromDbToMemory();
@@ -3121,7 +3137,7 @@ app.get("/api/weigh-ins/:flockId", requireAuth, requireFarmAccess, requireAction
   }
 });
 
-app.post("/api/weigh-ins/:flockId", requireAuth, requireFarmAccess, requireAction("weighin.record"), async (req, res) => {
+app.post("/api/weigh-ins/:flockId", requireAuth, requireFarmAccess, requirePageAccess("farm_flocks"), requireAction("weighin.record"), async (req, res) => {
   const flockId = String(req.params.flockId ?? "").trim();
   try {
     if (hasDb()) await syncFlocksFromDbToMemory();
@@ -3339,7 +3355,7 @@ function computeInventoryBalances(flockId = null) {
   }));
 }
 
-app.get("/api/inventory/ledger", requireAuth, requireFarmAccess, (req, res) => {
+app.get("/api/inventory/ledger", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), (req, res) => {
   const flockId = String(req.query.flock_id ?? "").trim();
   const type = String(req.query.type ?? "").trim();
   const page = Math.max(1, Number(req.query.page) || 1);
@@ -3361,7 +3377,7 @@ app.get("/api/inventory/balance", requireAuth, requireFarmAccess, (req, res) => 
   res.json({ balances: computeInventoryBalances(flockId) });
 });
 
-app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, (req, res) => {
+app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), (req, res) => {
   if (!canCreateProcurement(req.authUser)) {
     res.status(403).json({ error: "Only procurement, manager, or superuser can receive stock" });
     return;
@@ -3412,7 +3428,7 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, (req, res
   res.status(201).json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(flockId) });
 });
 
-app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, (req, res) => {
+app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), (req, res) => {
   if (!canCreateFeedConsumption(req.authUser)) {
     res.status(403).json({ error: "Only laborer, dispatcher, manager, or superuser can log feed usage" });
     return;
@@ -3461,7 +3477,7 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, (req
   res.status(201).json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(flockId) });
 });
 
-app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, (req, res) => {
+app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), (req, res) => {
   if (!canCreateInventoryAdjustment(req.authUser)) {
     res.status(403).json({ error: "Only manager or superuser can adjust stock" });
     return;
@@ -3505,7 +3521,7 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, (req, res
   res.status(201).json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(flockId) });
 });
 
-app.patch("/api/inventory/:id", requireAuth, requireFarmAccess, (req, res) => {
+app.patch("/api/inventory/:id", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), (req, res) => {
   const row = inventoryTransactions.find((r) => r.id === req.params.id);
   if (!row) {
     res.status(404).json({ error: "Inventory row not found" });
@@ -3660,7 +3676,7 @@ app.get("/api/server-time", requireAuth, (_req, res) => {
   });
 });
 
-app.post("/api/log-schedule", requireAuth, requireFarmAccess, requireLogScheduleEditor, (req, res) => {
+app.post("/api/log-schedule", requireAuth, requireFarmAccess, requirePageAccess("farm_schedule_settings"), requireLogScheduleEditor, (req, res) => {
   const body = req.body ?? {};
   const flockId = String(body.flockId ?? "");
   const role = String(body.role ?? "laborer");
@@ -3694,13 +3710,13 @@ app.post("/api/log-schedule", requireAuth, requireFarmAccess, requireLogSchedule
   res.status(201).json({ schedule: row });
 });
 
-app.get("/api/log-schedule/:flockId", requireAuth, requireFarmAccess, requireLogScheduleEditor, (req, res) => {
+app.get("/api/log-schedule/:flockId", requireAuth, requireFarmAccess, requirePageAccess("farm_schedule_settings"), requireLogScheduleEditor, (req, res) => {
   const flockId = req.params.flockId;
   const list = logSchedules.filter((s) => s.flockId === flockId);
   res.json({ schedules: list });
 });
 
-app.patch("/api/log-schedule/:id", requireAuth, requireFarmAccess, requireLogScheduleEditor, (req, res) => {
+app.patch("/api/log-schedule/:id", requireAuth, requireFarmAccess, requirePageAccess("farm_schedule_settings"), requireLogScheduleEditor, (req, res) => {
   const s = logSchedules.find((x) => x.id === req.params.id);
   if (!s) {
     res.status(404).json({ error: "Schedule not found" });
@@ -3725,7 +3741,7 @@ app.patch("/api/log-schedule/:id", requireAuth, requireFarmAccess, requireLogSch
   res.json({ schedule: s });
 });
 
-app.delete("/api/log-schedule/:id", requireAuth, requireFarmAccess, requireLogScheduleEditor, (req, res) => {
+app.delete("/api/log-schedule/:id", requireAuth, requireFarmAccess, requirePageAccess("farm_schedule_settings"), requireLogScheduleEditor, (req, res) => {
   const i = logSchedules.findIndex((x) => x.id === req.params.id);
   if (i < 0) {
     res.status(404).json({ error: "Schedule not found" });
@@ -4026,7 +4042,7 @@ app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requirePageAccess
   }
 });
 
-app.get("/api/treatment-rounds", requireAuth, requireFarmAccess, requireAction("flock.view"), requireTreatmentLogger, async (req, res) => {
+app.get("/api/treatment-rounds", requireAuth, requireFarmAccess, requirePageAccess("farm_treatments"), requireAction("flock.view"), requireTreatmentLogger, async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -4054,7 +4070,7 @@ app.get("/api/treatment-rounds", requireAuth, requireFarmAccess, requireAction("
   }
 });
 
-app.get("/api/treatment-rounds/overdue", requireAuth, requireFarmAccess, requireAction("flock.view"), requireTreatmentLogger, async (req, res) => {
+app.get("/api/treatment-rounds/overdue", requireAuth, requireFarmAccess, requirePageAccess("farm_treatments"), requireAction("flock.view"), requireTreatmentLogger, async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -4136,7 +4152,7 @@ app.get("/api/medicine/forecast", requireAuth, requireFarmAccess, requireAction(
   }
 });
 
-app.post("/api/treatment-rounds", requireAuth, requireFarmAccess, requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
+app.post("/api/treatment-rounds", requireAuth, requireFarmAccess, requirePageAccess("farm_treatments"), requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -4187,7 +4203,7 @@ app.post("/api/treatment-rounds", requireAuth, requireFarmAccess, requireAction(
   }
 });
 
-app.patch("/api/treatment-rounds/:id/status", requireAuth, requireFarmAccess, requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
+app.patch("/api/treatment-rounds/:id/status", requireAuth, requireFarmAccess, requirePageAccess("farm_treatments"), requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -4267,7 +4283,7 @@ app.patch("/api/treatment-rounds/:id/status", requireAuth, requireFarmAccess, re
   }
 });
 
-app.get("/api/flocks/:id/eligibility", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+app.get("/api/flocks/:id/eligibility", requireAuth, requireFarmAccess, requirePageAccess("farm_flocks"), requireAction("flock.view"), async (req, res) => {
   if (!hasDb()) {
     res.json({ eligibleForSlaughter: true, blockers: [] });
     return;
@@ -4340,7 +4356,7 @@ function relativeTimeStatus(targetIso, nowMs = Date.now()) {
   return { label: `Due in ${Math.floor(absMin / 60)}h`, severity: "healthy", overdueHours: 0 };
 }
 
-app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("flock.view"), async (_req, res) => {
+app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAccess(["dashboard_laborer", "dashboard_vet", "dashboard_management"]), requireAction("flock.view"), async (_req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
