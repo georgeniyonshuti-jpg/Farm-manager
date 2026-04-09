@@ -234,7 +234,7 @@ export default function App() {
               <Route
                 path="/admin/system-config"
                 element={
-                  <ProtectedRoute superuserOnly>
+                  <ProtectedRoute roles={["vet_manager", "manager", "superuser"]}>
                     <SystemConfigPage />
                   </ProtectedRoute>
                 }

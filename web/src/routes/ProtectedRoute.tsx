@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import {
+  canAccessPathByPageVisibility,
   canAccessRouteLaborerBlock,
   canAccessWorkspace,
   isSuperuser,
@@ -50,6 +51,10 @@ export function ProtectedRoute({
     !isSuperuser(user) &&
     !canAccessRouteLaborerBlock(user, location.pathname)
   ) {
+    return <Navigate to="/unauthorized" replace state={{ from: location }} />;
+  }
+
+  if (user && !canAccessPathByPageVisibility(user, location.pathname)) {
     return <Navigate to="/unauthorized" replace state={{ from: location }} />;
   }
 

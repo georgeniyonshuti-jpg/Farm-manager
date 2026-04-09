@@ -30,6 +30,7 @@ const CATEGORY_ORDER = [
   "treatment_dose_unit",
   "medicine_stock_unit",
   "medicine_category",
+  "feed_type",
   "medicine_admin_route",
   "inventory_procurement_reason",
   "inventory_consumption_reason",
@@ -51,7 +52,7 @@ const SETTING_FIELDS: Array<{ key: string; label: string }> = [
 ];
 
 export function SystemConfigPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { showToast } = useToast();
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,7 +98,10 @@ export function SystemConfigPage() {
   }, [load]);
 
   const sortedCategories = useMemo(() => {
-    const keys = [...new Set(rows.map((r) => r.category))];
+    const canManageAll = user?.role === "superuser";
+    const keys = [...new Set(rows.map((r) => r.category))].filter((k) =>
+      canManageAll ? true : k === "medicine_category" || k === "feed_type"
+    );
     keys.sort((a, b) => {
       const ia = CATEGORY_ORDER.indexOf(a);
       const ib = CATEGORY_ORDER.indexOf(b);
@@ -107,7 +111,7 @@ export function SystemConfigPage() {
       return a.localeCompare(b);
     });
     return keys;
-  }, [rows]);
+  }, [rows, user?.role]);
 
   function updateRowAt(index: number, patch: Partial<RefRow>) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
@@ -211,6 +215,7 @@ export function SystemConfigPage() {
 
       {!loading && !loadError ? (
         <>
+          {user?.role === "superuser" ? (
           <section className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 className="text-lg font-semibold text-neutral-900">Operational settings</h2>
@@ -229,7 +234,9 @@ export function SystemConfigPage() {
               ))}
             </div>
           </section>
+          ) : null}
 
+          {user?.role === "superuser" ? (
           <section className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-neutral-900">Breed standards (JSON)</h2>
             <p className="mt-1 text-xs text-neutral-500">
@@ -244,6 +251,7 @@ export function SystemConfigPage() {
               spellCheck={false}
             />
           </section>
+          ) : null}
 
           {sortedCategories.map((cat) => (
             <section key={cat} className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">

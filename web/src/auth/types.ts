@@ -26,6 +26,8 @@ export type SessionUser = {
   canViewSensitiveFinancial: boolean;
   /** Optional scoping (e.g. hide Investor Memo department) */
   departmentKeys: string[];
+  /** Superuser-controlled page visibility keys (empty/missing means role defaults). */
+  pageAccess?: string[];
 };
 
 export type AuthState = {

@@ -98,6 +98,48 @@ export type PermissionKey =
   | "view_investor_memos"
   | "manage_users";
 
+export const PAGE_ACCESS_DEFS: Array<{ key: string; label: string; prefixes: string[] }> = [
+  { key: "dashboard_laborer", label: "Action center", prefixes: ["/dashboard/laborer"] },
+  { key: "dashboard_vet", label: "Vet home", prefixes: ["/dashboard/vet"] },
+  { key: "dashboard_management", label: "Command center", prefixes: ["/dashboard/management"] },
+  { key: "laborer_earnings", label: "My earnings", prefixes: ["/laborer/earnings"] },
+  { key: "farm_checkin", label: "Round check-in", prefixes: ["/farm/checkin"] },
+  { key: "farm_feed", label: "Feed log", prefixes: ["/farm/feed"] },
+  { key: "farm_mortality_log", label: "Log mortality", prefixes: ["/farm/mortality-log"] },
+  { key: "farm_daily_log", label: "Daily logs", prefixes: ["/farm/daily-log"] },
+  { key: "farm_mortality", label: "Mortality tracking", prefixes: ["/farm/mortality"] },
+  { key: "farm_inventory", label: "Feed inventory", prefixes: ["/farm/inventory"] },
+  { key: "farm_flocks", label: "Flocks", prefixes: ["/farm/flocks", "/farm/fcr"] },
+  { key: "farm_batch_schedule", label: "Check-in schedule", prefixes: ["/farm/batch-schedule"] },
+  { key: "farm_schedule_settings", label: "Schedule settings", prefixes: ["/farm/schedule-settings"] },
+  { key: "farm_payroll", label: "Payroll", prefixes: ["/farm/payroll"] },
+  { key: "farm_treatments", label: "Medicine tracking", prefixes: ["/farm/treatments"] },
+  { key: "farm_slaughter", label: "Slaughter & FCR", prefixes: ["/farm/slaughter"] },
+  { key: "cleva_portfolio", label: "Portfolio analytics", prefixes: ["/cleva/portfolio"] },
+  { key: "cleva_investor_memos", label: "Investor memos", prefixes: ["/cleva/investor-memos"] },
+  { key: "cleva_credit_scoring", label: "Credit scoring", prefixes: ["/cleva/credit-scoring"] },
+  { key: "admin_system_config", label: "Type settings", prefixes: ["/admin/system-config"] },
+  { key: "admin_users", label: "User management", prefixes: ["/admin/users"] },
+];
+const PAGE_KEYS = new Set(PAGE_ACCESS_DEFS.map((d) => d.key));
+
+export function canAccessPageByKey(user: SessionUser | null, key: string): boolean {
+  if (!user) return false;
+  if (isSuperuser(user)) return true;
+  if (!PAGE_KEYS.has(key)) return true;
+  const access = Array.isArray(user.pageAccess) ? user.pageAccess : [];
+  if (access.length === 0) return true;
+  return access.includes(key);
+}
+
+export function canAccessPathByPageVisibility(user: SessionUser | null, path: string): boolean {
+  if (!user) return false;
+  if (isSuperuser(user)) return true;
+  const match = PAGE_ACCESS_DEFS.find((d) => d.prefixes.some((p) => path.startsWith(p)));
+  if (!match) return true;
+  return canAccessPageByKey(user, match.key);
+}
+
 export type FlockActionKey =
   | "flock.view"
   | "flock.create"

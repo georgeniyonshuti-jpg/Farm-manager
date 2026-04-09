@@ -8,6 +8,7 @@ import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
+import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 
 type FeedEntry = {
   id: string;
@@ -34,9 +35,16 @@ export function FarmFeedPage() {
 
   const [entries, setEntries] = useState<FeedEntry[]>([]);
   const [feedKg, setFeedKg] = useState("");
+  const [feedType, setFeedType] = useState("starter");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [entriesError, setEntriesError] = useState<string | null>(null);
+  const feedTypeOptions = useReferenceOptions("feed_type", token, [
+    { value: "starter", label: "Starter" },
+    { value: "grower", label: "Grower" },
+    { value: "finisher", label: "Finisher" },
+    { value: "supplement", label: "Supplement" },
+  ]);
 
   const loadFeedEntries = useCallback(async () => {
     if (!flockId || !token) {
@@ -78,13 +86,14 @@ export function FarmFeedPage() {
         headers: jsonAuthHeaders(token),
         body: JSON.stringify({
           feedKg: kg,
-          notes: notes.trim() || undefined,
+          notes: [`feed_type:${feedType}`, notes.trim()].filter(Boolean).join(" | "),
         }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Save failed");
       showToast("success", "Feed logged.");
       setFeedKg("");
+      setFeedType((feedTypeOptions[0]?.value ?? "starter"));
       setNotes("");
       void loadDetails();
       await loadFeedEntries();
@@ -173,6 +182,20 @@ export function FarmFeedPage() {
                 onChange={(e) => setFeedKg(e.target.value)}
                 placeholder="0"
               />
+            </label>
+            <label className="block text-sm font-medium text-neutral-700">
+              Feed type
+              <select
+                className="mt-1 w-full min-h-[52px] rounded-xl border border-neutral-300 px-4 text-base"
+                value={feedType}
+                onChange={(e) => setFeedType(e.target.value)}
+              >
+                {feedTypeOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="block text-sm font-medium text-neutral-700">
               Notes (optional)

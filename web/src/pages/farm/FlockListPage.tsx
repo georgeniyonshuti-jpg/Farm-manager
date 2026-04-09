@@ -75,6 +75,7 @@ export function FlockListPage() {
   const [insights, setInsights] = useState<string[]>([]);
   const [farmHealthScore, setFarmHealthScore] = useState<number | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
+  const [purgeBusyId, setPurgeBusyId] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState({
     placementDate: new Date().toISOString().slice(0, 10),
     initialCount: "",
@@ -262,6 +263,27 @@ export function FlockListPage() {
       showToast("error", e2 instanceof Error ? e2.message : "Failed to create flock");
     } finally {
       setCreateBusy(false);
+    }
+  }
+
+  async function purgeFlock(flockId: string, label: string) {
+    if (user?.role !== "superuser") return;
+    const confirmPhrase = window.prompt(`Type PURGE to permanently delete ${label}`);
+    if (confirmPhrase !== "PURGE") return;
+    setPurgeBusyId(flockId);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/purge`, {
+        method: "DELETE",
+        headers: jsonAuthHeaders(token),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Purge failed");
+      showToast("success", `${label} purged`);
+      await load();
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Purge failed");
+    } finally {
+      setPurgeBusyId(null);
     }
   }
 
@@ -466,6 +488,16 @@ export function FlockListPage() {
                       Schedule slaughter
                     </Link>
                   ) : null}
+                  {user?.role === "superuser" ? (
+                    <button
+                      type="button"
+                      disabled={purgeBusyId === f.id}
+                      onClick={() => void purgeFlock(f.id, f.label)}
+                      className="rounded border border-red-300 px-2 py-1 text-xs text-red-800 hover:bg-red-50 disabled:opacity-60"
+                    >
+                      {purgeBusyId === f.id ? "Purging..." : "Purge flock"}
+                    </button>
+                  ) : null}
                 </div>
               </li>
             ))}
@@ -508,6 +540,16 @@ export function FlockListPage() {
                           {(f.latestWeightKg != null ? `${f.latestWeightKg.toFixed(2)}kg` : "—")} ({(f.weightDeviationPct ?? 0) >= 0 ? "+" : ""}{(f.weightDeviationPct ?? 0).toFixed(1)}%)
                         </span>
                         {(f.alerts?.length ?? 0) > 0 ? <span className="text-xs text-amber-800">{f.alerts?.[0]}</span> : null}
+                        {user?.role === "superuser" ? (
+                          <button
+                            type="button"
+                            disabled={purgeBusyId === f.id}
+                            onClick={() => void purgeFlock(f.id, f.label)}
+                            className="ml-1 rounded border border-red-300 px-1.5 py-0.5 text-xs text-red-800 hover:bg-red-50 disabled:opacity-60"
+                          >
+                            {purgeBusyId === f.id ? "Purging..." : "Purge"}
+                          </button>
+                        ) : null}
                         {!f.checkinBadge && !f.withdrawalActive ? "—" : null}
                       </div>
                     </td>

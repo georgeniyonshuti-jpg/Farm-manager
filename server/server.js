@@ -132,7 +132,44 @@ function sanitizeUser(row) {
     businessUnitAccess: row.businessUnitAccess,
     canViewSensitiveFinancial: row.canViewSensitiveFinancial,
     departmentKeys: row.departmentKeys ?? [],
+    pageAccess: row.pageAccess ?? [],
   };
+}
+
+const PAGE_ACCESS_KEYS = [
+  "dashboard_laborer",
+  "dashboard_vet",
+  "dashboard_management",
+  "laborer_earnings",
+  "farm_checkin",
+  "farm_feed",
+  "farm_mortality_log",
+  "farm_daily_log",
+  "farm_mortality",
+  "farm_inventory",
+  "farm_flocks",
+  "farm_batch_schedule",
+  "farm_schedule_settings",
+  "farm_payroll",
+  "farm_treatments",
+  "farm_slaughter",
+  "cleva_portfolio",
+  "cleva_investor_memos",
+  "cleva_credit_scoring",
+  "admin_system_config",
+  "admin_users",
+];
+const PAGE_ACCESS_KEY_SET = new Set(PAGE_ACCESS_KEYS);
+
+function normalizePageAccess(input, fallback) {
+  if (Array.isArray(input)) {
+    const out = input.map(String).filter((k) => PAGE_ACCESS_KEY_SET.has(k));
+    return [...new Set(out)];
+  }
+  const raw = Array.isArray(fallback) ? fallback : PAGE_ACCESS_KEYS;
+  if (!Array.isArray(raw) || raw.length === 0) return [...PAGE_ACCESS_KEYS];
+  const out = raw.map(String).filter((k) => PAGE_ACCESS_KEY_SET.has(k));
+  return out.length > 0 ? [...new Set(out)] : [...PAGE_ACCESS_KEYS];
 }
 
 /** @type {Map<string, { userId: string, exp: number }>} */
@@ -174,8 +211,26 @@ const mortalityRecentByKey = new Map();
 const MORTALITY_DEBOUNCE_MS = 5 * 60 * 1000;
 
 function upsertUser(u) {
+  if (!Array.isArray(u.pageAccess) || u.pageAccess.length === 0) {
+    u.pageAccess = [...PAGE_ACCESS_KEYS];
+  } else {
+    u.pageAccess = normalizePageAccess(u.pageAccess, PAGE_ACCESS_KEYS);
+  }
   usersById.set(u.id, u);
   usersByEmail.set(u.email.toLowerCase(), u.id);
+}
+
+function updateUserRecord(existing, patch) {
+  const next = {
+    ...existing,
+    ...patch,
+  };
+  usersById.set(next.id, next);
+  if (String(existing.email).toLowerCase() !== String(next.email).toLowerCase()) {
+    usersByEmail.delete(String(existing.email).toLowerCase());
+    usersByEmail.set(String(next.email).toLowerCase(), next.id);
+  }
+  return next;
 }
 
 function seedUsers() {
@@ -270,6 +325,15 @@ function requireSuperuser(req, res, next) {
 function requireManagerOrSuperuser(req, res, next) {
   const r = req.authUser?.role;
   if (r === "superuser" || r === "manager") {
+    next();
+    return;
+  }
+  res.status(403).json({ error: "Forbidden" });
+}
+
+function requireLeadVetUp(req, res, next) {
+  const r = req.authUser?.role;
+  if (r === "vet_manager" || r === "manager" || r === "superuser") {
     next();
     return;
   }
@@ -1455,6 +1519,7 @@ app.post("/api/users", requireAuth, requireSuperuser, (req, res) => {
   const businessUnitAccess = String(body.businessUnitAccess ?? "farm");
   const canViewSensitiveFinancial = Boolean(body.canViewSensitiveFinancial);
   const departmentKeys = Array.isArray(body.departmentKeys) ? body.departmentKeys.map(String) : [];
+  const pageAccess = normalizePageAccess(body.pageAccess, PAGE_ACCESS_KEYS);
   for (const dk of departmentKeys) {
     if (!systemConfig.validateAgainstCategory("department_key", dk, systemConfig.getStaticFallbackCodes("department_key"))) {
       res.status(400).json({ error: `Invalid department key: ${dk}` });
@@ -1481,6 +1546,7 @@ app.post("/api/users", requireAuth, requireSuperuser, (req, res) => {
     businessUnitAccess,
     canViewSensitiveFinancial,
     departmentKeys,
+    pageAccess,
   };
   upsertUser(row);
   appendAudit(req.authUser.id, req.authUser.role, "user.create", "user", id, {
@@ -1490,6 +1556,71 @@ app.post("/api/users", requireAuth, requireSuperuser, (req, res) => {
     canViewSensitiveFinancial,
   });
   res.json({ user: sanitizeUser(row) });
+});
+
+app.put("/api/users/:id", requireAuth, requireSuperuser, (req, res) => {
+  const id = String(req.params.id ?? "");
+  const existing = usersById.get(id);
+  if (!existing) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  const body = req.body ?? {};
+  const email = String(body.email ?? existing.email).trim().toLowerCase();
+  const displayName = String(body.displayName ?? existing.displayName).trim();
+  const role = String(body.role ?? existing.role);
+  const businessUnitAccess = String(body.businessUnitAccess ?? existing.businessUnitAccess);
+  const canViewSensitiveFinancial = Boolean(body.canViewSensitiveFinancial ?? existing.canViewSensitiveFinancial);
+  const departmentKeys = Array.isArray(body.departmentKeys) ? body.departmentKeys.map(String) : existing.departmentKeys;
+  const pageAccess = normalizePageAccess(body.pageAccess, existing.pageAccess ?? PAGE_ACCESS_KEYS);
+  for (const dk of departmentKeys) {
+    if (!systemConfig.validateAgainstCategory("department_key", dk, systemConfig.getStaticFallbackCodes("department_key"))) {
+      res.status(400).json({ error: `Invalid department key: ${dk}` });
+      return;
+    }
+  }
+  if (!email || !displayName) {
+    res.status(400).json({ error: "email and displayName are required" });
+    return;
+  }
+  const existingByEmail = usersByEmail.get(email);
+  if (existingByEmail && existingByEmail !== id) {
+    res.status(409).json({ error: "User already exists" });
+    return;
+  }
+  const password = body.password == null ? "" : String(body.password);
+  const updated = updateUserRecord(existing, {
+    email,
+    displayName,
+    role,
+    businessUnitAccess,
+    canViewSensitiveFinancial,
+    departmentKeys,
+    pageAccess,
+    ...(password.trim() ? { passwordHash: hashPassword(password) } : {}),
+  });
+  appendAudit(req.authUser.id, req.authUser.role, "user.update", "user", id, {
+    role,
+    businessUnitAccess,
+    passwordReset: Boolean(password.trim()),
+  });
+  res.json({ user: sanitizeUser(updated) });
+});
+
+app.patch("/api/users/:id/page-access", requireAuth, requireSuperuser, (req, res) => {
+  const id = String(req.params.id ?? "");
+  const existing = usersById.get(id);
+  if (!existing) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  const body = req.body ?? {};
+  const pageAccess = normalizePageAccess(body.pageAccess, existing.pageAccess ?? PAGE_ACCESS_KEYS);
+  const updated = updateUserRecord(existing, { pageAccess });
+  appendAudit(req.authUser.id, req.authUser.role, "user.page_access.update", "user", id, {
+    pageAccessCount: pageAccess.length,
+  });
+  res.json({ user: sanitizeUser(updated) });
 });
 
 app.get("/api/audit", requireAuth, requireSuperuser, (req, res) => {
@@ -1546,14 +1677,27 @@ app.get("/api/reference-options", requireAuth, requireFarmAccess, (_req, res) =>
   res.json({ categories: systemConfig.getActiveReferenceOptionsGrouped() });
 });
 
-app.get("/api/admin/system-config", requireAuth, requireSuperuser, (_req, res) => {
+app.get("/api/admin/system-config", requireAuth, requireLeadVetUp, (_req, res) => {
   res.json(systemConfig.packAdminSystemConfigPayload(loadBreedStandardsFileOnly));
 });
 
-app.put("/api/admin/system-config", requireAuth, requireSuperuser, async (req, res) => {
+app.put("/api/admin/system-config", requireAuth, requireLeadVetUp, async (req, res) => {
   try {
+    const rawBody = req.body ?? {};
+    const isSuper = req.authUser.role === "superuser";
+    const sanitizedBody = isSuper
+      ? rawBody
+      : {
+          version: rawBody.version,
+          referenceOptions: Array.isArray(rawBody.referenceOptions)
+            ? rawBody.referenceOptions.filter((x) => {
+                const c = String(x?.category ?? "");
+                return c === "medicine_category" || c === "feed_type";
+              })
+            : [],
+        };
     await systemConfig.applyAdminSystemConfigPut(
-      req.body ?? {},
+      sanitizedBody,
       dbPool,
       dbQuery,
       hasDb,
@@ -1850,6 +1994,35 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.cre
       error: "Unable to create flock right now.",
       ...(process.env.NODE_ENV !== "production" ? { detail: msg, pgCode: pgCode || undefined } : {}),
     });
+  }
+});
+
+app.delete("/api/flocks/:id/purge", requireAuth, requireFarmAccess, requireSuperuser, async (req, res) => {
+  const id = String(req.params.id ?? "").trim();
+  if (!id) {
+    res.status(400).json({ error: "Invalid flock id" });
+    return;
+  }
+  if (!flocksById.has(id)) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
+  try {
+    if (hasDb()) {
+      await dbQuery(`DELETE FROM poultry_flocks WHERE id::text = $1`, [id]);
+    }
+    flocksById.delete(id);
+    const filterOutFlock = (row) => String(row?.flockId ?? "") !== id;
+    for (const bucket of [roundCheckins, flockFeedEntries, mortalityEvents, logSchedules, payrollImpacts, flockTreatments, slaughterEvents, inventoryTransactions, dailyLogs]) {
+      const keep = bucket.filter(filterOutFlock);
+      bucket.length = 0;
+      bucket.push(...keep);
+    }
+    appendAudit(req.authUser.id, req.authUser.role, "flock.purge", "flock", id, {});
+    res.json({ ok: true, flockId: id });
+  } catch (e) {
+    console.error("[ERROR]", "[flock] DELETE /api/flocks/:id/purge:", e instanceof Error ? e.message : e);
+    res.status(500).json({ error: "Unable to purge flock." });
   }
 });
 
