@@ -438,8 +438,13 @@ function seedUsers() {
   seed.forEach(upsertUser);
 }
 
-if (!IS_PRODUCTION) {
+function ensureDemoUsersForNonProd() {
+  if (IS_PRODUCTION) return;
   seedUsers();
+}
+
+if (!IS_PRODUCTION) {
+  ensureDemoUsersForNonProd();
 }
 
 function newSessionId() {
@@ -1665,6 +1670,7 @@ app.get("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_us
   if (hasDb()) {
     try {
       await syncUsersFromDbToMemory();
+      if (!IS_PRODUCTION) ensureDemoUsersForNonProd();
     } catch (e) {
       console.error("[ERROR]", "[db] GET /api/users sync:", e instanceof Error ? e.message : e);
     }
@@ -4965,9 +4971,12 @@ app.use((err, _req, res, _next) => {
     }
     try {
       const loaded = await syncUsersFromDbToMemory();
+      if (!IS_PRODUCTION) {
+        ensureDemoUsersForNonProd();
+      }
       if (loaded === 0 && !IS_PRODUCTION) {
         let seeded = 0;
-        seedUsers();
+        ensureDemoUsersForNonProd();
         for (const u of usersById.values()) {
           seeded += 1;
           if (isPersistableUuid(String(u.id))) {
@@ -4984,7 +4993,7 @@ app.use((err, _req, res, _next) => {
     } catch (e) {
       console.error("[ERROR]", "[startup] user sync load:", e instanceof Error ? e.message : e);
       if (!IS_PRODUCTION && usersById.size === 0) {
-        seedUsers();
+        ensureDemoUsersForNonProd();
         console.log("[INFO]", `[startup] users seeded after sync error (non-prod): ${usersById.size}`);
       }
     }
