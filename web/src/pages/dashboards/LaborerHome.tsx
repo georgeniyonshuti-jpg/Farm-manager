@@ -11,7 +11,6 @@ import { ChartPanel } from "../../components/dashboard/ChartPanel";
 import { SimpleCategoryBars } from "../../components/dashboard/charts/OpsCharts";
 import { API_BASE_URL } from "../../api/config";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
-import { canAccessPathByPageVisibility } from "../../auth/permissions";
 import { useHubAggregatePoll } from "../../hooks/useHubAggregatePoll";
 import type { ReactNode } from "react";
 
@@ -195,90 +194,78 @@ export function LaborerHome() {
     },
   ];
 
-  const bottomNav = useMemo(() => {
-    const items: TabItem[] = [
-      {
-        to: "/dashboard/laborer",
-        label: tabHome,
-        end: true,
-        icon: (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" strokeLinejoin="round" />
-            <polyline points="9 22 9 12 15 12 15 22" />
-          </svg>
-        ),
-      },
-      {
-        to: "/farm/checkin",
-        label: tabRounds,
-        icon: (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 6v6l4 2" strokeLinecap="round" />
-          </svg>
-        ),
-      },
-      {
-        to: "/farm/mortality-log",
-        label: tabMort,
-        icon: (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-            <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
-          </svg>
-        ),
-      },
-      {
-        to: "/farm/feed",
-        label: tabFeed,
-        icon: (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" strokeLinecap="round" />
-          </svg>
-        ),
-      },
-      {
-        to: "/farm/daily-log",
-        label: tabLog,
-        icon: (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" />
-          </svg>
-        ),
-      },
-      {
-        to: "/farm/mortality",
-        label: tabHistory,
-        icon: (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-            <path d="M3 3v18h18" strokeLinecap="round" />
-            <path d="M7 16l4-4 4 4 5-6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        ),
-      },
-      {
-        to: "/farm/inventory",
-        label: tabStock,
-        icon: (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-            <path d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        ),
-      },
-    ];
-    return user ? items.filter((item) => canAccessPathByPageVisibility(user, item.to)) : items;
-  }, [
-    user,
-    tabHome,
-    tabRounds,
-    tabMort,
-    tabFeed,
-    tabLog,
-    tabHistory,
-    tabStock,
-  ]);
+  const bottomNav: TabItem[] = [
+    {
+      to: "/dashboard/laborer",
+      label: tabHome,
+      end: true,
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" strokeLinejoin="round" />
+          <polyline points="9 22 9 12 15 12 15 22" />
+        </svg>
+      ),
+    },
+    {
+      to: "/farm/checkin",
+      label: tabRounds,
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 6v6l4 2" strokeLinecap="round" />
+        </svg>
+      ),
+    },
+    {
+      to: "/farm/mortality-log",
+      label: tabMort,
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+          <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
+        </svg>
+      ),
+    },
+    {
+      to: "/farm/feed",
+      label: tabFeed,
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" strokeLinecap="round" />
+        </svg>
+      ),
+    },
+    {
+      to: "/farm/daily-log",
+      label: tabLog,
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+          <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" />
+        </svg>
+      ),
+    },
+    {
+      to: "/farm/mortality",
+      label: tabHistory,
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M3 3v18h18" strokeLinecap="round" />
+          <path d="M7 16l4-4 4 4 5-6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ),
+    },
+    {
+      to: "/farm/inventory",
+      label: tabStock,
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+          <path d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ),
+    },
+  ];
 
   return (
     <div className="mx-auto w-full max-w-[960px] space-y-6">
@@ -348,14 +335,12 @@ export function LaborerHome() {
           </Link>
         </div>
         <div className="grid gap-3">
-          {user && canAccessPathByPageVisibility(user, "/farm/daily-log") ? (
-            <Link
-              to="/farm/daily-log"
-              className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-white px-4 text-lg font-medium text-neutral-900 hover:bg-[var(--primary-color-soft)]"
-            >
-              {linkDaily}
-            </Link>
-          ) : null}
+          <Link
+            to="/farm/daily-log"
+            className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-white px-4 text-lg font-medium text-neutral-900 hover:bg-[var(--primary-color-soft)]"
+          >
+            {linkDaily}
+          </Link>
           <Link
             to="/farm/mortality"
             className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-white px-4 text-lg font-medium text-neutral-900 hover:bg-[var(--primary-color-soft)]"
@@ -381,7 +366,7 @@ export function LaborerHome() {
         className="fixed inset-x-0 bottom-0 z-40 flex h-14 flex-col justify-center border-t border-[var(--border-color)] bg-white/95 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur sm:hidden"
         aria-label="Primary"
       >
-        <div className="flex h-full items-stretch justify-around gap-0.5 px-0.5">
+        <div className="grid h-full grid-cols-7 gap-0 px-1">
           {bottomNav.map((item) => (
             <NavLink
               key={item.to}
@@ -389,7 +374,7 @@ export function LaborerHome() {
               end={item.end}
               className={({ isActive }) =>
                 [
-                  "bounce-tap flex min-h-[44px] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-0.5 text-center",
+                  "bounce-tap flex min-h-[44px] flex-col items-center justify-center gap-0.5 rounded-lg px-0.5 text-center",
                   isActive ? "text-[var(--primary-color)]" : "text-neutral-600",
                 ].join(" ")
               }

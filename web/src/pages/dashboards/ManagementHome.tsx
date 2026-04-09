@@ -1,8 +1,6 @@
-import { Link } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
 import { PermissionGuard } from "../../components/PermissionGuard";
 import { useAuth } from "../../auth/AuthContext";
-import { canAccessPageByKey } from "../../auth/permissions";
 import { ChartPanel } from "../../components/dashboard/ChartPanel";
 import { MiniStat } from "../../components/dashboard/MiniStat";
 import {
@@ -45,21 +43,6 @@ export function ManagementHome() {
         title="Command center"
         subtitle="Cross-unit KPIs — Clevafarm operations and finance (subject to permissions)."
       />
-      {user && canAccessPageByKey(user, "farm_ops_reports") ? (
-        <section className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4 shadow-sm">
-          <h2 className="text-sm font-semibold text-emerald-950">Field operations reports</h2>
-          <p className="mt-1 text-sm text-emerald-900/90">
-            Summary counts and CSV downloads for round check-ins, feed entries, manager check-ins, and inventory
-            movements.
-          </p>
-          <Link
-            to="/farm/ops-reports"
-            className="mt-3 inline-flex min-h-[44px] items-center rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
-          >
-            Open ops reports
-          </Link>
-        </section>
-      ) : null}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <MiniStat label="Active flocks" value={flocks.length} />
         <MiniStat label="Critical flocks" value={criticalCount} tone={criticalCount > 0 ? "bad" : "good"} />

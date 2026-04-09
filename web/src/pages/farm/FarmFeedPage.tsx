@@ -9,16 +9,11 @@ import { useToast } from "../../components/Toast";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
-import { PhotoCaptureInput } from "../../components/farm/PhotoCaptureInput";
 
 type FeedEntry = {
   id: string;
   recordedAt: string;
   feedKg: number;
-  feedType?: string | null;
-  feedAdequate?: boolean | null;
-  waterAdequate?: boolean | null;
-  photos?: string[];
   notes?: string;
 };
 
@@ -42,9 +37,6 @@ export function FarmFeedPage() {
   const [feedKg, setFeedKg] = useState("");
   const [feedType, setFeedType] = useState("starter");
   const [notes, setNotes] = useState("");
-  const [photos, setPhotos] = useState<string[]>([]);
-  const [feedAdequate, setFeedAdequate] = useState(false);
-  const [waterAdequate, setWaterAdequate] = useState(false);
   const [busy, setBusy] = useState(false);
   const [entriesError, setEntriesError] = useState<string | null>(null);
   const feedTypeOptions = useReferenceOptions("feed_type", token, [
@@ -94,11 +86,7 @@ export function FarmFeedPage() {
         headers: jsonAuthHeaders(token),
         body: JSON.stringify({
           feedKg: kg,
-          feedType,
-          feedAdequate,
-          waterAdequate,
-          photos,
-          notes: notes.trim() ? notes.trim() : undefined,
+          notes: [`feed_type:${feedType}`, notes.trim()].filter(Boolean).join(" | "),
         }),
       });
       const d = await r.json().catch(() => ({}));
@@ -107,9 +95,6 @@ export function FarmFeedPage() {
       setFeedKg("");
       setFeedType((feedTypeOptions[0]?.value ?? "starter"));
       setNotes("");
-      setPhotos([]);
-      setFeedAdequate(false);
-      setWaterAdequate(false);
       void loadDetails();
       await loadFeedEntries();
     } catch (err) {
@@ -126,7 +111,7 @@ export function FarmFeedPage() {
     <div className="mx-auto max-w-lg space-y-5 sm:max-w-xl">
       <PageHeader
         title="Feed log"
-        subtitle="Log feed kg, type, adequacy ticks, and optional proof photos. Totals count toward cycle FCR with round check-ins."
+        subtitle="Record feed delivered without a photo round check-in. Totals count toward cycle FCR with round check-ins."
         action={
           <Link
             to="/dashboard/laborer"
@@ -212,36 +197,6 @@ export function FarmFeedPage() {
                 ))}
               </select>
             </label>
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50/80 px-4 py-3">
-              <input
-                type="checkbox"
-                className="mt-1 h-5 w-5 shrink-0 rounded border-neutral-300"
-                checked={feedAdequate}
-                onChange={(e) => setFeedAdequate(e.target.checked)}
-                disabled={busy}
-              />
-              <span className="text-sm font-medium text-neutral-800">Feed adequate (visible / accessible)</span>
-            </label>
-            <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50/80 px-4 py-3">
-              <input
-                type="checkbox"
-                className="mt-1 h-5 w-5 shrink-0 rounded border-neutral-300"
-                checked={waterAdequate}
-                onChange={(e) => setWaterAdequate(e.target.checked)}
-                disabled={busy}
-              />
-              <span className="text-sm font-medium text-neutral-800">Water adequate</span>
-            </label>
-            <div>
-              <p className="text-sm font-medium text-neutral-700">Photos (optional, up to 6)</p>
-              <PhotoCaptureInput
-                minCount={0}
-                maxCount={6}
-                pickerLabel="Add proof photos"
-                onChangeDataUrls={setPhotos}
-                disabled={busy}
-              />
-            </div>
             <label className="block text-sm font-medium text-neutral-700">
               Notes (optional)
               <textarea
@@ -286,12 +241,6 @@ export function FarmFeedPage() {
                       {new Date(en.recordedAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
                     </span>
                     <span className="font-semibold tabular-nums text-emerald-900">{en.feedKg} kg</span>
-                    <span className="w-full text-xs text-neutral-700">
-                      {[en.feedType, en.feedAdequate != null ? `feed OK: ${en.feedAdequate}` : null, en.waterAdequate != null ? `water OK: ${en.waterAdequate}` : null]
-                        .filter(Boolean)
-                        .join(" · ")}
-                      {Array.isArray(en.photos) && en.photos.length > 0 ? ` · ${en.photos.length} photo(s)` : ""}
-                    </span>
                     {en.notes ? <span className="w-full text-xs text-neutral-600">{en.notes}</span> : null}
                   </li>
                 ))}
@@ -303,7 +252,7 @@ export function FarmFeedPage() {
             <Link className="font-medium text-emerald-800 underline" to="/farm/checkin">
               Round check-in
             </Link>{" "}
-            captures photos, feed/water adequacy, and optional mortality each round.
+            still captures photos, water, and mortality with each round.
           </p>
         </>
       ) : null}
