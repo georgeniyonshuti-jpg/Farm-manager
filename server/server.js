@@ -4344,7 +4344,7 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("fl
                 LAG(avg_weight_kg) OVER (PARTITION BY flock_id ORDER BY weigh_date DESC) AS "prevWeightKg",
                 LAG(weigh_date) OVER (PARTITION BY flock_id ORDER BY weigh_date DESC) AS "prevWeighDate"
            FROM weigh_ins
-          WHERE flock_id IN (SELECT id::text FROM poultry_flocks WHERE status = 'active')
+          WHERE flock_id IN (SELECT id FROM poultry_flocks WHERE status = 'active')
        )
        SELECT DISTINCT ON (flock_id)
               flock_id AS "flockId",
@@ -4362,7 +4362,7 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("fl
       `SELECT flock_id::text AS "flockId",
               COALESCE(SUM(birds_slaughtered), 0)::float AS "slaughterTotal"
          FROM flock_slaughter_events
-        WHERE flock_id IN (SELECT id::text FROM poultry_flocks WHERE status = 'active')
+        WHERE flock_id IN (SELECT id FROM poultry_flocks WHERE status = 'active')
         GROUP BY flock_id`
     ).catch(() => ({ rows: [] }));
 
@@ -4385,7 +4385,7 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("fl
          FROM treatment_rounds
         WHERE status IN ('planned','in_progress')
           AND planned_for < now()
-          AND flock_id IN (SELECT id::text FROM poultry_flocks WHERE status = 'active')
+          AND flock_id IN (SELECT id FROM poultry_flocks WHERE status = 'active')
         GROUP BY flock_id`
     ).catch(() => ({ rows: [] }));
 
@@ -4395,7 +4395,7 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAction("fl
               MIN((at + (withdrawal_days || ' days')::interval)) AS "safeAfterAt"
          FROM flock_treatments
         WHERE (at + (withdrawal_days || ' days')::interval) > now()
-          AND flock_id IN (SELECT id::text FROM poultry_flocks WHERE status = 'active')
+          AND flock_id IN (SELECT id FROM poultry_flocks WHERE status = 'active')
         GROUP BY flock_id`
     ).catch(() => ({ rows: [] }));
 
