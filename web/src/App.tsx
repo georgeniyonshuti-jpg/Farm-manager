@@ -11,6 +11,7 @@ import { LaborerHome } from "./pages/dashboards/LaborerHome";
 import { VetHome } from "./pages/dashboards/VetHome";
 import { ManagementHome } from "./pages/dashboards/ManagementHome";
 import { FarmDailyLogPage } from "./pages/farm/FarmDailyLogPage";
+import { FarmOpsReportsPage } from "./pages/farm/FarmOpsReportsPage";
 import { FarmFeedPage } from "./pages/farm/FarmFeedPage";
 import { FarmInventoryPage } from "./pages/farm/FarmInventoryPage";
 import { FarmCheckinPage } from "./pages/farm/FarmCheckinPage";
@@ -154,8 +155,16 @@ export default function App() {
                 <Route
                   path="daily-log"
                   element={
-                    <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+                    <ProtectedRoute roles={["vet_manager", "manager", "superuser"]}>
                       <FarmDailyLogPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="ops-reports"
+                  element={
+                    <ProtectedRoute roles={["vet_manager", "manager", "superuser"]}>
+                      <FarmOpsReportsPage />
                     </ProtectedRoute>
                   }
                 />
@@ -195,7 +204,7 @@ export default function App() {
                 <Route
                   path="batch-schedule"
                   element={
-                    <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
+                    <ProtectedRoute roles={["superuser", "manager", "vet_manager"]}>
                       <FlockScheduleSettingsPage />
                     </ProtectedRoute>
                   }

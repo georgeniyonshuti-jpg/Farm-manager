@@ -53,7 +53,7 @@ const FARM_CORE_FULL: FarmNavItem[] = [
   { to: "/farm/checkin", label: "Round check-in" },
   { to: "/farm/feed", label: "Feed log" },
   { to: "/farm/mortality-log", label: "Log mortality" },
-  { to: "/farm/daily-log", label: "Daily logs" },
+  { to: "/farm/daily-log", label: "Manager check-in" },
   { to: "/farm/mortality", label: "Mortality tracking" },
   { to: "/farm/inventory", label: "Feed inventory" },
 ];
@@ -64,7 +64,15 @@ const FARM_CORE_FULL: FarmNavItem[] = [
  */
 export function farmCoreNavItems(user: SessionUser | null): FarmNavItem[] {
   if (!user || !canAccessWorkspace(user, "farm")) return [];
-  if (farmFieldOpsNavEligible(user)) return [...FARM_CORE_FULL];
+  if (farmFieldOpsNavEligible(user)) {
+    /** Manager check-in route is vet_manager+ only; hide for field and clinical vets. */
+    const hideDaily = user.role === "laborer" || user.role === "dispatcher" || user.role === "vet";
+    let core = FARM_CORE_FULL.filter((i) => (hideDaily ? i.to !== "/farm/daily-log" : true));
+    if (user.role === "vet_manager" || user.role === "manager" || user.role === "superuser") {
+      core = [...core, { to: "/farm/ops-reports", label: "Ops reports" }];
+    }
+    return core;
+  }
   if (user.role === "procurement_officer") return [{ to: "/farm/inventory", label: "Feed inventory" }];
   return [];
 }
@@ -106,7 +114,7 @@ export const PAGE_ACCESS_DEFS: Array<{ key: string; label: string; prefixes: str
   { key: "farm_checkin", label: "Round check-in", prefixes: ["/farm/checkin"] },
   { key: "farm_feed", label: "Feed log", prefixes: ["/farm/feed"] },
   { key: "farm_mortality_log", label: "Log mortality", prefixes: ["/farm/mortality-log"] },
-  { key: "farm_daily_log", label: "Daily logs", prefixes: ["/farm/daily-log"] },
+  { key: "farm_daily_log", label: "Manager check-in", prefixes: ["/farm/daily-log"] },
   { key: "farm_mortality", label: "Mortality tracking", prefixes: ["/farm/mortality"] },
   { key: "farm_inventory", label: "Feed inventory", prefixes: ["/farm/inventory"] },
   { key: "farm_flocks", label: "Flocks", prefixes: ["/farm/flocks", "/farm/fcr"] },
@@ -115,6 +123,11 @@ export const PAGE_ACCESS_DEFS: Array<{ key: string; label: string; prefixes: str
   { key: "farm_payroll", label: "Payroll", prefixes: ["/farm/payroll"] },
   { key: "farm_treatments", label: "Medicine tracking", prefixes: ["/farm/treatments"] },
   { key: "farm_slaughter", label: "Slaughter & FCR", prefixes: ["/farm/slaughter"] },
+  {
+    key: "farm_ops_reports",
+    label: "Field ops reports",
+    prefixes: ["/farm/ops-reports"],
+  },
   { key: "cleva_portfolio", label: "Portfolio analytics", prefixes: ["/cleva/portfolio"] },
   { key: "cleva_investor_memos", label: "Investor memos", prefixes: ["/cleva/investor-memos"] },
   { key: "cleva_credit_scoring", label: "Credit scoring", prefixes: ["/cleva/credit-scoring"] },

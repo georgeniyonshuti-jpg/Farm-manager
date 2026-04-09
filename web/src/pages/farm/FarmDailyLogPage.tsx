@@ -11,9 +11,9 @@ import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 export function FarmDailyLogPage() {
   const { token } = useAuth();
   const { showToast } = useToast();
-  const savedMsg = useLaborerT("Daily log saved.");
-  const pageTitle = useLaborerT("Daily log");
-  const pageSub = useLaborerT("Large fields for quick coop entry.");
+  const savedMsg = useLaborerT("Manager check-in saved.");
+  const pageTitle = useLaborerT("Manager check-in");
+  const pageSub = useLaborerT("End-of-day flock summary for management (mortality, intake, notes).");
   const lblFlock = useLaborerT("Flock");
 
   const {

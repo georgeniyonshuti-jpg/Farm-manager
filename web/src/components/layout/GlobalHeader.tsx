@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import type { ActiveWorkspace, SessionUser, UserRole } from "../../auth/types";
 import { canAccessWorkspace } from "../../auth/permissions";
+import { canEditFlockScheduleRole } from "../../farm/scheduleAccess";
 import { isLaborerLocaleUser, useLaborerT } from "../../i18n/laborerI18n";
 import { LaborerLanguageToggle } from "../LaborerLanguageToggle";
 import { BrandLogo } from "../BrandLogo";
@@ -215,12 +216,14 @@ export function GlobalHeader({
           >
             {linkEarnings}
           </Link>
-          <Link
-            to="/farm/batch-schedule"
-            className="bounce-tap inline-flex min-h-[44px] items-center justify-center rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)]"
-          >
-            {batchCta}
-          </Link>
+          {canEditFlockScheduleRole(user.role) ? (
+            <Link
+              to="/farm/batch-schedule"
+              className="bounce-tap inline-flex min-h-[44px] items-center justify-center rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)]"
+            >
+              {batchCta}
+            </Link>
+          ) : null}
         </>
       ) : null}
     </>

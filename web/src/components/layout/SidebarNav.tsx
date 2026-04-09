@@ -113,6 +113,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
       "/farm/feed": "farm_feed",
       "/farm/mortality-log": "farm_mortality_log",
       "/farm/daily-log": "farm_daily_log",
+      "/farm/ops-reports": "farm_ops_reports",
       "/farm/mortality": "farm_mortality",
       "/farm/inventory": "farm_inventory",
     };

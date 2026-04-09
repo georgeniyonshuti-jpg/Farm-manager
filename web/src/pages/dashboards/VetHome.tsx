@@ -19,6 +19,7 @@ import {
 } from "../../lib/dashboardAdapters";
 import { BlockersStacked, FcrTargetBars, MortalityTrendLine, SimpleCategoryBars, TopRiskBars } from "../../components/dashboard/charts/OpsCharts";
 import type { ReactNode } from "react";
+import { canAccessPathByPageVisibility } from "../../auth/permissions";
 
 type TabItem = { to: string; label: string; end?: boolean; icon: ReactNode };
 
@@ -27,7 +28,7 @@ function tabIconClass(isActive: boolean): string {
 }
 
 export function VetHome() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const vetDash = useVetDashboardData(token);
   const [status, setStatus] = useState<CheckinStatus | null>(null);
   const [primaryFlockId, setPrimaryFlockId] = useState<string | null>(null);
@@ -62,6 +63,7 @@ export function VetHome() {
   const tabLog = useLaborerT("Log");
   const tabHistory = useLaborerT("History");
   const tabSchedule = useLaborerT("Schedule");
+  const tabReports = useLaborerT("Reports");
 
   const [bannerSummary, setBannerSummary] = useState<{
     anyOverdue: boolean;
@@ -179,78 +181,90 @@ export function VetHome() {
   const otherOverdueCount =
     status && bannerSummary?.anyOverdue ? Math.max(0, bannerSummary.overdueCount - 1) : 0;
 
-  const bottomNav: TabItem[] = [
-    {
-      to: "/dashboard/vet",
-      label: tabHome,
-      end: true,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" strokeLinejoin="round" />
-          <polyline points="9 22 9 12 15 12 15 22" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/checkin",
-      label: tabRounds,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <circle cx="12" cy="12" r="10" />
-          <path d="M12 6v6l4 2" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/mortality-log",
-      label: tabMort,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-          <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/feed",
-      label: tabFeed,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/daily-log",
-      label: tabLog,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/mortality",
-      label: tabHistory,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M3 3v18h18" strokeLinecap="round" />
-          <path d="M7 16l4-4 4 4 5-6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/batch-schedule",
-      label: tabSchedule,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-          <path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-  ];
+  const bottomNav = useMemo(() => {
+    const items: TabItem[] = [
+      {
+        to: "/dashboard/vet",
+        label: tabHome,
+        end: true,
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" strokeLinejoin="round" />
+            <polyline points="9 22 9 12 15 12 15 22" />
+          </svg>
+        ),
+      },
+      {
+        to: "/farm/checkin",
+        label: tabRounds,
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 6v6l4 2" strokeLinecap="round" />
+          </svg>
+        ),
+      },
+      {
+        to: "/farm/mortality-log",
+        label: tabMort,
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
+          </svg>
+        ),
+      },
+      {
+        to: "/farm/feed",
+        label: tabFeed,
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" strokeLinecap="round" />
+          </svg>
+        ),
+      },
+      {
+        to: "/farm/daily-log",
+        label: tabLog,
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" />
+          </svg>
+        ),
+      },
+      {
+        to: "/farm/mortality",
+        label: tabHistory,
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="M3 3v18h18" strokeLinecap="round" />
+            <path d="M7 16l4-4 4 4 5-6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        ),
+      },
+      {
+        to: "/farm/batch-schedule",
+        label: tabSchedule,
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+            <path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" />
+          </svg>
+        ),
+      },
+      {
+        to: "/farm/ops-reports",
+        label: tabReports,
+        icon: (
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="M4 19V5M4 19h16M4 19l3-6 4 3 5-8 4 5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        ),
+      },
+    ];
+    return user ? items.filter((item) => canAccessPathByPageVisibility(user, item.to)) : items;
+  }, [user, tabHome, tabRounds, tabMort, tabFeed, tabLog, tabHistory, tabSchedule, tabReports]);
   const vetFlocks = vetDash.data.opsBoard?.flocks ?? [];
   const treatmentStatusData = Object.entries(
     vetDash.data.treatmentRounds.reduce<Record<string, number>>((acc, r) => {
@@ -388,7 +402,7 @@ export function VetHome() {
         className="fixed inset-x-0 bottom-0 z-40 flex h-14 flex-col justify-center border-t border-[var(--border-color)] bg-white/95 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur sm:hidden"
         aria-label="Primary"
       >
-        <div className="grid h-full grid-cols-7 gap-0 px-1">
+        <div className="flex h-full items-stretch justify-around gap-0.5 px-0.5">
           {bottomNav.map((item) => (
             <NavLink
               key={item.to}
@@ -396,7 +410,7 @@ export function VetHome() {
               end={item.end}
               className={({ isActive }) =>
                 [
-                  "bounce-tap flex min-h-[44px] flex-col items-center justify-center gap-0.5 rounded-lg px-0.5 text-center",
+                  "bounce-tap flex min-h-[44px] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-0.5 text-center",
                   isActive ? "text-[var(--primary-color)]" : "text-neutral-600",
                 ].join(" ")
               }

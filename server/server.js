@@ -152,16 +152,33 @@ const PAGE_ACCESS_KEYS = [
   "cleva_credit_scoring",
   "admin_system_config",
   "admin_users",
+  "farm_ops_reports",
 ];
 const PAGE_ACCESS_KEY_SET = new Set(PAGE_ACCESS_KEYS);
 
-function normalizePageAccess(input, fallback) {
-  if (Array.isArray(input)) {
-    const out = input.map(String).filter((k) => PAGE_ACCESS_KEY_SET.has(k));
-    return [...new Set(out)];
+/** Role-based defaults when page_access is missing or empty in DB. */
+function defaultPageAccessForRole(role, departmentKeys = []) {
+  const dept = Array.isArray(departmentKeys) ? departmentKeys.map(String) : [];
+  const juniorVet = dept.includes("junior_vet");
+  let keys = PAGE_ACCESS_KEYS.filter((k) => k !== "farm_ops_reports");
+  if (role === "laborer" || role === "dispatcher" || (role === "vet" && juniorVet)) {
+    keys = keys.filter((k) => k !== "farm_daily_log");
   }
-  const raw = Array.isArray(fallback) ? fallback : PAGE_ACCESS_KEYS;
-  if (!Array.isArray(raw) || raw.length === 0) return [...PAGE_ACCESS_KEYS];
+  if (role === "vet_manager" || role === "manager" || role === "superuser") {
+    keys = [...keys, "farm_ops_reports"];
+  }
+  return keys;
+}
+
+function normalizePageAccess(input, fallback) {
+  const fb =
+    Array.isArray(fallback) && fallback.length > 0 ? fallback : [...PAGE_ACCESS_KEYS];
+  if (Array.isArray(input) && input.length > 0) {
+    const out = input.map(String).filter((k) => PAGE_ACCESS_KEY_SET.has(k));
+    const uniq = [...new Set(out)];
+    if (uniq.length > 0) return uniq;
+  }
+  const raw = fb;
   const out = raw.map(String).filter((k) => PAGE_ACCESS_KEY_SET.has(k));
   return out.length > 0 ? [...new Set(out)] : [...PAGE_ACCESS_KEYS];
 }
@@ -282,10 +299,12 @@ const mortalityRecentByKey = new Map();
 const MORTALITY_DEBOUNCE_MS = 5 * 60 * 1000;
 
 function upsertUser(u) {
+  const roleFallback = defaultPageAccessForRole(String(u.role ?? "laborer"), u.departmentKeys ?? []);
   if (!Array.isArray(u.pageAccess) || u.pageAccess.length === 0) {
-    u.pageAccess = [...PAGE_ACCESS_KEYS];
+    u.pageAccess = [...roleFallback];
   } else {
-    u.pageAccess = normalizePageAccess(u.pageAccess, PAGE_ACCESS_KEYS);
+    u.pageAccess = normalizePageAccess(u.pageAccess, roleFallback);
+    if (u.pageAccess.length === 0) u.pageAccess = [...roleFallback];
   }
   usersById.set(u.id, u);
   usersByEmail.set(u.email.toLowerCase(), u.id);
@@ -332,7 +351,15 @@ async function persistUserToDb(row) {
       row.businessUnitAccess,
       Boolean(row.canViewSensitiveFinancial),
       JSON.stringify(Array.isArray(row.departmentKeys) ? row.departmentKeys : []),
-      JSON.stringify(normalizePageAccess(row.pageAccess, PAGE_ACCESS_KEYS)),
+      JSON.stringify(
+        normalizePageAccess(
+          row.pageAccess,
+          defaultPageAccessForRole(
+            String(row.role ?? "laborer"),
+            Array.isArray(row.departmentKeys) ? row.departmentKeys : []
+          )
+        )
+      ),
     ]
   );
 }
@@ -365,7 +392,10 @@ async function syncUsersFromDbToMemory() {
       businessUnitAccess: String(row.businessUnitAccess ?? "farm"),
       canViewSensitiveFinancial: Boolean(row.canViewSensitiveFinancial),
       departmentKeys: parseStringArray(row.departmentKeys, []),
-      pageAccess: normalizePageAccess(parseStringArray(row.pageAccess, []), PAGE_ACCESS_KEYS),
+      pageAccess: normalizePageAccess(
+        parseStringArray(row.pageAccess, []),
+        defaultPageAccessForRole(String(row.role ?? "laborer"), parseStringArray(row.departmentKeys, []))
+      ),
     });
   }
   return result.rowCount ?? 0;
@@ -638,7 +668,7 @@ function requireAction(action, blockedByResolver = null) {
 
 function canEditCheckinSchedule(user) {
   if (!user) return false;
-  return ["superuser", "manager", "vet_manager", "vet"].includes(user.role);
+  return ["superuser", "manager", "vet_manager"].includes(user.role);
 }
 
 function requireCheckinScheduleEditor(req, res, next) {
@@ -1237,13 +1267,21 @@ async function syncFlockFeedEntriesFromDb() {
             recorded_at AS "recordedAt",
             feed_kg AS "feedKg",
             COALESCE(notes, '') AS notes,
-            entered_by_user_id::text AS "enteredByUserId"
+            entered_by_user_id::text AS "enteredByUserId",
+            feed_type AS "feedType",
+            feed_adequate AS "feedAdequate",
+            water_adequate AS "waterAdequate",
+            photo_urls AS "photoUrls"
        FROM flock_feed_entries
        ORDER BY recorded_at ASC`
   );
   flockFeedEntries.length = 0;
   for (const row of r.rows) {
     const ra = row.recordedAt;
+    let entryPhotos = [];
+    const pu = row.photoUrls;
+    if (Array.isArray(pu)) entryPhotos = pu.map(String);
+    else if (pu && typeof pu === "object") entryPhotos = Object.values(pu).map(String);
     flockFeedEntries.push({
       id: String(row.id),
       flockId: String(row.flockId),
@@ -1251,6 +1289,10 @@ async function syncFlockFeedEntriesFromDb() {
       feedKg: Number(row.feedKg) || 0,
       notes: String(row.notes ?? ""),
       enteredByUserId: String(row.enteredByUserId),
+      feedType: row.feedType != null ? String(row.feedType) : null,
+      feedAdequate: row.feedAdequate != null ? Boolean(row.feedAdequate) : null,
+      waterAdequate: row.waterAdequate != null ? Boolean(row.waterAdequate) : null,
+      photos: entryPhotos,
     });
   }
 }
@@ -1267,6 +1309,23 @@ function ymdFromPgDate(d) {
   return t.length >= 10 ? t.slice(0, 10) : t;
 }
 
+/** Report window: default last 7 days. Query: start_at, end_at (ISO), optional flock_id */
+function parseReportRangeQuery(req) {
+  const flockId = String(req.query.flock_id ?? "").trim() || null;
+  const startIso = parseOptionalIsoDate(req.query.start_at);
+  const endIso = parseOptionalIsoDate(req.query.end_at);
+  let endMs = endIso ? new Date(endIso).getTime() : Date.now();
+  let startMs = startIso ? new Date(startIso).getTime() : endMs - 7 * 86400000;
+  if (startMs > endMs) {
+    const t = startMs;
+    startMs = endMs;
+    endMs = t;
+  }
+  const startYmd = ymdFromPgDate(new Date(startMs));
+  const endYmd = ymdFromPgDate(new Date(endMs));
+  return { flockId, startMs, endMs, startYmd, endYmd };
+}
+
 async function syncCheckInsFromDb() {
   if (!hasDb()) return;
   const r = await dbQuery(
@@ -1279,7 +1338,9 @@ async function syncCheckInsFromDb() {
             feed_kg AS "feedKg",
             water_l AS "waterL",
             COALESCE(notes, '') AS notes,
-            mortality_at_checkin AS "mortalityAtCheckin"
+            mortality_at_checkin AS "mortalityAtCheckin",
+            feed_adequate AS "feedAdequate",
+            water_adequate AS "waterAdequate"
        FROM check_ins
        ORDER BY at ASC`
   );
@@ -1302,6 +1363,8 @@ async function syncCheckInsFromDb() {
       waterL: Number(row.waterL) || 0,
       notes: String(row.notes ?? ""),
       mortalityAtCheckin: Math.max(0, Number(row.mortalityAtCheckin) || 0),
+      feedAdequate: row.feedAdequate != null ? Boolean(row.feedAdequate) : null,
+      waterAdequate: row.waterAdequate != null ? Boolean(row.waterAdequate) : null,
     });
   }
 }
@@ -1491,6 +1554,20 @@ function normalizeBands(bands) {
     }))
     .sort((a, b) => a.untilDay - b.untilDay);
   return out.length ? out : null;
+}
+
+/** Custom bands: operational target ~2–3 rounds per day (8–12 h between rounds). Default age curve unchanged when bands null. */
+function validateCustomCheckinBands(bands) {
+  if (!bands || !bands.length) return null;
+  const minH = 8;
+  const maxH = 12;
+  for (const b of bands) {
+    const h = Number(b.intervalHours);
+    if (h < minH || h > maxH) {
+      return `Each custom check-in interval must be between ${minH} and ${maxH} hours (about 3–2 rounds per day). Found ${h}h before day ${b.untilDay}.`;
+    }
+  }
+  return null;
 }
 
 function intervalHoursForAge(ageDays, flock) {
@@ -2375,7 +2452,13 @@ app.patch("/api/flocks/:id/checkin-schedule", requireAuth, requireFarmAccess, re
   }
   const body = req.body ?? {};
   if (body.checkinBands !== undefined) {
-    f.checkinBands = normalizeBands(body.checkinBands);
+    const normalized = normalizeBands(body.checkinBands);
+    const bandErr = validateCustomCheckinBands(normalized);
+    if (bandErr) {
+      res.status(400).json({ error: bandErr });
+      return;
+    }
+    f.checkinBands = normalized;
   }
   if (body.photosRequiredPerRound !== undefined) {
     const n = Number(body.photosRequiredPerRound);
@@ -2418,10 +2501,14 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
     res.status(400).json({ error: `At least ${minPhotos} photo(s) required for this check-in` });
     return;
   }
-  const feedKg = Number(body.feedKg);
-  const waterL = Number(body.waterL);
+  const feedKg =
+    body.feedKg != null && Number.isFinite(Number(body.feedKg)) ? Math.max(0, Number(body.feedKg)) : 0;
+  const waterL =
+    body.waterL != null && Number.isFinite(Number(body.waterL)) ? Math.max(0, Number(body.waterL)) : 0;
   const notes = String(body.notes ?? "").slice(0, 4000);
   const mortalityAtCheckin = body.mortalityAtCheckin != null ? Math.max(0, Number(body.mortalityAtCheckin)) : 0;
+  const feedAdequate = Boolean(body.feedAdequate);
+  const waterAdequate = Boolean(body.waterAdequate);
 
   let id = `chk_${crypto.randomBytes(8).toString("hex")}`;
   const at = new Date().toISOString();
@@ -2432,16 +2519,18 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
     at,
     photos,
     photoUrl: photos[0] ?? null,
-    feedKg: Number.isFinite(feedKg) ? feedKg : 0,
-    waterL: Number.isFinite(waterL) ? waterL : 0,
+    feedKg,
+    waterL,
     notes,
     mortalityAtCheckin,
+    feedAdequate,
+    waterAdequate,
   };
   if (hasDb() && isPersistableUuid(f.id) && isPersistableUuid(req.authUser.id)) {
     try {
       const ins = await dbQuery(
-        `INSERT INTO check_ins (flock_id, laborer_id, at, photo_url, photo_urls, feed_kg, water_l, notes, mortality_at_checkin)
-         VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4, $5::jsonb, $6::numeric, $7::numeric, $8, $9)
+        `INSERT INTO check_ins (flock_id, laborer_id, at, photo_url, photo_urls, feed_kg, water_l, notes, mortality_at_checkin, feed_adequate, water_adequate)
+         VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4, $5::jsonb, $6::numeric, $7::numeric, $8, $9, $10, $11)
          RETURNING id::text AS id`,
         [
           f.id,
@@ -2453,6 +2542,8 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
           row.waterL,
           notes && notes.trim() ? notes.slice(0, 4000) : null,
           mortalityAtCheckin,
+          feedAdequate,
+          waterAdequate,
         ]
       );
       const rid = ins.rows[0]?.id;
@@ -2546,29 +2637,53 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid feed entry" });
     return;
   }
-  const { feedKg, notes } = parsed.data;
+  const { feedKg, notes, feedType, feedAdequate, waterAdequate, photos } = parsed.data;
+  const photoList = Array.isArray(photos)
+    ? photos.filter((p) => typeof p === "string" && p.length > 40)
+    : [];
+  const uploadErr = validateImageDataUrls(photoList);
+  if (uploadErr) {
+    res.status(400).json({ error: uploadErr });
+    return;
+  }
   let atIso = new Date().toISOString();
   const recRaw = parsed.data.recordedAt;
   if (recRaw) {
     const p = parseOptionalIsoDate(recRaw);
     if (p) atIso = p;
   }
+  const notesDb = notes && String(notes).trim() ? String(notes).slice(0, 4000) : null;
+  const ft = feedType && String(feedType).trim() ? String(feedType).trim().slice(0, 120) : null;
   let id = `ffe_${crypto.randomBytes(8).toString("hex")}`;
   const row = {
     id,
     flockId: f.id,
     recordedAt: atIso,
     feedKg,
-    notes: notes ?? "",
+    notes: notesDb ?? "",
     enteredByUserId: req.authUser.id,
+    feedType: ft,
+    feedAdequate: Boolean(feedAdequate),
+    waterAdequate: Boolean(waterAdequate),
+    photos: photoList,
   };
-  if (hasDb()) {
+  if (hasDb() && isPersistableUuid(f.id) && isPersistableUuid(req.authUser.id)) {
     try {
       const ins = await dbQuery(
-        `INSERT INTO flock_feed_entries (flock_id, recorded_at, feed_kg, notes, entered_by_user_id)
-         VALUES ($1::uuid, $2::timestamptz, $3::numeric, $4, $5::uuid)
+        `INSERT INTO flock_feed_entries (flock_id, recorded_at, feed_kg, notes, entered_by_user_id, feed_type, feed_adequate, water_adequate, photo_urls)
+         VALUES ($1::uuid, $2::timestamptz, $3::numeric, $4, $5::uuid, $6, $7, $8, $9::jsonb)
          RETURNING id::text AS id, recorded_at AS "recordedAt"`,
-        [f.id, atIso, feedKg, notes && String(notes).trim() ? String(notes).slice(0, 4000) : null, req.authUser.id]
+        [
+          f.id,
+          atIso,
+          feedKg,
+          notesDb,
+          req.authUser.id,
+          ft,
+          row.feedAdequate,
+          row.waterAdequate,
+          JSON.stringify(photoList),
+        ]
       );
       const r0 = ins.rows[0];
       id = String(r0?.id ?? id);
@@ -2596,7 +2711,16 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
   const summary = await buildFlockPerformanceSummary(f.id);
   res.json({
     ok: true,
-    entry: { id: row.id, recordedAt: row.recordedAt, feedKg: row.feedKg, notes: row.notes },
+    entry: {
+      id: row.id,
+      recordedAt: row.recordedAt,
+      feedKg: row.feedKg,
+      notes: row.notes,
+      feedType: row.feedType,
+      feedAdequate: row.feedAdequate,
+      waterAdequate: row.waterAdequate,
+      photos: row.photos,
+    },
     feedToDateKg: summary?.feedToDateKg ?? Number(totalFeedKgForFlock(f.id).toFixed(2)),
     payrollImpact,
     payrollSaved,
@@ -2620,6 +2744,10 @@ app.get("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requireP
       recordedAt: e.recordedAt,
       feedKg: e.feedKg,
       notes: e.notes,
+      feedType: e.feedType ?? null,
+      feedAdequate: e.feedAdequate ?? null,
+      waterAdequate: e.waterAdequate ?? null,
+      photos: Array.isArray(e.photos) ? e.photos : [],
     }));
   res.json({ entries: list, feedToDateKg: Number(totalFeedKgForFlock(flockId).toFixed(2)) });
 });
@@ -3435,6 +3563,319 @@ app.post("/api/weigh-ins/:flockId", requireAuth, requireFarmAccess, requirePageA
   }
 });
 
+app.get("/api/farm/ops-summary", requireAuth, requireFarmAccess, requireLeadVetUp, requirePageAccess("farm_ops_reports"), async (req, res) => {
+  const { flockId, startMs, endMs, startYmd, endYmd } = parseReportRangeQuery(req);
+  const win = { startAt: new Date(startMs).toISOString(), endAt: new Date(endMs).toISOString(), flockId };
+
+  if (!hasDb()) {
+    const inRange = (iso) => {
+      const t = new Date(iso).getTime();
+      return t >= startMs && t <= endMs;
+    };
+    const flockOk = (fid) => !flockId || String(fid) === flockId;
+    const roundCheckinsCount = roundCheckins.filter((c) => inRange(c.at) && flockOk(c.flockId)).length;
+    const feedEntriesCount = flockFeedEntries.filter((e) => inRange(e.recordedAt) && flockOk(e.flockId)).length;
+    const managerLogsCount = dailyLogs.filter((l) => {
+      const t = new Date(l.receivedAt ?? `${l.logDate}T12:00:00Z`).getTime();
+      return t >= startMs && t <= endMs && flockOk(l.flockId);
+    }).length;
+    const invCount = inventoryTransactions.filter((x) => {
+      const t = new Date(x.at).getTime();
+      return t >= startMs && t <= endMs && (!flockId || String(x.flockId) === flockId);
+    }).length;
+    let overdueFlockCount = 0;
+    for (const f of flocksById.values()) {
+      if (flockId && String(f.id) !== flockId) continue;
+      const st = checkinStatusPayload(f);
+      if (st.isOverdue) overdueFlockCount += 1;
+    }
+    return res.json({
+      window: win,
+      roundCheckins: roundCheckinsCount,
+      feedEntries: feedEntriesCount,
+      managerLogs: managerLogsCount,
+      inventoryTransactions: invCount,
+      overdueFlocks: overdueFlockCount,
+    });
+  }
+
+  try {
+    const fid = flockId && isPersistableUuid(flockId) ? flockId : null;
+    const r = await dbQuery(
+      `SELECT
+        (SELECT COUNT(*)::int FROM check_ins c
+          WHERE c.at >= $1::timestamptz AND c.at <= $2::timestamptz
+            AND ($3::uuid IS NULL OR c.flock_id = $3)) AS round_checkins,
+        (SELECT COUNT(*)::int FROM flock_feed_entries e
+          WHERE e.recorded_at >= $1::timestamptz AND e.recorded_at <= $2::timestamptz
+            AND ($3::uuid IS NULL OR e.flock_id = $3)) AS feed_entries,
+        (SELECT COUNT(*)::int FROM poultry_daily_logs d
+          WHERE COALESCE(d.submitted_at, d.created_at) >= $1::timestamptz
+            AND COALESCE(d.submitted_at, d.created_at) <= $2::timestamptz
+            AND ($3::uuid IS NULL OR d.flock_id = $3)) AS manager_logs,
+        (SELECT COUNT(*)::int FROM poultry_inventory_transactions t98
+          WHERE t98.transaction_date >= $4::date AND t98.transaction_date <= $5::date
+            AND ($3::uuid IS NULL OR t98.flock_id = $3)) AS inventory_tx`,
+      [new Date(startMs).toISOString(), new Date(endMs).toISOString(), fid, startYmd, endYmd]
+    );
+    const row = r.rows[0] ?? {};
+    let overdueFlockCount = 0;
+    for (const f of flocksById.values()) {
+      if (flockId && String(f.id) !== flockId) continue;
+      const st = checkinStatusPayload(f);
+      if (st.isOverdue) overdueFlockCount += 1;
+    }
+    res.json({
+      window: win,
+      roundCheckins: Number(row.round_checkins ?? 0),
+      feedEntries: Number(row.feed_entries ?? 0),
+      managerLogs: Number(row.manager_logs ?? 0),
+      inventoryTransactions: Number(row.inventory_tx ?? 0),
+      overdueFlocks: overdueFlockCount,
+    });
+  } catch (e) {
+    console.error("[ERROR]", "[api] GET /api/farm/ops-summary:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+  }
+});
+
+app.get("/api/reports/round-checkins.csv", requireAuth, requireFarmAccess, requireLeadVetUp, requirePageAccess("farm_ops_reports"), async (req, res) => {
+  const { flockId, startMs, endMs } = parseReportRangeQuery(req);
+  appendAudit(req.authUser.id, req.authUser.role, "report.export", "report", "round-checkins.csv", { flockId, ...req.query });
+  let rows = [];
+  if (hasDb()) {
+    try {
+      const fid = flockId && isPersistableUuid(flockId) ? flockId : null;
+      const r = await dbQuery(
+        `SELECT c.id::text AS id, c.flock_id::text AS "flockId", c.laborer_id::text AS "laborerId",
+                c.at AS at, c.feed_kg AS "feedKg", c.water_l AS "waterL",
+                c.feed_adequate AS "feedAdequate", c.water_adequate AS "waterAdequate",
+                COALESCE(c.notes, '') AS notes, c.mortality_at_checkin AS "mortalityAtCheckin",
+                COALESCE(c.photo_url, '') AS photoUrl
+           FROM check_ins c
+          WHERE c.at >= $1::timestamptz AND c.at <= $2::timestamptz
+            AND ($3::uuid IS NULL OR c.flock_id = $3)
+          ORDER BY c.at DESC`,
+        [new Date(startMs).toISOString(), new Date(endMs).toISOString(), fid]
+      );
+      rows = r.rows.map((x) => ({
+        ...x,
+        at: x.at instanceof Date ? x.at.toISOString() : String(x.at),
+      }));
+    } catch (e) {
+      console.error("[ERROR]", "[reports] round-checkins.csv:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+      return;
+    }
+  } else {
+    rows = roundCheckins
+      .filter((c) => {
+        const t = new Date(c.at).getTime();
+        return t >= startMs && t <= endMs && (!flockId || String(c.flockId) === flockId);
+      })
+      .sort((a, b) => (a.at < b.at ? 1 : -1))
+      .map((c) => ({
+        id: c.id,
+        flockId: c.flockId,
+        laborerId: c.laborerId,
+        at: c.at,
+        feedKg: c.feedKg,
+        waterL: c.waterL,
+        feedAdequate: c.feedAdequate,
+        waterAdequate: c.waterAdequate,
+        notes: c.notes,
+        mortalityAtCheckin: c.mortalityAtCheckin,
+        photoUrl: c.photoUrl ?? "",
+      }));
+  }
+  const csv = csvFromRows(
+    [
+      "id",
+      "flockId",
+      "laborerId",
+      "at",
+      "feedKg",
+      "waterL",
+      "feedAdequate",
+      "waterAdequate",
+      "mortalityAtCheckin",
+      "photoUrl",
+      "notes",
+    ],
+    rows
+  );
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", 'attachment; filename="round-checkins.csv"');
+  res.send(csv);
+});
+
+app.get("/api/reports/feed-entries.csv", requireAuth, requireFarmAccess, requireLeadVetUp, requirePageAccess("farm_ops_reports"), async (req, res) => {
+  const { flockId, startMs, endMs } = parseReportRangeQuery(req);
+  appendAudit(req.authUser.id, req.authUser.role, "report.export", "report", "feed-entries.csv", { flockId, ...req.query });
+  let rows = [];
+  if (hasDb()) {
+    try {
+      const fid = flockId && isPersistableUuid(flockId) ? flockId : null;
+      const r = await dbQuery(
+        `SELECT e.id::text AS id, e.flock_id::text AS "flockId", e.entered_by_user_id::text AS "enteredByUserId",
+                e.recorded_at AS "recordedAt", e.feed_kg AS "feedKg",
+                e.feed_type AS "feedType", e.feed_adequate AS "feedAdequate", e.water_adequate AS "waterAdequate",
+                COALESCE(e.notes, '') AS notes, e.photo_urls AS "photoUrls"
+           FROM flock_feed_entries e
+          WHERE e.recorded_at >= $1::timestamptz AND e.recorded_at <= $2::timestamptz
+            AND ($3::uuid IS NULL OR e.flock_id = $3)
+          ORDER BY e.recorded_at DESC`,
+        [new Date(startMs).toISOString(), new Date(endMs).toISOString(), fid]
+      );
+      rows = r.rows.map((x) => ({
+        id: x.id,
+        flockId: x.flockId,
+        enteredByUserId: x.enteredByUserId,
+        recordedAt: x.recordedAt instanceof Date ? x.recordedAt.toISOString() : String(x.recordedAt),
+        feedKg: x.feedKg,
+        feedType: x.feedType ?? "",
+        feedAdequate: x.feedAdequate,
+        waterAdequate: x.waterAdequate,
+        notes: x.notes,
+        photoCount: Array.isArray(x.photoUrls) ? x.photoUrls.length : typeof x.photoUrls === "object" && x.photoUrls ? Object.keys(x.photoUrls).length : 0,
+      }));
+    } catch (e) {
+      console.error("[ERROR]", "[reports] feed-entries.csv:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+      return;
+    }
+  } else {
+    rows = flockFeedEntries
+      .filter((e) => {
+        const t = new Date(e.recordedAt).getTime();
+        return t >= startMs && t <= endMs && (!flockId || String(e.flockId) === flockId);
+      })
+      .map((e) => ({
+        id: e.id,
+        flockId: e.flockId,
+        enteredByUserId: e.enteredByUserId,
+        recordedAt: e.recordedAt,
+        feedKg: e.feedKg,
+        feedType: e.feedType ?? "",
+        feedAdequate: e.feedAdequate,
+        waterAdequate: e.waterAdequate,
+        notes: e.notes,
+        photoCount: Array.isArray(e.photos) ? e.photos.length : 0,
+      }));
+  }
+  const csv = csvFromRows(
+    ["id", "flockId", "enteredByUserId", "recordedAt", "feedKg", "feedType", "feedAdequate", "waterAdequate", "photoCount", "notes"],
+    rows
+  );
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", 'attachment; filename="feed-entries.csv"');
+  res.send(csv);
+});
+
+app.get("/api/reports/daily-logs.csv", requireAuth, requireFarmAccess, requireLeadVetUp, requirePageAccess("farm_ops_reports"), async (req, res) => {
+  const { flockId, startMs, endMs } = parseReportRangeQuery(req);
+  appendAudit(req.authUser.id, req.authUser.role, "report.export", "report", "daily-logs.csv", { flockId, ...req.query });
+  let rows = [];
+  if (hasDb()) {
+    try {
+      const fid = flockId && isPersistableUuid(flockId) ? flockId : null;
+      const r = await dbQuery(
+        `SELECT d.id::text AS id, d.flock_id::text AS "flockId", d.laborer_id::text AS "enteredByUserId",
+                d.log_date::text AS "logDate", d.mortality, d.feed_intake_kg AS "feedIntakeKg",
+                d.water_liters AS "waterLiters", COALESCE(d.notes, '') AS notes,
+                COALESCE(d.submitted_at, d.created_at) AS "submittedAt"
+           FROM poultry_daily_logs d
+          WHERE COALESCE(d.submitted_at, d.created_at) >= $1::timestamptz
+            AND COALESCE(d.submitted_at, d.created_at) <= $2::timestamptz
+            AND ($3::uuid IS NULL OR d.flock_id = $3)
+          ORDER BY COALESCE(d.submitted_at, d.created_at) DESC`,
+        [new Date(startMs).toISOString(), new Date(endMs).toISOString(), fid]
+      );
+      rows = r.rows.map((x) => ({
+        ...x,
+        submittedAt: x.submittedAt instanceof Date ? x.submittedAt.toISOString() : String(x.submittedAt ?? ""),
+      }));
+    } catch (e) {
+      console.error("[ERROR]", "[reports] daily-logs.csv:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+      return;
+    }
+  } else {
+    rows = dailyLogs
+      .filter((l) => {
+        const t = new Date(l.receivedAt).getTime();
+        return t >= startMs && t <= endMs && (!flockId || String(l.flockId) === flockId);
+      })
+      .map((l) => ({
+        id: l.id,
+        flockId: l.flockId,
+        enteredByUserId: l.enteredByUserId,
+        logDate: l.logDate,
+        mortality: l.mortality,
+        feedIntakeKg: l.feedIntakeKg,
+        waterLiters: l.waterLiters,
+        notes: l.notes,
+        submittedAt: l.receivedAt,
+      }));
+  }
+  const csv = csvFromRows(
+    ["id", "flockId", "enteredByUserId", "logDate", "mortality", "feedIntakeKg", "waterLiters", "notes", "submittedAt"],
+    rows
+  );
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", 'attachment; filename="manager-daily-logs.csv"');
+  res.send(csv);
+});
+
+app.get("/api/reports/inventory-movements.csv", requireAuth, requireFarmAccess, requireLeadVetUp, requirePageAccess("farm_ops_reports"), async (req, res) => {
+  const { flockId, startMs, endMs, startYmd, endYmd } = parseReportRangeQuery(req);
+  appendAudit(req.authUser.id, req.authUser.role, "report.export", "report", "inventory-movements.csv", { flockId, ...req.query });
+  let rows = [];
+  if (hasDb()) {
+    try {
+      const fid = flockId && isPersistableUuid(flockId) ? flockId : null;
+      const r = await dbQuery(
+        `SELECT t.id::text AS id, t.flock_id::text AS "flockId", t.recorded_by::text AS "recordedBy",
+                t.item_type::text AS "itemType", t.quantity, t.unit, t.transaction_date::text AS "transactionDate",
+                COALESCE(t.notes, '') AS notes
+           FROM poultry_inventory_transactions t
+          WHERE t.transaction_date >= $1::date AND t.transaction_date <= $2::date
+            AND ($3::uuid IS NULL OR t.flock_id = $3)
+          ORDER BY t.transaction_date DESC, t.created_at DESC`,
+        [startYmd, endYmd, fid]
+      );
+      rows = r.rows;
+    } catch (e) {
+      console.error("[ERROR]", "[reports] inventory-movements.csv:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+      return;
+    }
+  } else {
+    rows = inventoryTransactions
+      .filter((x) => {
+        const t = new Date(x.at).getTime();
+        return t >= startMs && t <= endMs && (!flockId || String(x.flockId) === flockId);
+      })
+      .map((x) => ({
+        id: x.id,
+        flockId: x.flockId,
+        recordedBy: x.actorUserId,
+        itemType: x.type,
+        quantity: x.quantityKg,
+        unit: "kg",
+        transactionDate: String(x.at ?? "").slice(0, 10),
+        notes: x.reason ?? x.notes ?? "",
+      }));
+  }
+  const csv = csvFromRows(
+    ["id", "flockId", "recordedBy", "itemType", "quantity", "unit", "transactionDate", "notes"],
+    rows
+  );
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", 'attachment; filename="inventory-movements.csv"');
+  res.send(csv);
+});
+
 app.get("/api/reports/flock-performance.csv", requireAuth, requireFarmAccess, async (req, res) => {
   const flockId = String(req.query.flock_id ?? "").trim();
   if (!flockId || !flocksById.has(flockId)) {
@@ -3776,7 +4217,7 @@ function computeValidation(payload) {
   return { warnings, mortalityPct: pct };
 }
 
-app.post("/api/daily-logs/validate", requireAuth, requireFarmAccess, requirePageAccess("farm_daily_log"), requireAction("mortality.record"), (req, res) => {
+app.post("/api/daily-logs/validate", requireAuth, requireFarmAccess, requireLeadVetUp, requirePageAccess("farm_daily_log"), (req, res) => {
   // PROD-FIX: prevents malformed data and injection
   const parsed = dailyLogSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -3788,7 +4229,7 @@ app.post("/api/daily-logs/validate", requireAuth, requireFarmAccess, requirePage
   res.json({ warnings });
 });
 
-app.post("/api/daily-logs", requireAuth, requireFarmAccess, requirePageAccess("farm_daily_log"), requireAction("mortality.record"), async (req, res) => {
+app.post("/api/daily-logs", requireAuth, requireFarmAccess, requireLeadVetUp, requirePageAccess("farm_daily_log"), async (req, res) => {
   // PROD-FIX: prevents malformed data and injection
   const parsed = dailyLogSchema.safeParse(req.body ?? {});
   if (!parsed.success) {

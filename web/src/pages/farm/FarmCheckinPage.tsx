@@ -115,11 +115,11 @@ export function FarmCheckinPage() {
   const lblFlock = useLaborerT("Flock");
   const title = useLaborerT("Round check-in");
   const subtitle = useLaborerT(
-    "Photos required • feed & water • optional birds lost at this round"
+    "Photos required • mark feed & water adequacy • optional birds lost at this round"
   );
   const linkAction = useLaborerT("Action center");
-  const lblFeed = useLaborerT("Feed since last round (kg)");
-  const lblWater = useLaborerT("Water since last round (L)");
+  const lblFeedOk = useLaborerT("Feed adequate at this round");
+  const lblWaterOk = useLaborerT("Water adequate at this round");
   const lblMort = useLaborerT("Birds lost at this check-in (optional)");
   const lblNotes = useLaborerT("Notes");
   const phZero = useLaborerT("0");
@@ -147,8 +147,8 @@ export function FarmCheckinPage() {
     loadFlocks,
   } = useFlockFieldContext(token);
   const [photos, setPhotos] = useState<string[]>([]);
-  const [feedKg, setFeedKg] = useState("");
-  const [waterL, setWaterL] = useState("");
+  const [feedAdequate, setFeedAdequate] = useState(false);
+  const [waterAdequate, setWaterAdequate] = useState(false);
   const [mortalityAtCheckin, setMortalityAtCheckin] = useState("");
   const [notes, setNotes] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -178,8 +178,10 @@ export function FarmCheckinPage() {
         headers: jsonAuthHeaders(token),
         body: JSON.stringify({
           photos,
-          feedKg: feedKg === "" ? 0 : Number(feedKg),
-          waterL: waterL === "" ? 0 : Number(waterL),
+          feedAdequate,
+          waterAdequate,
+          feedKg: 0,
+          waterL: 0,
           mortalityAtCheckin: mortalityAtCheckin === "" ? 0 : Number(mortalityAtCheckin),
           notes,
         }),
@@ -191,8 +193,8 @@ export function FarmCheckinPage() {
         throw new Error(msg);
       }
       setPhotos([]);
-      setFeedKg("");
-      setWaterL("");
+      setFeedAdequate(false);
+      setWaterAdequate(false);
       setMortalityAtCheckin("");
       setNotes("");
       void loadDetails();
@@ -307,7 +309,7 @@ export function FarmCheckinPage() {
               to="/farm/feed"
               className="text-xs font-semibold text-emerald-800 underline hover:text-emerald-950"
             >
-              Log feed only (no photos)
+              Feed log (kg, type, adequacy)
             </Link>
           }
         />
@@ -326,30 +328,24 @@ export function FarmCheckinPage() {
           onPhotos={setPhotos}
         />
 
-        <div>
-          <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="feed">
-            {lblFeed}
-          </label>
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50/80 px-4 py-3">
           <input
-            id="feed"
-            inputMode="decimal"
-            className="w-full min-h-[48px] rounded-xl border border-neutral-300 px-4 text-lg"
-            value={feedKg}
-            onChange={(e) => setFeedKg(e.target.value)}
+            type="checkbox"
+            className="mt-1 h-5 w-5 shrink-0 rounded border-neutral-300"
+            checked={feedAdequate}
+            onChange={(e) => setFeedAdequate(e.target.checked)}
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="water">
-            {lblWater}
-          </label>
+          <span className="text-sm font-medium text-neutral-800">{lblFeedOk}</span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 bg-neutral-50/80 px-4 py-3">
           <input
-            id="water"
-            inputMode="decimal"
-            className="w-full min-h-[48px] rounded-xl border border-neutral-300 px-4 text-lg"
-            value={waterL}
-            onChange={(e) => setWaterL(e.target.value)}
+            type="checkbox"
+            className="mt-1 h-5 w-5 shrink-0 rounded border-neutral-300"
+            checked={waterAdequate}
+            onChange={(e) => setWaterAdequate(e.target.checked)}
           />
-        </div>
+          <span className="text-sm font-medium text-neutral-800">{lblWaterOk}</span>
+        </label>
         <div>
           <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="mort">
             {lblMort}
