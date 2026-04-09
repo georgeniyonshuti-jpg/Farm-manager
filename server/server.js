@@ -1,11 +1,10 @@
 import crypto from "node:crypto";
+import dns from "node:dns";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import cors from "cors";
 import express from "express";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import session from "express-session";
 import pgSession from "connect-pg-simple";
 import pg from "pg";
@@ -13,6 +12,9 @@ import { runMigrations } from "./migrate.js";
 import { checkinSchema, dailyLogSchema, feedEntrySchema, loginSchema } from "./utils/validation.js";
 import * as systemConfig from "./systemConfig.js";
 
+dns.setDefaultResultOrder("ipv4first");
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
@@ -80,10 +82,8 @@ app.use(cors({
 app.use(express.json({ limit: "20mb" }));
 app.set("trust proxy", 1); // required for Render
 app.use(session({
-  // PROD-FIX: persistent session store for multi-instance deployment
-  store: new PgStore({
-    conString: process.env.DATABASE_URL,
-  }),
+  // PROD-FIX: persistent session store for multi-instance deployment (reuse dbPool so IPv4 + ssl match migrate/main queries)
+  store: dbPool ? new PgStore({ pool: dbPool }) : new PgStore({ conString: process.env.DATABASE_URL }),
   // ENV: moved to environment variable
   secret: process.env.SESSION_SECRET,
   resave: false,
