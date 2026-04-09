@@ -1,11 +1,8 @@
-import dns from "node:dns";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-
-/** Prefer A records over AAAA — complements `family: 4` on hosts where dual-stack still picked IPv6 first. */
-dns.setDefaultResultOrder("ipv4first");
+import { pgClientConfigFromDatabaseUrlAsync } from "./pgConnFromUrl.js";
 
 const { Client } = pg;
 
@@ -31,12 +28,8 @@ async function runMigrationsOnce() {
     throw new Error("DATABASE_URL is required");
   }
 
-  /** Same as `server.js` db pool: force IPv4 — Render/many hosts cannot route IPv6 to managed Postgres (ENETUNREACH). */
-  const clientConfig = {
-    connectionString: databaseUrl,
-    ssl: { rejectUnauthorized: false },
-    family: 4,
-  };
+  /** Explicit IPv4 from DNS — `connectionString` + `family` still dialed IPv6 on Render (ENETUNREACH). */
+  const clientConfig = await pgClientConfigFromDatabaseUrlAsync(databaseUrl);
 
   const client = new Client(clientConfig);
   await client.connect();

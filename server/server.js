@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import dns from "node:dns";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,11 +7,10 @@ import express from "express";
 import session from "express-session";
 import pgSession from "connect-pg-simple";
 import pg from "pg";
+import { pgPoolConfigFromDatabaseUrl } from "./pgConnFromUrl.js";
 import { runMigrations } from "./migrate.js";
 import { checkinSchema, dailyLogSchema, feedEntrySchema, loginSchema } from "./utils/validation.js";
 import * as systemConfig from "./systemConfig.js";
-
-dns.setDefaultResultOrder("ipv4first");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -24,13 +22,7 @@ const DEMO_USERS_ENABLED = !IS_PRODUCTION || ENABLE_DEMO_USERS;
 const PEPPER = process.env.AUTH_PEPPER ?? "";
 const PgStore = pgSession(session);
 const { Pool } = pg;
-const dbPool = process.env.DATABASE_URL
-  ? new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: { rejectUnauthorized: false },
-      family: 4,
-    })
-  : null;
+const dbPool = process.env.DATABASE_URL ? new Pool(pgPoolConfigFromDatabaseUrl(process.env.DATABASE_URL)) : null;
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,
