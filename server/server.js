@@ -17,6 +17,7 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const ENABLE_DEMO_USERS = String(process.env.ENABLE_DEMO_USERS ?? "").toLowerCase() === "true";
+const DEMO_USERS_ENABLED = !IS_PRODUCTION || ENABLE_DEMO_USERS;
 // FIX: move hardcoded values to environment variables
 const PEPPER = process.env.AUTH_PEPPER ?? "";
 const PgStore = pgSession(session);
@@ -440,11 +441,11 @@ function seedUsers() {
 }
 
 function ensureDemoUsersForNonProd() {
-  if (IS_PRODUCTION && !ENABLE_DEMO_USERS) return;
+  if (!DEMO_USERS_ENABLED) return;
   seedUsers();
 }
 
-if (!IS_PRODUCTION) {
+if (DEMO_USERS_ENABLED) {
   ensureDemoUsersForNonProd();
 }
 
@@ -1671,7 +1672,7 @@ app.get("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_us
   if (hasDb()) {
     try {
       await syncUsersFromDbToMemory();
-      if (!IS_PRODUCTION) ensureDemoUsersForNonProd();
+      if (DEMO_USERS_ENABLED) ensureDemoUsersForNonProd();
     } catch (e) {
       console.error("[ERROR]", "[db] GET /api/users sync:", e instanceof Error ? e.message : e);
     }
@@ -4972,10 +4973,10 @@ app.use((err, _req, res, _next) => {
     }
     try {
       const loaded = await syncUsersFromDbToMemory();
-      if (!IS_PRODUCTION) {
+      if (DEMO_USERS_ENABLED) {
         ensureDemoUsersForNonProd();
       }
-      if (loaded === 0 && !IS_PRODUCTION) {
+      if (loaded === 0 && DEMO_USERS_ENABLED) {
         let seeded = 0;
         ensureDemoUsersForNonProd();
         for (const u of usersById.values()) {
@@ -4988,14 +4989,14 @@ app.use((err, _req, res, _next) => {
             }
           }
         }
-        console.log("[INFO]", `[startup] users seeded (non-prod fallback): ${seeded}`);
+        console.log("[INFO]", `[startup] users seeded (demo fallback): ${seeded}`);
       }
       console.log("[INFO]", `[startup] users loaded from db: ${loaded}, in-memory total: ${usersById.size}`);
     } catch (e) {
       console.error("[ERROR]", "[startup] user sync load:", e instanceof Error ? e.message : e);
-      if (!IS_PRODUCTION && usersById.size === 0) {
+      if (DEMO_USERS_ENABLED && usersById.size === 0) {
         ensureDemoUsersForNonProd();
-        console.log("[INFO]", `[startup] users seeded after sync error (non-prod): ${usersById.size}`);
+        console.log("[INFO]", `[startup] users seeded after sync error (demo mode): ${usersById.size}`);
       }
     }
     try {
