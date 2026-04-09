@@ -15,6 +15,7 @@ import * as systemConfig from "./systemConfig.js";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+const IS_PRODUCTION = process.env.NODE_ENV === "production";
 // FIX: move hardcoded values to environment variables
 const PEPPER = process.env.AUTH_PEPPER ?? "";
 const PgStore = pgSession(session);
@@ -211,6 +212,43 @@ let auditSeq = 0;
 /** @type {Array<{ id: string, at: string, actor_id: string, role: string, action: string, resource: string, resource_id: string | null, metadata?: object }>} */
 const auditEvents = [];
 
+async function persistAuditToDb(row) {
+  if (!hasDb()) return;
+  await dbQuery(
+    `INSERT INTO audit_events (
+      id, at, actor_id, role, action, resource, resource_id, metadata
+    )
+    VALUES (
+      $1, $2::timestamptz, $3::text, $4::text, $5::text, $6::text, $7::text, $8::jsonb
+    )
+    ON CONFLICT (id) DO NOTHING`,
+    [
+      String(row.id),
+      String(row.at),
+      row.actor_id != null ? String(row.actor_id) : null,
+      String(row.role ?? "unknown"),
+      String(row.action ?? ""),
+      String(row.resource ?? ""),
+      row.resource_id != null ? String(row.resource_id) : null,
+      JSON.stringify(row.metadata ?? {}),
+    ]
+  );
+}
+
+async function backfillAuditEventsToDb() {
+  if (!hasDb() || auditEvents.length === 0) return 0;
+  let inserted = 0;
+  for (const event of auditEvents) {
+    try {
+      await persistAuditToDb(event);
+      inserted += 1;
+    } catch (e) {
+      console.error("[ERROR]", "[startup] audit backfill row:", e instanceof Error ? e.message : e);
+    }
+  }
+  return inserted;
+}
+
 /**
  * FIX: audit payload shape { actor_id, role, action, resource, resource_id, timestamp } compatible
  */
@@ -229,6 +267,11 @@ function appendAudit(actorUserId, role, action, resource, resourceId, metadata) 
     metadata: metadata ?? {},
   };
   auditEvents.unshift(row);
+  if (hasDb()) {
+    persistAuditToDb(row).catch((e) => {
+      console.error("[ERROR]", "[db] audit insert:", e instanceof Error ? e.message : e);
+    });
+  }
   return row;
 }
 
@@ -244,6 +287,86 @@ function upsertUser(u) {
   }
   usersById.set(u.id, u);
   usersByEmail.set(u.email.toLowerCase(), u.id);
+}
+
+function parseStringArray(value, fallback = []) {
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
+async function persistUserToDb(row) {
+  if (!hasDb()) return;
+  await dbQuery(
+    `INSERT INTO users (
+      id, email, full_name, role, password_hash, business_unit_access,
+      can_view_sensitive_financial, department_keys, page_access
+    )
+    VALUES (
+      $1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb
+    )
+    ON CONFLICT (id) DO UPDATE SET
+      email = EXCLUDED.email,
+      full_name = EXCLUDED.full_name,
+      role = EXCLUDED.role,
+      password_hash = EXCLUDED.password_hash,
+      business_unit_access = EXCLUDED.business_unit_access,
+      can_view_sensitive_financial = EXCLUDED.can_view_sensitive_financial,
+      department_keys = EXCLUDED.department_keys,
+      page_access = EXCLUDED.page_access`,
+    [
+      row.id,
+      row.email,
+      row.displayName,
+      row.role,
+      row.passwordHash,
+      row.businessUnitAccess,
+      Boolean(row.canViewSensitiveFinancial),
+      JSON.stringify(Array.isArray(row.departmentKeys) ? row.departmentKeys : []),
+      JSON.stringify(normalizePageAccess(row.pageAccess, PAGE_ACCESS_KEYS)),
+    ]
+  );
+}
+
+async function syncUsersFromDbToMemory() {
+  if (!hasDb()) return 0;
+  const result = await dbQuery(
+    `SELECT
+      id::text AS id,
+      COALESCE(email, '') AS email,
+      COALESCE(full_name, email, 'User') AS "displayName",
+      COALESCE(role, 'laborer') AS role,
+      COALESCE(password_hash, '') AS "passwordHash",
+      COALESCE(business_unit_access, 'farm') AS "businessUnitAccess",
+      COALESCE(can_view_sensitive_financial, false) AS "canViewSensitiveFinancial",
+      COALESCE(department_keys, '[]'::jsonb) AS "departmentKeys",
+      COALESCE(page_access, '[]'::jsonb) AS "pageAccess"
+    FROM users
+    ORDER BY created_at ASC NULLS LAST`
+  );
+  usersById.clear();
+  usersByEmail.clear();
+  for (const row of result.rows) {
+    upsertUser({
+      id: String(row.id),
+      email: String(row.email).toLowerCase(),
+      displayName: String(row.displayName),
+      passwordHash: String(row.passwordHash ?? ""),
+      role: String(row.role ?? "laborer"),
+      businessUnitAccess: String(row.businessUnitAccess ?? "farm"),
+      canViewSensitiveFinancial: Boolean(row.canViewSensitiveFinancial),
+      departmentKeys: parseStringArray(row.departmentKeys, []),
+      pageAccess: normalizePageAccess(parseStringArray(row.pageAccess, []), PAGE_ACCESS_KEYS),
+    });
+  }
+  return result.rowCount ?? 0;
 }
 
 function updateUserRecord(existing, patch) {
@@ -315,7 +438,9 @@ function seedUsers() {
   seed.forEach(upsertUser);
 }
 
-seedUsers();
+if (!IS_PRODUCTION) {
+  seedUsers();
+}
 
 function newSessionId() {
   return crypto.randomBytes(32).toString("hex");
@@ -607,7 +732,9 @@ function seedLogScheduleDemo() {
     createdAt: new Date().toISOString(),
   });
 }
-seedLogScheduleDemo();
+if (!IS_PRODUCTION) {
+  seedLogScheduleDemo();
+}
 
 function isFieldPayrollViewer(user) {
   if (!user) return false;
@@ -1476,7 +1603,9 @@ function seedFlock() {
     photosRequiredPerRound: 1,
   });
 }
-seedFlock();
+if (!IS_PRODUCTION) {
+  seedFlock();
+}
 
 // FIX: add root and health endpoints
 app.get("/", (_req, res) => {
@@ -1532,11 +1661,22 @@ app.get("/api/auth/me", requireAuth, (req, res) => {
   res.json({ user: sanitizeUser(req.authUser) });
 });
 
-app.get("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_users"), (_req, res) => {
+app.get("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_users"), async (_req, res) => {
+  if (hasDb()) {
+    try {
+      await syncUsersFromDbToMemory();
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET /api/users sync:", e instanceof Error ? e.message : e);
+    }
+  }
   res.json({ users: [...usersById.values()].map(sanitizeUser) });
 });
 
-app.post("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_users"), (req, res) => {
+app.post("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_users"), async (req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
   const body = req.body ?? {};
   const email = String(body.email ?? "").trim().toLowerCase();
   const displayName = String(body.displayName ?? "").trim();
@@ -1562,7 +1702,7 @@ app.post("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_u
     return;
   }
 
-  const id = `usr_${crypto.randomBytes(6).toString("hex")}`;
+  const id = crypto.randomUUID();
   const row = {
     id,
     email,
@@ -1574,6 +1714,13 @@ app.post("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_u
     departmentKeys,
     pageAccess,
   };
+  try {
+    await persistUserToDb(row);
+  } catch (e) {
+    console.error("[ERROR]", "[db] POST /api/users:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+    return;
+  }
   upsertUser(row);
   appendAudit(req.authUser.id, req.authUser.role, "user.create", "user", id, {
     email,
@@ -1584,7 +1731,11 @@ app.post("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_u
   res.json({ user: sanitizeUser(row) });
 });
 
-app.put("/api/users/:id", requireAuth, requireSuperuser, requirePageAccess("admin_users"), (req, res) => {
+app.put("/api/users/:id", requireAuth, requireSuperuser, requirePageAccess("admin_users"), async (req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
   const id = String(req.params.id ?? "");
   const existing = usersById.get(id);
   if (!existing) {
@@ -1615,7 +1766,8 @@ app.put("/api/users/:id", requireAuth, requireSuperuser, requirePageAccess("admi
     return;
   }
   const password = body.password == null ? "" : String(body.password);
-  const updated = updateUserRecord(existing, {
+  const updatedDraft = {
+    ...existing,
     email,
     displayName,
     role,
@@ -1624,7 +1776,15 @@ app.put("/api/users/:id", requireAuth, requireSuperuser, requirePageAccess("admi
     departmentKeys,
     pageAccess,
     ...(password.trim() ? { passwordHash: hashPassword(password) } : {}),
-  });
+  };
+  try {
+    await persistUserToDb(updatedDraft);
+  } catch (e) {
+    console.error("[ERROR]", "[db] PUT /api/users/:id:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+    return;
+  }
+  const updated = updateUserRecord(existing, updatedDraft);
   appendAudit(req.authUser.id, req.authUser.role, "user.update", "user", id, {
     role,
     businessUnitAccess,
@@ -1633,7 +1793,11 @@ app.put("/api/users/:id", requireAuth, requireSuperuser, requirePageAccess("admi
   res.json({ user: sanitizeUser(updated) });
 });
 
-app.patch("/api/users/:id/page-access", requireAuth, requireSuperuser, requirePageAccess("admin_users"), (req, res) => {
+app.patch("/api/users/:id/page-access", requireAuth, requireSuperuser, requirePageAccess("admin_users"), async (req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
   const id = String(req.params.id ?? "");
   const existing = usersById.get(id);
   if (!existing) {
@@ -1642,6 +1806,17 @@ app.patch("/api/users/:id/page-access", requireAuth, requireSuperuser, requirePa
   }
   const body = req.body ?? {};
   const pageAccess = normalizePageAccess(body.pageAccess, existing.pageAccess ?? PAGE_ACCESS_KEYS);
+  const updatedDraft = {
+    ...existing,
+    pageAccess,
+  };
+  try {
+    await persistUserToDb(updatedDraft);
+  } catch (e) {
+    console.error("[ERROR]", "[db] PATCH /api/users/:id/page-access:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+    return;
+  }
   const updated = updateUserRecord(existing, { pageAccess });
   appendAudit(req.authUser.id, req.authUser.role, "user.page_access.update", "user", id, {
     pageAccessCount: pageAccess.length,
@@ -1649,11 +1824,53 @@ app.patch("/api/users/:id/page-access", requireAuth, requireSuperuser, requirePa
   res.json({ user: sanitizeUser(updated) });
 });
 
-app.get("/api/audit", requireAuth, requireSuperuser, (req, res) => {
+app.get("/api/audit", requireAuth, requireSuperuser, async (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
   const roleFilter = String(req.query.role ?? "").trim();
   const actionFilter = String(req.query.action ?? "").trim();
+
+  if (hasDb()) {
+    try {
+      const where = [];
+      const params = [];
+      let idx = 1;
+      if (roleFilter) {
+        where.push(`role = $${idx++}`);
+        params.push(roleFilter);
+      }
+      if (actionFilter) {
+        where.push(`action ILIKE $${idx++}`);
+        params.push(`%${actionFilter}%`);
+      }
+      const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+      const countRes = await dbQuery(`SELECT COUNT(*)::int AS total FROM audit_events ${whereSql}`, params);
+      const total = Number(countRes.rows?.[0]?.total ?? 0);
+      const start = (page - 1) * pageSize;
+      const rowsRes = await dbQuery(
+        `SELECT id, at, actor_id, role, action, resource, resource_id, metadata
+           FROM audit_events
+           ${whereSql}
+          ORDER BY at DESC
+          LIMIT $${idx++} OFFSET $${idx++}`,
+        [...params, pageSize, start]
+      );
+      const events = rowsRes.rows.map((r) => ({
+        id: String(r.id),
+        at: r.at instanceof Date ? r.at.toISOString() : String(r.at),
+        actor_id: r.actor_id == null ? null : String(r.actor_id),
+        role: String(r.role ?? "unknown"),
+        action: String(r.action ?? ""),
+        resource: String(r.resource ?? ""),
+        resource_id: r.resource_id == null ? null : String(r.resource_id),
+        metadata: r.metadata && typeof r.metadata === "object" ? r.metadata : {},
+      }));
+      res.json({ events, total, page, pageSize });
+      return;
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET /api/audit:", e instanceof Error ? e.message : e);
+    }
+  }
 
   let list = auditEvents;
   if (roleFilter) list = list.filter((e) => e.role === roleFilter);
@@ -1666,7 +1883,7 @@ app.get("/api/audit", requireAuth, requireSuperuser, (req, res) => {
 });
 
 /** FIX: explicit audit POST (actor must match session; superuser may supply any actor_id for tooling) */
-app.post("/api/audit", requireAuth, (req, res) => {
+app.post("/api/audit", requireAuth, async (req, res) => {
   const body = req.body ?? {};
   const actorId = String(body.actor_id ?? req.authUser.id);
   if (req.authUser.role !== "superuser" && actorId !== req.authUser.id) {
@@ -1696,6 +1913,15 @@ app.post("/api/audit", requireAuth, (req, res) => {
     metadata: {},
   };
   auditEvents.unshift(row);
+  if (hasDb()) {
+    try {
+      await persistAuditToDb(row);
+    } catch (e) {
+      console.error("[ERROR]", "[db] POST /api/audit:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+      return;
+    }
+  }
   res.status(201).json({ event: row });
 });
 
@@ -4736,6 +4962,39 @@ app.use((err, _req, res, _next) => {
       await systemConfig.refreshSystemConfigFromDatabase(dbQuery, hasDb);
     } catch (e) {
       console.error("[ERROR]", "[startup] system config load:", e instanceof Error ? e.message : e);
+    }
+    try {
+      const loaded = await syncUsersFromDbToMemory();
+      if (loaded === 0 && !IS_PRODUCTION) {
+        let seeded = 0;
+        seedUsers();
+        for (const u of usersById.values()) {
+          seeded += 1;
+          if (isPersistableUuid(String(u.id))) {
+            try {
+              await persistUserToDb(u);
+            } catch (e) {
+              console.error("[ERROR]", "[startup] user seed persist:", e instanceof Error ? e.message : e);
+            }
+          }
+        }
+        console.log("[INFO]", `[startup] users seeded (non-prod fallback): ${seeded}`);
+      }
+      console.log("[INFO]", `[startup] users loaded from db: ${loaded}, in-memory total: ${usersById.size}`);
+    } catch (e) {
+      console.error("[ERROR]", "[startup] user sync load:", e instanceof Error ? e.message : e);
+      if (!IS_PRODUCTION && usersById.size === 0) {
+        seedUsers();
+        console.log("[INFO]", `[startup] users seeded after sync error (non-prod): ${usersById.size}`);
+      }
+    }
+    try {
+      const backfilled = await backfillAuditEventsToDb();
+      if (backfilled > 0) {
+        console.log("[INFO]", `[startup] audit backfill complete: ${backfilled}`);
+      }
+    } catch (e) {
+      console.error("[ERROR]", "[startup] audit backfill:", e instanceof Error ? e.message : e);
     }
   }
   app.listen(PORT, () => {
