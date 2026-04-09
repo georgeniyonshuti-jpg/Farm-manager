@@ -33,6 +33,7 @@ import { LaborerEarningsPage } from "./pages/laborer/LaborerEarningsPage";
 import { ToastProvider } from "./components/Toast";
 import { VersionBadge } from "./components/VersionBadge";
 import { SystemStatus } from "./components/SystemStatus";
+import { InstallPromptBanner } from "./components/pwa/InstallPromptBanner";
 import { FarmTreatmentPage } from "./pages/farm/FarmTreatmentPage";
 import { FarmSlaughterPage } from "./pages/farm/FarmSlaughterPage";
 import { FARM_FIELD_OPS_ROLES } from "./auth/permissions";
@@ -246,6 +247,7 @@ export default function App() {
         </Routes>
         <VersionBadge />
         <SystemStatus />
+        <InstallPromptBanner />
         </ToastProvider>
         </LaborerI18nProvider>
       </AuthProvider>
