@@ -16,6 +16,7 @@ import * as systemConfig from "./systemConfig.js";
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+const ENABLE_DEMO_USERS = String(process.env.ENABLE_DEMO_USERS ?? "").toLowerCase() === "true";
 // FIX: move hardcoded values to environment variables
 const PEPPER = process.env.AUTH_PEPPER ?? "";
 const PgStore = pgSession(session);
@@ -439,7 +440,7 @@ function seedUsers() {
 }
 
 function ensureDemoUsersForNonProd() {
-  if (IS_PRODUCTION) return;
+  if (IS_PRODUCTION && !ENABLE_DEMO_USERS) return;
   seedUsers();
 }
 
