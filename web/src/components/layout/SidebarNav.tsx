@@ -136,7 +136,7 @@ export function SidebarNav({ onNavigate }: Props) {
         <button
           type="button"
           onClick={() => toggleGroup(id)}
-          className="bounce-tap flex w-full items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wide text-neutral-600"
+          className="bounce-tap flex w-full items-center justify-between px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500"
         >
           <span>{title}</span>
           <span aria-hidden>{isOpen ? "−" : "+"}</span>
@@ -151,10 +151,10 @@ export function SidebarNav({ onNavigate }: Props) {
                 onClick={onNavigate}
                 className={({ isActive }) =>
                   [
-                    "bounce-tap rounded-lg px-3 py-2 text-sm font-medium",
+                    "bounce-tap flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-medium",
                     isActive
-                      ? "bg-[var(--primary-color)] text-white"
-                      : "text-neutral-800 hover:bg-[var(--primary-color-soft)]",
+                      ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
+                      : "border-l-transparent text-neutral-800 hover:bg-[var(--primary-color-soft)]",
                   ].join(" ")
                 }
               >
@@ -168,21 +168,21 @@ export function SidebarNav({ onNavigate }: Props) {
   }
 
   return (
-    <aside className="w-full border-b border-neutral-200 bg-neutral-50 sm:w-[18rem] sm:border-b-0 sm:border-r">
-      <div className="p-4 sm:p-5">
-        <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+    <aside className="w-full border-b border-neutral-200 bg-neutral-50 md:h-full md:w-[240px] md:border-b-0 md:border-r">
+      <div className="p-4 md:p-5">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500">
           {activeWorkspace === "farm" ? farmSectionTitle : clevaSectionTitle}
         </p>
-        <nav className="mt-4 flex flex-col gap-2.5 sm:flex-col">
+        <nav className="mt-4 flex flex-col gap-2.5 pb-20 md:pb-0">
           <NavLink
             to={dashLink.to}
             onClick={onNavigate}
             className={({ isActive }) =>
               [
-                "rounded-lg px-3 py-2 text-sm font-medium",
+                "flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-medium",
                 isActive
-                  ? "bg-emerald-800 text-white"
-                  : "text-neutral-800 hover:bg-neutral-200/80",
+                  ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
+                  : "border-l-transparent text-neutral-800 hover:bg-neutral-200/80",
               ].join(" ")
             }
           >
@@ -203,10 +203,10 @@ export function SidebarNav({ onNavigate }: Props) {
                 onClick={onNavigate}
                 className={({ isActive }) =>
                   [
-                    "bounce-tap rounded-lg px-3 py-2 text-sm font-medium",
+                    "bounce-tap flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-medium",
                     isActive
-                      ? "bg-[var(--primary-color)] text-white"
-                      : "text-neutral-800 hover:bg-[var(--primary-color-soft)]",
+                      ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
+                      : "border-l-transparent text-neutral-800 hover:bg-[var(--primary-color-soft)]",
                   ].join(" ")
                 }
               >
@@ -220,10 +220,10 @@ export function SidebarNav({ onNavigate }: Props) {
               onClick={onNavigate}
               className={({ isActive }) =>
                 [
-                  "mt-2 rounded-lg px-3 py-2 text-sm font-medium",
+                  "mt-2 flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-medium",
                   isActive
-                    ? "bg-neutral-900 text-white"
-                    : "border border-dashed border-neutral-300 text-neutral-800 hover:bg-neutral-200/80",
+                    ? "border-l-neutral-900 bg-neutral-900 text-white"
+                    : "border border-dashed border-neutral-300 border-l-transparent text-neutral-800 hover:bg-neutral-200/80",
                 ].join(" ")
               }
             >

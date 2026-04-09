@@ -601,7 +601,13 @@ async function updatePayrollImpactAutoFieldsDb(row) {
       [row.id, row.logId, row.logType, row.rwfDelta, row.reason, row.submittedAt, row.onTime, fUuid]
     );
   } catch (e) {
-    console.error("[ERROR]", "[db] payroll_impact UPDATE (auto):", e instanceof Error ? e.message : e);
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn("[WARN] PAYROLL PERSISTENCE FAILED — payroll_impact UPDATE (auto)", {
+      payrollImpactId: row.id,
+      message: msg,
+    });
+    console.error("[ERROR]", "[db] payroll_impact UPDATE (auto):", msg);
+    throw e;
   }
 }
 
@@ -656,13 +662,16 @@ async function createPayrollEntry({
         [userId, logId, logType, rwfDelta, reason, ymd, ymd, submittedAtIso, onTime, fUuid]
       );
       const r0 = ins.rows[0];
-      if (r0?.id) {
-        row.id = String(r0.id);
-        const ca = r0.createdAt;
-        if (ca) row.createdAt = ca instanceof Date ? ca.toISOString() : String(ca);
+      if (!r0?.id) {
+        throw new Error("payroll_impact INSERT returned no row id");
       }
+      row.id = String(r0.id);
+      const ca = r0.createdAt;
+      if (ca) row.createdAt = ca instanceof Date ? ca.toISOString() : String(ca);
     } catch (e) {
-      console.error("[ERROR]", "[db] payroll_impact INSERT:", e instanceof Error ? e.message : e);
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[ERROR]", "[db] payroll_impact INSERT:", msg);
+      throw new Error(msg);
     }
   }
   payrollImpacts.unshift(row);
@@ -676,22 +685,27 @@ async function createPayrollEntry({
   return row;
 }
 
+/**
+ * @returns {{ payrollImpact: object | null, payrollSaved: boolean }}
+ */
 async function maybeAutoPayrollForSubmit(reqUser, flockId, logType, logId, submittedAtIso) {
-  if (logType !== "check_in" && logType !== "feed_entry") return null;
+  if (logType !== "check_in" && logType !== "feed_entry") {
+    return { payrollImpact: null, payrollSaved: true };
+  }
   const scheds = logSchedules.filter((s) => s.flockId === flockId && s.role === reqUser.role);
-  if (!scheds.length) return null;
+  if (!scheds.length) return { payrollImpact: null, payrollSaved: true };
   const rates = systemConfig.getFieldPayrollRates();
   const bucket = logType;
   const creditRwf = bucket === "check_in" ? rates.checkInRwf : rates.feedRwf;
   const s = scheds[0];
   const ymd = kigaliYmd(new Date(submittedAtIso));
   const onTime = isSubmissionWithinPayrollWindow(submittedAtIso, s.windowOpen, s.windowClose);
-  if (!onTime) return null;
+  if (!onTime) return { payrollImpact: null, payrollSaved: true };
 
   const reason = "On-time: submission within payroll window";
   const existing = findFieldDayPayrollRow(reqUser.id, flockId, ymd, bucket);
   if (existing) {
-    if (existing.onTime && existing.rwfDelta > 0) return existing;
+    if (existing.onTime && existing.rwfDelta > 0) return { payrollImpact: existing, payrollSaved: true };
     if (creditRwf > 0) {
       existing.logId = logId;
       existing.logType = logType;
@@ -706,23 +720,36 @@ async function maybeAutoPayrollForSubmit(reqUser, flockId, logType, logId, submi
         flockId,
         rwfDelta: creditRwf,
       });
-      await updatePayrollImpactAutoFieldsDb(existing);
-      return existing;
+      try {
+        await updatePayrollImpactAutoFieldsDb(existing);
+        return { payrollImpact: existing, payrollSaved: true };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn(`PAYROLL PERSISTENCE FAILED for user ${reqUser.id}: ${msg}`);
+        return { payrollImpact: existing, payrollSaved: false };
+      }
     }
-    return existing;
+    return { payrollImpact: existing, payrollSaved: true };
   }
 
-  if (creditRwf <= 0) return null;
-  return createPayrollEntry({
-    userId: reqUser.id,
-    logId,
-    logType,
-    submittedAtIso,
-    flockId,
-    onTime,
-    rwfDelta: creditRwf,
-    reason,
-  });
+  if (creditRwf <= 0) return { payrollImpact: null, payrollSaved: true };
+  try {
+    const row = await createPayrollEntry({
+      userId: reqUser.id,
+      logId,
+      logType,
+      submittedAtIso,
+      flockId,
+      onTime,
+      rwfDelta: creditRwf,
+      reason,
+    });
+    return { payrollImpact: row, payrollSaved: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.warn(`PAYROLL PERSISTENCE FAILED for user ${reqUser.id}: ${msg}`);
+    return { payrollImpact: null, payrollSaved: false };
+  }
 }
 
 function canLogTreatments(user) {
@@ -844,18 +871,23 @@ async function runMissedPayrollScan() {
         if (!hasCheckinInWindowForUserOnDay(u.id, sched.flockId, ymd, sched)) {
           if (!hasPayrollFieldCreditForBucket(u.id, sched.flockId, ymd, "check_in")) {
             if (!hasMissedFieldPayroll(u.id, sched.flockId, ymd, "check_in")) {
-              payrollMissedKeys.add(missCheckinKey);
               if (missCheck !== 0) {
-                await createPayrollEntry({
-                  userId: u.id,
-                  logId: `missed_checkin_${sched.id}_${ymd}`,
-                  logType: "check_in",
-                  submittedAtIso: now.toISOString(),
-                  flockId: sched.flockId,
-                  onTime: false,
-                  rwfDelta: missCheck,
-                  reason: "Missed: no round check-in in payroll window",
-                });
+                try {
+                  await createPayrollEntry({
+                    userId: u.id,
+                    logId: `missed_checkin_${sched.id}_${ymd}`,
+                    logType: "check_in",
+                    submittedAtIso: now.toISOString(),
+                    flockId: sched.flockId,
+                    onTime: false,
+                    rwfDelta: missCheck,
+                    reason: "Missed: no round check-in in payroll window",
+                  });
+                  payrollMissedKeys.add(missCheckinKey);
+                } catch (e) {
+                  const msg = e instanceof Error ? e.message : String(e);
+                  console.warn(`PAYROLL PERSISTENCE FAILED for user ${u.id}: ${msg}`);
+                }
               }
             }
           }
@@ -867,18 +899,23 @@ async function runMissedPayrollScan() {
         if (!hasFeedInWindowForUserOnDay(u.id, sched.flockId, ymd, sched)) {
           if (!hasPayrollFieldCreditForBucket(u.id, sched.flockId, ymd, "feed_entry")) {
             if (!hasMissedFieldPayroll(u.id, sched.flockId, ymd, "feed_entry")) {
-              payrollMissedKeys.add(missFeedKey);
               if (missFeed !== 0) {
-                await createPayrollEntry({
-                  userId: u.id,
-                  logId: `missed_feed_${sched.id}_${ymd}`,
-                  logType: "feed_entry",
-                  submittedAtIso: now.toISOString(),
-                  flockId: sched.flockId,
-                  onTime: false,
-                  rwfDelta: missFeed,
-                  reason: "Missed: no feed entry in payroll window",
-                });
+                try {
+                  await createPayrollEntry({
+                    userId: u.id,
+                    logId: `missed_feed_${sched.id}_${ymd}`,
+                    logType: "feed_entry",
+                    submittedAtIso: now.toISOString(),
+                    flockId: sched.flockId,
+                    onTime: false,
+                    rwfDelta: missFeed,
+                    reason: "Missed: no feed entry in payroll window",
+                  });
+                  payrollMissedKeys.add(missFeedKey);
+                } catch (e) {
+                  const msg = e instanceof Error ? e.message : String(e);
+                  console.warn(`PAYROLL PERSISTENCE FAILED for user ${u.id}: ${msg}`);
+                }
               }
             }
           }
@@ -1079,6 +1116,62 @@ async function syncMortalityEventsFromDb() {
       notes: String(row.notes ?? ""),
       linkedCheckinId: row.linkedCheckinId != null ? String(row.linkedCheckinId) : null,
       source: String(row.source ?? "adhoc"),
+    });
+  }
+}
+
+async function syncDailyLogsFromDb() {
+  if (!hasDb()) return;
+  const r = await dbQuery(
+    `SELECT id::text AS id,
+            flock_id::text AS "flockId",
+            laborer_id::text AS "enteredByUserId",
+            log_date::text AS "logDate",
+            mortality,
+            feed_intake_kg AS "feedIntakeKg",
+            water_liters AS "waterLiters",
+            temp_min_c AS "tempMinC",
+            temp_max_c AS "tempMaxC",
+            avg_weight_sample_kg AS "avgWeightSampleKg",
+            COALESCE(notes, '') AS notes,
+            mortality_pct_of_initial AS "mortalityPct",
+            flagged_high_mortality AS "flaggedHighMortality",
+            validation_status::text AS "validationStatus",
+            submitted_at AS "submittedAt",
+            created_at AS "createdAt"
+       FROM poultry_daily_logs
+       ORDER BY log_date ASC, created_at ASC`
+  );
+  dailyLogs.length = 0;
+  for (const row of r.rows) {
+    const pct = row.mortalityPct != null ? Number(row.mortalityPct) : 0;
+    const warnings = [];
+    if (pct >= 0.5) {
+      warnings.push(`Mortality is ${pct.toFixed(2)}% of initial flock (≥ 0.5%).`);
+    }
+    if (pct >= 2) {
+      warnings.push("Very high single-day mortality — would require vet manager approval in production.");
+    }
+    const validation = { warnings, mortalityPct: pct };
+    const sa = row.submittedAt;
+    const receivedAt =
+      sa instanceof Date ? sa.toISOString() : sa != null ? String(sa) : new Date().toISOString();
+    dailyLogs.push({
+      id: String(row.id),
+      flockId: String(row.flockId),
+      logDate: String(row.logDate).slice(0, 10),
+      mortality: Math.max(0, Number(row.mortality) || 0),
+      feedIntakeKg: Number(row.feedIntakeKg) || 0,
+      waterLiters: Number(row.waterLiters) || 0,
+      tempMinC: row.tempMinC != null ? Number(row.tempMinC) : null,
+      tempMaxC: row.tempMaxC != null ? Number(row.tempMaxC) : null,
+      avgWeightSampleKg: row.avgWeightSampleKg != null ? Number(row.avgWeightSampleKg) : null,
+      notes: String(row.notes ?? ""),
+      receivedAt,
+      validation,
+      enteredByUserId: String(row.enteredByUserId),
+      flaggedHighMortality: Boolean(row.flaggedHighMortality),
+      validationStatus: row.validationStatus != null ? String(row.validationStatus) : "draft",
     });
   }
 }
@@ -1645,6 +1738,11 @@ async function syncFlocksFromDbToMemory() {
     console.error("[ERROR]", "[db] syncMortalityEventsFromDb:", e instanceof Error ? e.message : e);
   }
   try {
+    await syncDailyLogsFromDb();
+  } catch (e) {
+    console.error("[ERROR]", "[db] syncDailyLogsFromDb:", e instanceof Error ? e.message : e);
+  }
+  try {
     await syncPayrollImpactsFromDb();
   } catch (e) {
     console.error("[ERROR]", "[db] syncPayrollImpactsFromDb:", e instanceof Error ? e.message : e);
@@ -1936,7 +2034,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, async
     }
   }
   roundCheckins.push(row);
-  const payrollImpact = await maybeAutoPayrollForSubmit(req.authUser, f.id, "check_in", id, at);
+  const { payrollImpact, payrollSaved } = await maybeAutoPayrollForSubmit(req.authUser, f.id, "check_in", id, at);
   appendAudit(req.authUser.id, req.authUser.role, "farm.round_checkin.create", "flock", f.id, {
     checkinId: id,
     photoCount: photos.length,
@@ -1999,6 +2097,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, async
     flockDay: flockAgeDays(f, new Date(at)),
     status: statusOut,
     payrollImpact,
+    payrollSaved,
   });
 });
 
@@ -2050,7 +2149,13 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
     }
   }
   flockFeedEntries.push(row);
-  const payrollImpact = await maybeAutoPayrollForSubmit(req.authUser, f.id, "feed_entry", id, row.recordedAt);
+  const { payrollImpact, payrollSaved } = await maybeAutoPayrollForSubmit(
+    req.authUser,
+    f.id,
+    "feed_entry",
+    id,
+    row.recordedAt,
+  );
   appendAudit(req.authUser.id, req.authUser.role, "farm.feed_entry.create", "flock", f.id, {
     feedEntryId: row.id,
     feedKg,
@@ -2061,6 +2166,7 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
     entry: { id: row.id, recordedAt: row.recordedAt, feedKg: row.feedKg, notes: row.notes },
     feedToDateKg: summary?.feedToDateKg ?? Number(totalFeedKgForFlock(f.id).toFixed(2)),
     payrollImpact,
+    payrollSaved,
   });
 });
 
@@ -3262,8 +3368,70 @@ app.post("/api/daily-logs", requireAuth, async (req, res) => {
     return;
   }
   const validation = computeValidation(payload);
-  const dlId = `dl_${crypto.randomBytes(6).toString("hex")}`;
+  const mortalityPct = Number(validation.mortalityPct) || 0;
+  const flaggedHighMortality = mortalityPct >= 0.5;
+  const validationStatus = mortalityPct >= 2 ? "vet_approval_required" : "draft";
+  const mortalityN = Math.max(0, Number(payload.mortality) || 0);
+  const feedIntakeKg = Number.isFinite(Number(payload.feedIntakeKg)) ? Math.max(0, Number(payload.feedIntakeKg)) : 0;
+  const waterLiters = Number.isFinite(Number(payload.waterLiters)) ? Math.max(0, Number(payload.waterLiters)) : 0;
+  const tempMinC =
+    payload.tempMinC != null && payload.tempMinC !== "" ? Number(payload.tempMinC) : null;
+  const tempMaxC =
+    payload.tempMaxC != null && payload.tempMaxC !== "" ? Number(payload.tempMaxC) : null;
+  const avgWeightSampleKg =
+    payload.avgWeightSampleKg != null && payload.avgWeightSampleKg !== ""
+      ? Number(payload.avgWeightSampleKg)
+      : null;
+  const notesRaw = String(payload.notes ?? "").slice(0, 4000);
+  const notesDb = notesRaw.trim() ? notesRaw : null;
+  const logDateStr = String(payload.logDate).slice(0, 10);
+  let dlId = `dl_${crypto.randomBytes(6).toString("hex")}`;
   const receivedAt = new Date().toISOString();
+
+  if (hasDb() && isPersistableUuid(String(payload.flockId)) && isPersistableUuid(req.authUser.id)) {
+    try {
+      const ins = await dbQuery(
+        `INSERT INTO poultry_daily_logs (
+           flock_id, laborer_id, log_date, mortality, feed_intake_kg, water_liters,
+           temp_min_c, temp_max_c, avg_weight_sample_kg, notes,
+           validation_status, mortality_pct_of_initial, flagged_high_mortality,
+           submitted_at
+         )
+         VALUES (
+           $1::uuid, $2::uuid, $3::date, $4, $5::numeric, $6::numeric,
+           $7::numeric, $8::numeric, $9::numeric, $10,
+           $11::poultry_daily_log_validation_status, $12::numeric, $13, $14::timestamptz
+         )
+         RETURNING id::text AS id`,
+        [
+          payload.flockId,
+          req.authUser.id,
+          logDateStr,
+          mortalityN,
+          feedIntakeKg,
+          waterLiters,
+          tempMinC != null && Number.isFinite(tempMinC) ? tempMinC : null,
+          tempMaxC != null && Number.isFinite(tempMaxC) ? tempMaxC : null,
+          avgWeightSampleKg != null && Number.isFinite(avgWeightSampleKg) ? avgWeightSampleKg : null,
+          notesDb,
+          validationStatus,
+          mortalityPct,
+          flaggedHighMortality,
+          receivedAt,
+        ]
+      );
+      const rid = ins.rows[0]?.id;
+      if (!rid) {
+        throw new Error("poultry_daily_logs INSERT returned no id");
+      }
+      dlId = String(rid);
+    } catch (e) {
+      console.error("[ERROR]", "[db] POST daily-logs:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not save daily log." });
+      return;
+    }
+  }
+
   const record = {
     id: dlId,
     ...payload,
