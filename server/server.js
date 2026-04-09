@@ -13,13 +13,23 @@ import { runMigrations } from "./migrate.js";
 import { checkinSchema, dailyLogSchema, feedEntrySchema, loginSchema } from "./utils/validation.js";
 import * as systemConfig from "./systemConfig.js";
 
-// PROD-FIX: run migrations on boot without crashing API startup on failure
+// PROD-FIX: run migrations on boot; fail hard in production if migrations fail
 runMigrations().then((result) => {
-  if (result.ok) console.log("[INFO]", "[startup] migrations complete");
-  else console.error("[ERROR]", "[startup] migrations complete with failures:", result.failedCount);
+  if (result.ok) {
+    console.log("[INFO]", "[startup] migrations complete");
+    return;
+  }
+  console.error("[ERROR]", "[startup] migrations complete with failures:", result.failedCount);
+  if (process.env.NODE_ENV === "production") {
+    console.error("[ERROR]", "[startup] refusing to continue in production with failed migrations");
+    process.exit(1);
+  }
 }).catch(err => {
   console.error("[ERROR]", "[startup] migration error:", err.message);
-  // Don't crash the server if migrations fail
+  if (process.env.NODE_ENV === "production") {
+    console.error("[ERROR]", "[startup] refusing to continue in production after migration error");
+    process.exit(1);
+  }
 });
 
 const app = express();
@@ -170,6 +180,25 @@ function normalizePageAccess(input, fallback) {
   if (!Array.isArray(raw) || raw.length === 0) return [...PAGE_ACCESS_KEYS];
   const out = raw.map(String).filter((k) => PAGE_ACCESS_KEY_SET.has(k));
   return out.length > 0 ? [...new Set(out)] : [...PAGE_ACCESS_KEYS];
+}
+
+function hasUserPageAccess(user, key) {
+  if (!user) return false;
+  if (user.role === "superuser") return true;
+  if (!PAGE_ACCESS_KEY_SET.has(String(key))) return true;
+  const access = Array.isArray(user.pageAccess) ? user.pageAccess.map(String) : [];
+  if (access.length === 0) return true;
+  return access.includes(String(key));
+}
+
+function requirePageAccess(pageKey) {
+  return (req, res, next) => {
+    if (!hasUserPageAccess(req.authUser, pageKey)) {
+      res.status(403).json({ error: "Page access denied", pageKey: String(pageKey) });
+      return;
+    }
+    next();
+  };
 }
 
 /** @type {Map<string, { userId: string, exp: number }>} */
@@ -1506,11 +1535,11 @@ app.get("/api/auth/me", requireAuth, (req, res) => {
   res.json({ user: sanitizeUser(req.authUser) });
 });
 
-app.get("/api/users", requireAuth, requireSuperuser, (_req, res) => {
+app.get("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_users"), (_req, res) => {
   res.json({ users: [...usersById.values()].map(sanitizeUser) });
 });
 
-app.post("/api/users", requireAuth, requireSuperuser, (req, res) => {
+app.post("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_users"), (req, res) => {
   const body = req.body ?? {};
   const email = String(body.email ?? "").trim().toLowerCase();
   const displayName = String(body.displayName ?? "").trim();
@@ -1558,7 +1587,7 @@ app.post("/api/users", requireAuth, requireSuperuser, (req, res) => {
   res.json({ user: sanitizeUser(row) });
 });
 
-app.put("/api/users/:id", requireAuth, requireSuperuser, (req, res) => {
+app.put("/api/users/:id", requireAuth, requireSuperuser, requirePageAccess("admin_users"), (req, res) => {
   const id = String(req.params.id ?? "");
   const existing = usersById.get(id);
   if (!existing) {
@@ -1607,7 +1636,7 @@ app.put("/api/users/:id", requireAuth, requireSuperuser, (req, res) => {
   res.json({ user: sanitizeUser(updated) });
 });
 
-app.patch("/api/users/:id/page-access", requireAuth, requireSuperuser, (req, res) => {
+app.patch("/api/users/:id/page-access", requireAuth, requireSuperuser, requirePageAccess("admin_users"), (req, res) => {
   const id = String(req.params.id ?? "");
   const existing = usersById.get(id);
   if (!existing) {
@@ -1677,11 +1706,11 @@ app.get("/api/reference-options", requireAuth, requireFarmAccess, (_req, res) =>
   res.json({ categories: systemConfig.getActiveReferenceOptionsGrouped() });
 });
 
-app.get("/api/admin/system-config", requireAuth, requireLeadVetUp, (_req, res) => {
+app.get("/api/admin/system-config", requireAuth, requireLeadVetUp, requirePageAccess("admin_system_config"), (_req, res) => {
   res.json(systemConfig.packAdminSystemConfigPayload(loadBreedStandardsFileOnly));
 });
 
-app.put("/api/admin/system-config", requireAuth, requireLeadVetUp, async (req, res) => {
+app.put("/api/admin/system-config", requireAuth, requireLeadVetUp, requirePageAccess("admin_system_config"), async (req, res) => {
   try {
     const rawBody = req.body ?? {};
     const isSuper = req.authUser.role === "superuser";
@@ -1894,7 +1923,7 @@ async function syncFlocksFromDbToMemory() {
   rebuildPayrollMissedKeysFromLoadedPayroll();
 }
 
-app.get("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.view"), async (_req, res) => {
+app.get("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_flocks"), requireAction("flock.view"), async (_req, res) => {
   if (hasDb()) {
     try {
       await syncFlocksFromDbToMemory();
@@ -1918,7 +1947,7 @@ app.get("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.view
   res.json({ flocks });
 });
 
-app.post("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.create"), async (req, res) => {
+app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_flocks"), requireAction("flock.create"), async (req, res) => {
   const body = req.body ?? {};
   const placementDateRaw = String(body.placementDate ?? "").trim();
   const placementDate = /^\d{4}-\d{2}-\d{2}$/.test(placementDateRaw) ? placementDateRaw : "";
@@ -1997,7 +2026,7 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requireAction("flock.cre
   }
 });
 
-app.delete("/api/flocks/:id/purge", requireAuth, requireFarmAccess, requireSuperuser, async (req, res) => {
+app.delete("/api/flocks/:id/purge", requireAuth, requireFarmAccess, requireSuperuser, requirePageAccess("farm_flocks"), async (req, res) => {
   const id = String(req.params.id ?? "").trim();
   if (!id) {
     res.status(400).json({ error: "Invalid flock id" });
@@ -2134,7 +2163,7 @@ app.patch("/api/flocks/:id/checkin-schedule", requireAuth, requireFarmAccess, re
   res.json({ flock: f, status: checkinStatusPayload(f) });
 });
 
-app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, async (req, res) => {
+app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin"), requireAction("flock.view"), async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -2274,7 +2303,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, async
   });
 });
 
-app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requirePageAccess("farm_feed"), requireAction("flock.view"), async (req, res) => {
   const flockId = String(req.params.id ?? "").trim();
   const f = flocksById.get(flockId);
   if (!f) {
@@ -2343,7 +2372,7 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
   });
 });
 
-app.get("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+app.get("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requirePageAccess("farm_feed"), requireAction("flock.view"), async (req, res) => {
   const flockId = String(req.params.id ?? "").trim();
   const f = flocksById.get(flockId);
   if (!f) {
@@ -2364,7 +2393,7 @@ app.get("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requireA
   res.json({ entries: list, feedToDateKg: Number(totalFeedKgForFlock(flockId).toFixed(2)) });
 });
 
-app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, async (req, res) => {
+app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, requirePageAccess("farm_mortality_log"), requireAction("mortality.record"), async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -2459,7 +2488,7 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, asy
   res.json({ ok: true, mortality: row, status: checkinStatusPayload(f), payrollImpact: null });
 });
 
-app.get("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, (req, res) => {
+app.get("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, requirePageAccess("farm_mortality"), (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -2469,7 +2498,7 @@ app.get("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, (req
   res.json({ events: list });
 });
 
-app.get("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, (req, res) => {
+app.get("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin"), (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -2740,7 +2769,7 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
   };
 }
 
-app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
+app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requirePageAccess("farm_treatments"), requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -2806,7 +2835,7 @@ app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireAc
   res.status(201).json({ treatment: row });
 });
 
-app.get("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+app.get("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requirePageAccess("farm_treatments"), requireAction("flock.view"), async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -2822,7 +2851,7 @@ app.get("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requireAct
   }
 });
 
-app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requireAction("slaughter.record"), requireSlaughterEventLogger, async (req, res) => {
+app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requirePageAccess("farm_slaughter"), requireAction("slaughter.record"), requireSlaughterEventLogger, async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -2904,7 +2933,7 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
   res.status(201).json({ slaughter: row, fcr: perf?.fcr ?? null, performance: perf });
 });
 
-app.get("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requireAction("flock.view"), async (req, res) => {
+app.get("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requirePageAccess("farm_slaughter"), requireAction("flock.view"), async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
@@ -3516,7 +3545,7 @@ function computeValidation(payload) {
   return { warnings, mortalityPct: pct };
 }
 
-app.post("/api/daily-logs/validate", requireAuth, (req, res) => {
+app.post("/api/daily-logs/validate", requireAuth, requireFarmAccess, requirePageAccess("farm_daily_log"), requireAction("mortality.record"), (req, res) => {
   // PROD-FIX: prevents malformed data and injection
   const parsed = dailyLogSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -3528,7 +3557,7 @@ app.post("/api/daily-logs/validate", requireAuth, (req, res) => {
   res.json({ warnings });
 });
 
-app.post("/api/daily-logs", requireAuth, async (req, res) => {
+app.post("/api/daily-logs", requireAuth, requireFarmAccess, requirePageAccess("farm_daily_log"), requireAction("mortality.record"), async (req, res) => {
   // PROD-FIX: prevents malformed data and injection
   const parsed = dailyLogSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -3538,6 +3567,10 @@ app.post("/api/daily-logs", requireAuth, async (req, res) => {
   const payload = { ...(req.body ?? {}), ...parsed.data };
   if (!payload.flockId || !payload.logDate) {
     res.status(400).json({ error: "flockId and logDate are required" });
+    return;
+  }
+  if (!flocksById.has(String(payload.flockId))) {
+    res.status(404).json({ error: "Flock not found" });
     return;
   }
   const validation = computeValidation(payload);
@@ -3705,7 +3738,7 @@ app.delete("/api/log-schedule/:id", requireAuth, requireFarmAccess, requireLogSc
   res.json({ ok: true });
 });
 
-app.post("/api/payroll-impact", requireAuth, requireFarmAccess, async (req, res) => {
+app.post("/api/payroll-impact", requireAuth, requireFarmAccess, requirePageAccess("farm_payroll"), async (req, res) => {
   if (!canManageLogScheduleAndPayroll(req.authUser)) {
     res.status(403).json({ error: "Forbidden" });
     return;
@@ -3775,7 +3808,7 @@ app.post("/api/payroll-impact", requireAuth, requireFarmAccess, async (req, res)
   res.status(201).json({ entry: row });
 });
 
-app.get("/api/payroll-impact", requireAuth, requireFarmAccess, (req, res) => {
+app.get("/api/payroll-impact", requireAuth, requireFarmAccess, requirePageAccess("farm_payroll"), (req, res) => {
   const isField = isFieldPayrollViewer(req.authUser);
   const isPayrollManager = canManageLogScheduleAndPayroll(req.authUser);
   if (!isField && !isPayrollManager) {
@@ -3824,7 +3857,7 @@ app.get("/api/payroll-impact", requireAuth, requireFarmAccess, (req, res) => {
   res.json({ entries: enriched, totals });
 });
 
-app.patch("/api/payroll-impact/:id/approve", requireAuth, requireFarmAccess, requirePayrollApprover, async (req, res) => {
+app.patch("/api/payroll-impact/:id/approve", requireAuth, requireFarmAccess, requirePageAccess("farm_payroll"), requirePayrollApprover, async (req, res) => {
   const p = payrollImpacts.find((x) => x.id === req.params.id);
   if (!p) {
     res.status(404).json({ error: "Not found" });
@@ -3837,7 +3870,7 @@ app.patch("/api/payroll-impact/:id/approve", requireAuth, requireFarmAccess, req
   res.json({ entry: p });
 });
 
-app.post("/api/payroll-impact/bulk-approve", requireAuth, requireFarmAccess, requirePayrollApprover, async (req, res) => {
+app.post("/api/payroll-impact/bulk-approve", requireAuth, requireFarmAccess, requirePageAccess("farm_payroll"), requirePayrollApprover, async (req, res) => {
   const body = req.body ?? {};
   const ids = Array.isArray(body.ids) ? body.ids.map(String) : null;
   let n = 0;
@@ -3858,7 +3891,7 @@ app.post("/api/payroll-impact/bulk-approve", requireAuth, requireFarmAccess, req
 // Medicine ops v2
 // -------------------------
 
-app.get("/api/medicine", requireAuth, requireFarmAccess, requireAction("flock.view"), requireTreatmentLogger, async (_req, res) => {
+app.get("/api/medicine", requireAuth, requireFarmAccess, requirePageAccess("farm_treatments"), requireAction("flock.view"), requireTreatmentLogger, async (_req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -3877,7 +3910,7 @@ app.get("/api/medicine", requireAuth, requireFarmAccess, requireAction("flock.vi
   }
 });
 
-app.post("/api/medicine", requireAuth, requireFarmAccess, requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
+app.post("/api/medicine", requireAuth, requireFarmAccess, requirePageAccess("farm_treatments"), requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -3923,7 +3956,7 @@ app.post("/api/medicine", requireAuth, requireFarmAccess, requireAction("treatme
   }
 });
 
-app.get("/api/medicine/lots", requireAuth, requireFarmAccess, requireAction("flock.view"), requireTreatmentLogger, async (req, res) => {
+app.get("/api/medicine/lots", requireAuth, requireFarmAccess, requirePageAccess("farm_treatments"), requireAction("flock.view"), requireTreatmentLogger, async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -3948,7 +3981,7 @@ app.get("/api/medicine/lots", requireAuth, requireFarmAccess, requireAction("flo
   }
 });
 
-app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
+app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requirePageAccess("farm_treatments"), requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
