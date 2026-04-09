@@ -6,9 +6,18 @@ import { CheckinStatusBlock, type CheckinStatus } from "../farm/FarmCheckinPage"
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { PageHeader } from "../../components/PageHeader";
 import { HubCheckinBanner, type HubCheckinBannerVariant } from "../../components/farm/HubCheckinBanner";
+import { ChartPanel } from "../../components/dashboard/ChartPanel";
 import { API_BASE_URL } from "../../api/config";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { useHubAggregatePoll } from "../../hooks/useHubAggregatePoll";
+import { useVetDashboardData } from "../../hooks/useVetDashboardData";
+import {
+  blockersSeries,
+  fcrVsTargetSeries,
+  mortalityTrendPseudoDaily,
+  topRiskSeries,
+} from "../../lib/dashboardAdapters";
+import { BlockersStacked, FcrTargetBars, MortalityTrendLine, SimpleCategoryBars, TopRiskBars } from "../../components/dashboard/charts/OpsCharts";
 import type { ReactNode } from "react";
 
 type TabItem = { to: string; label: string; end?: boolean; icon: ReactNode };
@@ -19,6 +28,7 @@ function tabIconClass(isActive: boolean): string {
 
 export function VetHome() {
   const { token } = useAuth();
+  const vetDash = useVetDashboardData(token);
   const [status, setStatus] = useState<CheckinStatus | null>(null);
   const [primaryFlockId, setPrimaryFlockId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -241,6 +251,20 @@ export function VetHome() {
       ),
     },
   ];
+  const vetFlocks = vetDash.data.opsBoard?.flocks ?? [];
+  const treatmentStatusData = Object.entries(
+    vetDash.data.treatmentRounds.reduce<Record<string, number>>((acc, r) => {
+      const k = r.status ?? "planned";
+      acc[k] = (acc[k] ?? 0) + 1;
+      return acc;
+    }, {}),
+  ).map(([statusKey, count]) => ({ status: statusKey, count }));
+  const medicineForecastData = vetDash.data.medicineForecast
+    .slice(0, 8)
+    .map((r) => ({
+      medicine: String(r.medicineName ?? "Medicine"),
+      days: r.daysToStockout == null ? 60 : Number(r.daysToStockout),
+    }));
 
   return (
     <div className="mx-auto w-full max-w-[960px] space-y-6">
@@ -290,6 +314,74 @@ export function VetHome() {
             {slLink}
           </Link>
         </section>
+      </div>
+
+      <div className="space-y-4">
+        <PageHeader
+          className="mb-2"
+          title={useLaborerT("Clinical analytics")}
+          subtitle={useLaborerT("Trends and blockers across treatment, mortality, and feed efficiency.")}
+        />
+        <div className="grid gap-4 xl:grid-cols-2">
+          <ChartPanel
+            title={useLaborerT("Treatment round status")}
+            subtitle={useLaborerT("Current treatment workflow distribution")}
+            loading={vetDash.loading}
+            error={vetDash.error}
+            empty={!vetDash.loading && !vetDash.error && treatmentStatusData.length === 0}
+          >
+            <SimpleCategoryBars data={treatmentStatusData} xKey="status" barKey="count" barName="Rounds" color="#8b5cf6" />
+          </ChartPanel>
+          <ChartPanel
+            title={useLaborerT("Medicine stock runway")}
+            subtitle={useLaborerT("Days remaining before stockout")}
+            loading={vetDash.loading}
+            error={vetDash.error}
+            empty={!vetDash.loading && !vetDash.error && medicineForecastData.length === 0}
+          >
+            <SimpleCategoryBars data={medicineForecastData} xKey="medicine" barKey="days" barName="Days to stockout" color="#f59e0b" />
+          </ChartPanel>
+        </div>
+        <div className="grid gap-4 xl:grid-cols-2">
+          <ChartPanel
+            title={useLaborerT("Mortality trend")}
+            subtitle={useLaborerT("Farm-level mortality direction")}
+            loading={vetDash.loading}
+            error={vetDash.error}
+            empty={!vetDash.loading && !vetDash.error && vetFlocks.length === 0}
+          >
+            <MortalityTrendLine data={mortalityTrendPseudoDaily(vetFlocks)} />
+          </ChartPanel>
+          <ChartPanel
+            title={useLaborerT("FCR vs target")}
+            subtitle={useLaborerT("Top flocks by FCR variance")}
+            loading={vetDash.loading}
+            error={vetDash.error}
+            empty={!vetDash.loading && !vetDash.error && fcrVsTargetSeries(vetFlocks).length === 0}
+          >
+            <FcrTargetBars data={fcrVsTargetSeries(vetFlocks, 8)} />
+          </ChartPanel>
+        </div>
+        <div className="grid gap-4 xl:grid-cols-2">
+          <ChartPanel
+            title={useLaborerT("Highest risk flocks")}
+            subtitle={useLaborerT("Immediate vet-manager attention queue")}
+            loading={vetDash.loading}
+            error={vetDash.error}
+            empty={!vetDash.loading && !vetDash.error && vetFlocks.length === 0}
+          >
+            <TopRiskBars data={topRiskSeries(vetFlocks, 8)} />
+          </ChartPanel>
+          <ChartPanel
+            title={useLaborerT("Operational blockers")}
+            subtitle={useLaborerT("Overdue rounds and withdrawal blockers")}
+            loading={vetDash.loading}
+            error={vetDash.error}
+            empty={!vetDash.loading && !vetDash.error && vetFlocks.length === 0}
+          >
+            <BlockersStacked data={blockersSeries(vetFlocks, 8)} />
+          </ChartPanel>
+        </div>
       </div>
 
       <nav

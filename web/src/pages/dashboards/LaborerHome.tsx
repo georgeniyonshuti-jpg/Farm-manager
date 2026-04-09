@@ -7,6 +7,8 @@ import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { HubCheckinBanner, type HubCheckinBannerVariant } from "../../components/farm/HubCheckinBanner";
+import { ChartPanel } from "../../components/dashboard/ChartPanel";
+import { SimpleCategoryBars } from "../../components/dashboard/charts/OpsCharts";
 import { API_BASE_URL } from "../../api/config";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { useHubAggregatePoll } from "../../hooks/useHubAggregatePoll";
@@ -170,6 +172,27 @@ export function LaborerHome() {
 
   const otherOverdueCount =
     status && bannerSummary?.anyOverdue ? Math.max(0, bannerSummary.overdueCount - 1) : 0;
+  const quickStatusData = [
+    { label: tabRounds, value: status ? 1 : 0 },
+    { label: tabMort, value: bannerSummary?.anyOverdue ? Math.max(1, bannerSummary.overdueCount) : 0 },
+    { label: tabFeed, value: status ? 1 : 0 },
+  ];
+  const cycleData = [
+    { stage: "Check-in", value: status ? 100 : 45 },
+    {
+      stage: "Feed",
+      value: bannerSummary?.minutesUntilSoonestNext != null
+        ? Math.max(35, Math.min(100, 100 - Math.round(bannerSummary.minutesUntilSoonestNext / 2)))
+        : 40,
+    },
+    {
+      stage: "Schedule",
+      value:
+        bannerSummary?.minutesUntilSoonestNext != null
+          ? Math.max(0, Math.min(100, 100 - bannerSummary.minutesUntilSoonestNext))
+          : 50,
+    },
+  ];
 
   const bottomNav: TabItem[] = [
     {
@@ -268,6 +291,27 @@ export function LaborerHome() {
       {!loading && !loadError && !status ? (
         <EmptyState title={noFlockTitle} description={noFlockBody} />
       ) : null}
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <ChartPanel
+          title={useLaborerT("Today quick status")}
+          subtitle={useLaborerT("Fast view of round, mortality, and feed activity")}
+          loading={loading}
+          error={loadError}
+          empty={!loading && !loadError && quickStatusData.every((x) => x.value === 0)}
+        >
+          <SimpleCategoryBars data={quickStatusData} xKey="label" barKey="value" barName="Count" color="#1d9e75" />
+        </ChartPanel>
+        <ChartPanel
+          title={useLaborerT("Cycle progress")}
+          subtitle={useLaborerT("Check-in and feed workflow completeness")}
+          loading={loading}
+          error={loadError}
+          empty={!loading && !loadError && cycleData.every((x) => x.value === 0)}
+        >
+          <SimpleCategoryBars data={cycleData} xKey="stage" barKey="value" barName="Progress %" color="#0ea5e9" />
+        </ChartPanel>
+      </div>
 
       <div className="grid gap-3 md:grid-cols-2 md:gap-4 md:items-start">
         <div className="grid gap-3">
