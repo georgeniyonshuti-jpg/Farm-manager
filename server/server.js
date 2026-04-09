@@ -7,7 +7,7 @@ import express from "express";
 import session from "express-session";
 import pgSession from "connect-pg-simple";
 import pg from "pg";
-import { pgPoolConfigFromDatabaseUrl } from "./pgConnFromUrl.js";
+import { pgClientConfigFromDatabaseUrlAsync } from "./pgConnFromUrl.js";
 import { runMigrations } from "./migrate.js";
 import { checkinSchema, dailyLogSchema, feedEntrySchema, loginSchema } from "./utils/validation.js";
 import * as systemConfig from "./systemConfig.js";
@@ -22,7 +22,9 @@ const DEMO_USERS_ENABLED = !IS_PRODUCTION || ENABLE_DEMO_USERS;
 const PEPPER = process.env.AUTH_PEPPER ?? "";
 const PgStore = pgSession(session);
 const { Pool } = pg;
-const dbPool = process.env.DATABASE_URL ? new Pool(pgPoolConfigFromDatabaseUrl(process.env.DATABASE_URL)) : null;
+const dbPool = process.env.DATABASE_URL
+  ? new Pool(await pgClientConfigFromDatabaseUrlAsync(process.env.DATABASE_URL))
+  : null;
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,

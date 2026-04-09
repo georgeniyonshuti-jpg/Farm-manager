@@ -23,40 +23,8 @@ export function parsePostgresUrl(urlString) {
 }
 
 /**
- * @param {string} host
- * @returns {string} IPv4 address or IPv4 literal
- */
-export function resolveIpv4HostSync(host) {
-  const kind = net.isIP(host);
-  if (kind === 4) return host;
-  if (kind === 6) {
-    throw new Error(
-      "[db] DATABASE_URL uses an IPv6 host; use the DB hostname (A record) or Render private DB URL.",
-    );
-  }
-  return dns.lookupSync(host, { family: 4 }).address;
-}
-
-/**
- * @param {string} databaseUrl
- * @returns {object} config for `pg.Pool` / `pg.Client` (no `connectionString`)
- */
-export function pgPoolConfigFromDatabaseUrl(databaseUrl) {
-  const p = parsePostgresUrl(databaseUrl);
-  const host = resolveIpv4HostSync(p.host);
-
-  return {
-    host,
-    port: p.port,
-    user: p.user,
-    password: p.password,
-    database: p.database,
-    ssl: { rejectUnauthorized: false },
-  };
-}
-
-/**
- * Async variant for migrations (non-blocking lookup).
+ * Build `pg` config with IPv4-resolved host (avoids `connectionString` IPv6 on Render).
+ * Uses async `dns.lookup` only — `dns.lookupSync` is not available in some Node/build combos.
  * @param {string} databaseUrl
  */
 export async function pgClientConfigFromDatabaseUrlAsync(databaseUrl) {
