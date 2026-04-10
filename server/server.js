@@ -678,13 +678,8 @@ function isVetOrAbove(user) {
   return (ROLE_RANK[user.role] ?? -1) >= ROLE_RANK["vet"];
 }
 
-/** Laborer / dispatcher / junior vet (vet + department) need manager review on round check-ins. */
+/** Round check-ins are routine ops logs: no manager review gate. */
 function needsFieldCheckinApproval(user) {
-  if (!user) return true;
-  if (user.role === "laborer" || user.role === "dispatcher") return true;
-  if (user.role === "vet" && Array.isArray(user.departmentKeys) && user.departmentKeys.includes("junior_vet")) {
-    return true;
-  }
   return false;
 }
 
@@ -2961,86 +2956,12 @@ app.get("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requir
   res.json({ checkins: list });
 });
 
-app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireLeadVetUp, async (req, res) => {
-  const flockId = req.query.flockId ? String(req.query.flockId) : null;
-  if (hasDb()) {
-    try {
-      let sql = `SELECT c.id::text AS id, c.flock_id::text AS "flockId", c.laborer_id::text AS "laborerId",
-                        c.at, c.submission_status AS "submissionStatus",
-                        COALESCE(c.feed_available, false) AS "feedAvailable",
-                        COALESCE(c.water_available, false) AS "waterAvailable",
-                        COALESCE(c.notes, '') AS notes,
-                        COALESCE(u.full_name, u.email, '') AS "laborerName",
-                        f.code AS "flockCode"
-                   FROM check_ins c
-                   LEFT JOIN users u ON u.id = c.laborer_id
-                   LEFT JOIN poultry_flocks f ON f.id = c.flock_id
-                  WHERE c.submission_status = 'pending_review'`;
-      const params = [];
-      if (flockId) {
-        params.push(flockId);
-        sql += ` AND c.flock_id = $${params.length}::uuid`;
-      }
-      sql += ` ORDER BY c.at DESC LIMIT 200`;
-      const r = await dbQuery(sql, params);
-      res.json({ checkins: r.rows });
-      return;
-    } catch (e) {
-      console.error("[ERROR]", "[db] GET check-ins/pending:", e instanceof Error ? e.message : e);
-    }
-  }
-  let list = roundCheckins.filter((c) => (c.submissionStatus ?? "approved") === "pending_review");
-  if (flockId) list = list.filter((c) => String(c.flockId) === flockId);
-  res.json({
-    checkins: list.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 200),
-  });
+app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireLeadVetUp, async (_req, res) => {
+  res.json({ checkins: [] });
 });
 
 app.patch("/api/check-ins/:id/review", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireLeadVetUp, async (req, res) => {
-  const checkinId = String(req.params.id);
-  const action = String(req.body?.action ?? "");
-  if (action !== "approve" && action !== "reject") {
-    res.status(400).json({ error: "action must be 'approve' or 'reject'" });
-    return;
-  }
-  const reviewNotes = String(req.body?.reviewNotes ?? "").slice(0, 4000) || null;
-  const newStatus = action === "approve" ? "approved" : "rejected";
-  if (hasDb() && isPersistableUuid(checkinId)) {
-    try {
-      const r = await dbQuery(
-        `UPDATE check_ins
-            SET submission_status = $1,
-                reviewed_by_user_id = $2::uuid,
-                reviewed_at = now(),
-                review_notes = $3
-          WHERE id = $4::uuid AND submission_status = 'pending_review'
-          RETURNING id::text AS id`,
-        [newStatus, req.authUser.id, reviewNotes, checkinId]
-      );
-      if (r.rowCount === 0) {
-        res.status(404).json({ error: "Check-in not found or already reviewed" });
-        return;
-      }
-    } catch (e) {
-      console.error("[ERROR]", "[db] PATCH check-ins review:", e instanceof Error ? e.message : e);
-      res.status(503).json({ error: "Could not update check-in." });
-      return;
-    }
-    try {
-      await syncCheckInsFromDb();
-    } catch (e) {
-      console.error("[ERROR]", "syncCheckInsFromDb after review:", e instanceof Error ? e.message : e);
-    }
-  }
-  const mem = roundCheckins.find((c) => String(c.id) === checkinId);
-  if (mem) {
-    mem.submissionStatus = newStatus;
-    mem.reviewedByUserId = req.authUser.id;
-    mem.reviewedAt = new Date().toISOString();
-    mem.reviewNotes = reviewNotes;
-  }
-  appendAudit(req.authUser.id, req.authUser.role, `farm.check_in.${action}`, "check_in", checkinId, { reviewNotes });
-  res.json({ ok: true, status: newStatus });
+  res.status(410).json({ error: "Round check-ins are operational logs and do not require review." });
 });
 
 // ── Feed entries: pending review queue + review action ──

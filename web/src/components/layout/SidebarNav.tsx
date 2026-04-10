@@ -64,13 +64,6 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
       ? { to: "/farm/schedule-settings", label: "Schedule settings" }
       : null;
 
-  const checkinReviewNavItem: NavItem | null =
-    activeWorkspace === "farm" &&
-    (user.role === "manager" || user.role === "vet_manager" || user.role === "superuser") &&
-    canSee("farm_checkin_review")
-      ? { to: "/farm/checkin-review", label: "Review check-ins" }
-      : null;
-
   const payrollNavItem: NavItem | null =
     activeWorkspace === "farm" &&
     (user.role === "manager" || user.role === "vet_manager" || user.role === "superuser") &&
@@ -109,7 +102,6 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
     flocksItem,
     scheduleItem,
     logPayrollItem,
-    checkinReviewNavItem,
     payrollNavItem,
     treatmentNavItem,
     slaughterNavItem,
@@ -171,7 +163,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
       ),
     ];
     const workforce = farmNav.filter((i) =>
-      ["/farm/batch-schedule", "/farm/schedule-settings", "/farm/checkin-review", "/farm/payroll", "/laborer/earnings"].includes(i.to)
+      ["/farm/batch-schedule", "/farm/schedule-settings", "/farm/payroll", "/laborer/earnings"].includes(i.to)
     );
     return { core: coreOps, clinical: clinicalReport, workforce };
   }, [farmCore, farmNav]);

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { formatRwf } from "../../lib/formatRwf";
@@ -236,14 +235,6 @@ export function PayrollImpactPage() {
       <PageHeader
         title="Payroll impact"
         subtitle="Bonuses and deductions from log timing. Approve before payroll closes."
-        action={
-          <Link
-            to="/farm/checkin-review"
-            className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
-          >
-            Review check-ins
-          </Link>
-        }
       />
 
       {canEditFieldRates ? (
