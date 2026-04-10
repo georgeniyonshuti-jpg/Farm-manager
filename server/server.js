@@ -821,6 +821,22 @@ function findPayrollByLog(userId, logId, logType) {
   );
 }
 
+/** Remove auto payroll lines tied to a specific log (e.g. reject a pending check-in that wrongly accrued credit). */
+async function removePayrollImpactByLog(logId, logType) {
+  if (hasDb()) {
+    try {
+      await dbQuery(`DELETE FROM payroll_impact WHERE log_id = $1 AND log_type = $2`, [String(logId), String(logType)]);
+    } catch (e) {
+      console.error("[ERROR]", "[db] payroll_impact DELETE by log:", e instanceof Error ? e.message : e);
+    }
+  }
+  for (let i = payrollImpacts.length - 1; i >= 0; i--) {
+    if (String(payrollImpacts[i].logId) === String(logId) && payrollImpacts[i].logType === logType) {
+      payrollImpacts.splice(i, 1);
+    }
+  }
+}
+
 /** @param {"check_in"|"feed_entry"} bucket */
 function hasPayrollFieldCreditForBucket(userId, flockId, ymd, bucket) {
   return Boolean(findFieldDayPayrollRow(userId, flockId, ymd, bucket));
@@ -1084,16 +1100,24 @@ function logOpsPipeline(action, step, meta = {}) {
   console.info("[OPS_PIPELINE]", action, step, meta);
 }
 
-async function handleRoundCheck({ reqUser, flockId, checkinId, submittedAtIso }) {
-  logOpsPipeline("round_check", "start", { flockId, checkinId, userId: reqUser?.id ?? null });
-  const payroll = await maybeAutoPayrollForSubmit(reqUser, flockId, "check_in", checkinId, submittedAtIso);
-  logOpsPipeline("round_check", "payroll_done", { flockId, checkinId, payrollSaved: payroll.payrollSaved });
+async function handleRoundCheck({ reqUser, flockId, checkinId, submittedAtIso, submissionStatus = "approved" }) {
+  logOpsPipeline("round_check", "start", { flockId, checkinId, userId: reqUser?.id ?? null, submissionStatus });
+  let payrollImpact = null;
+  let payrollSaved = true;
+  if (submissionStatus === "approved") {
+    const payroll = await maybeAutoPayrollForSubmit(reqUser, flockId, "check_in", checkinId, submittedAtIso);
+    payrollImpact = payroll.payrollImpact;
+    payrollSaved = payroll.payrollSaved;
+    logOpsPipeline("round_check", "payroll_done", { flockId, checkinId, payrollSaved });
+  } else {
+    logOpsPipeline("round_check", "payroll_deferred", { flockId, checkinId, submissionStatus });
+  }
   const flock = flocksById.get(flockId);
   const status = flock
     ? ((await checkinStatusPayloadWithFcrHint(flockId, reqUser?.role ?? null)) ?? checkinStatusPayload(flock, reqUser?.role ?? null))
     : null;
   logOpsPipeline("round_check", "schedule_recomputed", { flockId, hasStatus: Boolean(status) });
-  return { ...payroll, status };
+  return { payrollImpact, payrollSaved, status };
 }
 
 async function handleMortalityLog({ flockId, mortalityId, submissionStatus, role = null }) {
@@ -2725,6 +2749,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
     flockId: f.id,
     checkinId: id,
     submittedAtIso: at,
+    submissionStatus,
   });
   appendAudit(req.authUser.id, req.authUser.role, "farm.round_checkin.create", "flock", f.id, {
     checkinId: id,
@@ -3120,6 +3145,17 @@ app.patch("/api/check-ins/:id/review", requireAuth, requireFarmAccess, requirePa
     mem.reviewedByUserId = req.authUser.id;
     mem.reviewedAt = new Date().toISOString();
     mem.reviewNotes = reviewNotes;
+  }
+  if (action === "approve" && mem) {
+    const workerUser = usersById.get(mem.laborerId);
+    if (workerUser) {
+      await maybeAutoPayrollForSubmit(workerUser, mem.flockId, "check_in", checkinId, mem.at);
+    } else {
+      console.warn("[WARN] check-in approve: laborer not in usersById", mem.laborerId);
+    }
+  }
+  if (action === "reject") {
+    await removePayrollImpactByLog(checkinId, "check_in");
   }
   appendAudit(req.authUser.id, req.authUser.role, `farm.check_in.${action}`, "check_in", checkinId, { reviewNotes });
   res.json({ ok: true, status: newStatus });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { readAuthHeaders } from "../../lib/authHeaders";
@@ -51,6 +51,7 @@ export function LaborerHome() {
   const [status, setStatus] = useState<CheckinStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const didInitialLoadRef = useRef(false);
 
   const [bannerSummary, setBannerSummary] = useState<{
     anyOverdue: boolean;
@@ -63,7 +64,7 @@ export function LaborerHome() {
 
   const load = useCallback(async () => {
     setLoadError(null);
-    setLoading(true);
+    if (!didInitialLoadRef.current) setLoading(true);
     try {
       const ar = await fetch(`${API_BASE_URL}/api/me/aggregate-checkin-status`, { headers: readAuthHeaders(token) });
       const ad = await ar.json();
@@ -90,6 +91,7 @@ export function LaborerHome() {
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Could not load schedule");
     } finally {
+      didInitialLoadRef.current = true;
       setLoading(false);
     }
   }, [token]);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { readAuthHeaders } from "../../lib/authHeaders";
@@ -33,6 +33,7 @@ export function VetHome() {
   const [primaryFlockId, setPrimaryFlockId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const didInitialLoadRef = useRef(false);
 
   const hTitle = useLaborerT("Vet hub");
   const hSub = useLaborerT("Track rounds, flock health, and urgent work.");
@@ -74,7 +75,7 @@ export function VetHome() {
 
   const load = useCallback(async () => {
     setLoadError(null);
-    setLoading(true);
+    if (!didInitialLoadRef.current) setLoading(true);
     try {
       const ar = await fetch(`${API_BASE_URL}/api/me/aggregate-checkin-status`, { headers: readAuthHeaders(token) });
       const ad = await ar.json();
@@ -103,6 +104,7 @@ export function VetHome() {
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Could not load schedule");
     } finally {
+      didInitialLoadRef.current = true;
       setLoading(false);
     }
   }, [token]);

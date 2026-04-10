@@ -90,7 +90,7 @@ function AppRoutes() {
           <Route
             path="/laborer/earnings"
             element={
-              <ProtectedRoute roles={["laborer", "dispatcher"]}>
+              <ProtectedRoute roles={["laborer", "dispatcher", "vet"]}>
                 <LaborerEarningsPage />
               </ProtectedRoute>
             }
