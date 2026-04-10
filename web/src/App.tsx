@@ -39,6 +39,232 @@ import { InstallPromptBanner } from "./components/pwa/InstallPromptBanner";
 import { FarmTreatmentPage } from "./pages/farm/FarmTreatmentPage";
 import { FarmSlaughterPage } from "./pages/farm/FarmSlaughterPage";
 import { FARM_FIELD_OPS_ROLES } from "./auth/permissions";
+import { useAuth } from "./auth/AuthContext";
+import { AppLoadingScreen } from "./components/AppLoadingScreen";
+
+function AppRoutes() {
+  const { bootstrapped } = useAuth();
+  if (!bootstrapped) return <AppLoadingScreen />;
+  return (
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+
+      <Route element={<ProtectedRoute />}>
+        {/* FIX: RBAC — dedicated page when role/workspace denies access */}
+        <Route path="/unauthorized" element={<UnauthorizedPage />} />
+        <Route element={<AppShell />}>
+          <Route path="/" element={<HomeRedirect />} />
+
+          <Route
+            path="/dashboard/laborer"
+            element={
+              <ProtectedRoute roles={["laborer", "dispatcher", "vet"]}>
+                <LaborerHome />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/vet"
+            element={
+              <ProtectedRoute roles={["vet", "vet_manager", "superuser"]}>
+                <VetHome />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/dashboard/management"
+            element={
+              <ProtectedRoute
+                roles={[
+                  "manager",
+                  "superuser",
+                  "procurement_officer",
+                  "sales_coordinator",
+                ]}
+              >
+                <ManagementHome />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/laborer/earnings"
+            element={
+              <ProtectedRoute roles={["laborer", "dispatcher"]}>
+                <LaborerEarningsPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route path="/farm" element={<FarmSection />}>
+            <Route
+              path="flocks"
+              element={
+                <ProtectedRoute
+                  roles={["manager", "vet_manager", "vet", "superuser", "procurement_officer", "sales_coordinator"]}
+                >
+                  <FlockListPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="flocks/:id"
+              element={
+                <ProtectedRoute
+                  roles={["manager", "vet_manager", "vet", "superuser", "procurement_officer", "sales_coordinator"]}
+                >
+                  <FlockDetailPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="flocks/:id/fcr"
+              element={
+                <ProtectedRoute
+                  roles={["manager", "vet_manager", "vet", "superuser", "procurement_officer", "sales_coordinator"]}
+                >
+                  <FlockFcrPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="fcr"
+              element={
+                <ProtectedRoute
+                  roles={["manager", "vet_manager", "vet", "superuser", "procurement_officer", "sales_coordinator"]}
+                >
+                  <FarmFcrRedirectPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="checkin"
+              element={
+                <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+                  <FarmCheckinPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="mortality-log"
+              element={
+                <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+                  <FarmMortalityLogPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="daily-log"
+              element={
+                <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+                  <FarmDailyLogPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="feed"
+              element={
+                <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+                  <FarmFeedPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="mortality"
+              element={
+                <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+                  <FarmMortalityPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="vet-logs"
+              element={
+                <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
+                  <FarmVetLogsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="inventory" element={<FarmInventoryPage />} />
+            <Route
+              path="treatments"
+              element={
+                <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
+                  <FarmTreatmentPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="slaughter"
+              element={
+                <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
+                  <FarmSlaughterPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="batch-schedule"
+              element={
+                <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
+                  <FlockScheduleSettingsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="schedule-settings"
+              element={
+                <ProtectedRoute roles={["manager", "vet_manager", "superuser"]}>
+                  <LogScheduleSettingsPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="checkin-review"
+              element={
+                <ProtectedRoute roles={["manager", "vet_manager", "superuser"]}>
+                  <FarmCheckinReviewPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="payroll"
+              element={
+                <ProtectedRoute roles={["manager", "vet_manager", "superuser"]}>
+                  <PayrollImpactPage />
+                </ProtectedRoute>
+              }
+            />
+          </Route>
+
+          <Route path="/cleva" element={<ClevaSection />}>
+            <Route path="portfolio" element={<PortfolioPage />} />
+            <Route path="investor-memos" element={<InvestorMemosPage />} />
+            <Route path="credit-scoring" element={<CreditScoringPage />} />
+          </Route>
+
+          <Route
+            path="/admin/users"
+            element={
+              <ProtectedRoute superuserOnly>
+                <UserManagementPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/system-config"
+            element={
+              <ProtectedRoute roles={["vet_manager", "manager", "superuser"]}>
+                <SystemConfigPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Route>
+    </Routes>
+  );
+}
 
 export default function App() {
   return (
@@ -46,223 +272,7 @@ export default function App() {
       <AuthProvider>
         <LaborerI18nProvider>
         <ToastProvider>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-
-          <Route element={<ProtectedRoute />}>
-            {/* FIX: RBAC — dedicated page when role/workspace denies access */}
-            <Route path="/unauthorized" element={<UnauthorizedPage />} />
-            <Route element={<AppShell />}>
-              <Route path="/" element={<HomeRedirect />} />
-
-              <Route
-                path="/dashboard/laborer"
-                element={
-                  <ProtectedRoute roles={["laborer", "dispatcher", "vet"]}>
-                    <LaborerHome />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/dashboard/vet"
-                element={
-                  <ProtectedRoute roles={["vet", "vet_manager", "superuser"]}>
-                    <VetHome />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/dashboard/management"
-                element={
-                  <ProtectedRoute
-                    roles={[
-                      "manager",
-                      "superuser",
-                      "procurement_officer",
-                      "sales_coordinator",
-                    ]}
-                  >
-                    <ManagementHome />
-                  </ProtectedRoute>
-                }
-              />
-
-              <Route
-                path="/laborer/earnings"
-                element={
-                  <ProtectedRoute roles={["laborer", "dispatcher"]}>
-                    <LaborerEarningsPage />
-                  </ProtectedRoute>
-                }
-              />
-
-              <Route path="/farm" element={<FarmSection />}>
-                <Route
-                  path="flocks"
-                  element={
-                    <ProtectedRoute
-                      roles={["manager", "vet_manager", "vet", "superuser", "procurement_officer", "sales_coordinator"]}
-                    >
-                      <FlockListPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="flocks/:id"
-                  element={
-                    <ProtectedRoute
-                      roles={["manager", "vet_manager", "vet", "superuser", "procurement_officer", "sales_coordinator"]}
-                    >
-                      <FlockDetailPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="flocks/:id/fcr"
-                  element={
-                    <ProtectedRoute
-                      roles={["manager", "vet_manager", "vet", "superuser", "procurement_officer", "sales_coordinator"]}
-                    >
-                      <FlockFcrPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="fcr"
-                  element={
-                    <ProtectedRoute
-                      roles={["manager", "vet_manager", "vet", "superuser", "procurement_officer", "sales_coordinator"]}
-                    >
-                      <FarmFcrRedirectPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="checkin"
-                  element={
-                    <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
-                      <FarmCheckinPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="mortality-log"
-                  element={
-                    <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
-                      <FarmMortalityLogPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="daily-log"
-                  element={
-                    <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
-                      <FarmDailyLogPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="feed"
-                  element={
-                    <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
-                      <FarmFeedPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="mortality"
-                  element={
-                    <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
-                      <FarmMortalityPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="vet-logs"
-                  element={
-                    <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
-                      <FarmVetLogsPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route path="inventory" element={<FarmInventoryPage />} />
-                <Route
-                  path="treatments"
-                  element={
-                    <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
-                      <FarmTreatmentPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="slaughter"
-                  element={
-                    <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
-                      <FarmSlaughterPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="batch-schedule"
-                  element={
-                    <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
-                      <FlockScheduleSettingsPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="schedule-settings"
-                  element={
-                    <ProtectedRoute roles={["manager", "vet_manager", "superuser"]}>
-                      <LogScheduleSettingsPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="checkin-review"
-                  element={
-                    <ProtectedRoute roles={["manager", "vet_manager", "superuser"]}>
-                      <FarmCheckinReviewPage />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="payroll"
-                  element={
-                    <ProtectedRoute roles={["manager", "vet_manager", "superuser"]}>
-                      <PayrollImpactPage />
-                    </ProtectedRoute>
-                  }
-                />
-              </Route>
-
-              <Route path="/cleva" element={<ClevaSection />}>
-                <Route path="portfolio" element={<PortfolioPage />} />
-                <Route path="investor-memos" element={<InvestorMemosPage />} />
-                <Route path="credit-scoring" element={<CreditScoringPage />} />
-              </Route>
-
-              <Route
-                path="/admin/users"
-                element={
-                  <ProtectedRoute superuserOnly>
-                    <UserManagementPage />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/admin/system-config"
-                element={
-                  <ProtectedRoute roles={["vet_manager", "manager", "superuser"]}>
-                    <SystemConfigPage />
-                  </ProtectedRoute>
-                }
-              />
-
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Route>
-          </Route>
-        </Routes>
+        <AppRoutes />
         <VersionBadge />
         <SystemStatus />
         <InstallPromptBanner />

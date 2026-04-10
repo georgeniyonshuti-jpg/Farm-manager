@@ -8,15 +8,10 @@ import {
   roleAtLeast,
 } from "../auth/permissions";
 import type { ActiveWorkspace, UserRole } from "../auth/types";
-import { useLaborerT } from "../i18n/laborerI18n";
+import { AppLoadingScreen } from "../components/AppLoadingScreen";
 
 function SessionLoadingScreen() {
-  const label = useLaborerT("Loading session…");
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-neutral-100 text-neutral-600">
-      {label}
-    </div>
-  );
+  return <AppLoadingScreen />;
 }
 
 type ProtectedRouteProps = {
