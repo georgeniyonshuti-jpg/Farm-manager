@@ -120,6 +120,10 @@ export function FarmMortalityLogPage() {
       setCount("");
       setIsEmergency(false);
       setNotes("");
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("farm:ops-updated"));
+        window.dispatchEvent(new CustomEvent("farm:checkin-submitted"));
+      }
       void loadDetails();
       const okMsg = isEmergency ? alertEmerg : alertNorm;
       showToast("success", okMsg);

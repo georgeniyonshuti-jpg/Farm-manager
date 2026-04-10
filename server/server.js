@@ -678,8 +678,13 @@ function isVetOrAbove(user) {
   return (ROLE_RANK[user.role] ?? -1) >= ROLE_RANK["vet"];
 }
 
-/** Round check-ins are routine ops logs: no manager review gate. */
+/** Laborer / dispatcher / junior vet (vet + department) need manager review on round check-ins. */
 function needsFieldCheckinApproval(user) {
+  if (!user) return true;
+  if (user.role === "laborer" || user.role === "dispatcher") return true;
+  if (user.role === "vet" && Array.isArray(user.departmentKeys) && user.departmentKeys.includes("junior_vet")) {
+    return true;
+  }
   return false;
 }
 
@@ -1093,6 +1098,34 @@ async function maybeAutoPayrollForSubmit(reqUser, flockId, logType, logId, submi
   }
 }
 
+function logOpsPipeline(action, step, meta = {}) {
+  console.info("[OPS_PIPELINE]", action, step, meta);
+}
+
+async function handleRoundCheck({ reqUser, flockId, checkinId, submittedAtIso }) {
+  logOpsPipeline("round_check", "start", { flockId, checkinId, userId: reqUser?.id ?? null });
+  const payroll = await maybeAutoPayrollForSubmit(reqUser, flockId, "check_in", checkinId, submittedAtIso);
+  logOpsPipeline("round_check", "payroll_done", { flockId, checkinId, payrollSaved: payroll.payrollSaved });
+  const flock = flocksById.get(flockId);
+  const status = flock ? ((await checkinStatusPayloadWithFcrHint(flockId)) ?? checkinStatusPayload(flock)) : null;
+  logOpsPipeline("round_check", "schedule_recomputed", { flockId, hasStatus: Boolean(status) });
+  return { ...payroll, status };
+}
+
+async function handleMortalityLog({ flockId, mortalityId, submissionStatus }) {
+  logOpsPipeline("mortality_log", "start", { flockId, mortalityId, submissionStatus });
+  const flock = flocksById.get(flockId);
+  const status = flock ? checkinStatusPayload(flock) : null;
+  const performance = await buildFlockPerformanceSummary(flockId);
+  logOpsPipeline("mortality_log", "derived_recomputed", {
+    flockId,
+    mortalityId,
+    mortalityToDate: performance?.mortalityToDate ?? null,
+    birdsLiveEstimate: performance?.birdsLiveEstimate ?? null,
+  });
+  return { status, performance };
+}
+
 function canLogTreatments(user) {
   return actionAllowed(user, "treatment.execute");
 }
@@ -1346,6 +1379,13 @@ function totalFeedKgForFlock(flockId, cutoffMs = Number.POSITIVE_INFINITY) {
   return s;
 }
 
+function shouldCountMortalityForLiveEstimate(event) {
+  if (!event) return false;
+  if (event.affectsLiveCount === false) return false;
+  const status = String(event.submissionStatus ?? "approved");
+  return status !== "rejected";
+}
+
 async function syncFlockFeedEntriesFromDb() {
   if (!hasDb()) return;
   const r = await dbQuery(
@@ -1354,7 +1394,11 @@ async function syncFlockFeedEntriesFromDb() {
             recorded_at AS "recordedAt",
             feed_kg AS "feedKg",
             COALESCE(notes, '') AS notes,
-            entered_by_user_id::text AS "enteredByUserId"
+            entered_by_user_id::text AS "enteredByUserId",
+            COALESCE(submission_status, 'approved') AS "submissionStatus",
+            reviewed_by_user_id::text AS "reviewedByUserId",
+            reviewed_at AS "reviewedAt",
+            review_notes AS "reviewNotes"
        FROM flock_feed_entries
        ORDER BY recorded_at ASC`
   );
@@ -1368,6 +1412,10 @@ async function syncFlockFeedEntriesFromDb() {
       feedKg: Number(row.feedKg) || 0,
       notes: String(row.notes ?? ""),
       enteredByUserId: String(row.enteredByUserId),
+      submissionStatus: String(row.submissionStatus ?? "approved"),
+      reviewedByUserId: row.reviewedByUserId != null ? String(row.reviewedByUserId) : null,
+      reviewedAt: row.reviewedAt instanceof Date ? row.reviewedAt.toISOString() : row.reviewedAt != null ? String(row.reviewedAt) : null,
+      reviewNotes: row.reviewNotes != null ? String(row.reviewNotes) : null,
     });
   }
 }
@@ -1485,7 +1533,12 @@ async function syncMortalityEventsFromDb() {
             photos,
             COALESCE(notes, '') AS notes,
             linked_checkin_id::text AS "linkedCheckinId",
-            source
+            source,
+            COALESCE(submission_status, 'approved') AS "submissionStatus",
+            COALESCE(affects_live_count, true) AS "affectsLiveCount",
+            reviewed_by_user_id::text AS "reviewedByUserId",
+            reviewed_at AS "reviewedAt",
+            review_notes AS "reviewNotes"
        FROM flock_mortality_events
        ORDER BY at ASC`
   );
@@ -1507,6 +1560,11 @@ async function syncMortalityEventsFromDb() {
       notes: String(row.notes ?? ""),
       linkedCheckinId: row.linkedCheckinId != null ? String(row.linkedCheckinId) : null,
       source: String(row.source ?? "adhoc"),
+      submissionStatus: String(row.submissionStatus ?? "approved"),
+      affectsLiveCount: Boolean(row.affectsLiveCount),
+      reviewedByUserId: row.reviewedByUserId != null ? String(row.reviewedByUserId) : null,
+      reviewedAt: row.reviewedAt instanceof Date ? row.reviewedAt.toISOString() : row.reviewedAt != null ? String(row.reviewedAt) : null,
+      reviewNotes: row.reviewNotes != null ? String(row.reviewNotes) : null,
     });
   }
 }
@@ -2657,7 +2715,12 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
   } else {
     roundCheckins.push(row);
   }
-  const { payrollImpact, payrollSaved } = await maybeAutoPayrollForSubmit(req.authUser, f.id, "check_in", id, at);
+  const { payrollImpact, payrollSaved, status: derivedStatus } = await handleRoundCheck({
+    reqUser: req.authUser,
+    flockId: f.id,
+    checkinId: id,
+    submittedAtIso: at,
+  });
   appendAudit(req.authUser.id, req.authUser.role, "farm.round_checkin.create", "flock", f.id, {
     checkinId: id,
     photoCount: photos.length,
@@ -2716,8 +2779,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
       affectsLiveCount,
     });
   }
-  const statusOut =
-    (await checkinStatusPayloadWithFcrHint(f.id)) ?? checkinStatusPayload(f);
+  const statusOut = derivedStatus ?? ((await checkinStatusPayloadWithFcrHint(f.id)) ?? checkinStatusPayload(f));
   res.json({
     ok: true,
     checkin: row,
@@ -2877,7 +2939,7 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
     linkedCheckinId,
     source: linkedCheckinId ? "linked" : isEmergency ? "emergency" : "adhoc",
     submissionStatus,
-    affectsLiveCount: submissionStatus === "approved",
+    affectsLiveCount: true,
   };
   if (hasDb() && isPersistableUuid(f.id) && isPersistableUuid(req.authUser.id)) {
     try {
@@ -2920,7 +2982,14 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
     isEmergency,
     submissionStatus,
   });
-  res.json({ ok: true, mortality: row, status: checkinStatusPayload(f), payrollImpact: null });
+  const processed = await handleMortalityLog({ flockId: f.id, mortalityId: id, submissionStatus });
+  res.json({
+    ok: true,
+    mortality: row,
+    status: processed.status ?? checkinStatusPayload(f),
+    performance: processed.performance ?? null,
+    payrollImpact: null,
+  });
 });
 
 app.get("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, requirePageAccess("farm_mortality"), (req, res) => {
@@ -2956,12 +3025,86 @@ app.get("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requir
   res.json({ checkins: list });
 });
 
-app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireLeadVetUp, async (_req, res) => {
-  res.json({ checkins: [] });
+app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireLeadVetUp, async (req, res) => {
+  const flockId = req.query.flockId ? String(req.query.flockId) : null;
+  if (hasDb()) {
+    try {
+      let sql = `SELECT c.id::text AS id, c.flock_id::text AS "flockId", c.laborer_id::text AS "laborerId",
+                        c.at, c.submission_status AS "submissionStatus",
+                        COALESCE(c.feed_available, false) AS "feedAvailable",
+                        COALESCE(c.water_available, false) AS "waterAvailable",
+                        COALESCE(c.notes, '') AS notes,
+                        COALESCE(u.full_name, u.email, '') AS "laborerName",
+                        f.code AS "flockCode"
+                   FROM check_ins c
+                   LEFT JOIN users u ON u.id = c.laborer_id
+                   LEFT JOIN poultry_flocks f ON f.id = c.flock_id
+                  WHERE c.submission_status = 'pending_review'`;
+      const params = [];
+      if (flockId) {
+        params.push(flockId);
+        sql += ` AND c.flock_id = $${params.length}::uuid`;
+      }
+      sql += ` ORDER BY c.at DESC LIMIT 200`;
+      const r = await dbQuery(sql, params);
+      res.json({ checkins: r.rows });
+      return;
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET check-ins/pending:", e instanceof Error ? e.message : e);
+    }
+  }
+  let list = roundCheckins.filter((c) => (c.submissionStatus ?? "approved") === "pending_review");
+  if (flockId) list = list.filter((c) => String(c.flockId) === flockId);
+  res.json({
+    checkins: list.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 200),
+  });
 });
 
 app.patch("/api/check-ins/:id/review", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireLeadVetUp, async (req, res) => {
-  res.status(410).json({ error: "Round check-ins are operational logs and do not require review." });
+  const checkinId = String(req.params.id);
+  const action = String(req.body?.action ?? "");
+  if (action !== "approve" && action !== "reject") {
+    res.status(400).json({ error: "action must be 'approve' or 'reject'" });
+    return;
+  }
+  const reviewNotes = String(req.body?.reviewNotes ?? "").slice(0, 4000) || null;
+  const newStatus = action === "approve" ? "approved" : "rejected";
+  if (hasDb() && isPersistableUuid(checkinId)) {
+    try {
+      const r = await dbQuery(
+        `UPDATE check_ins
+            SET submission_status = $1,
+                reviewed_by_user_id = $2::uuid,
+                reviewed_at = now(),
+                review_notes = $3
+          WHERE id = $4::uuid AND submission_status = 'pending_review'
+          RETURNING id::text AS id`,
+        [newStatus, req.authUser.id, reviewNotes, checkinId]
+      );
+      if (r.rowCount === 0) {
+        res.status(404).json({ error: "Check-in not found or already reviewed" });
+        return;
+      }
+    } catch (e) {
+      console.error("[ERROR]", "[db] PATCH check-ins review:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not update check-in." });
+      return;
+    }
+    try {
+      await syncCheckInsFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "syncCheckInsFromDb after review:", e instanceof Error ? e.message : e);
+    }
+  }
+  const mem = roundCheckins.find((c) => String(c.id) === checkinId);
+  if (mem) {
+    mem.submissionStatus = newStatus;
+    mem.reviewedByUserId = req.authUser.id;
+    mem.reviewedAt = new Date().toISOString();
+    mem.reviewNotes = reviewNotes;
+  }
+  appendAudit(req.authUser.id, req.authUser.role, `farm.check_in.${action}`, "check_in", checkinId, { reviewNotes });
+  res.json({ ok: true, status: newStatus });
 });
 
 // ── Feed entries: pending review queue + review action ──
@@ -3075,6 +3218,7 @@ app.patch("/api/mortality-events/:id/review", requireAuth, requireFarmAccess, re
   const reviewNotes = String(req.body?.reviewNotes ?? "").slice(0, 4000) || null;
   const newStatus = action === "approve" ? "approved" : "rejected";
   const affectsLiveCount = action === "approve";
+  let reviewedFlockId = null;
   if (hasDb()) {
     try {
       const r = await dbQuery(
@@ -3082,13 +3226,14 @@ app.patch("/api/mortality-events/:id/review", requireAuth, requireFarmAccess, re
             SET submission_status = $1, reviewed_by_user_id = $2::uuid, reviewed_at = now(),
                 review_notes = $3, affects_live_count = $4
           WHERE id = $5::uuid AND submission_status = 'pending_review'
-          RETURNING id::text AS id`,
+          RETURNING id::text AS id, flock_id::text AS "flockId"`,
         [newStatus, req.authUser.id, reviewNotes, affectsLiveCount, eventId]
       );
       if (r.rowCount === 0) {
         res.status(404).json({ error: "Event not found or already reviewed" });
         return;
       }
+      reviewedFlockId = r.rows[0]?.flockId ? String(r.rows[0].flockId) : null;
     } catch (e) {
       console.error("[ERROR]", "[db] PATCH mortality-events review:", e instanceof Error ? e.message : e);
       res.status(503).json({ error: "Could not update mortality event." });
@@ -3104,7 +3249,18 @@ app.patch("/api/mortality-events/:id/review", requireAuth, requireFarmAccess, re
     mem.reviewNotes = reviewNotes;
   }
   appendAudit(req.authUser.id, req.authUser.role, `farm.mortality.${action}`, "mortality_event", eventId, { reviewNotes });
-  res.json({ ok: true, status: newStatus, affectsLiveCount });
+  const processed = await handleMortalityLog({
+    flockId: mem?.flockId ?? reviewedFlockId ?? "",
+    mortalityId: eventId,
+    submissionStatus: newStatus,
+  });
+  res.json({
+    ok: true,
+    status: newStatus,
+    affectsLiveCount,
+    flockStatus: processed.status ?? null,
+    performance: processed.performance ?? null,
+  });
 });
 
 // ── Vet logs (replaces daily logs for vet+ roles) ──
@@ -3562,7 +3718,7 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
   const cutoffMs = atIso ? new Date(atIso).getTime() : Number.POSITIVE_INFINITY;
   const feedToDate = totalFeedKgForFlock(flockId, cutoffMs);
   const mortalityToDate = mortalityEvents
-    .filter((m) => m.flockId === flockId && new Date(m.at).getTime() <= cutoffMs)
+    .filter((m) => m.flockId === flockId && new Date(m.at).getTime() <= cutoffMs && shouldCountMortalityForLiveEstimate(m))
     .reduce((s, m) => s + (Number(m.count) || 0), 0);
   const slRows = await listSlaughterForFlock(flockId);
   const slaughterToDate = slRows

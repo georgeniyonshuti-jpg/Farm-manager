@@ -115,6 +115,10 @@ export function FarmFeedPage() {
       setFeedKg("");
       setFeedType((feedTypeOptions[0]?.value ?? "starter"));
       setNotes("");
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("farm:ops-updated"));
+        window.dispatchEvent(new CustomEvent("farm:checkin-submitted"));
+      }
       void loadDetails();
       await loadFeedEntries();
     } catch (err) {
