@@ -1107,15 +1107,17 @@ async function handleRoundCheck({ reqUser, flockId, checkinId, submittedAtIso })
   const payroll = await maybeAutoPayrollForSubmit(reqUser, flockId, "check_in", checkinId, submittedAtIso);
   logOpsPipeline("round_check", "payroll_done", { flockId, checkinId, payrollSaved: payroll.payrollSaved });
   const flock = flocksById.get(flockId);
-  const status = flock ? ((await checkinStatusPayloadWithFcrHint(flockId)) ?? checkinStatusPayload(flock)) : null;
+  const status = flock
+    ? ((await checkinStatusPayloadWithFcrHint(flockId, reqUser?.role ?? null)) ?? checkinStatusPayload(flock, reqUser?.role ?? null))
+    : null;
   logOpsPipeline("round_check", "schedule_recomputed", { flockId, hasStatus: Boolean(status) });
   return { ...payroll, status };
 }
 
-async function handleMortalityLog({ flockId, mortalityId, submissionStatus }) {
+async function handleMortalityLog({ flockId, mortalityId, submissionStatus, role = null }) {
   logOpsPipeline("mortality_log", "start", { flockId, mortalityId, submissionStatus });
   const flock = flocksById.get(flockId);
-  const status = flock ? checkinStatusPayload(flock) : null;
+  const status = flock ? checkinStatusPayload(flock, role) : null;
   const performance = await buildFlockPerformanceSummary(flockId);
   logOpsPipeline("mortality_log", "derived_recomputed", {
     flockId,
@@ -1738,9 +1740,18 @@ function lastCheckinMs(flockId) {
   return Math.max(...times);
 }
 
-function computeNextDueMs(flock, now = Date.now()) {
+function scheduleIntervalHoursForFlockRole(flockId, role) {
+  if (!role) return null;
+  const entries = logSchedules.filter((s) => s.flockId === flockId && s.role === role);
+  if (!entries.length) return null;
+  const h = Number(entries[0].intervalHours);
+  return Number.isFinite(h) && h > 0 ? h : null;
+}
+
+function computeNextDueMs(flock, now = Date.now(), role = null) {
   const ageDays = flockAgeDays(flock, new Date(now));
-  const h = intervalHoursForAge(ageDays, flock);
+  const roleInterval = scheduleIntervalHoursForFlockRole(flock.id, role);
+  const h = roleInterval ?? intervalHoursForAge(ageDays, flock);
   const intervalMs = h * 3600000;
   const last = lastCheckinMs(flock.id);
   if (last === null) {
@@ -1750,11 +1761,11 @@ function computeNextDueMs(flock, now = Date.now()) {
   return last + intervalMs;
 }
 
-function checkinStatusPayload(flock) {
+function checkinStatusPayload(flock, role = null) {
   const now = Date.now();
   const ageDays = flockAgeDays(flock, new Date(now));
-  const intervalHours = intervalHoursForAge(ageDays, flock);
-  const nextDueMs = computeNextDueMs(flock, now);
+  const intervalHours = scheduleIntervalHoursForFlockRole(flock.id, role) ?? intervalHoursForAge(ageDays, flock);
+  const nextDueMs = computeNextDueMs(flock, now, role);
   const lastMs = lastCheckinMs(flock.id);
   const lastCheckinAt = lastMs ? new Date(lastMs).toISOString() : null;
   const overdueMs = Math.max(0, now - nextDueMs);
@@ -1776,7 +1787,7 @@ function checkinStatusPayload(flock) {
     ageDays,
     targetSlaughterDays: { min: flock.targetSlaughterDayMin, max: flock.targetSlaughterDayMax },
     intervalHours,
-    intervalSource: flock.checkinBands?.length ? "batch_custom" : "default_age_curve",
+    intervalSource: scheduleIntervalHoursForFlockRole(flock.id, role) != null ? "role_schedule" : (flock.checkinBands?.length ? "batch_custom" : "default_age_curve"),
     lastCheckinAt,
     nextDueAt: new Date(nextDueMs).toISOString(),
     overdueMs,
@@ -1787,10 +1798,10 @@ function checkinStatusPayload(flock) {
   };
 }
 
-async function checkinStatusPayloadWithFcrHint(flockId) {
+async function checkinStatusPayloadWithFcrHint(flockId, role = null) {
   const f = flocksById.get(flockId);
   if (!f) return null;
-  const base = checkinStatusPayload(f);
+  const base = checkinStatusPayload(f, role);
   let fcrCheckinHint = null;
   let feedToDateKg = null;
   try {
@@ -2384,7 +2395,7 @@ async function syncFlocksFromDbToMemory() {
   rebuildPayrollMissedKeysFromLoadedPayroll();
 }
 
-app.get("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_flocks"), requireAction("flock.view"), async (_req, res) => {
+app.get("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_flocks"), requireAction("flock.view"), async (req, res) => {
   if (hasDb()) {
     try {
       await syncFlocksFromDbToMemory();
@@ -2394,7 +2405,7 @@ app.get("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_f
   }
   // FIX: embed check-in urgency per flock for list + detail views
   const flocks = [...flocksById.values()].map((f) => {
-    const st = checkinStatusPayload(f);
+    const st = checkinStatusPayload(f, req.authUser?.role ?? null);
     return {
       ...f,
       checkinBadge: st.checkinBadge,
@@ -2524,7 +2535,7 @@ app.get("/api/flocks/:id/checkin-status", requireAuth, requireFarmAccess, requir
       /* ignore */
     }
   }
-  const payload = await checkinStatusPayloadWithFcrHint(req.params.id);
+  const payload = await checkinStatusPayloadWithFcrHint(req.params.id, req.authUser?.role ?? null);
   if (!payload) {
     res.status(404).json({ error: "Flock not found" });
     return;
@@ -2532,7 +2543,7 @@ app.get("/api/flocks/:id/checkin-status", requireAuth, requireFarmAccess, requir
   res.json(payload);
 });
 
-app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requireAnyPageAccess(["dashboard_laborer", "dashboard_vet", "dashboard_management"]), requireAction("flock.view"), async (_req, res) => {
+app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requireAnyPageAccess(["dashboard_laborer", "dashboard_vet", "dashboard_management"]), requireAction("flock.view"), async (req, res) => {
   if (hasDb()) {
     try {
       await syncFlocksFromDbToMemory();
@@ -2543,7 +2554,7 @@ app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requ
   const now = Date.now();
   const flocks = [...flocksById.values()];
   const perFlock = flocks.map((f) => {
-    const status = checkinStatusPayload(f);
+    const status = checkinStatusPayload(f, req.authUser?.role ?? null);
     return { flockId: f.id, label: f.label ?? f.code ?? f.id, status };
   });
 
@@ -2579,7 +2590,9 @@ app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requ
   const primaryFlockId = anyOverdue ? worstOverdueFlockId : soonestFlockId;
   let primaryStatus = null;
   if (primaryFlockId) {
-    primaryStatus = (await checkinStatusPayloadWithFcrHint(primaryFlockId)) ?? checkinStatusPayload(flocksById.get(primaryFlockId));
+    primaryStatus =
+      (await checkinStatusPayloadWithFcrHint(primaryFlockId, req.authUser?.role ?? null))
+      ?? checkinStatusPayload(flocksById.get(primaryFlockId), req.authUser?.role ?? null);
   }
 
   const summary = {
@@ -2621,7 +2634,7 @@ app.patch("/api/flocks/:id/checkin-schedule", requireAuth, requireFarmAccess, re
     hasCustomBands: Boolean(f.checkinBands?.length),
     photosRequiredPerRound: f.photosRequiredPerRound,
   });
-  res.json({ flock: f, status: checkinStatusPayload(f) });
+  res.json({ flock: f, status: checkinStatusPayload(f, req.authUser?.role ?? null) });
 });
 
 app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin"), requireAction("flock.view"), async (req, res) => {
@@ -2779,7 +2792,10 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
       affectsLiveCount,
     });
   }
-  const statusOut = derivedStatus ?? ((await checkinStatusPayloadWithFcrHint(f.id)) ?? checkinStatusPayload(f));
+  const statusOut =
+    derivedStatus
+    ?? ((await checkinStatusPayloadWithFcrHint(f.id, req.authUser?.role ?? null))
+      ?? checkinStatusPayload(f, req.authUser?.role ?? null));
   res.json({
     ok: true,
     checkin: row,
@@ -2982,11 +2998,16 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
     isEmergency,
     submissionStatus,
   });
-  const processed = await handleMortalityLog({ flockId: f.id, mortalityId: id, submissionStatus });
+  const processed = await handleMortalityLog({
+    flockId: f.id,
+    mortalityId: id,
+    submissionStatus,
+    role: req.authUser?.role ?? null,
+  });
   res.json({
     ok: true,
     mortality: row,
-    status: processed.status ?? checkinStatusPayload(f),
+    status: processed.status ?? checkinStatusPayload(f, req.authUser?.role ?? null),
     performance: processed.performance ?? null,
     payrollImpact: null,
   });
@@ -3253,6 +3274,7 @@ app.patch("/api/mortality-events/:id/review", requireAuth, requireFarmAccess, re
     flockId: mem?.flockId ?? reviewedFlockId ?? "",
     mortalityId: eventId,
     submissionStatus: newStatus,
+    role: req.authUser?.role ?? null,
   });
   res.json({
     ok: true,
