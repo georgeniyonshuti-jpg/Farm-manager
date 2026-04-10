@@ -7,8 +7,6 @@ import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { HubCheckinBanner, type HubCheckinBannerVariant } from "../../components/farm/HubCheckinBanner";
-import { ChartPanel } from "../../components/dashboard/ChartPanel";
-import { SimpleCategoryBars } from "../../components/dashboard/charts/OpsCharts";
 import { API_BASE_URL } from "../../api/config";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { useHubAggregatePoll } from "../../hooks/useHubAggregatePoll";
@@ -30,10 +28,7 @@ export function LaborerHome() {
   const hSubLaborer = useLaborerT("Daily tasks optimized for your phone.");
   const linkCheckin = useLaborerT("Round check-in");
   const linkMort = useLaborerT("Log mortality");
-  const linkDaily = useLaborerT("Daily log");
   const linkFeed = useLaborerT("Feed log");
-  const linkTable = useLaborerT("Mortality table");
-  const linkInv = useLaborerT("Feed inventory");
   const linkEarnings = useLaborerT("My earnings");
   const noFlockTitle = useLaborerT("No flock available");
   const noFlockBody = useLaborerT("Round status appears when a flock is assigned to your site.");
@@ -51,9 +46,7 @@ export function LaborerHome() {
   const tabRounds = useLaborerT("Rounds");
   const tabMort = useLaborerT("Mortality");
   const tabFeed = useLaborerT("Feed");
-  const tabLog = useLaborerT("Log");
-  const tabHistory = useLaborerT("History");
-  const tabStock = useLaborerT("Stock");
+  const [showDetailedCard, setShowDetailedCard] = useState(false);
 
   const [status, setStatus] = useState<CheckinStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -178,28 +171,6 @@ export function LaborerHome() {
 
   const otherOverdueCount =
     status && bannerSummary?.anyOverdue ? Math.max(0, bannerSummary.overdueCount - 1) : 0;
-  const quickStatusData = [
-    { label: tabRounds, value: status ? 1 : 0 },
-    { label: tabMort, value: bannerSummary?.anyOverdue ? Math.max(1, bannerSummary.overdueCount) : 0 },
-    { label: tabFeed, value: status ? 1 : 0 },
-  ];
-  const cycleData = [
-    { stage: "Check-in", value: status ? 100 : 45 },
-    {
-      stage: "Feed",
-      value: bannerSummary?.minutesUntilSoonestNext != null
-        ? Math.max(35, Math.min(100, 100 - Math.round(bannerSummary.minutesUntilSoonestNext / 2)))
-        : 40,
-    },
-    {
-      stage: "Schedule",
-      value:
-        bannerSummary?.minutesUntilSoonestNext != null
-          ? Math.max(0, Math.min(100, 100 - bannerSummary.minutesUntilSoonestNext))
-          : 50,
-    },
-  ];
-
   const bottomNav: TabItem[] = [
     {
       to: "/dashboard/laborer",
@@ -241,41 +212,15 @@ export function LaborerHome() {
         </svg>
       ),
     },
-    {
-      to: "/farm/daily-log",
-      label: tabLog,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/mortality",
-      label: tabHistory,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M3 3v18h18" strokeLinecap="round" />
-          <path d="M7 16l4-4 4 4 5-6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/inventory",
-      label: tabStock,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-          <path d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      ),
-    },
   ];
 
   return (
     <div className="mx-auto w-full max-w-[960px] space-y-6">
-      {roundBanner ? <HubCheckinBanner variant={roundBanner.variant} message={roundBanner.text} /> : null}
+      {roundBanner ? (
+        <button type="button" className="w-full text-left" onClick={() => setShowDetailedCard((v) => !v)}>
+          <HubCheckinBanner variant={roundBanner.variant} message={roundBanner.text} />
+        </button>
+      ) : null}
       <PageHeader
         className="mb-3 gap-3"
         title={isJuniorVet ? hTitleJunior : hTitleLaborer}
@@ -291,33 +236,12 @@ export function LaborerHome() {
         />
       )}
 
-      {!loading && !loadError && status ? (
+      {!loading && !loadError && status && showDetailedCard ? (
         <CheckinStatusBlock status={status} showWarning={false} otherOverdueCount={otherOverdueCount} />
       ) : null}
       {!loading && !loadError && !status ? (
         <EmptyState title={noFlockTitle} description={noFlockBody} />
       ) : null}
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <ChartPanel
-          title={useLaborerT("Today quick status")}
-          subtitle={useLaborerT("Fast view of round, mortality, and feed activity")}
-          loading={loading}
-          error={loadError}
-          empty={!loading && !loadError && quickStatusData.every((x) => x.value === 0)}
-        >
-          <SimpleCategoryBars data={quickStatusData} xKey="label" barKey="value" barName="Count" color="#1d9e75" />
-        </ChartPanel>
-        <ChartPanel
-          title={useLaborerT("Cycle progress")}
-          subtitle={useLaborerT("Check-in and feed workflow completeness")}
-          loading={loading}
-          error={loadError}
-          empty={!loading && !loadError && cycleData.every((x) => x.value === 0)}
-        >
-          <SimpleCategoryBars data={cycleData} xKey="stage" barKey="value" barName="Progress %" color="#0ea5e9" />
-        </ChartPanel>
-      </div>
 
       <div className="grid gap-3 md:grid-cols-2 md:gap-4 md:items-start">
         <div className="grid gap-3">
@@ -341,24 +265,6 @@ export function LaborerHome() {
           </Link>
         </div>
         <div className="grid gap-3">
-          <Link
-            to="/farm/daily-log"
-            className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-white px-4 text-lg font-medium text-neutral-900 hover:bg-[var(--primary-color-soft)]"
-          >
-            {linkDaily}
-          </Link>
-          <Link
-            to="/farm/mortality"
-            className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-white px-4 text-lg font-medium text-neutral-900 hover:bg-[var(--primary-color-soft)]"
-          >
-            {linkTable}
-          </Link>
-          <Link
-            to="/farm/inventory"
-            className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-white px-4 text-lg font-medium text-neutral-900 hover:bg-[var(--primary-color-soft)]"
-          >
-            {linkInv}
-          </Link>
           <Link
             to="/laborer/earnings"
             className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border border-[var(--primary-color)]/30 bg-[var(--primary-color-soft)] px-4 text-lg font-semibold text-[var(--primary-color-dark)] hover:bg-[var(--primary-color-soft)]"
