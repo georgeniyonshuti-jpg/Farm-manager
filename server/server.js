@@ -815,6 +815,12 @@ function findFieldDayPayrollRow(userId, flockId, ymd, bucket) {
   );
 }
 
+function findPayrollByLog(userId, logId, logType) {
+  return payrollImpacts.find(
+    (p) => p.userId === userId && p.logId === logId && p.logType === logType
+  );
+}
+
 /** @param {"check_in"|"feed_entry"} bucket */
 function hasPayrollFieldCreditForBucket(userId, flockId, ymd, bucket) {
   return Boolean(findFieldDayPayrollRow(userId, flockId, ymd, bucket));
@@ -990,33 +996,9 @@ async function maybeAutoPayrollForSubmit(reqUser, flockId, logType, logId, submi
     }
     if (creditRwf <= 0) return { payrollImpact: null, payrollSaved: true };
 
-    const existing = findFieldDayPayrollRow(reqUser.id, flockId, ymd, bucket);
-    if (existing) {
-      const prevDelta = Number(existing.rwfDelta) || 0;
-      if (prevDelta >= creditRwf && prevDelta > 0) {
-        return { payrollImpact: existing, payrollSaved: true };
-      }
-      existing.logId = logId;
-      existing.logType = logType;
-      existing.submittedAt = submittedAtIso;
-      existing.onTime = onTime;
-      existing.rwfDelta = Math.max(prevDelta, creditRwf);
-      existing.reason = reason;
-      if (!(existing.flockId != null)) existing.flockId = flockId;
-      appendAudit(reqUser.id, reqUser.role, "payroll.impact.auto_upgrade", "payroll_impact", existing.id, {
-        logType,
-        logId,
-        flockId,
-        rwfDelta: existing.rwfDelta,
-      });
-      try {
-        await updatePayrollImpactAutoFieldsDb(existing);
-        return { payrollImpact: existing, payrollSaved: true };
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.warn(`PAYROLL PERSISTENCE FAILED for user ${reqUser.id}: ${msg}`);
-        return { payrollImpact: existing, payrollSaved: false };
-      }
+    const byLog = findPayrollByLog(reqUser.id, logId, logType);
+    if (byLog) {
+      return { payrollImpact: byLog, payrollSaved: true };
     }
 
     try {
@@ -5053,7 +5035,35 @@ app.get(
 });
 
 app.patch("/api/payroll-impact/:id/approve", requireAuth, requireFarmAccess, requirePageAccess("farm_payroll"), requirePayrollApprover, async (req, res) => {
-  const p = payrollImpacts.find((x) => x.id === req.params.id);
+  const id = String(req.params.id);
+  if (hasDb() && isPersistableUuid(id) && isPersistableUuid(req.authUser.id)) {
+    try {
+      const r = await dbQuery(
+        `UPDATE payroll_impact
+            SET approved_by = $2::uuid, approved_at = now()
+          WHERE id = $1::uuid
+          RETURNING id::text AS id, approved_by::text AS "approvedBy", approved_at AS "approvedAt"`,
+        [id, req.authUser.id]
+      );
+      if (r.rowCount === 0) {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      const mem = payrollImpacts.find((x) => x.id === id);
+      if (mem) {
+        mem.approvedBy = r.rows[0]?.approvedBy ? String(r.rows[0].approvedBy) : req.authUser.id;
+        mem.approvedAt = r.rows[0]?.approvedAt instanceof Date ? r.rows[0].approvedAt.toISOString() : new Date().toISOString();
+      }
+      appendAudit(req.authUser.id, req.authUser.role, "payroll.impact.approve", "payroll_impact", id, {});
+      res.json({ ok: true, id });
+      return;
+    } catch (e) {
+      console.error("[ERROR]", "[db] PATCH /api/payroll-impact/:id/approve:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not approve payroll line." });
+      return;
+    }
+  }
+  const p = payrollImpacts.find((x) => x.id === id);
   if (!p) {
     res.status(404).json({ error: "Not found" });
     return;
@@ -5068,6 +5078,33 @@ app.patch("/api/payroll-impact/:id/approve", requireAuth, requireFarmAccess, req
 app.post("/api/payroll-impact/bulk-approve", requireAuth, requireFarmAccess, requirePageAccess("farm_payroll"), requirePayrollApprover, async (req, res) => {
   const body = req.body ?? {};
   const ids = Array.isArray(body.ids) ? body.ids.map(String) : null;
+  if (hasDb() && isPersistableUuid(req.authUser.id)) {
+    try {
+      let sql = `UPDATE payroll_impact SET approved_by = $1::uuid, approved_at = now() WHERE approved_at IS NULL`;
+      const params = [req.authUser.id];
+      if (ids && ids.length > 0) {
+        params.push(ids);
+        sql += ` AND id::text = ANY($2::text[])`;
+      }
+      sql += ` RETURNING id::text AS id, approved_at AS "approvedAt"`;
+      const r = await dbQuery(sql, params);
+      for (const row of r.rows) {
+        const id = String(row.id);
+        const mem = payrollImpacts.find((p) => p.id === id);
+        if (mem) {
+          mem.approvedBy = req.authUser.id;
+          mem.approvedAt = row.approvedAt instanceof Date ? row.approvedAt.toISOString() : new Date().toISOString();
+        }
+      }
+      appendAudit(req.authUser.id, req.authUser.role, "payroll.impact.bulk_approve", "payroll_impact", null, { count: r.rowCount });
+      res.json({ approved: r.rowCount });
+      return;
+    } catch (e) {
+      console.error("[ERROR]", "[db] POST /api/payroll-impact/bulk-approve:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not bulk-approve payroll lines." });
+      return;
+    }
+  }
   let n = 0;
   const at = new Date().toISOString();
   for (const p of payrollImpacts) {
