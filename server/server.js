@@ -4918,7 +4918,7 @@ app.get(
   requireAuth,
   requireFarmAccess,
   requireAnyPageAccess(["farm_payroll", "laborer_earnings"]),
-  (req, res) => {
+  async (req, res) => {
   const isField = isFieldPayrollViewer(req.authUser);
   const isPayrollManager = canManageLogScheduleAndPayroll(req.authUser);
   if (!isField && !isPayrollManager) {
@@ -4933,6 +4933,90 @@ app.get(
   if (isField && userIdQ && userIdQ !== req.authUser.id) {
     res.status(403).json({ error: "Forbidden" });
     return;
+  }
+  if (hasDb()) {
+    try {
+      const where = [];
+      const params = [];
+      if (isField) {
+        params.push(req.authUser.id);
+        where.push(`p.user_id::text = $${params.length}`);
+      } else if (userIdQ) {
+        params.push(userIdQ);
+        where.push(`p.user_id::text = $${params.length}`);
+      }
+      if (periodStart) {
+        params.push(periodStart);
+        where.push(`p.period_end >= $${params.length}::date`);
+      }
+      if (periodEnd) {
+        params.push(periodEnd);
+        where.push(`p.period_start <= $${params.length}::date`);
+      }
+      if (approvedQ === "true") where.push(`p.approved_at IS NOT NULL`);
+      if (approvedQ === "false") where.push(`p.approved_at IS NULL`);
+      const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+      const q = await dbQuery(
+        `SELECT p.id::text AS id,
+                p.user_id::text AS "userId",
+                p.log_id AS "logId",
+                p.log_type AS "logType",
+                p.rwf_delta::float AS "rwfDelta",
+                COALESCE(p.reason, '') AS reason,
+                p.period_start::text AS "periodStart",
+                p.period_end::text AS "periodEnd",
+                p.approved_by::text AS "approvedBy",
+                p.approved_at AS "approvedAt",
+                p.created_at AS "createdAt",
+                p.submitted_at AS "submittedAt",
+                p.on_time AS "onTime",
+                p.flock_id::text AS "flockId",
+                COALESCE(u.full_name, u.name, u.email, p.user_id::text) AS "workerName",
+                COALESCE(u.role, '') AS "workerRole"
+           FROM payroll_impact p
+           LEFT JOIN users u ON u.id = p.user_id
+           ${whereSql}
+          ORDER BY p.submitted_at DESC, p.created_at DESC
+          LIMIT 1000`,
+        params
+      );
+      const entries = q.rows.map((r) => ({
+        id: String(r.id),
+        userId: String(r.userId),
+        logId: String(r.logId ?? ""),
+        logType: String(r.logType ?? ""),
+        rwfDelta: Number(r.rwfDelta) || 0,
+        reason: String(r.reason ?? ""),
+        periodStart: ymdFromPgDate(r.periodStart),
+        periodEnd: ymdFromPgDate(r.periodEnd),
+        approvedBy: r.approvedBy != null ? String(r.approvedBy) : null,
+        approvedAt: r.approvedAt instanceof Date ? r.approvedAt.toISOString() : r.approvedAt != null ? String(r.approvedAt) : null,
+        createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt != null ? String(r.createdAt) : null,
+        submittedAt: r.submittedAt instanceof Date ? r.submittedAt.toISOString() : r.submittedAt != null ? String(r.submittedAt) : null,
+        onTime: r.onTime == null ? null : Boolean(r.onTime),
+        flockId: r.flockId != null ? String(r.flockId) : null,
+        workerName: String(r.workerName ?? ""),
+        workerRole: String(r.workerRole ?? ""),
+      }));
+      let totals = null;
+      if (isField) {
+        let netAll = 0;
+        let netApproved = 0;
+        let netPending = 0;
+        for (const p of entries) {
+          const d = Number(p.rwfDelta) || 0;
+          netAll += d;
+          if (p.approvedAt != null) netApproved += d;
+          else netPending += d;
+        }
+        totals = { netAll, netApproved, netPending };
+      }
+      res.json({ entries, totals });
+      return;
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET /api/payroll-impact:", e instanceof Error ? e.message : e);
+    }
   }
   let list = [...payrollImpacts];
   if (isField) list = list.filter((p) => p.userId === req.authUser.id);
