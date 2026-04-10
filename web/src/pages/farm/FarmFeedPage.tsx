@@ -9,6 +9,7 @@ import { useToast } from "../../components/Toast";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
+import { SubmissionStageScreen } from "../../components/farm/SubmissionStageScreen";
 
 type FeedEntry = {
   id: string;
@@ -49,6 +50,7 @@ export function FarmFeedPage() {
   const [feedType, setFeedType] = useState("starter");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  const [submitStage, setSubmitStage] = useState<"idle" | "submitting" | "success">("idle");
   const [entriesError, setEntriesError] = useState<string | null>(null);
   const [inventoryBalanceKg, setInventoryBalanceKg] = useState<number | null>(null);
   const feedTypeOptions = useReferenceOptions("feed_type", token, [
@@ -100,6 +102,7 @@ export function FarmFeedPage() {
       return;
     }
     setBusy(true);
+    setSubmitStage("submitting");
     try {
       const r = await fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/feed-entries`, {
         method: "POST",
@@ -121,8 +124,11 @@ export function FarmFeedPage() {
       }
       void loadDetails();
       await loadFeedEntries();
+      setSubmitStage("success");
+      window.setTimeout(() => setSubmitStage("idle"), 1200);
     } catch (err) {
       showToast("error", err instanceof Error ? err.message : "Save failed");
+      setSubmitStage("idle");
     } finally {
       setBusy(false);
     }
@@ -130,6 +136,15 @@ export function FarmFeedPage() {
 
   const selected = flocks.find((f) => f.id === flockId);
   const loading = listLoading;
+
+  if (submitStage === "submitting" || submitStage === "success") {
+    return (
+      <SubmissionStageScreen
+        stage={submitStage === "submitting" ? "submitting" : "success"}
+        successText="Feed log submitted successfully."
+      />
+    );
+  }
 
   return (
     <div className="mx-auto max-w-lg space-y-5 sm:max-w-xl">

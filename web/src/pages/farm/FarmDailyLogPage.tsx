@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useLaborerT } from "../../i18n/laborerI18n";
 import { DailyLogForm, type DailyLogPayload } from "../../components/DailyLogForm";
 import { useAuth } from "../../auth/AuthContext";
@@ -7,6 +8,7 @@ import { API_BASE_URL } from "../../api/config";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
+import { SubmissionStageScreen } from "../../components/farm/SubmissionStageScreen";
 
 export function FarmDailyLogPage() {
   const { token } = useAuth();
@@ -32,6 +34,7 @@ export function FarmDailyLogPage() {
   const loading = listLoading;
   const selected = flocks.find((f) => f.id === flockId);
   const initialCount = Math.max(1, Number(selected?.initialCount) || 1);
+  const [submitStage, setSubmitStage] = useState<"idle" | "submitting" | "success">("idle");
 
   async function postDailyLog(payload: DailyLogPayload) {
     const headers: HeadersInit = { "Content-Type": "application/json" };
@@ -63,6 +66,15 @@ export function FarmDailyLogPage() {
       throw new Error((data as { error?: string }).error ?? `Validate failed (${res.status})`);
     }
     return data as { warnings: string[] };
+  }
+
+  if (submitStage === "submitting" || submitStage === "success") {
+    return (
+      <SubmissionStageScreen
+        stage={submitStage === "submitting" ? "submitting" : "success"}
+        successText="Daily log submitted successfully."
+      />
+    );
   }
 
   return (
@@ -123,6 +135,7 @@ export function FarmDailyLogPage() {
                 initialFlockCount={initialCount}
                 onValidate={validateDailyLog}
                 onSubmit={async (payload) => {
+                  setSubmitStage("submitting");
                   try {
                     const out = await postDailyLog(payload);
                     void loadDetails();
@@ -132,9 +145,12 @@ export function FarmDailyLogPage() {
                         ? ` (${pay.rwfDelta >= 0 ? "+" : ""}${pay.rwfDelta} RWF)`
                         : "";
                     showToast("success", `${savedMsg}${bonus}`);
+                    setSubmitStage("success");
+                    window.setTimeout(() => setSubmitStage("idle"), 1200);
                   } catch (e) {
                     const msg = e instanceof Error ? e.message : "Save failed";
                     showToast("error", msg);
+                    setSubmitStage("idle");
                     throw e;
                   }
                 }}

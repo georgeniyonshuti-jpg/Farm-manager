@@ -11,6 +11,7 @@ import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { API_BASE_URL } from "../../api/config";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
+import { SubmissionStageScreen } from "../../components/farm/SubmissionStageScreen";
 
 function MortalityPhotoBlock({
   busy,
@@ -74,6 +75,7 @@ export function FarmMortalityLogPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [submitCooldown, setSubmitCooldown] = useState(false);
+  const [submitStage, setSubmitStage] = useState<"idle" | "submitting" | "success">("idle");
 
   const flockLoading = listLoading;
 
@@ -95,6 +97,7 @@ export function FarmMortalityLogPage() {
     }
     setError(null);
     setBusy(true);
+    setSubmitStage("submitting");
     try {
       const res = await fetch(`${API_BASE_URL}/api/flocks/${flockId}/mortality-events`, {
         method: "POST",
@@ -127,13 +130,25 @@ export function FarmMortalityLogPage() {
       void loadDetails();
       const okMsg = isEmergency ? alertEmerg : alertNorm;
       showToast("success", okMsg);
+      setSubmitStage("success");
+      window.setTimeout(() => setSubmitStage("idle"), 1200);
     } catch (err) {
       const msg = err instanceof Error ? err.message : errSave;
       setError(msg);
       showToast("error", msg);
+      setSubmitStage("idle");
     } finally {
       setBusy(false);
     }
+  }
+
+  if (submitStage === "submitting" || submitStage === "success") {
+    return (
+      <SubmissionStageScreen
+        stage={submitStage === "submitting" ? "submitting" : "success"}
+        successText="Mortality submitted successfully."
+      />
+    );
   }
 
   return (

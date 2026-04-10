@@ -14,6 +14,7 @@ import { API_BASE_URL } from "../../api/config";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import type { CheckinStatus } from "./checkinStatusTypes";
+import { SubmissionStageScreen } from "../../components/farm/SubmissionStageScreen";
 
 export type { CheckinBadge, CheckinStatus } from "./checkinStatusTypes";
 
@@ -156,6 +157,7 @@ export function FarmCheckinPage() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [fcrHintDismissed, setFcrHintDismissed] = useState(false);
+  const [submitStage, setSubmitStage] = useState<"idle" | "submitting" | "success">("idle");
 
   const pageLoading = listLoading;
 
@@ -173,6 +175,7 @@ export function FarmCheckinPage() {
     }
     setSubmitError(null);
     setBusy(true);
+    setSubmitStage("submitting");
     try {
       // ENV: moved to environment variable
       const res = await fetch(`${API_BASE_URL}/api/flocks/${flockId}/round-checkins`, {
@@ -213,13 +216,25 @@ export function FarmCheckinPage() {
           : "";
       const dayLabel = typeof flockDay === "number" ? ` (Day ${flockDay})` : "";
       showToast("success", `${savedMsg}${dayLabel}${bonus}`);
+      setSubmitStage("success");
+      window.setTimeout(() => setSubmitStage("idle"), 1200);
     } catch (err) {
       const msg = err instanceof Error ? err.message : errSave;
       setSubmitError(msg);
       showToast("error", msg);
+      setSubmitStage("idle");
     } finally {
       setBusy(false);
     }
+  }
+
+  if (submitStage === "submitting" || submitStage === "success") {
+    return (
+      <SubmissionStageScreen
+        stage={submitStage === "submitting" ? "submitting" : "success"}
+        successText="Round check-in submitted successfully."
+      />
+    );
   }
 
   return (
