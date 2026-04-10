@@ -8,6 +8,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { HubCheckinBanner, type HubCheckinBannerVariant } from "../../components/farm/HubCheckinBanner";
 import { API_BASE_URL } from "../../api/config";
+import { fetchJsonWithNetworkRetry } from "../../lib/apiFetch";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { useHubAggregatePoll } from "../../hooks/useHubAggregatePoll";
 import type { ReactNode } from "react";
@@ -66,10 +67,18 @@ export function LaborerHome() {
     setLoadError(null);
     if (!didInitialLoadRef.current) setLoading(true);
     try {
-      const ar = await fetch(`${API_BASE_URL}/api/me/aggregate-checkin-status`, { headers: readAuthHeaders(token) });
-      const ad = await ar.json();
-      if (!ar.ok) throw new Error(ad.error ?? "Status failed");
-      const primary = ad.primaryStatus as CheckinStatus | null | undefined;
+      const ad = await fetchJsonWithNetworkRetry<{
+        primaryStatus?: CheckinStatus | null;
+        summary?: {
+          anyOverdue?: boolean;
+          overdueCount?: number;
+          maxOverdueMinutes?: number;
+          overdueLabels?: string[];
+          minutesUntilSoonestNext?: number | null;
+          soonestFlockLabel?: string | null;
+        } | null;
+      }>(`${API_BASE_URL}/api/me/aggregate-checkin-status`, { headers: readAuthHeaders(token) });
+      const primary = ad.primaryStatus;
       setStatus(primary ?? null);
       const s = ad.summary;
       if (s) {

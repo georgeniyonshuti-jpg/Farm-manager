@@ -1746,10 +1746,26 @@ function flockAgeDays(flock, at = new Date()) {
   return Math.max(0, Math.floor(ms / 86400000));
 }
 
+/** Avoid RangeError from `new Date(NaN).toISOString()` when upstream ms is invalid. */
+function safeMsToIso(ms) {
+  const n = Number(ms);
+  if (!Number.isFinite(n)) return new Date().toISOString();
+  const d = new Date(n);
+  return Number.isFinite(d.getTime()) ? d.toISOString() : new Date().toISOString();
+}
+
 function lastCheckinMs(flockId) {
-  const times = roundCheckins.filter((c) => c.flockId === flockId).map((c) => new Date(c.at).getTime());
-  if (!times.length) return null;
-  return Math.max(...times);
+  let best = -Infinity;
+  let any = false;
+  for (const c of roundCheckins) {
+    if (c.flockId !== flockId) continue;
+    const t = new Date(c.at).getTime();
+    if (!Number.isFinite(t)) continue;
+    any = true;
+    if (t > best) best = t;
+  }
+  if (!any) return null;
+  return best;
 }
 
 function scheduleIntervalHoursForFlockRole(flockId, role) {
@@ -1766,7 +1782,7 @@ function computeNextDueMs(flock, now = Date.now(), role = null) {
   const h = roleInterval ?? intervalHoursForAge(ageDays, flock);
   const intervalMs = h * 3600000;
   const last = lastCheckinMs(flock.id);
-  if (last === null) {
+  if (last == null || !Number.isFinite(last)) {
     const p = new Date(`${flock?.placementDate ?? ""}T00:00:00`).getTime();
     if (!Number.isFinite(p)) return now + intervalMs;
     return p + intervalMs;
@@ -1780,9 +1796,13 @@ function checkinStatusPayload(flock, role = null) {
   const ageDays = flockAgeDays(flock, new Date(now));
   const intervalHours = scheduleIntervalHoursForFlockRole(flock.id, role) ?? intervalHoursForAge(ageDays, flock);
   const nextDueMsRaw = computeNextDueMs(flock, now, role);
-  const nextDueMs = Number.isFinite(nextDueMsRaw) ? nextDueMsRaw : (now + intervalHours * 3600000);
+  const intervalMsFallback = (Number.isFinite(intervalHours) ? intervalHours : 24) * 3600000;
+  const nextDueMs = Number.isFinite(nextDueMsRaw) ? nextDueMsRaw : now + intervalMsFallback;
   const lastMs = lastCheckinMs(flock.id);
-  const lastCheckinAt = lastMs ? new Date(lastMs).toISOString() : null;
+  const lastCheckinAt =
+    lastMs != null && Number.isFinite(lastMs) && Number.isFinite(new Date(lastMs).getTime())
+      ? new Date(lastMs).toISOString()
+      : null;
   const overdueMs = Math.max(0, now - nextDueMs);
   const isOverdue = now > nextDueMs;
   const msUntilDue = nextDueMs - now;
@@ -1804,7 +1824,7 @@ function checkinStatusPayload(flock, role = null) {
     intervalHours,
     intervalSource: scheduleIntervalHoursForFlockRole(flock.id, role) != null ? "role_schedule" : (flock.checkinBands?.length ? "batch_custom" : "default_age_curve"),
     lastCheckinAt,
-    nextDueAt: new Date(nextDueMs).toISOString(),
+    nextDueAt: safeMsToIso(nextDueMs),
     overdueMs,
     isOverdue,
     checkinBadge,
@@ -2559,71 +2579,79 @@ app.get("/api/flocks/:id/checkin-status", requireAuth, requireFarmAccess, requir
 });
 
 app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requireAnyPageAccess(["dashboard_laborer", "dashboard_vet", "dashboard_management"]), requireAction("flock.view"), async (req, res) => {
-  if (hasDb()) {
-    try {
-      await syncFlocksFromDbToMemory();
-    } catch {
-      /* ignore */
-    }
-  }
-  const now = Date.now();
-  const flocks = [...flocksById.values()];
-  const perFlock = flocks.map((f) => {
-    const status = checkinStatusPayload(f, req.authUser?.role ?? null);
-    return { flockId: f.id, label: f.label ?? f.code ?? f.id, status };
-  });
-
-  let anyOverdue = false;
-  let overdueCount = 0;
-  let maxOverdueMinutes = 0;
-  const overdueLabels = [];
-  let soonestNextMs = Infinity;
-  let soonestFlockId = null;
-  let soonestFlockLabel = null;
-  let worstOverdueFlockId = null;
-
-  for (const { flockId, label, status } of perFlock) {
-    if (status.isOverdue) {
-      anyOverdue = true;
-      overdueCount += 1;
-      const mins = Math.floor(status.overdueMs / 60000);
-      if (mins >= maxOverdueMinutes) {
-        maxOverdueMinutes = mins;
-        worstOverdueFlockId = flockId;
-      }
-      if (overdueLabels.length < 3) overdueLabels.push(String(label));
-    } else {
-      const nextMs = new Date(status.nextDueAt).getTime();
-      if (nextMs < soonestNextMs) {
-        soonestNextMs = nextMs;
-        soonestFlockId = flockId;
-        soonestFlockLabel = String(label);
+  try {
+    if (hasDb()) {
+      try {
+        await syncFlocksFromDbToMemory();
+      } catch {
+        /* ignore */
       }
     }
+    const now = Date.now();
+    const flocks = [...flocksById.values()];
+    const perFlock = flocks.map((f) => {
+      const status = checkinStatusPayload(f, req.authUser?.role ?? null);
+      return { flockId: f.id, label: f.label ?? f.code ?? f.id, status };
+    });
+
+    let anyOverdue = false;
+    let overdueCount = 0;
+    let maxOverdueMinutes = 0;
+    const overdueLabels = [];
+    let soonestNextMs = Infinity;
+    let soonestFlockId = null;
+    let soonestFlockLabel = null;
+    let worstOverdueFlockId = null;
+
+    for (const { flockId, label, status } of perFlock) {
+      if (status.isOverdue) {
+        anyOverdue = true;
+        overdueCount += 1;
+        const mins = Math.floor(status.overdueMs / 60000);
+        if (mins >= maxOverdueMinutes) {
+          maxOverdueMinutes = mins;
+          worstOverdueFlockId = flockId;
+        }
+        if (overdueLabels.length < 3) overdueLabels.push(String(label));
+      } else {
+        const nextMs = new Date(status.nextDueAt).getTime();
+        if (Number.isFinite(nextMs) && nextMs < soonestNextMs) {
+          soonestNextMs = nextMs;
+          soonestFlockId = flockId;
+          soonestFlockLabel = String(label);
+        }
+      }
+    }
+
+    const primaryFlockId = anyOverdue ? worstOverdueFlockId : soonestFlockId;
+    let primaryStatus = null;
+    if (primaryFlockId) {
+      const primaryFlock = flocksById.get(primaryFlockId);
+      primaryStatus =
+        (await checkinStatusPayloadWithFcrHint(primaryFlockId, req.authUser?.role ?? null))
+        ?? (primaryFlock ? checkinStatusPayload(primaryFlock, req.authUser?.role ?? null) : null);
+    }
+
+    const summary = {
+      anyOverdue,
+      overdueCount,
+      maxOverdueMinutes,
+      overdueLabels,
+      minutesUntilSoonestNext:
+        anyOverdue || soonestNextMs === Infinity ? null : Math.max(0, Math.floor((soonestNextMs - now) / 60000)),
+      soonestFlockLabel: anyOverdue ? null : soonestFlockLabel,
+      soonestFlockId: anyOverdue ? null : soonestFlockId,
+      primaryFlockId,
+    };
+
+    res.json({ summary, primaryFlockId, primaryStatus });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[ERROR]", "[api] GET /api/me/aggregate-checkin-status:", msg);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Could not load check-in schedule. Try again." });
+    }
   }
-
-  const primaryFlockId = anyOverdue ? worstOverdueFlockId : soonestFlockId;
-  let primaryStatus = null;
-  if (primaryFlockId) {
-    const primaryFlock = flocksById.get(primaryFlockId);
-    primaryStatus =
-      (await checkinStatusPayloadWithFcrHint(primaryFlockId, req.authUser?.role ?? null))
-      ?? (primaryFlock ? checkinStatusPayload(primaryFlock, req.authUser?.role ?? null) : null);
-  }
-
-  const summary = {
-    anyOverdue,
-    overdueCount,
-    maxOverdueMinutes,
-    overdueLabels,
-    minutesUntilSoonestNext:
-      anyOverdue || soonestNextMs === Infinity ? null : Math.max(0, Math.floor((soonestNextMs - now) / 60000)),
-    soonestFlockLabel: anyOverdue ? null : soonestFlockLabel,
-    soonestFlockId: anyOverdue ? null : soonestFlockId,
-    primaryFlockId,
-  };
-
-  res.json({ summary, primaryFlockId, primaryStatus });
 });
 
 app.patch("/api/flocks/:id/checkin-schedule", requireAuth, requireFarmAccess, requireCheckinScheduleEditor, (req, res) => {
