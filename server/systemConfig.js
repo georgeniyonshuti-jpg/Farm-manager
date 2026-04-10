@@ -94,6 +94,9 @@ export const DEFAULT_APP_SETTINGS = {
   field_payroll_feed_rwf: "300",
   field_payroll_missed_check_in_rwf: "200",
   field_payroll_missed_feed_rwf: "200",
+  checkin_commission_on_time_rwf: "500",
+  checkin_deduction_late_rwf: "300",
+  checkin_deduction_missed_rwf: "500",
 };
 
 /** @type {Array<{ category: string, value: string, label: string, sortOrder: number, active: boolean, metadata: object }>} */
@@ -207,6 +210,21 @@ export function getFieldPayrollRates() {
     missedFeedRwf: Math.max(0, Math.floor(getAppSettingNumber("field_payroll_missed_feed_rwf", 200))),
   };
 }
+
+/** Configurable check-in commission/deduction rates (manager+ editable). */
+export function getCheckinCommissionRates() {
+  return {
+    onTimeRwf: Math.max(0, Math.floor(getAppSettingNumber("checkin_commission_on_time_rwf", 500))),
+    lateDeductionRwf: Math.max(0, Math.floor(getAppSettingNumber("checkin_deduction_late_rwf", 300))),
+    missedDeductionRwf: Math.max(0, Math.floor(getAppSettingNumber("checkin_deduction_missed_rwf", 500))),
+  };
+}
+
+const CHECKIN_COMMISSION_DB_KEYS = [
+  "checkin_commission_on_time_rwf",
+  "checkin_deduction_late_rwf",
+  "checkin_deduction_missed_rwf",
+];
 
 const FIELD_PAYROLL_DB_KEYS = [
   "field_payroll_check_in_rwf",

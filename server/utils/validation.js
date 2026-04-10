@@ -18,7 +18,10 @@ export const checkinSchema = z.object({
   photos: z.array(z.string().min(20)).min(1).max(6),
   feedKg: z.coerce.number().min(0).max(100000).optional(),
   waterL: z.coerce.number().min(0).max(100000).optional(),
+  feedAvailable: z.boolean().optional(),
+  waterAvailable: z.boolean().optional(),
   mortalityAtCheckin: z.coerce.number().min(0).max(100000).optional(),
+  mortalityReportedInMortalityLog: z.boolean().optional(),
   notes: z.string().max(4000).optional(),
 });
 
@@ -27,4 +30,12 @@ export const feedEntrySchema = z.object({
   feedKg: z.coerce.number().min(0.001).max(100000),
   notes: z.string().max(4000).optional(),
   recordedAt: z.string().max(40).optional(),
+});
+
+export const vetLogSchema = z.object({
+  flockId: z.string().min(1).max(120),
+  logDate: z.string().min(8).max(32),
+  observations: z.string().max(8000).optional(),
+  actionsTaken: z.string().max(8000).optional(),
+  recommendations: z.string().max(8000).optional(),
 });

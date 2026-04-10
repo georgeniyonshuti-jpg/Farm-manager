@@ -303,7 +303,16 @@ export function FarmInventoryPage() {
           ) : null}
 
           <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-            <h2 className="text-sm font-semibold text-neutral-900">Inventory ledger</h2>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold text-neutral-900">Inventory ledger</h2>
+              <a
+                href={`${API_BASE_URL}/api/reports/feed-inventory.csv${flockId ? `?flockId=${encodeURIComponent(flockId)}` : ""}`}
+                className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+                download
+              >
+                Export CSV
+              </a>
+            </div>
             <div className="mt-3 space-y-2">
               {rows.map((r) => (
                 <div key={r.id} className="rounded-lg border border-neutral-200 p-3 text-sm">

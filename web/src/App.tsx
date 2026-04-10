@@ -16,6 +16,7 @@ import { FarmInventoryPage } from "./pages/farm/FarmInventoryPage";
 import { FarmCheckinPage } from "./pages/farm/FarmCheckinPage";
 import { FarmMortalityLogPage } from "./pages/farm/FarmMortalityLogPage";
 import { FarmMortalityPage } from "./pages/farm/FarmMortalityPage";
+import { FarmVetLogsPage } from "./pages/farm/FarmVetLogsPage";
 import { FlockScheduleSettingsPage } from "./pages/farm/FlockScheduleSettingsPage";
 import { FlockListPage } from "./pages/farm/FlockListPage";
 import { FlockDetailPage } from "./pages/farm/FlockDetailPage";
@@ -172,6 +173,14 @@ export default function App() {
                   element={
                     <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
                       <FarmMortalityPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="vet-logs"
+                  element={
+                    <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
+                      <FarmVetLogsPage />
                     </ProtectedRoute>
                   }
                 />

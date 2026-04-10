@@ -15,7 +15,18 @@ type FeedEntry = {
   recordedAt: string;
   feedKg: number;
   notes?: string;
+  submissionStatus?: string;
 };
+
+function StatusBadge({ status }: { status?: string }) {
+  if (!status || status === "approved") return null;
+  const cls =
+    status === "pending_review"
+      ? "bg-amber-100 text-amber-800"
+      : "bg-red-100 text-red-800";
+  const label = status === "pending_review" ? "Pending review" : "Rejected";
+  return <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${cls}`}>{label}</span>;
+}
 
 export function FarmFeedPage() {
   const { token } = useAuth();
@@ -39,6 +50,7 @@ export function FarmFeedPage() {
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [entriesError, setEntriesError] = useState<string | null>(null);
+  const [inventoryBalanceKg, setInventoryBalanceKg] = useState<number | null>(null);
   const feedTypeOptions = useReferenceOptions("feed_type", token, [
     { value: "starter", label: "Starter" },
     { value: "grower", label: "Grower" },
@@ -50,17 +62,25 @@ export function FarmFeedPage() {
     if (!flockId || !token) {
       setEntries([]);
       setEntriesError(null);
+      setInventoryBalanceKg(null);
       return;
     }
     try {
-      const er = await fetch(
-        `${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/feed-entries?limit=25`,
-        { headers: readAuthHeaders(token) },
-      );
+      const [er, br] = await Promise.all([
+        fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/feed-entries?limit=25`, { headers: readAuthHeaders(token) }),
+        fetch(`${API_BASE_URL}/api/inventory/balance?flock_id=${encodeURIComponent(flockId)}`, { headers: readAuthHeaders(token) }),
+      ]);
       const ed = await er.json();
       if (!er.ok) throw new Error((ed as { error?: string }).error ?? "Entries failed");
       setEntries(((ed as { entries?: FeedEntry[] }).entries) ?? []);
       setEntriesError(null);
+      try {
+        const bd = await br.json();
+        const bal = ((bd as { balances?: Array<{ balanceKg: number }> }).balances ?? [])[0]?.balanceKg;
+        setInventoryBalanceKg(typeof bal === "number" ? bal : null);
+      } catch {
+        setInventoryBalanceKg(null);
+      }
     } catch (e) {
       setEntries([]);
       setEntriesError(e instanceof Error ? e.message : "Entries failed");
@@ -110,8 +130,8 @@ export function FarmFeedPage() {
   return (
     <div className="mx-auto max-w-lg space-y-5 sm:max-w-xl">
       <PageHeader
-        title="Feed log"
-        subtitle="Record feed delivered without a photo round check-in. Totals count toward cycle FCR with round check-ins."
+        title="Feed request / log"
+        subtitle="Record feed delivered. Lower roles require manager approval. Totals count toward cycle FCR with round check-ins."
         action={
           <Link
             to="/dashboard/laborer"
@@ -167,6 +187,13 @@ export function FarmFeedPage() {
             <p className="text-sm text-neutral-500">Loading flock context…</p>
           ) : !flockId ? (
             <p className="text-sm text-amber-800">No active flocks. Create a flock to start logging feed.</p>
+          ) : null}
+
+          {inventoryBalanceKg != null ? (
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
+              <span className="font-semibold text-emerald-900">Feed stock:</span>
+              <span className="font-mono tabular-nums text-emerald-800">{inventoryBalanceKg.toFixed(2)} kg</span>
+            </div>
           ) : null}
 
           <form
@@ -240,7 +267,10 @@ export function FarmFeedPage() {
                     <span className="font-mono text-xs text-neutral-600">
                       {new Date(en.recordedAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
                     </span>
-                    <span className="font-semibold tabular-nums text-emerald-900">{en.feedKg} kg</span>
+                    <span className="flex items-center gap-2">
+                      <span className="font-semibold tabular-nums text-emerald-900">{en.feedKg} kg</span>
+                      <StatusBadge status={en.submissionStatus} />
+                    </span>
                     {en.notes ? <span className="w-full text-xs text-neutral-600">{en.notes}</span> : null}
                   </li>
                 ))}

@@ -18,20 +18,30 @@ type MortalityRow = {
   notes: string;
   source: string;
   linkedCheckinId: string | null;
+  submissionStatus?: string;
+  affectsLiveCount?: boolean;
 };
+
+function MortStatusBadge({ status }: { status?: string }) {
+  if (!status || status === "approved") return <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-800">Approved</span>;
+  if (status === "pending_review") return <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-800">Pending</span>;
+  return <span className="inline-block rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-800">Rejected</span>;
+}
 
 export function FarmMortalityPage() {
   const { token } = useAuth();
   const tFlock = useLaborerT("Flock");
   const tTitle = useLaborerT("Mortality tracking");
   const tLead = useLaborerT(
-    "Events from round check-ins and ad-hoc / emergency logs (with photos stored on server in demo).",
+    "Full report of all mortality events, with filters and export.",
   );
   const tLog = useLaborerT("Log mortality");
   const tTime = useLaborerT("Time");
   const tCount = useLaborerT("Count");
   const tType = useLaborerT("Type");
   const tNotes = useLaborerT("Notes");
+  const tStatus = useLaborerT("Status");
+  const tLive = useLaborerT("Affects live count");
   const tEmptyTitle = useLaborerT("No mortality logged yet");
   const tEmptyBody = useLaborerT("Submit losses from the mortality log — photos are required.");
   const tNoFlocks = useLaborerT("No flock available");
@@ -52,6 +62,8 @@ export function FarmMortalityPage() {
   const [rows, setRows] = useState<MortalityRow[]>([]);
   const [eventsError, setEventsError] = useState<string | null>(null);
   const [eventsLoading, setEventsLoading] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
 
   const loadEvents = useCallback(async () => {
     if (!token || !flockId) {
@@ -79,6 +91,16 @@ export function FarmMortalityPage() {
   useEffect(() => {
     void loadEvents();
   }, [loadEvents]);
+
+  const filteredRows = rows.filter((r) => {
+    if (statusFilter !== "all" && (r.submissionStatus ?? "approved") !== statusFilter) return false;
+    if (searchQ) {
+      const q = searchQ.toLowerCase();
+      const hay = [r.notes, r.source, r.id].filter(Boolean).join(" ").toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
 
   const loading = listLoading || (eventsLoading && rows.length === 0);
   const pageError = ctxError ?? eventsError;
@@ -153,20 +175,58 @@ export function FarmMortalityPage() {
         />
       )}
 
-      {!loading && !pageError && rows.length === 0 && flockId ? (
+      {!loading && !pageError && rows.length > 0 ? (
+        <div className="mt-4 flex flex-wrap gap-3 items-end">
+          <label className="text-sm font-medium text-neutral-700">
+            Search
+            <input
+              className="mt-1 block w-48 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm"
+              placeholder="Notes, source…"
+              value={searchQ}
+              onChange={(e) => setSearchQ(e.target.value)}
+            />
+          </label>
+          <label className="text-sm font-medium text-neutral-700">
+            {tStatus}
+            <select
+              className="mt-1 block w-40 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              <option value="all">All</option>
+              <option value="approved">Approved</option>
+              <option value="pending_review">Pending</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </label>
+          <a
+            href={`${API_BASE_URL}/api/reports/mortality.csv${flockId ? `?flockId=${encodeURIComponent(flockId)}` : ""}`}
+            className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+            download
+          >
+            Export CSV
+          </a>
+        </div>
+      ) : null}
+
+      {!loading && !pageError && filteredRows.length === 0 && flockId ? (
         <EmptyState title={tEmptyTitle} description={tEmptyBody} />
       ) : null}
 
-      {!loading && !pageError && rows.length > 0 ? (
+      {!loading && !pageError && filteredRows.length > 0 ? (
         <>
           <ul className="mt-4 space-y-3 sm:hidden">
-            {rows.map((r) => (
+            {filteredRows.map((r) => (
               <li key={r.id} className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm">
                 <div className="flex justify-between font-mono text-xs text-neutral-600">
                   <span>{r.at}</span>
                   <span className="font-semibold text-neutral-900">
                     {tCount}: {r.count}
                   </span>
+                </div>
+                <div className="mt-1 flex gap-2">
+                  <MortStatusBadge status={r.submissionStatus} />
+                  {r.affectsLiveCount === false ? <span className="text-[10px] text-neutral-500">No live count effect</span> : null}
                 </div>
                 <p className="mt-2 font-medium text-neutral-800">
                   {r.isEmergency ? (
@@ -180,17 +240,19 @@ export function FarmMortalityPage() {
             ))}
           </ul>
           <div className="institutional-table-wrapper mt-4 hidden overflow-x-auto sm:block">
-            <table className="institutional-table min-w-[28rem] text-sm">
+            <table className="institutional-table min-w-[38rem] text-sm">
               <thead>
                 <tr>
                   <th>{tTime}</th>
                   <th>{tCount}</th>
                   <th>{tType}</th>
+                  <th>{tStatus}</th>
+                  <th>{tLive}</th>
                   <th>{tNotes}</th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {filteredRows.map((r) => (
                   <tr key={r.id}>
                     <td className="whitespace-nowrap font-mono text-xs">{r.at}</td>
                     <td>{r.count}</td>
@@ -201,6 +263,8 @@ export function FarmMortalityPage() {
                         <TranslatedText text={r.source?.replace(/_/g, " ").trim() || "—"} />
                       )}
                     </td>
+                    <td><MortStatusBadge status={r.submissionStatus} /></td>
+                    <td>{r.affectsLiveCount !== false ? "Yes" : "No"}</td>
                     <td>{r.notes || <TranslatedText text="—" />}</td>
                   </tr>
                 ))}

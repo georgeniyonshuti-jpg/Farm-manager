@@ -113,6 +113,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
       "/farm/feed": "farm_feed",
       "/farm/mortality-log": "farm_mortality_log",
       "/farm/daily-log": "farm_daily_log",
+      "/farm/vet-logs": "farm_vet_logs",
       "/farm/mortality": "farm_mortality",
       "/farm/inventory": "farm_inventory",
     };
@@ -150,14 +151,21 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
       : null;
 
   const groupedFarmNav = useMemo(() => {
-    const core = farmCore;
-    return {
-      core,
-      clinical: farmNav.filter((i) =>
-        ["/farm/flocks", "/farm/batch-schedule", "/farm/treatments", "/farm/slaughter", "/farm/fcr"].includes(i.to)
+    const coreOps = farmCore.filter((i) =>
+      ["/farm/checkin", "/farm/feed", "/farm/mortality-log", "/farm/inventory"].includes(i.to)
+    );
+    const clinicalReport = [
+      ...farmCore.filter((i) =>
+        ["/farm/mortality", "/farm/vet-logs"].includes(i.to)
       ),
-      workforce: farmNav.filter((i) => ["/farm/schedule-settings", "/farm/payroll", "/laborer/earnings"].includes(i.to)),
-    };
+      ...farmNav.filter((i) =>
+        ["/farm/flocks", "/farm/treatments", "/farm/slaughter", "/farm/fcr"].includes(i.to)
+      ),
+    ];
+    const workforce = farmNav.filter((i) =>
+      ["/farm/batch-schedule", "/farm/schedule-settings", "/farm/payroll", "/laborer/earnings"].includes(i.to)
+    );
+    return { core: coreOps, clinical: clinicalReport, workforce };
   }, [farmCore, farmNav]);
 
   function toggleGroup(id: "core" | "clinical" | "workforce") {

@@ -51,10 +51,8 @@ export type FarmNavItem = { to: string; label: string; end?: boolean };
 
 const FARM_CORE_FULL: FarmNavItem[] = [
   { to: "/farm/checkin", label: "Round check-in" },
-  { to: "/farm/feed", label: "Feed log" },
+  { to: "/farm/feed", label: "Feed request / log" },
   { to: "/farm/mortality-log", label: "Log mortality" },
-  { to: "/farm/daily-log", label: "Daily logs" },
-  { to: "/farm/mortality", label: "Mortality tracking" },
   { to: "/farm/inventory", label: "Feed inventory" },
 ];
 
@@ -64,7 +62,14 @@ const FARM_CORE_FULL: FarmNavItem[] = [
  */
 export function farmCoreNavItems(user: SessionUser | null): FarmNavItem[] {
   if (!user || !canAccessWorkspace(user, "farm")) return [];
-  if (farmFieldOpsNavEligible(user)) return [...FARM_CORE_FULL];
+  if (farmFieldOpsNavEligible(user)) {
+    const items: FarmNavItem[] = [...FARM_CORE_FULL];
+    if (roleAtLeast(user, "vet")) {
+      items.push({ to: "/farm/vet-logs", label: "Vet logs" });
+    }
+    items.push({ to: "/farm/mortality", label: "Mortality tracking" });
+    return items;
+  }
   if (user.role === "procurement_officer") return [{ to: "/farm/inventory", label: "Feed inventory" }];
   return [];
 }
@@ -106,7 +111,8 @@ export const PAGE_ACCESS_DEFS: Array<{ key: string; label: string; prefixes: str
   { key: "farm_checkin", label: "Round check-in", prefixes: ["/farm/checkin"] },
   { key: "farm_feed", label: "Feed log", prefixes: ["/farm/feed"] },
   { key: "farm_mortality_log", label: "Log mortality", prefixes: ["/farm/mortality-log"] },
-  { key: "farm_daily_log", label: "Daily logs", prefixes: ["/farm/daily-log"] },
+  { key: "farm_daily_log", label: "Daily logs (legacy)", prefixes: ["/farm/daily-log"] },
+  { key: "farm_vet_logs", label: "Vet logs", prefixes: ["/farm/vet-logs"] },
   { key: "farm_mortality", label: "Mortality tracking", prefixes: ["/farm/mortality"] },
   { key: "farm_inventory", label: "Feed inventory", prefixes: ["/farm/inventory"] },
   { key: "farm_flocks", label: "Flocks", prefixes: ["/farm/flocks", "/farm/fcr"] },
@@ -156,7 +162,7 @@ const FLOCK_ACTION_MIN_ROLE: Record<FlockActionKey, UserRole> = {
   "flock.create": "vet_manager",
   "treatment.execute": "vet",
   "weighin.record": "vet",
-  "mortality.record": "vet",
+  "mortality.record": "laborer",
   "slaughter.schedule": "vet_manager",
   "slaughter.record": "vet_manager",
   "flock.close": "vet_manager",

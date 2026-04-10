@@ -9,7 +9,7 @@ import pgSession from "connect-pg-simple";
 import pg from "pg";
 import { pgClientConfigFromDatabaseUrlAsync } from "./pgConnFromUrl.js";
 import { runMigrations } from "./migrate.js";
-import { checkinSchema, dailyLogSchema, feedEntrySchema, loginSchema } from "./utils/validation.js";
+import { checkinSchema, dailyLogSchema, feedEntrySchema, loginSchema, vetLogSchema } from "./utils/validation.js";
 import * as systemConfig from "./systemConfig.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -174,6 +174,7 @@ const PAGE_ACCESS_KEYS = [
   "farm_batch_schedule",
   "farm_schedule_settings",
   "farm_payroll",
+  "farm_vet_logs",
   "farm_treatments",
   "farm_slaughter",
   "cleva_portfolio",
@@ -615,7 +616,7 @@ const FLOCK_ACTION_MIN_ROLE = {
   "flock.create": "vet_manager",
   "treatment.execute": "vet",
   "weighin.record": "vet",
-  "mortality.record": "vet",
+  "mortality.record": "laborer",
   "slaughter.schedule": "vet_manager",
   "slaughter.record": "vet_manager",
   "flock.close": "vet_manager",
@@ -663,6 +664,17 @@ function requireAction(action, blockedByResolver = null) {
     }
     next();
   };
+}
+
+function needsApproval(user) {
+  if (!user) return true;
+  const r = ROLE_RANK[user.role] ?? -1;
+  return r < ROLE_RANK["vet_manager"];
+}
+
+function isVetOrAbove(user) {
+  if (!user) return false;
+  return (ROLE_RANK[user.role] ?? -1) >= ROLE_RANK["vet"];
 }
 
 function canEditCheckinSchedule(user) {
@@ -2449,8 +2461,11 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
   }
   const feedKg = Number(body.feedKg);
   const waterL = Number(body.waterL);
+  const feedAvailable = Boolean(body.feedAvailable);
+  const waterAvailable = Boolean(body.waterAvailable);
   const notes = String(body.notes ?? "").slice(0, 4000);
   const mortalityAtCheckin = body.mortalityAtCheckin != null ? Math.max(0, Number(body.mortalityAtCheckin)) : 0;
+  const mortalityReportedInMortalityLog = Boolean(body.mortalityReportedInMortalityLog);
 
   let id = `chk_${crypto.randomBytes(8).toString("hex")}`;
   const at = new Date().toISOString();
@@ -2463,14 +2478,17 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
     photoUrl: photos[0] ?? null,
     feedKg: Number.isFinite(feedKg) ? feedKg : 0,
     waterL: Number.isFinite(waterL) ? waterL : 0,
+    feedAvailable,
+    waterAvailable,
     notes,
     mortalityAtCheckin,
+    mortalityReportedInMortalityLog,
   };
   if (hasDb() && isPersistableUuid(f.id) && isPersistableUuid(req.authUser.id)) {
     try {
       const ins = await dbQuery(
-        `INSERT INTO check_ins (flock_id, laborer_id, at, photo_url, photo_urls, feed_kg, water_l, notes, mortality_at_checkin)
-         VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4, $5::jsonb, $6::numeric, $7::numeric, $8, $9)
+        `INSERT INTO check_ins (flock_id, laborer_id, at, photo_url, photo_urls, feed_kg, water_l, notes, mortality_at_checkin, feed_available, water_available, mortality_reported_in_mortality_log)
+         VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4, $5::jsonb, $6::numeric, $7::numeric, $8, $9, $10, $11, $12)
          RETURNING id::text AS id`,
         [
           f.id,
@@ -2482,6 +2500,9 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
           row.waterL,
           notes && notes.trim() ? notes.slice(0, 4000) : null,
           mortalityAtCheckin,
+          feedAvailable,
+          waterAvailable,
+          mortalityReportedInMortalityLog,
         ]
       );
       const rid = ins.rows[0]?.id;
@@ -2502,6 +2523,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
     photoCount: photos.length,
   });
   if (mortalityAtCheckin > 0) {
+    const affectsLiveCount = mortalityReportedInMortalityLog;
     let mid = `mort_${crypto.randomBytes(8).toString("hex")}`;
     const mortRow = {
       id: mid,
@@ -2514,13 +2536,14 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
       notes: "Logged at scheduled round check-in",
       linkedCheckinId: id,
       source: "round_checkin",
+      affectsLiveCount,
     };
     if (hasDb() && isPersistableUuid(f.id) && isPersistableUuid(req.authUser.id)) {
       try {
         const linkUuid = isPersistableUuid(id) ? id : null;
         const ins = await dbQuery(
-          `INSERT INTO flock_mortality_events (flock_id, laborer_id, at, count, is_emergency, photos, notes, linked_checkin_id, source)
-           VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4, $5, $6::jsonb, $7, $8::uuid, $9)
+          `INSERT INTO flock_mortality_events (flock_id, laborer_id, at, count, is_emergency, photos, notes, linked_checkin_id, source, affects_live_count)
+           VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4, $5, $6::jsonb, $7, $8::uuid, $9, $10)
            RETURNING id::text AS id`,
           [
             f.id,
@@ -2532,6 +2555,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
             mortRow.notes,
             linkUuid,
             "round_checkin",
+            affectsLiveCount,
           ]
         );
         const mr = ins.rows[0]?.id;
@@ -2549,6 +2573,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
     appendAudit(req.authUser.id, req.authUser.role, "farm.mortality.create", "flock", f.id, {
       mortalityId: mid,
       count: mortalityAtCheckin,
+      affectsLiveCount,
     });
   }
   const statusOut =
@@ -2582,6 +2607,7 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
     const p = parseOptionalIsoDate(recRaw);
     if (p) atIso = p;
   }
+  const submissionStatus = needsApproval(req.authUser) ? "pending_review" : "approved";
   let id = `ffe_${crypto.randomBytes(8).toString("hex")}`;
   const row = {
     id,
@@ -2590,14 +2616,15 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
     feedKg,
     notes: notes ?? "",
     enteredByUserId: req.authUser.id,
+    submissionStatus,
   };
   if (hasDb()) {
     try {
       const ins = await dbQuery(
-        `INSERT INTO flock_feed_entries (flock_id, recorded_at, feed_kg, notes, entered_by_user_id)
-         VALUES ($1::uuid, $2::timestamptz, $3::numeric, $4, $5::uuid)
+        `INSERT INTO flock_feed_entries (flock_id, recorded_at, feed_kg, notes, entered_by_user_id, submission_status)
+         VALUES ($1::uuid, $2::timestamptz, $3::numeric, $4, $5::uuid, $6)
          RETURNING id::text AS id, recorded_at AS "recordedAt"`,
-        [f.id, atIso, feedKg, notes && String(notes).trim() ? String(notes).slice(0, 4000) : null, req.authUser.id]
+        [f.id, atIso, feedKg, notes && String(notes).trim() ? String(notes).slice(0, 4000) : null, req.authUser.id, submissionStatus]
       );
       const r0 = ins.rows[0];
       id = String(r0?.id ?? id);
@@ -2621,11 +2648,12 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
   appendAudit(req.authUser.id, req.authUser.role, "farm.feed_entry.create", "flock", f.id, {
     feedEntryId: row.id,
     feedKg,
+    submissionStatus,
   });
   const summary = await buildFlockPerformanceSummary(f.id);
   res.json({
     ok: true,
-    entry: { id: row.id, recordedAt: row.recordedAt, feedKg: row.feedKg, notes: row.notes },
+    entry: { id: row.id, recordedAt: row.recordedAt, feedKg: row.feedKg, notes: row.notes, submissionStatus },
     feedToDateKg: summary?.feedToDateKg ?? Number(totalFeedKgForFlock(f.id).toFixed(2)),
     payrollImpact,
     payrollSaved,
@@ -2649,6 +2677,7 @@ app.get("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requireP
       recordedAt: e.recordedAt,
       feedKg: e.feedKg,
       notes: e.notes,
+      submissionStatus: e.submissionStatus ?? "approved",
     }));
   res.json({ entries: list, feedToDateKg: Number(totalFeedKgForFlock(flockId).toFixed(2)) });
 });
@@ -2693,6 +2722,7 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
     return;
   }
 
+  const submissionStatus = needsApproval(req.authUser) ? "pending_review" : "approved";
   let id = `mort_${crypto.randomBytes(8).toString("hex")}`;
   const at = new Date().toISOString();
   const row = {
@@ -2706,14 +2736,16 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
     notes,
     linkedCheckinId,
     source: linkedCheckinId ? "linked" : isEmergency ? "emergency" : "adhoc",
+    submissionStatus,
+    affectsLiveCount: submissionStatus === "approved",
   };
   if (hasDb() && isPersistableUuid(f.id) && isPersistableUuid(req.authUser.id)) {
     try {
       const linkUuid =
         linkedCheckinId && isPersistableUuid(String(linkedCheckinId)) ? String(linkedCheckinId) : null;
       const ins = await dbQuery(
-        `INSERT INTO flock_mortality_events (flock_id, laborer_id, at, count, is_emergency, photos, notes, linked_checkin_id, source)
-         VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4, $5, $6::jsonb, $7, $8::uuid, $9)
+        `INSERT INTO flock_mortality_events (flock_id, laborer_id, at, count, is_emergency, photos, notes, linked_checkin_id, source, submission_status, affects_live_count)
+         VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4, $5, $6::jsonb, $7, $8::uuid, $9, $10, $11)
          RETURNING id::text AS id`,
         [
           f.id,
@@ -2725,6 +2757,8 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
           notes && notes.trim() ? notes.slice(0, 4000) : null,
           linkUuid,
           row.source,
+          submissionStatus,
+          row.affectsLiveCount,
         ]
       );
       const rid = ins.rows[0]?.id;
@@ -2744,6 +2778,7 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
     mortalityId: id,
     count,
     isEmergency,
+    submissionStatus,
   });
   res.json({ ok: true, mortality: row, status: checkinStatusPayload(f), payrollImpact: null });
 });
@@ -2754,7 +2789,14 @@ app.get("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, requ
     res.status(404).json({ error: "Flock not found" });
     return;
   }
-  const list = mortalityEvents.filter((m) => m.flockId === f.id).sort((a, b) => (a.at < b.at ? 1 : -1));
+  const list = mortalityEvents
+    .filter((m) => m.flockId === f.id)
+    .sort((a, b) => (a.at < b.at ? 1 : -1))
+    .map((m) => ({
+      ...m,
+      submissionStatus: m.submissionStatus ?? "approved",
+      affectsLiveCount: m.affectsLiveCount ?? true,
+    }));
   res.json({ events: list });
 });
 
@@ -2766,6 +2808,425 @@ app.get("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requir
   }
   const list = roundCheckins.filter((c) => c.flockId === f.id).sort((a, b) => (a.at < b.at ? 1 : -1));
   res.json({ checkins: list });
+});
+
+// ── Feed entries: pending review queue + review action ──
+
+app.get("/api/feed-entries/pending", requireAuth, requireFarmAccess, requireLeadVetUp, async (req, res) => {
+  const flockId = req.query.flockId ? String(req.query.flockId) : null;
+  const from = req.query.from ? String(req.query.from) : null;
+  const to = req.query.to ? String(req.query.to) : null;
+  if (hasDb()) {
+    try {
+      let sql = `SELECT e.id::text AS id, e.flock_id AS "flockId", e.recorded_at AS "recordedAt",
+                        e.feed_kg AS "feedKg", e.notes, e.entered_by_user_id AS "enteredByUserId",
+                        e.submission_status AS "submissionStatus", u.name AS "enteredByName"
+                   FROM flock_feed_entries e
+                   LEFT JOIN users u ON u.id = e.entered_by_user_id
+                  WHERE e.submission_status = 'pending_review'`;
+      const params = [];
+      if (flockId) { params.push(flockId); sql += ` AND e.flock_id = $${params.length}::uuid`; }
+      if (from) { params.push(from); sql += ` AND e.recorded_at >= $${params.length}::timestamptz`; }
+      if (to) { params.push(to); sql += ` AND e.recorded_at <= $${params.length}::timestamptz`; }
+      sql += ` ORDER BY e.recorded_at DESC LIMIT 200`;
+      const r = await dbQuery(sql, params);
+      res.json({ entries: r.rows });
+      return;
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET feed-entries/pending:", e instanceof Error ? e.message : e);
+    }
+  }
+  let entries = flockFeedEntries.filter((e) => (e.submissionStatus ?? "approved") === "pending_review");
+  if (flockId) entries = entries.filter((e) => e.flockId === flockId);
+  res.json({ entries: entries.sort((a, b) => (a.recordedAt < b.recordedAt ? 1 : -1)).slice(0, 200) });
+});
+
+app.patch("/api/feed-entries/:id/review", requireAuth, requireFarmAccess, requireLeadVetUp, async (req, res) => {
+  const entryId = String(req.params.id);
+  const action = String(req.body?.action ?? "");
+  if (action !== "approve" && action !== "reject") {
+    res.status(400).json({ error: "action must be 'approve' or 'reject'" });
+    return;
+  }
+  const reviewNotes = String(req.body?.reviewNotes ?? "").slice(0, 4000) || null;
+  const newStatus = action === "approve" ? "approved" : "rejected";
+  if (hasDb()) {
+    try {
+      const r = await dbQuery(
+        `UPDATE flock_feed_entries
+            SET submission_status = $1, reviewed_by_user_id = $2::uuid, reviewed_at = now(), review_notes = $3
+          WHERE id = $4::uuid AND submission_status = 'pending_review'
+          RETURNING id::text AS id`,
+        [newStatus, req.authUser.id, reviewNotes, entryId]
+      );
+      if (r.rowCount === 0) {
+        res.status(404).json({ error: "Entry not found or already reviewed" });
+        return;
+      }
+    } catch (e) {
+      console.error("[ERROR]", "[db] PATCH feed-entries review:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not update feed entry." });
+      return;
+    }
+  }
+  const mem = flockFeedEntries.find((e) => String(e.id) === entryId);
+  if (mem) {
+    mem.submissionStatus = newStatus;
+    mem.reviewedByUserId = req.authUser.id;
+    mem.reviewedAt = new Date().toISOString();
+    mem.reviewNotes = reviewNotes;
+  }
+  appendAudit(req.authUser.id, req.authUser.role, `farm.feed_entry.${action}`, "feed_entry", entryId, { reviewNotes });
+  res.json({ ok: true, status: newStatus });
+});
+
+// ── Mortality events: pending review queue + review action ──
+
+app.get("/api/mortality-events/pending", requireAuth, requireFarmAccess, requireLeadVetUp, async (req, res) => {
+  const flockId = req.query.flockId ? String(req.query.flockId) : null;
+  const from = req.query.from ? String(req.query.from) : null;
+  const to = req.query.to ? String(req.query.to) : null;
+  if (hasDb()) {
+    try {
+      let sql = `SELECT e.id::text AS id, e.flock_id AS "flockId", e.laborer_id AS "laborerId",
+                        e.at, e.count, e.is_emergency AS "isEmergency", e.notes,
+                        e.submission_status AS "submissionStatus", u.name AS "reportedByName"
+                   FROM flock_mortality_events e
+                   LEFT JOIN users u ON u.id = e.laborer_id
+                  WHERE e.submission_status = 'pending_review'`;
+      const params = [];
+      if (flockId) { params.push(flockId); sql += ` AND e.flock_id = $${params.length}::uuid`; }
+      if (from) { params.push(from); sql += ` AND e.at >= $${params.length}::timestamptz`; }
+      if (to) { params.push(to); sql += ` AND e.at <= $${params.length}::timestamptz`; }
+      sql += ` ORDER BY e.at DESC LIMIT 200`;
+      const r = await dbQuery(sql, params);
+      res.json({ events: r.rows });
+      return;
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET mortality-events/pending:", e instanceof Error ? e.message : e);
+    }
+  }
+  let events = mortalityEvents.filter((e) => (e.submissionStatus ?? "approved") === "pending_review");
+  if (flockId) events = events.filter((e) => e.flockId === flockId);
+  res.json({ events: events.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 200) });
+});
+
+app.patch("/api/mortality-events/:id/review", requireAuth, requireFarmAccess, requireLeadVetUp, async (req, res) => {
+  const eventId = String(req.params.id);
+  const action = String(req.body?.action ?? "");
+  if (action !== "approve" && action !== "reject") {
+    res.status(400).json({ error: "action must be 'approve' or 'reject'" });
+    return;
+  }
+  const reviewNotes = String(req.body?.reviewNotes ?? "").slice(0, 4000) || null;
+  const newStatus = action === "approve" ? "approved" : "rejected";
+  const affectsLiveCount = action === "approve";
+  if (hasDb()) {
+    try {
+      const r = await dbQuery(
+        `UPDATE flock_mortality_events
+            SET submission_status = $1, reviewed_by_user_id = $2::uuid, reviewed_at = now(),
+                review_notes = $3, affects_live_count = $4
+          WHERE id = $5::uuid AND submission_status = 'pending_review'
+          RETURNING id::text AS id`,
+        [newStatus, req.authUser.id, reviewNotes, affectsLiveCount, eventId]
+      );
+      if (r.rowCount === 0) {
+        res.status(404).json({ error: "Event not found or already reviewed" });
+        return;
+      }
+    } catch (e) {
+      console.error("[ERROR]", "[db] PATCH mortality-events review:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not update mortality event." });
+      return;
+    }
+  }
+  const mem = mortalityEvents.find((e) => String(e.id) === eventId);
+  if (mem) {
+    mem.submissionStatus = newStatus;
+    mem.affectsLiveCount = affectsLiveCount;
+    mem.reviewedByUserId = req.authUser.id;
+    mem.reviewedAt = new Date().toISOString();
+    mem.reviewNotes = reviewNotes;
+  }
+  appendAudit(req.authUser.id, req.authUser.role, `farm.mortality.${action}`, "mortality_event", eventId, { reviewNotes });
+  res.json({ ok: true, status: newStatus, affectsLiveCount });
+});
+
+// ── Vet logs (replaces daily logs for vet+ roles) ──
+
+app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("farm_vet_logs"), async (req, res) => {
+  if (!isVetOrAbove(req.authUser)) {
+    res.status(403).json({ error: "Only vet or above can create vet logs" });
+    return;
+  }
+  const parsed = vetLogSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid vet log payload" });
+    return;
+  }
+  const { flockId, logDate, observations, actionsTaken, recommendations } = parsed.data;
+  const f = flocksById.get(flockId);
+  if (!f) {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
+  const submissionStatus = needsApproval(req.authUser) ? "pending_review" : "approved";
+  let id = `vl_${crypto.randomBytes(8).toString("hex")}`;
+  const now = new Date().toISOString();
+  const row = {
+    id,
+    flockId,
+    authorUserId: req.authUser.id,
+    logDate: String(logDate).slice(0, 10),
+    observations: observations ?? null,
+    actionsTaken: actionsTaken ?? null,
+    recommendations: recommendations ?? null,
+    submissionStatus,
+    createdAt: now,
+    updatedAt: now,
+  };
+  if (hasDb() && isPersistableUuid(flockId) && isPersistableUuid(req.authUser.id)) {
+    try {
+      const ins = await dbQuery(
+        `INSERT INTO farm_vet_logs (flock_id, author_user_id, log_date, observations, actions_taken, recommendations, submission_status)
+         VALUES ($1::uuid, $2::uuid, $3::date, $4, $5, $6, $7)
+         RETURNING id::text AS id, created_at AS "createdAt"`,
+        [flockId, req.authUser.id, row.logDate, row.observations, row.actionsTaken, row.recommendations, submissionStatus]
+      );
+      const r0 = ins.rows[0];
+      if (r0?.id) { row.id = String(r0.id); id = row.id; }
+      if (r0?.createdAt) row.createdAt = r0.createdAt instanceof Date ? r0.createdAt.toISOString() : String(r0.createdAt);
+    } catch (e) {
+      console.error("[ERROR]", "[db] POST /api/vet-logs:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not save vet log." });
+      return;
+    }
+  }
+  vetLogs.push(row);
+  appendAudit(req.authUser.id, req.authUser.role, "farm.vet_log.create", "flock", flockId, { vetLogId: id, submissionStatus });
+  res.json({ ok: true, log: row });
+});
+
+app.get("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("farm_vet_logs"), async (req, res) => {
+  if (!isVetOrAbove(req.authUser)) {
+    res.status(403).json({ error: "Only vet or above can view vet logs" });
+    return;
+  }
+  const flockId = req.query.flockId ? String(req.query.flockId) : null;
+  const status = req.query.status ? String(req.query.status) : null;
+  const from = req.query.from ? String(req.query.from) : null;
+  const to = req.query.to ? String(req.query.to) : null;
+  const q = req.query.q ? String(req.query.q).toLowerCase() : null;
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const pageSize = Math.min(200, Math.max(1, Number(req.query.pageSize) || 40));
+  const offset = (page - 1) * pageSize;
+  if (hasDb()) {
+    try {
+      let sql = `SELECT v.id::text AS id, v.flock_id AS "flockId", v.author_user_id AS "authorUserId",
+                        v.log_date AS "logDate", v.observations, v.actions_taken AS "actionsTaken",
+                        v.recommendations, v.submission_status AS "submissionStatus",
+                        v.reviewed_by_user_id AS "reviewedByUserId", v.reviewed_at AS "reviewedAt",
+                        v.review_notes AS "reviewNotes", v.created_at AS "createdAt",
+                        u.name AS "authorName"
+                   FROM farm_vet_logs v
+                   LEFT JOIN users u ON u.id = v.author_user_id
+                  WHERE 1=1`;
+      const params = [];
+      if (flockId) { params.push(flockId); sql += ` AND v.flock_id = $${params.length}::uuid`; }
+      if (status) { params.push(status); sql += ` AND v.submission_status = $${params.length}`; }
+      if (from) { params.push(from); sql += ` AND v.log_date >= $${params.length}::date`; }
+      if (to) { params.push(to); sql += ` AND v.log_date <= $${params.length}::date`; }
+      if (q) { params.push(`%${q}%`); sql += ` AND (v.observations ILIKE $${params.length} OR v.actions_taken ILIKE $${params.length} OR v.recommendations ILIKE $${params.length})`; }
+      const countSql = sql.replace(/SELECT[\s\S]+?FROM/, "SELECT count(*)::int AS total FROM");
+      const countR = await dbQuery(countSql, params);
+      const total = countR.rows[0]?.total ?? 0;
+      sql += ` ORDER BY v.log_date DESC, v.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      params.push(pageSize, offset);
+      const r = await dbQuery(sql, params);
+      res.json({ logs: r.rows, total, page, pageSize });
+      return;
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET /api/vet-logs:", e instanceof Error ? e.message : e);
+    }
+  }
+  let logs = [...vetLogs];
+  if (flockId) logs = logs.filter((l) => l.flockId === flockId);
+  if (status) logs = logs.filter((l) => l.submissionStatus === status);
+  if (q) logs = logs.filter((l) => [l.observations, l.actionsTaken, l.recommendations].some((s) => s && String(s).toLowerCase().includes(q)));
+  logs.sort((a, b) => (a.logDate < b.logDate ? 1 : -1));
+  const total = logs.length;
+  res.json({ logs: logs.slice(offset, offset + pageSize), total, page, pageSize });
+});
+
+app.patch("/api/vet-logs/:id/review", requireAuth, requireFarmAccess, requireLeadVetUp, async (req, res) => {
+  const logId = String(req.params.id);
+  const action = String(req.body?.action ?? "");
+  if (action !== "approve" && action !== "reject") {
+    res.status(400).json({ error: "action must be 'approve' or 'reject'" });
+    return;
+  }
+  const reviewNotes = String(req.body?.reviewNotes ?? "").slice(0, 4000) || null;
+  const newStatus = action === "approve" ? "approved" : "rejected";
+  if (hasDb()) {
+    try {
+      const r = await dbQuery(
+        `UPDATE farm_vet_logs
+            SET submission_status = $1, reviewed_by_user_id = $2::uuid, reviewed_at = now(), review_notes = $3, updated_at = now()
+          WHERE id = $4::uuid AND submission_status = 'pending_review'
+          RETURNING id::text AS id`,
+        [newStatus, req.authUser.id, reviewNotes, logId]
+      );
+      if (r.rowCount === 0) {
+        res.status(404).json({ error: "Vet log not found or already reviewed" });
+        return;
+      }
+    } catch (e) {
+      console.error("[ERROR]", "[db] PATCH vet-logs review:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not update vet log." });
+      return;
+    }
+  }
+  const mem = vetLogs.find((l) => String(l.id) === logId);
+  if (mem) {
+    mem.submissionStatus = newStatus;
+    mem.reviewedByUserId = req.authUser.id;
+    mem.reviewedAt = new Date().toISOString();
+    mem.reviewNotes = reviewNotes;
+    mem.updatedAt = new Date().toISOString();
+  }
+  appendAudit(req.authUser.id, req.authUser.role, `farm.vet_log.${action}`, "vet_log", logId, { reviewNotes });
+  res.json({ ok: true, status: newStatus });
+});
+
+// ── Report CSV exports ──
+
+app.get("/api/reports/mortality.csv", requireAuth, requireFarmAccess, requireLeadVetUp, async (req, res) => {
+  const flockId = req.query.flockId ? String(req.query.flockId) : null;
+  const from = req.query.from ? String(req.query.from) : null;
+  const to = req.query.to ? String(req.query.to) : null;
+  const status = req.query.status ? String(req.query.status) : null;
+  const includeSlaughtered = req.query.includeSlaughtered === "true";
+  if (hasDb()) {
+    try {
+      let sql = `SELECT e.id, e.flock_id, f.flock_code, e.at, e.count, e.is_emergency,
+                        e.source, e.notes, e.submission_status, e.affects_live_count,
+                        u.name AS reported_by, e.review_notes
+                   FROM flock_mortality_events e
+                   JOIN poultry_flocks f ON f.id = e.flock_id
+                   LEFT JOIN users u ON u.id = e.laborer_id
+                  WHERE 1=1`;
+      const params = [];
+      if (flockId) { params.push(flockId); sql += ` AND e.flock_id = $${params.length}::uuid`; }
+      if (from) { params.push(from); sql += ` AND e.at >= $${params.length}::timestamptz`; }
+      if (to) { params.push(to); sql += ` AND e.at <= $${params.length}::timestamptz`; }
+      if (status) { params.push(status); sql += ` AND e.submission_status = $${params.length}`; }
+      if (!includeSlaughtered) sql += ` AND f.status != 'slaughtered'`;
+      sql += ` ORDER BY e.at DESC LIMIT 5000`;
+      const r = await dbQuery(sql, params);
+      const header = "id,flock_id,flock_code,at,count,is_emergency,source,notes,submission_status,affects_live_count,reported_by,review_notes";
+      const csvRows = r.rows.map((row) =>
+        [row.id, row.flock_id, row.flock_code, row.at, row.count, row.is_emergency, row.source, `"${String(row.notes ?? "").replace(/"/g, '""')}"`, row.submission_status, row.affects_live_count, row.reported_by, `"${String(row.review_notes ?? "").replace(/"/g, '""')}"`].join(",")
+      );
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", "attachment; filename=mortality_report.csv");
+      res.send([header, ...csvRows].join("\n"));
+      return;
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET /api/reports/mortality.csv:", e instanceof Error ? e.message : e);
+    }
+  }
+  res.status(503).json({ error: "Database required for CSV export" });
+});
+
+app.get("/api/reports/feed-inventory.csv", requireAuth, requireFarmAccess, requireLeadVetUp, async (req, res) => {
+  const flockId = req.query.flockId ? String(req.query.flockId) : null;
+  const from = req.query.from ? String(req.query.from) : null;
+  const to = req.query.to ? String(req.query.to) : null;
+  if (hasDb()) {
+    try {
+      let sql = `SELECT e.id, e.flock_id, f.flock_code, e.recorded_at, e.feed_kg,
+                        e.notes, e.submission_status, u.name AS entered_by, e.review_notes
+                   FROM flock_feed_entries e
+                   JOIN poultry_flocks f ON f.id = e.flock_id
+                   LEFT JOIN users u ON u.id = e.entered_by_user_id
+                  WHERE 1=1`;
+      const params = [];
+      if (flockId) { params.push(flockId); sql += ` AND e.flock_id = $${params.length}::uuid`; }
+      if (from) { params.push(from); sql += ` AND e.recorded_at >= $${params.length}::timestamptz`; }
+      if (to) { params.push(to); sql += ` AND e.recorded_at <= $${params.length}::timestamptz`; }
+      sql += ` ORDER BY e.recorded_at DESC LIMIT 5000`;
+      const r = await dbQuery(sql, params);
+      const header = "id,flock_id,flock_code,recorded_at,feed_kg,notes,submission_status,entered_by,review_notes";
+      const csvRows = r.rows.map((row) =>
+        [row.id, row.flock_id, row.flock_code, row.recorded_at, row.feed_kg, `"${String(row.notes ?? "").replace(/"/g, '""')}"`, row.submission_status, row.entered_by, `"${String(row.review_notes ?? "").replace(/"/g, '""')}"`].join(",")
+      );
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", "attachment; filename=feed_inventory_report.csv");
+      res.send([header, ...csvRows].join("\n"));
+      return;
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET /api/reports/feed-inventory.csv:", e instanceof Error ? e.message : e);
+    }
+  }
+  res.status(503).json({ error: "Database required for CSV export" });
+});
+
+app.get("/api/reports/medicine-tracking.csv", requireAuth, requireFarmAccess, requireLeadVetUp, async (req, res) => {
+  const flockId = req.query.flockId ? String(req.query.flockId) : null;
+  const from = req.query.from ? String(req.query.from) : null;
+  const to = req.query.to ? String(req.query.to) : null;
+  if (hasDb()) {
+    try {
+      let sql = `SELECT t.id, t.flock_id, f.flock_code, t.at, t.disease_or_reason, t.medicine_name,
+                        t.dosage_value, t.dosage_unit, t.route, t.notes, u.name AS administered_by
+                   FROM poultry_treatments t
+                   JOIN poultry_flocks f ON f.id = t.flock_id
+                   LEFT JOIN users u ON u.id = t.administered_by_user_id
+                  WHERE 1=1`;
+      const params = [];
+      if (flockId) { params.push(flockId); sql += ` AND t.flock_id = $${params.length}::uuid`; }
+      if (from) { params.push(from); sql += ` AND t.at >= $${params.length}::timestamptz`; }
+      if (to) { params.push(to); sql += ` AND t.at <= $${params.length}::timestamptz`; }
+      sql += ` ORDER BY t.at DESC LIMIT 5000`;
+      const r = await dbQuery(sql, params);
+      const header = "id,flock_id,flock_code,at,disease_or_reason,medicine_name,dosage_value,dosage_unit,route,notes,administered_by";
+      const csvRows = r.rows.map((row) =>
+        [row.id, row.flock_id, row.flock_code, row.at, `"${String(row.disease_or_reason ?? "").replace(/"/g, '""')}"`, `"${String(row.medicine_name ?? "").replace(/"/g, '""')}"`, row.dosage_value, row.dosage_unit, row.route, `"${String(row.notes ?? "").replace(/"/g, '""')}"`, row.administered_by].join(",")
+      );
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", "attachment; filename=medicine_tracking_report.csv");
+      res.send([header, ...csvRows].join("\n"));
+      return;
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET /api/reports/medicine-tracking.csv:", e instanceof Error ? e.message : e);
+    }
+  }
+  res.status(503).json({ error: "Database required for CSV export" });
+});
+
+app.get("/api/reports/flocks.csv", requireAuth, requireFarmAccess, requireLeadVetUp, async (_req, res) => {
+  if (hasDb()) {
+    try {
+      const r = await dbQuery(
+        `SELECT f.id, f.flock_code, f.breed_code, f.placement_date, f.initial_count,
+                f.status, f.target_weight_kg, f.created_at
+           FROM poultry_flocks f
+          ORDER BY f.placement_date DESC LIMIT 5000`
+      );
+      const header = "id,flock_code,breed_code,placement_date,initial_count,status,target_weight_kg,created_at";
+      const csvRows = r.rows.map((row) =>
+        [row.id, row.flock_code, row.breed_code, row.placement_date, row.initial_count, row.status, row.target_weight_kg ?? "", row.created_at].join(",")
+      );
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", "attachment; filename=flocks_report.csv");
+      res.send([header, ...csvRows].join("\n"));
+      return;
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET /api/reports/flocks.csv:", e instanceof Error ? e.message : e);
+    }
+  }
+  res.status(503).json({ error: "Database required for CSV export" });
 });
 
 async function listTreatmentsForFlock(flockId, startIso = null, endIso = null) {
@@ -3786,6 +4247,9 @@ app.patch("/api/inventory/:id", requireAuth, requireFarmAccess, requirePageAcces
 
 /** @type {Array<Record<string, unknown>>} */
 const dailyLogs = [];
+
+/** @type {Array<Record<string, unknown>>} */
+const vetLogs = [];
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "clevafarm-api", storedLogs: dailyLogs.length, users: usersById.size });

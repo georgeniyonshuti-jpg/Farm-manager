@@ -115,12 +115,13 @@ export function FarmCheckinPage() {
   const lblFlock = useLaborerT("Flock");
   const title = useLaborerT("Round check-in");
   const subtitle = useLaborerT(
-    "Photos required • feed & water • optional birds lost at this round"
+    "Photos required • confirm feed & water available • optional birds lost"
   );
   const linkAction = useLaborerT("Action center");
-  const lblFeed = useLaborerT("Feed since last round (kg)");
-  const lblWater = useLaborerT("Water since last round (L)");
+  const lblFeedAvail = useLaborerT("Feed is available");
+  const lblWaterAvail = useLaborerT("Water is available");
   const lblMort = useLaborerT("Birds lost at this check-in (optional)");
+  const lblMortLogged = useLaborerT("Also file in mortality log (affects live count)");
   const lblNotes = useLaborerT("Notes");
   const phZero = useLaborerT("0");
   const btnSaving = useLaborerT("Saving…");
@@ -147,9 +148,10 @@ export function FarmCheckinPage() {
     loadFlocks,
   } = useFlockFieldContext(token);
   const [photos, setPhotos] = useState<string[]>([]);
-  const [feedKg, setFeedKg] = useState("");
-  const [waterL, setWaterL] = useState("");
+  const [feedAvailable, setFeedAvailable] = useState(false);
+  const [waterAvailable, setWaterAvailable] = useState(false);
   const [mortalityAtCheckin, setMortalityAtCheckin] = useState("");
+  const [mortalityReportedInMortalityLog, setMortalityReportedInMortalityLog] = useState(false);
   const [notes, setNotes] = useState("");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -178,9 +180,12 @@ export function FarmCheckinPage() {
         headers: jsonAuthHeaders(token),
         body: JSON.stringify({
           photos,
-          feedKg: feedKg === "" ? 0 : Number(feedKg),
-          waterL: waterL === "" ? 0 : Number(waterL),
+          feedAvailable,
+          waterAvailable,
+          feedKg: 0,
+          waterL: 0,
           mortalityAtCheckin: mortalityAtCheckin === "" ? 0 : Number(mortalityAtCheckin),
+          mortalityReportedInMortalityLog,
           notes,
         }),
       });
@@ -191,9 +196,10 @@ export function FarmCheckinPage() {
         throw new Error(msg);
       }
       setPhotos([]);
-      setFeedKg("");
-      setWaterL("");
+      setFeedAvailable(false);
+      setWaterAvailable(false);
       setMortalityAtCheckin("");
+      setMortalityReportedInMortalityLog(false);
       setNotes("");
       void loadDetails();
       const pay = (data as { payrollImpact?: { rwfDelta?: number } }).payrollImpact;
@@ -326,30 +332,24 @@ export function FarmCheckinPage() {
           onPhotos={setPhotos}
         />
 
-        <div>
-          <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="feed">
-            {lblFeed}
-          </label>
+        <label className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm font-medium text-neutral-800 cursor-pointer select-none">
           <input
-            id="feed"
-            inputMode="decimal"
-            className="w-full min-h-[48px] rounded-xl border border-neutral-300 px-4 text-lg"
-            value={feedKg}
-            onChange={(e) => setFeedKg(e.target.value)}
+            type="checkbox"
+            checked={feedAvailable}
+            onChange={(e) => setFeedAvailable(e.target.checked)}
+            className="h-5 w-5 rounded border-neutral-300 text-emerald-600 focus:ring-emerald-500"
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="water">
-            {lblWater}
-          </label>
+          {lblFeedAvail}
+        </label>
+        <label className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm font-medium text-neutral-800 cursor-pointer select-none">
           <input
-            id="water"
-            inputMode="decimal"
-            className="w-full min-h-[48px] rounded-xl border border-neutral-300 px-4 text-lg"
-            value={waterL}
-            onChange={(e) => setWaterL(e.target.value)}
+            type="checkbox"
+            checked={waterAvailable}
+            onChange={(e) => setWaterAvailable(e.target.checked)}
+            className="h-5 w-5 rounded border-neutral-300 text-emerald-600 focus:ring-emerald-500"
           />
-        </div>
+          {lblWaterAvail}
+        </label>
         <div>
           <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="mort">
             {lblMort}
@@ -363,6 +363,17 @@ export function FarmCheckinPage() {
             onChange={(e) => setMortalityAtCheckin(e.target.value)}
           />
         </div>
+        {mortalityAtCheckin && Number(mortalityAtCheckin) > 0 ? (
+          <label className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={mortalityReportedInMortalityLog}
+              onChange={(e) => setMortalityReportedInMortalityLog(e.target.checked)}
+              className="h-5 w-5 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+            />
+            {lblMortLogged}
+          </label>
+        ) : null}
         <div>
           <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="notes">
             {lblNotes}

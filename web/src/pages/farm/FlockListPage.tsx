@@ -303,6 +303,15 @@ export function FlockListPage() {
       <PageHeader
         title="Flocks"
         subtitle="Real-time flock risk prioritization with explainable alerts."
+        action={
+          <a
+            href={`${API_BASE_URL}/api/reports/flocks.csv`}
+            className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+            download
+          >
+            Export CSV
+          </a>
+        }
       />
       {farmHealthScore != null ? (
         <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm shadow-sm">

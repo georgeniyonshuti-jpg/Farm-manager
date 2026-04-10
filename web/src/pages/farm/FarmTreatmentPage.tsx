@@ -404,7 +404,19 @@ export function FarmTreatmentPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <PageHeader title="Medicine tracking" subtitle="Record treatments and withdrawal windows by flock." />
+      <PageHeader
+        title="Medicine tracking"
+        subtitle="Record treatments and withdrawal windows by flock."
+        action={
+          <a
+            href={`${API_BASE_URL}/api/reports/medicine-tracking.csv${flockId ? `?flockId=${encodeURIComponent(flockId)}` : ""}`}
+            className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+            download
+          >
+            Export CSV
+          </a>
+        }
+      />
       {!loading && flockStrip ? (
         <FlockContextStrip
           label={flockStrip.label}
