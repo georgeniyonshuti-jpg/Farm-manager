@@ -1454,6 +1454,7 @@ async function syncLogSchedulesFromDb() {
 
 async function syncCheckInsFromDb() {
   if (!hasDb()) return;
+  const preservedMemory = roundCheckins.filter((c) => !isPersistableUuid(String(c.id ?? "")));
   const r = await dbQuery(
     `SELECT id::text AS id,
             flock_id::text AS "flockId",
@@ -1502,6 +1503,9 @@ async function syncCheckInsFromDb() {
       reviewedAt: row.reviewedAt instanceof Date ? row.reviewedAt.toISOString() : row.reviewedAt != null ? String(row.reviewedAt) : null,
       reviewNotes: row.reviewNotes != null ? String(row.reviewNotes) : null,
     });
+  }
+  if (preservedMemory.length > 0) {
+    roundCheckins.push(...preservedMemory);
   }
 }
 
@@ -3031,6 +3035,7 @@ app.get("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requir
 
 app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireLeadVetUp, async (req, res) => {
   const flockId = req.query.flockId ? String(req.query.flockId) : null;
+  const memPending = roundCheckins.filter((c) => (c.submissionStatus ?? "approved") === "pending_review");
   if (hasDb()) {
     try {
       let sql = `SELECT c.id::text AS id, c.flock_id::text AS "flockId", c.laborer_id::text AS "laborerId",
@@ -3051,13 +3056,17 @@ app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAcc
       }
       sql += ` ORDER BY c.at DESC LIMIT 200`;
       const r = await dbQuery(sql, params);
-      res.json({ checkins: r.rows });
+      const merged = [...r.rows, ...memPending]
+        .filter((c) => (flockId ? String(c.flockId) === flockId : true))
+        .sort((a, b) => (String(a.at) < String(b.at) ? 1 : -1))
+        .slice(0, 200);
+      res.json({ checkins: merged });
       return;
     } catch (e) {
       console.error("[ERROR]", "[db] GET check-ins/pending:", e instanceof Error ? e.message : e);
     }
   }
-  let list = roundCheckins.filter((c) => (c.submissionStatus ?? "approved") === "pending_review");
+  let list = memPending;
   if (flockId) list = list.filter((c) => String(c.flockId) === flockId);
   res.json({
     checkins: list.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 200),
@@ -4917,7 +4926,8 @@ app.get(
     res.status(403).json({ error: "Forbidden" });
     return;
   }
-  if (hasDb()) {
+  const shouldUseDbQuery = hasDb() && (isPayrollManager || isPersistableUuid(req.authUser.id));
+  if (shouldUseDbQuery) {
     try {
       const where = [];
       const params = [];
@@ -4982,12 +4992,29 @@ app.get(
         workerName: String(r.workerName ?? ""),
         workerRole: String(r.workerRole ?? ""),
       }));
+      let mergedEntries = entries;
+      if (isPayrollManager) {
+        const memOnly = payrollImpacts.filter((p) => !isPersistableUuid(String(p.id ?? "")));
+        const filteredMem = memOnly.filter((p) => {
+          if (userIdQ && p.userId !== userIdQ) return false;
+          if (periodStart && p.periodEnd < periodStart) return false;
+          if (periodEnd && p.periodStart > periodEnd) return false;
+          if (approvedQ === "true" && p.approvedAt == null) return false;
+          if (approvedQ === "false" && p.approvedAt != null) return false;
+          return true;
+        }).map((p) => ({
+          ...p,
+          workerName: usersById.get(p.userId)?.displayName ?? p.userId,
+          workerRole: usersById.get(p.userId)?.role ?? "",
+        }));
+        mergedEntries = [...entries, ...filteredMem].sort((a, b) => (String(a.submittedAt) < String(b.submittedAt) ? 1 : -1));
+      }
       let totals = null;
       if (isField) {
         let netAll = 0;
         let netApproved = 0;
         let netPending = 0;
-        for (const p of entries) {
+        for (const p of mergedEntries) {
           const d = Number(p.rwfDelta) || 0;
           netAll += d;
           if (p.approvedAt != null) netApproved += d;
@@ -4995,7 +5022,7 @@ app.get(
         }
         totals = { netAll, netApproved, netPending };
       }
-      res.json({ entries, totals });
+      res.json({ entries: mergedEntries, totals });
       return;
     } catch (e) {
       console.error("[ERROR]", "[db] GET /api/payroll-impact:", e instanceof Error ? e.message : e);
