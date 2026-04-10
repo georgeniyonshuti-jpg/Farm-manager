@@ -2590,9 +2590,10 @@ app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requ
   const primaryFlockId = anyOverdue ? worstOverdueFlockId : soonestFlockId;
   let primaryStatus = null;
   if (primaryFlockId) {
+    const primaryFlock = flocksById.get(primaryFlockId);
     primaryStatus =
       (await checkinStatusPayloadWithFcrHint(primaryFlockId, req.authUser?.role ?? null))
-      ?? checkinStatusPayload(flocksById.get(primaryFlockId), req.authUser?.role ?? null);
+      ?? (primaryFlock ? checkinStatusPayload(primaryFlock, req.authUser?.role ?? null) : null);
   }
 
   const summary = {
