@@ -1715,8 +1715,10 @@ function intervalHoursForAge(ageDays, flock) {
 }
 
 function flockAgeDays(flock, at = new Date()) {
-  const p = new Date(`${flock.placementDate}T00:00:00`);
-  const ms = at.getTime() - p.getTime();
+  const p = new Date(`${flock?.placementDate ?? ""}T00:00:00`);
+  const pMs = p.getTime();
+  if (!Number.isFinite(pMs)) return 0;
+  const ms = at.getTime() - pMs;
   return Math.max(0, Math.floor(ms / 86400000));
 }
 
@@ -1741,17 +1743,20 @@ function computeNextDueMs(flock, now = Date.now(), role = null) {
   const intervalMs = h * 3600000;
   const last = lastCheckinMs(flock.id);
   if (last === null) {
-    const p = new Date(`${flock.placementDate}T00:00:00`).getTime();
+    const p = new Date(`${flock?.placementDate ?? ""}T00:00:00`).getTime();
+    if (!Number.isFinite(p)) return now + intervalMs;
     return p + intervalMs;
   }
-  return last + intervalMs;
+  const out = last + intervalMs;
+  return Number.isFinite(out) ? out : now + intervalMs;
 }
 
 function checkinStatusPayload(flock, role = null) {
   const now = Date.now();
   const ageDays = flockAgeDays(flock, new Date(now));
   const intervalHours = scheduleIntervalHoursForFlockRole(flock.id, role) ?? intervalHoursForAge(ageDays, flock);
-  const nextDueMs = computeNextDueMs(flock, now, role);
+  const nextDueMsRaw = computeNextDueMs(flock, now, role);
+  const nextDueMs = Number.isFinite(nextDueMsRaw) ? nextDueMsRaw : (now + intervalHours * 3600000);
   const lastMs = lastCheckinMs(flock.id);
   const lastCheckinAt = lastMs ? new Date(lastMs).toISOString() : null;
   const overdueMs = Math.max(0, now - nextDueMs);
