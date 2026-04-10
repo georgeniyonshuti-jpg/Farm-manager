@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
 /** Field hub aggregate refresh: less aggressive than 15s, pauses when tab/ app in background. */
-const AGGREGATE_POLL_MS = 60_000;
+const AGGREGATE_POLL_MS = 15_000;
 
 /**
  * Initial fetch + interval while `document.visibilityState === "visible"`.

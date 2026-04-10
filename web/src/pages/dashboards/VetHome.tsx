@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, NavLink } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { readAuthHeaders } from "../../lib/authHeaders";
@@ -108,6 +108,12 @@ export function VetHome() {
   }, [token]);
 
   useHubAggregatePoll(load);
+
+  useEffect(() => {
+    const onSubmitted = () => void load();
+    window.addEventListener("farm:checkin-submitted", onSubmitted);
+    return () => window.removeEventListener("farm:checkin-submitted", onSubmitted);
+  }, [load]);
 
   const roundBanner = useMemo((): { variant: HubCheckinBannerVariant; text: string } | null => {
     if (loading) return { variant: "loading", text: tLoadingBanner };

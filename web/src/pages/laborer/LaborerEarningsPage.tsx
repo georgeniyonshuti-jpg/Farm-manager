@@ -112,6 +112,12 @@ export function LaborerEarningsPage() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    const onSubmitted = () => void load();
+    window.addEventListener("farm:checkin-submitted", onSubmitted);
+    return () => window.removeEventListener("farm:checkin-submitted", onSubmitted);
+  }, [load]);
+
   const fallbackTotals = useMemo((): PayrollTotals => {
     let netApproved = 0;
     let netPending = 0;

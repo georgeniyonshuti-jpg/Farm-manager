@@ -201,6 +201,9 @@ export function FarmCheckinPage() {
       setMortalityAtCheckin("");
       setMortalityReportedInMortalityLog(false);
       setNotes("");
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("farm:checkin-submitted"));
+      }
       void loadDetails();
       const pay = (data as { payrollImpact?: { rwfDelta?: number } }).payrollImpact;
       const flockDay = (data as { flockDay?: number }).flockDay;

@@ -119,6 +119,7 @@ export const PAGE_ACCESS_DEFS: Array<{ key: string; label: string; prefixes: str
   { key: "farm_batch_schedule", label: "Check-in schedule", prefixes: ["/farm/batch-schedule"] },
   { key: "farm_schedule_settings", label: "Schedule settings", prefixes: ["/farm/schedule-settings"] },
   { key: "farm_payroll", label: "Payroll", prefixes: ["/farm/payroll"] },
+  { key: "farm_checkin_review", label: "Review check-ins", prefixes: ["/farm/checkin-review"] },
   { key: "farm_treatments", label: "Medicine tracking", prefixes: ["/farm/treatments"] },
   { key: "farm_slaughter", label: "Slaughter & FCR", prefixes: ["/farm/slaughter"] },
   { key: "cleva_portfolio", label: "Portfolio analytics", prefixes: ["/cleva/portfolio"] },

@@ -30,6 +30,7 @@ import { SystemConfigPage } from "./pages/admin/SystemConfigPage";
 import { UnauthorizedPage } from "./pages/UnauthorizedPage";
 import { LogScheduleSettingsPage } from "./pages/farm/LogScheduleSettingsPage";
 import { PayrollImpactPage } from "./pages/farm/PayrollImpactPage";
+import { FarmCheckinReviewPage } from "./pages/farm/FarmCheckinReviewPage";
 import { LaborerEarningsPage } from "./pages/laborer/LaborerEarningsPage";
 import { ToastProvider } from "./components/Toast";
 import { VersionBadge } from "./components/VersionBadge";
@@ -214,6 +215,14 @@ export default function App() {
                   element={
                     <ProtectedRoute roles={["manager", "vet_manager", "superuser"]}>
                       <LogScheduleSettingsPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="checkin-review"
+                  element={
+                    <ProtectedRoute roles={["manager", "vet_manager", "superuser"]}>
+                      <FarmCheckinReviewPage />
                     </ProtectedRoute>
                   }
                 />

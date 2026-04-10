@@ -174,6 +174,7 @@ const PAGE_ACCESS_KEYS = [
   "farm_batch_schedule",
   "farm_schedule_settings",
   "farm_payroll",
+  "farm_checkin_review",
   "farm_vet_logs",
   "farm_treatments",
   "farm_slaughter",
@@ -677,6 +678,16 @@ function isVetOrAbove(user) {
   return (ROLE_RANK[user.role] ?? -1) >= ROLE_RANK["vet"];
 }
 
+/** Laborer / dispatcher / junior vet (vet + department) need manager review on round check-ins. */
+function needsFieldCheckinApproval(user) {
+  if (!user) return true;
+  if (user.role === "laborer" || user.role === "dispatcher") return true;
+  if (user.role === "vet" && Array.isArray(user.departmentKeys) && user.departmentKeys.includes("junior_vet")) {
+    return true;
+  }
+  return false;
+}
+
 function canEditCheckinSchedule(user) {
   if (!user) return false;
   return ["superuser", "manager", "vet_manager", "vet"].includes(user.role);
@@ -958,16 +969,87 @@ async function maybeAutoPayrollForSubmit(reqUser, flockId, logType, logId, submi
     return { payrollImpact: null, payrollSaved: true };
   }
   const scheds = logSchedules.filter((s) => s.flockId === flockId && s.role === reqUser.role);
-  if (!scheds.length) return { payrollImpact: null, payrollSaved: true };
   const rates = systemConfig.getFieldPayrollRates();
-  const bucket = logType;
-  const creditRwf = bucket === "check_in" ? rates.checkInRwf : rates.feedRwf;
-  const s = scheds[0];
+  const comm = systemConfig.getCheckinCommissionRates();
   const ymd = kigaliYmd(new Date(submittedAtIso));
-  const onTime = isSubmissionWithinPayrollWindow(submittedAtIso, s.windowOpen, s.windowClose);
-  if (!onTime) return { payrollImpact: null, payrollSaved: true };
+  const bucket = logType;
 
-  const reason = "On-time: submission within payroll window";
+  if (logType === "check_in") {
+    const baseOnTime = comm.onTimeRwf > 0 ? comm.onTimeRwf : rates.checkInRwf;
+    const lateDed = comm.lateDeductionRwf;
+    let onTime = true;
+    let creditRwf = baseOnTime;
+    let reason = "Round check-in credit (no payroll window configured for your role on this flock)";
+    if (scheds.length > 0) {
+      const s = scheds[0];
+      onTime = isSubmissionWithinPayrollWindow(submittedAtIso, s.windowOpen, s.windowClose);
+      creditRwf = onTime ? baseOnTime : Math.max(0, baseOnTime - lateDed);
+      reason = onTime
+        ? "On-time: round check-in within payroll window"
+        : "Late round check-in: commission reduced per policy";
+    }
+    if (creditRwf <= 0) return { payrollImpact: null, payrollSaved: true };
+
+    const existing = findFieldDayPayrollRow(reqUser.id, flockId, ymd, bucket);
+    if (existing) {
+      const prevDelta = Number(existing.rwfDelta) || 0;
+      if (prevDelta >= creditRwf && prevDelta > 0) {
+        return { payrollImpact: existing, payrollSaved: true };
+      }
+      existing.logId = logId;
+      existing.logType = logType;
+      existing.submittedAt = submittedAtIso;
+      existing.onTime = onTime;
+      existing.rwfDelta = Math.max(prevDelta, creditRwf);
+      existing.reason = reason;
+      if (!(existing.flockId != null)) existing.flockId = flockId;
+      appendAudit(reqUser.id, reqUser.role, "payroll.impact.auto_upgrade", "payroll_impact", existing.id, {
+        logType,
+        logId,
+        flockId,
+        rwfDelta: existing.rwfDelta,
+      });
+      try {
+        await updatePayrollImpactAutoFieldsDb(existing);
+        return { payrollImpact: existing, payrollSaved: true };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn(`PAYROLL PERSISTENCE FAILED for user ${reqUser.id}: ${msg}`);
+        return { payrollImpact: existing, payrollSaved: false };
+      }
+    }
+
+    try {
+      const row = await createPayrollEntry({
+        userId: reqUser.id,
+        logId,
+        logType,
+        submittedAtIso,
+        flockId,
+        onTime,
+        rwfDelta: creditRwf,
+        reason,
+      });
+      return { payrollImpact: row, payrollSaved: true };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`PAYROLL PERSISTENCE FAILED for user ${reqUser.id}: ${msg}`);
+      return { payrollImpact: null, payrollSaved: false };
+    }
+  }
+
+  /* feed_entry */
+  const creditRwf = rates.feedRwf;
+  if (creditRwf <= 0) return { payrollImpact: null, payrollSaved: true };
+  let onTime = true;
+  let reason = "Feed log credit (no payroll window configured for your role on this flock)";
+  if (scheds.length > 0) {
+    const s = scheds[0];
+    onTime = isSubmissionWithinPayrollWindow(submittedAtIso, s.windowOpen, s.windowClose);
+    if (!onTime) return { payrollImpact: null, payrollSaved: true };
+    reason = "On-time: feed entry within payroll window";
+  }
+
   const existing = findFieldDayPayrollRow(reqUser.id, flockId, ymd, bucket);
   if (existing) {
     if (existing.onTime && existing.rwfDelta > 0) return { payrollImpact: existing, payrollSaved: true };
@@ -997,7 +1079,6 @@ async function maybeAutoPayrollForSubmit(reqUser, flockId, logType, logId, submi
     return { payrollImpact: existing, payrollSaved: true };
   }
 
-  if (creditRwf <= 0) return { payrollImpact: null, payrollSaved: true };
   try {
     const row = await createPayrollEntry({
       userId: reqUser.id,
@@ -1308,6 +1389,42 @@ function ymdFromPgDate(d) {
   return t.length >= 10 ? t.slice(0, 10) : t;
 }
 
+function normalizePgTimeToHhMm(t) {
+  const s = String(t ?? "").trim();
+  if (!s) return "00:00";
+  const parts = s.split(":");
+  const h = String(parts[0] ?? "0").padStart(2, "0");
+  const m = String(parts[1] ?? "0").padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+async function syncLogSchedulesFromDb() {
+  if (!hasDb()) return;
+  const r = await dbQuery(
+    `SELECT id::text AS id,
+            flock_id::text AS "flockId",
+            role,
+            interval_hours AS "intervalHours",
+            window_open::text AS "windowOpen",
+            window_close::text AS "windowClose",
+            created_at AS "createdAt"
+       FROM log_schedule
+      ORDER BY created_at ASC`
+  );
+  logSchedules.length = 0;
+  for (const row of r.rows) {
+    logSchedules.push({
+      id: String(row.id),
+      flockId: String(row.flockId),
+      role: String(row.role),
+      intervalHours: Number(row.intervalHours) || 24,
+      windowOpen: normalizePgTimeToHhMm(row.windowOpen),
+      windowClose: normalizePgTimeToHhMm(row.windowClose),
+      createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt ?? new Date().toISOString()),
+    });
+  }
+}
+
 async function syncCheckInsFromDb() {
   if (!hasDb()) return;
   const r = await dbQuery(
@@ -1320,7 +1437,14 @@ async function syncCheckInsFromDb() {
             feed_kg AS "feedKg",
             water_l AS "waterL",
             COALESCE(notes, '') AS notes,
-            mortality_at_checkin AS "mortalityAtCheckin"
+            mortality_at_checkin AS "mortalityAtCheckin",
+            COALESCE(feed_available, false) AS "feedAvailable",
+            COALESCE(water_available, false) AS "waterAvailable",
+            COALESCE(mortality_reported_in_mortality_log, false) AS "mortalityReportedInMortalityLog",
+            COALESCE(submission_status, 'approved') AS "submissionStatus",
+            reviewed_by_user_id::text AS "reviewedByUserId",
+            reviewed_at AS "reviewedAt",
+            review_notes AS "reviewNotes"
        FROM check_ins
        ORDER BY at ASC`
   );
@@ -1343,6 +1467,13 @@ async function syncCheckInsFromDb() {
       waterL: Number(row.waterL) || 0,
       notes: String(row.notes ?? ""),
       mortalityAtCheckin: Math.max(0, Number(row.mortalityAtCheckin) || 0),
+      feedAvailable: Boolean(row.feedAvailable),
+      waterAvailable: Boolean(row.waterAvailable),
+      mortalityReportedInMortalityLog: Boolean(row.mortalityReportedInMortalityLog),
+      submissionStatus: String(row.submissionStatus ?? "approved"),
+      reviewedByUserId: row.reviewedByUserId != null ? String(row.reviewedByUserId) : null,
+      reviewedAt: row.reviewedAt instanceof Date ? row.reviewedAt.toISOString() : row.reviewedAt != null ? String(row.reviewedAt) : null,
+      reviewNotes: row.reviewNotes != null ? String(row.reviewNotes) : null,
     });
   }
 }
@@ -2168,6 +2299,11 @@ async function syncFlocksFromDbToMemory() {
     });
   }
   try {
+    await syncLogSchedulesFromDb();
+  } catch (e) {
+    console.error("[ERROR]", "[db] syncLogSchedulesFromDb:", e instanceof Error ? e.message : e);
+  }
+  try {
     await syncFlockFeedEntriesFromDb();
   } catch (e) {
     console.error("[ERROR]", "[db] syncFlockFeedEntriesFromDb:", e instanceof Error ? e.message : e);
@@ -2466,6 +2602,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
   const notes = String(body.notes ?? "").slice(0, 4000);
   const mortalityAtCheckin = body.mortalityAtCheckin != null ? Math.max(0, Number(body.mortalityAtCheckin)) : 0;
   const mortalityReportedInMortalityLog = Boolean(body.mortalityReportedInMortalityLog);
+  const submissionStatus = needsFieldCheckinApproval(req.authUser) ? "pending_review" : "approved";
 
   let id = `chk_${crypto.randomBytes(8).toString("hex")}`;
   const at = new Date().toISOString();
@@ -2483,12 +2620,13 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
     notes,
     mortalityAtCheckin,
     mortalityReportedInMortalityLog,
+    submissionStatus,
   };
   if (hasDb() && isPersistableUuid(f.id) && isPersistableUuid(req.authUser.id)) {
     try {
       const ins = await dbQuery(
-        `INSERT INTO check_ins (flock_id, laborer_id, at, photo_url, photo_urls, feed_kg, water_l, notes, mortality_at_checkin, feed_available, water_available, mortality_reported_in_mortality_log)
-         VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4, $5::jsonb, $6::numeric, $7::numeric, $8, $9, $10, $11, $12)
+        `INSERT INTO check_ins (flock_id, laborer_id, at, photo_url, photo_urls, feed_kg, water_l, notes, mortality_at_checkin, feed_available, water_available, mortality_reported_in_mortality_log, submission_status)
+         VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4, $5::jsonb, $6::numeric, $7::numeric, $8, $9, $10, $11, $12, $13)
          RETURNING id::text AS id`,
         [
           f.id,
@@ -2503,6 +2641,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
           feedAvailable,
           waterAvailable,
           mortalityReportedInMortalityLog,
+          submissionStatus,
         ]
       );
       const rid = ins.rows[0]?.id;
@@ -2510,13 +2649,19 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
         id = String(rid);
         row.id = id;
       }
+      try {
+        await syncCheckInsFromDb();
+      } catch (syncErr) {
+        console.error("[ERROR]", "[db] syncCheckInsFromDb after check-in:", syncErr instanceof Error ? syncErr.message : syncErr);
+      }
     } catch (e) {
       console.error("[ERROR]", "[db] POST round-checkins:", e instanceof Error ? e.message : e);
       res.status(503).json({ error: "Could not save round check-in." });
       return;
     }
+  } else {
+    roundCheckins.push(row);
   }
-  roundCheckins.push(row);
   const { payrollImpact, payrollSaved } = await maybeAutoPayrollForSubmit(req.authUser, f.id, "check_in", id, at);
   appendAudit(req.authUser.id, req.authUser.role, "farm.round_checkin.create", "flock", f.id, {
     checkinId: id,
@@ -2806,8 +2951,96 @@ app.get("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requir
     res.status(404).json({ error: "Flock not found" });
     return;
   }
-  const list = roundCheckins.filter((c) => c.flockId === f.id).sort((a, b) => (a.at < b.at ? 1 : -1));
+  const list = roundCheckins
+    .filter((c) => c.flockId === f.id)
+    .sort((a, b) => (a.at < b.at ? 1 : -1))
+    .map((c) => ({
+      ...c,
+      submissionStatus: c.submissionStatus ?? "approved",
+    }));
   res.json({ checkins: list });
+});
+
+app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireLeadVetUp, async (req, res) => {
+  const flockId = req.query.flockId ? String(req.query.flockId) : null;
+  if (hasDb()) {
+    try {
+      let sql = `SELECT c.id::text AS id, c.flock_id::text AS "flockId", c.laborer_id::text AS "laborerId",
+                        c.at, c.submission_status AS "submissionStatus",
+                        COALESCE(c.feed_available, false) AS "feedAvailable",
+                        COALESCE(c.water_available, false) AS "waterAvailable",
+                        COALESCE(c.notes, '') AS notes,
+                        COALESCE(u.full_name, u.email, '') AS "laborerName",
+                        f.code AS "flockCode"
+                   FROM check_ins c
+                   LEFT JOIN users u ON u.id = c.laborer_id
+                   LEFT JOIN poultry_flocks f ON f.id = c.flock_id
+                  WHERE c.submission_status = 'pending_review'`;
+      const params = [];
+      if (flockId) {
+        params.push(flockId);
+        sql += ` AND c.flock_id = $${params.length}::uuid`;
+      }
+      sql += ` ORDER BY c.at DESC LIMIT 200`;
+      const r = await dbQuery(sql, params);
+      res.json({ checkins: r.rows });
+      return;
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET check-ins/pending:", e instanceof Error ? e.message : e);
+    }
+  }
+  let list = roundCheckins.filter((c) => (c.submissionStatus ?? "approved") === "pending_review");
+  if (flockId) list = list.filter((c) => String(c.flockId) === flockId);
+  res.json({
+    checkins: list.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 200),
+  });
+});
+
+app.patch("/api/check-ins/:id/review", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireLeadVetUp, async (req, res) => {
+  const checkinId = String(req.params.id);
+  const action = String(req.body?.action ?? "");
+  if (action !== "approve" && action !== "reject") {
+    res.status(400).json({ error: "action must be 'approve' or 'reject'" });
+    return;
+  }
+  const reviewNotes = String(req.body?.reviewNotes ?? "").slice(0, 4000) || null;
+  const newStatus = action === "approve" ? "approved" : "rejected";
+  if (hasDb() && isPersistableUuid(checkinId)) {
+    try {
+      const r = await dbQuery(
+        `UPDATE check_ins
+            SET submission_status = $1,
+                reviewed_by_user_id = $2::uuid,
+                reviewed_at = now(),
+                review_notes = $3
+          WHERE id = $4::uuid AND submission_status = 'pending_review'
+          RETURNING id::text AS id`,
+        [newStatus, req.authUser.id, reviewNotes, checkinId]
+      );
+      if (r.rowCount === 0) {
+        res.status(404).json({ error: "Check-in not found or already reviewed" });
+        return;
+      }
+    } catch (e) {
+      console.error("[ERROR]", "[db] PATCH check-ins review:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not update check-in." });
+      return;
+    }
+    try {
+      await syncCheckInsFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "syncCheckInsFromDb after review:", e instanceof Error ? e.message : e);
+    }
+  }
+  const mem = roundCheckins.find((c) => String(c.id) === checkinId);
+  if (mem) {
+    mem.submissionStatus = newStatus;
+    mem.reviewedByUserId = req.authUser.id;
+    mem.reviewedAt = new Date().toISOString();
+    mem.reviewNotes = reviewNotes;
+  }
+  appendAudit(req.authUser.id, req.authUser.role, `farm.check_in.${action}`, "check_in", checkinId, { reviewNotes });
+  res.json({ ok: true, status: newStatus });
 });
 
 // ── Feed entries: pending review queue + review action ──
@@ -4384,7 +4617,7 @@ app.get("/api/server-time", requireAuth, (_req, res) => {
   });
 });
 
-app.post("/api/log-schedule", requireAuth, requireFarmAccess, requirePageAccess("farm_schedule_settings"), requireLogScheduleEditor, (req, res) => {
+app.post("/api/log-schedule", requireAuth, requireFarmAccess, requirePageAccess("farm_schedule_settings"), requireLogScheduleEditor, async (req, res) => {
   const body = req.body ?? {};
   const flockId = String(body.flockId ?? "");
   const role = String(body.role ?? "laborer");
@@ -4403,7 +4636,8 @@ app.post("/api/log-schedule", requireAuth, requireFarmAccess, requirePageAccess(
     res.status(400).json({ error: "Invalid role for log schedule" });
     return;
   }
-  const id = `ls_${crypto.randomBytes(6).toString("hex")}`;
+  let id = `ls_${crypto.randomBytes(6).toString("hex")}`;
+  const createdAtIso = new Date().toISOString();
   const row = {
     id,
     flockId,
@@ -4411,8 +4645,29 @@ app.post("/api/log-schedule", requireAuth, requireFarmAccess, requirePageAccess(
     intervalHours,
     windowOpen,
     windowClose,
-    createdAt: new Date().toISOString(),
+    createdAt: createdAtIso,
   };
+  if (hasDb() && isPersistableUuid(flockId)) {
+    try {
+      const ins = await dbQuery(
+        `INSERT INTO log_schedule (flock_id, role, interval_hours, window_open, window_close)
+         VALUES ($1::uuid, $2, $3::numeric, $4::time, $5::time)
+         RETURNING id::text AS id, created_at AS "createdAt"`,
+        [flockId, role, intervalHours, windowOpen, windowClose]
+      );
+      const r0 = ins.rows[0];
+      if (r0?.id) {
+        id = String(r0.id);
+        row.id = id;
+        const ca = r0.createdAt;
+        if (ca) row.createdAt = ca instanceof Date ? ca.toISOString() : String(ca);
+      }
+    } catch (e) {
+      console.error("[ERROR]", "[db] POST log-schedule:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not save log schedule." });
+      return;
+    }
+  }
   logSchedules.push(row);
   appendAudit(req.authUser.id, req.authUser.role, "log_schedule.create", "flock", flockId, { scheduleId: id });
   res.status(201).json({ schedule: row });
@@ -4424,7 +4679,7 @@ app.get("/api/log-schedule/:flockId", requireAuth, requireFarmAccess, requirePag
   res.json({ schedules: list });
 });
 
-app.patch("/api/log-schedule/:id", requireAuth, requireFarmAccess, requirePageAccess("farm_schedule_settings"), requireLogScheduleEditor, (req, res) => {
+app.patch("/api/log-schedule/:id", requireAuth, requireFarmAccess, requirePageAccess("farm_schedule_settings"), requireLogScheduleEditor, async (req, res) => {
   const s = logSchedules.find((x) => x.id === req.params.id);
   if (!s) {
     res.status(404).json({ error: "Schedule not found" });
@@ -4445,17 +4700,44 @@ app.patch("/api/log-schedule/:id", requireAuth, requireFarmAccess, requirePageAc
     }
     s.role = nextRole;
   }
+  if (hasDb() && isPersistableUuid(s.id)) {
+    try {
+      await dbQuery(
+        `UPDATE log_schedule
+            SET interval_hours = $2::numeric,
+                window_open = $3::time,
+                window_close = $4::time,
+                role = $5
+          WHERE id = $1::uuid`,
+        [s.id, s.intervalHours, s.windowOpen, s.windowClose, s.role]
+      );
+    } catch (e) {
+      console.error("[ERROR]", "[db] PATCH log-schedule:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not update log schedule." });
+      return;
+    }
+  }
   appendAudit(req.authUser.id, req.authUser.role, "log_schedule.update", "flock", s.flockId, { scheduleId: s.id });
   res.json({ schedule: s });
 });
 
-app.delete("/api/log-schedule/:id", requireAuth, requireFarmAccess, requirePageAccess("farm_schedule_settings"), requireLogScheduleEditor, (req, res) => {
+app.delete("/api/log-schedule/:id", requireAuth, requireFarmAccess, requirePageAccess("farm_schedule_settings"), requireLogScheduleEditor, async (req, res) => {
   const i = logSchedules.findIndex((x) => x.id === req.params.id);
   if (i < 0) {
     res.status(404).json({ error: "Schedule not found" });
     return;
   }
   const [removed] = logSchedules.splice(i, 1);
+  if (hasDb() && isPersistableUuid(removed.id)) {
+    try {
+      await dbQuery(`DELETE FROM log_schedule WHERE id = $1::uuid`, [removed.id]);
+    } catch (e) {
+      console.error("[ERROR]", "[db] DELETE log-schedule:", e instanceof Error ? e.message : e);
+      logSchedules.splice(i, 0, removed);
+      res.status(503).json({ error: "Could not delete log schedule." });
+      return;
+    }
+  }
   appendAudit(req.authUser.id, req.authUser.role, "log_schedule.delete", "flock", removed.flockId, {
     scheduleId: removed.id,
   });
@@ -4532,7 +4814,12 @@ app.post("/api/payroll-impact", requireAuth, requireFarmAccess, requirePageAcces
   res.status(201).json({ entry: row });
 });
 
-app.get("/api/payroll-impact", requireAuth, requireFarmAccess, requirePageAccess("farm_payroll"), (req, res) => {
+app.get(
+  "/api/payroll-impact",
+  requireAuth,
+  requireFarmAccess,
+  requireAnyPageAccess(["farm_payroll", "laborer_earnings"]),
+  (req, res) => {
   const isField = isFieldPayrollViewer(req.authUser);
   const isPayrollManager = canManageLogScheduleAndPayroll(req.authUser);
   if (!isField && !isPayrollManager) {
