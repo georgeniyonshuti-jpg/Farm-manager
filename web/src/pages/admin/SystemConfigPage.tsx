@@ -265,15 +265,15 @@ export function SystemConfigPage() {
                   Add row
                 </button>
               </div>
-              <div className="mt-3 overflow-x-auto">
-                <table className="min-w-full border-collapse text-sm">
+              <div className="institutional-table-wrapper mt-3 overflow-x-auto">
+                <table className="institutional-table min-w-full text-sm">
                   <thead>
-                    <tr className="border-b border-neutral-200 text-left text-xs font-medium text-neutral-500">
-                      <th className="py-2 pr-3">Value</th>
-                      <th className="py-2 pr-3">Label</th>
-                      <th className="py-2 pr-3">Sort</th>
-                      <th className="py-2 pr-3">Active</th>
-                      <th className="py-2"> </th>
+                    <tr>
+                      <th>Value</th>
+                      <th>Label</th>
+                      <th>Sort</th>
+                      <th>Active</th>
+                      <th> </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -281,7 +281,7 @@ export function SystemConfigPage() {
                       .map((r, i) => ({ r, i }))
                       .filter(({ r }) => r.category === cat)
                       .map(({ r, i }) => (
-                        <tr key={`${i}`} className="border-b border-neutral-100">
+                        <tr key={`${i}`}>
                           <td className="py-2 pr-3">
                             <input
                               className="w-full min-w-[8rem] rounded border border-neutral-200 px-2 py-1 font-mono text-xs"

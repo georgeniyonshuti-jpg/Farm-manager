@@ -215,31 +215,7 @@ export function FarmMortalityPage() {
 
       {!loading && !pageError && filteredRows.length > 0 ? (
         <>
-          <ul className="mt-4 space-y-3 sm:hidden">
-            {filteredRows.map((r) => (
-              <li key={r.id} className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm">
-                <div className="flex justify-between font-mono text-xs text-neutral-600">
-                  <span>{r.at}</span>
-                  <span className="font-semibold text-neutral-900">
-                    {tCount}: {r.count}
-                  </span>
-                </div>
-                <div className="mt-1 flex gap-2">
-                  <MortStatusBadge status={r.submissionStatus} />
-                  {r.affectsLiveCount === false ? <span className="text-[10px] text-neutral-500">No live count effect</span> : null}
-                </div>
-                <p className="mt-2 font-medium text-neutral-800">
-                  {r.isEmergency ? (
-                    <TranslatedText text="Emergency" />
-                  ) : (
-                    <TranslatedText text={r.source?.replace(/_/g, " ").trim() || "—"} />
-                  )}
-                </p>
-                <p className="mt-1 text-neutral-600">{r.notes || "—"}</p>
-              </li>
-            ))}
-          </ul>
-          <div className="institutional-table-wrapper mt-4 hidden overflow-x-auto sm:block">
+          <div className="institutional-table-wrapper mt-4 overflow-x-auto">
             <table className="institutional-table min-w-[38rem] text-sm">
               <thead>
                 <tr>

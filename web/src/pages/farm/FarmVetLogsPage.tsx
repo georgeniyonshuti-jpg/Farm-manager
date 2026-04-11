@@ -176,30 +176,30 @@ export function FarmVetLogsPage() {
 
           {!logsLoading && logs.length > 0 ? (
             <>
-              <div className="overflow-x-auto rounded-xl border border-neutral-200 bg-white">
-                <table className="w-full text-sm">
-                  <thead className="bg-neutral-50 text-left text-xs font-semibold uppercase text-neutral-500">
+              <div className="institutional-table-wrapper overflow-x-auto">
+                <table className="institutional-table min-w-[52rem] text-sm">
+                  <thead>
                     <tr>
-                      <th className="px-3 py-2">Date</th>
-                      <th className="px-3 py-2">Author</th>
-                      <th className="px-3 py-2">Observations</th>
-                      <th className="px-3 py-2">Actions</th>
-                      <th className="px-3 py-2">Status</th>
-                      {isReviewer ? <th className="px-3 py-2">Review</th> : null}
+                      <th>Date</th>
+                      <th>Author</th>
+                      <th>Observations</th>
+                      <th>Actions</th>
+                      <th>Status</th>
+                      {isReviewer ? <th>Review</th> : null}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-neutral-100">
+                  <tbody>
                     {logs.map((l) => (
                       <tr key={l.id}>
-                        <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">{l.logDate}</td>
-                        <td className="px-3 py-2">{l.authorName ?? l.authorUserId?.slice(0, 8)}</td>
-                        <td className="max-w-xs truncate px-3 py-2">{l.observations || "—"}</td>
-                        <td className="max-w-xs truncate px-3 py-2">{l.actionsTaken || "—"}</td>
-                        <td className="px-3 py-2"><StatusBadge status={l.submissionStatus} /></td>
+                        <td className="whitespace-nowrap font-mono text-xs">{l.logDate}</td>
+                        <td>{l.authorName ?? l.authorUserId?.slice(0, 8)}</td>
+                        <td className="max-w-xs truncate">{l.observations || "—"}</td>
+                        <td className="max-w-xs truncate">{l.actionsTaken || "—"}</td>
+                        <td><StatusBadge status={l.submissionStatus} /></td>
                         {isReviewer ? (
-                          <td className="px-3 py-2">
+                          <td>
                             {l.submissionStatus === "pending_review" ? (
-                              <span className="flex gap-1">
+                              <span className="flex flex-wrap gap-1">
                                 <button type="button" onClick={() => void handleReview(l.id, "approve")} className="rounded bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">Approve</button>
                                 <button type="button" onClick={() => void handleReview(l.id, "reject")} className="rounded bg-red-600 px-2 py-0.5 text-xs font-semibold text-white">Reject</button>
                               </span>

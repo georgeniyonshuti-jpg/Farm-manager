@@ -63,8 +63,6 @@ export function FlockListPage() {
   const { token, user } = useAuth();
   const { showToast } = useToast();
   const breedOptions = useReferenceOptions("breed", token, FALLBACK_BREED_OPTIONS);
-  const isManagerView = user?.role === "manager" || user?.role === "superuser" || user?.role === "investor";
-  const isVetView = user?.role === "vet" || user?.role === "vet_manager";
   const canCreateFlock = canFlockAction(user, "flock.create");
   const [flocks, setFlocks] = useState<FlockRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -459,75 +457,8 @@ export function FlockListPage() {
             </div>
           ) : null}
 
-          <ul className="space-y-3 sm:hidden">
-            {visibleFlocks.map((f) => (
-              <li key={f.id} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <Link to={`/farm/flocks/${f.id}`} className="font-semibold text-emerald-900 hover:underline">
-                    {f.label}
-                  </Link>
-                  {f.checkinBadge && <CheckinUrgencyBadge badge={f.checkinBadge} />}
-                </div>
-                <p className="mt-1 text-xs text-neutral-500">
-                  Day {f.ageDays ?? "—"} · {f.timeStatus?.label ?? "Updated recently"}
-                </p>
-                <p className="mt-1 text-xs text-neutral-700">
-                  Weight: {f.latestWeightKg != null ? `${f.latestWeightKg.toFixed(2)}kg` : "—"} ({(f.weightDeviationPct ?? 0) >= 0 ? "+" : ""}{(f.weightDeviationPct ?? 0).toFixed(1)}% vs expected)
-                </p>
-                <p className="mt-1 text-xs text-neutral-700">
-                  Mortality {f.mortalityRatePct?.toFixed(2) ?? "0.00"}% ({(f.mortality24hDeltaPct ?? 0) >= 0 ? "+" : ""}{(f.mortality24hDeltaPct ?? 0).toFixed(2)}% last 24h)
-                </p>
-                <p className="mt-1 text-xs text-neutral-700">
-                  FCR {f.latestFcr != null ? f.latestFcr.toFixed(2) : "—"} ({f.fcrDeviation != null ? `${f.fcrDeviation >= 0 ? "+" : ""}${f.fcrDeviation.toFixed(2)} vs target` : "vs target —"})
-                </p>
-                <p className="mt-1 text-xs text-neutral-700">
-                  Risk {f.riskScore ?? 0} · {f.riskClass ?? "healthy"} · {f.topIssue ?? "—"}
-                </p>
-                {!!f.trends ? (
-                  <p className="mt-1 text-xs text-neutral-600">
-                    Trends: M {f.trends.mortality} · W {f.trends.weight} · FCR {f.trends.fcr}
-                  </p>
-                ) : null}
-                {isManagerView && f.projections?.projectedHarvestWeightKg != null ? (
-                  <p className="mt-1 text-xs text-emerald-800">
-                    Projected harvest: {f.projections.projectedHarvestWeightKg.toFixed(2)}kg ({(f.projections.projectedHarvestDeltaPct ?? 0) >= 0 ? "+" : ""}{(f.projections.projectedHarvestDeltaPct ?? 0).toFixed(1)}% vs target)
-                  </p>
-                ) : null}
-                {isVetView ? (
-                  <p className="mt-1 text-xs text-red-800">
-                    Vet priority: mortality trend {f.trends?.mortality ?? "→ stable"} · projected mortality {(f.projections?.projectedMortalityPct ?? 0).toFixed(2)}%
-                  </p>
-                ) : null}
-                {(f.alerts?.length ?? 0) > 0 ? <p className="mt-1 text-xs text-amber-800">{f.alerts?.slice(0, 2).join(" · ")}</p> : null}
-                {f.withdrawalActive ? <p className="mt-1 inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-800">🔴 Withdrawal</p> : null}
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {flockActionPresentation(user, "treatment.execute").mode === "enabled" ? (
-                    <Link to="/farm/treatments" className="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50">
-                      Resolve round
-                    </Link>
-                  ) : null}
-                  {flockActionPresentation(user, "slaughter.schedule").mode === "enabled" ? (
-                    <Link to="/farm/slaughter" className="rounded border border-neutral-300 px-2 py-1 text-xs hover:bg-neutral-50">
-                      Schedule slaughter
-                    </Link>
-                  ) : null}
-                  {user?.role === "superuser" ? (
-                    <button
-                      type="button"
-                      disabled={purgeBusyId === f.id}
-                      onClick={() => void purgeFlock(f.id, f.label)}
-                      className="rounded border border-red-300 px-2 py-1 text-xs text-red-800 hover:bg-red-50 disabled:opacity-60"
-                    >
-                      {purgeBusyId === f.id ? "Purging..." : "Purge flock"}
-                    </button>
-                  ) : null}
-                </div>
-              </li>
-            ))}
-          </ul>
-
-          <div className="institutional-table-wrapper hidden overflow-x-auto sm:block">
-            <table className="institutional-table min-w-full text-sm">
+          <div className="institutional-table-wrapper overflow-x-auto">
+            <table className="institutional-table min-w-[52rem] text-sm">
               <thead>
                 <tr>
                   <th>Flock</th>
@@ -536,6 +467,7 @@ export function FlockListPage() {
                   <th>FCR</th>
                   <th>Priority</th>
                   <th>Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -574,6 +506,24 @@ export function FlockListPage() {
                           </button>
                         ) : null}
                         {!f.checkinBadge && !f.withdrawalActive ? "—" : null}
+                      </div>
+                    </td>
+                    <td className="text-xs">
+                      <div className="flex flex-wrap gap-2">
+                        {flockActionPresentation(user, "treatment.execute").mode === "enabled" ? (
+                          <Link to="/farm/treatments" className="font-medium text-emerald-800 hover:underline">
+                            Resolve round
+                          </Link>
+                        ) : null}
+                        {flockActionPresentation(user, "slaughter.schedule").mode === "enabled" ? (
+                          <Link to="/farm/slaughter" className="font-medium text-emerald-800 hover:underline">
+                            Slaughter
+                          </Link>
+                        ) : null}
+                        {flockActionPresentation(user, "treatment.execute").mode !== "enabled" &&
+                        flockActionPresentation(user, "slaughter.schedule").mode !== "enabled" ? (
+                          <span className="text-neutral-400">—</span>
+                        ) : null}
                       </div>
                     </td>
                   </tr>

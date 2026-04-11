@@ -403,41 +403,8 @@ export function PayrollImpactPage() {
         />
       ) : null}
 
-      <div className="space-y-3 sm:hidden">
-        {!loading && !error && entries.length > 0
-          ? entries.map((e) => (
-            <div key={e.id} className="rounded-xl border border-neutral-200 bg-white p-4 text-sm shadow-sm">
-              <div className="flex justify-between font-semibold text-neutral-900">
-                <span>{e.workerName}</span>
-                <span className={e.rwfDelta >= 0 ? "text-emerald-800" : "text-red-800"}>
-                  {formatRwf(e.rwfDelta)}
-                </span>
-              </div>
-              <p className="text-xs text-neutral-500">
-                {e.workerRole} · {e.logType}
-              </p>
-              <p className="mt-1 text-xs text-neutral-600">{e.reason}</p>
-              <p className="mt-2 text-xs">
-                On-time: {e.onTime == null ? "—" : e.onTime ? "Yes" : "No"} · Approved:{" "}
-                {e.approvedAt ? "Yes" : "No"}
-              </p>
-              {e.approvedAt == null ? (
-                <button
-                  type="button"
-                  disabled={busyId != null}
-                  onClick={() => void approveOne(e.id)}
-                  className="mt-3 w-full rounded-lg bg-neutral-900 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                >
-                  Approve
-                </button>
-              ) : null}
-            </div>
-          ))
-          : null}
-      </div>
-
       {!loading && !error && entries.length > 0 ? (
-        <div className="institutional-table-wrapper hidden overflow-x-auto sm:block">
+        <div className="institutional-table-wrapper overflow-x-auto">
           <table className="institutional-table min-w-[48rem] text-sm">
             <thead>
               <tr>

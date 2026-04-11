@@ -66,8 +66,6 @@ export function LaborerEarningsPage() {
   const yes = useLaborerT("Yes");
   const no = useLaborerT("No");
   const pending = useLaborerT("Pending");
-  const approvalLbl = useLaborerT("Approval");
-  const onTimeLbl = useLaborerT("On-time");
   const netAllLbl = useLaborerT("Net (all)");
   const approvedTotalLbl = useLaborerT("Approved");
   const pendingTotalLbl = useLaborerT("Pending approval");
@@ -166,27 +164,8 @@ export function LaborerEarningsPage() {
 
       {!loading && !error && entries.length > 0 ? (
         <>
-          <ul className="space-y-3 sm:hidden">
-            {entries.map((e) => (
-              <li key={e.id} className="rounded-xl border border-neutral-200 bg-white p-4 text-sm">
-                <div className="flex justify-between font-semibold">
-                  <span className="text-neutral-800">{e.logType}</span>
-                  <span className={e.rwfDelta >= 0 ? "text-emerald-800" : "text-red-800"}>
-                    {formatRwf(e.rwfDelta)}
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-neutral-500">{e.submittedAt}</p>
-                <p className="mt-1 text-xs text-neutral-600">{e.reason}</p>
-                <p className="mt-2 text-xs text-neutral-500">
-                  {onTimeLbl}: {e.onTime == null ? "—" : e.onTime ? yes : no} · {approvalLbl}:{" "}
-                  {e.approvedAt ? yes : pending}
-                </p>
-              </li>
-            ))}
-          </ul>
-
-          <div className="institutional-table-wrapper hidden overflow-x-auto sm:block">
-            <table className="institutional-table text-sm">
+          <div className="institutional-table-wrapper overflow-x-auto">
+            <table className="institutional-table min-w-[36rem] text-sm">
               <thead>
                 <tr>
                   <th>{colType}</th>

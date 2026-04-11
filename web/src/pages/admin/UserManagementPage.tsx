@@ -275,11 +275,11 @@ export function UserManagementPage() {
         <p className="mt-1 text-xs text-neutral-500">
           Superuser can tick which pages each user can see. Unticked pages are hidden and blocked on direct URL access.
         </p>
-        <div className="mt-4 overflow-x-auto">
-          <table className="min-w-[980px] border-collapse text-xs">
+        <div className="institutional-table-wrapper mt-4">
+          <table className="min-w-[980px] w-full border-collapse text-xs">
             <thead>
               <tr className="border-b border-neutral-200">
-                <th className="sticky left-0 z-10 bg-white px-2 py-2 text-left">User</th>
+                <th className="sticky left-0 z-10 bg-[var(--surface-elevated)] px-2 py-2 text-left">User</th>
                 {PAGE_ACCESS_DEFS.map((p) => (
                   <th key={p.key} className="px-2 py-2 text-left font-medium text-neutral-600">
                     {p.label}
@@ -293,7 +293,7 @@ export function UserManagementPage() {
                 const visible = new Set((u.pageAccess?.length ? u.pageAccess : allKeys).map(String));
                 return (
                   <tr key={u.id} className="border-b border-neutral-100">
-                    <td className="sticky left-0 bg-white px-2 py-2">
+                    <td className="sticky left-0 z-[1] bg-[var(--surface-color)] px-2 py-2">
                       <p className="font-semibold text-neutral-900">{u.displayName}</p>
                       <p className="text-[11px] text-neutral-500">{u.email}</p>
                     </td>
@@ -417,21 +417,7 @@ export function UserManagementPage() {
         ) : null}
         {!loading && !loadError ? (
           <>
-            <ul className="mt-4 space-y-3 sm:hidden">
-              {users.map((u) => (
-                <li key={u.id} className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm">
-                  <p className="font-semibold text-neutral-900">{u.displayName}</p>
-                  <p className="text-neutral-600">{u.email}</p>
-                  <p className="mt-2 text-xs text-neutral-500">
-                    {u.role} · {u.businessUnitAccess} · sensitive: {u.canViewSensitiveFinancial ? "Yes" : "No"}
-                  </p>
-                  <p className="mt-1 text-xs text-neutral-500">
-                    {u.departmentKeys.length ? u.departmentKeys.join(", ") : "—"}
-                  </p>
-                </li>
-              ))}
-            </ul>
-            <div className="institutional-table-wrapper mt-4 hidden overflow-x-auto sm:block">
+            <div className="institutional-table-wrapper mt-4 overflow-x-auto">
               <table className="institutional-table text-sm">
                 <thead>
                   <tr>
@@ -565,22 +551,7 @@ export function UserManagementPage() {
 
         {!auditBusy && !auditError && auditTotal > 0 ? (
           <>
-            <ul className="mt-4 space-y-3 sm:hidden">
-              {audit.map((row) => (
-                <li key={row.id} className="rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm">
-                  <p className="font-mono text-xs text-neutral-600">{row.at}</p>
-                  <p className="mt-1 font-medium text-neutral-900">
-                    {row.action} <span className="text-neutral-500">({row.role})</span>
-                  </p>
-                  <p className="mt-1 font-mono text-xs text-neutral-700">{row.actor_id}</p>
-                  <p className="mt-1 break-all text-xs text-neutral-600">
-                    {row.resource}
-                    {row.resource_id ? ` / ${row.resource_id}` : ""}
-                  </p>
-                </li>
-              ))}
-            </ul>
-            <div className="institutional-table-wrapper mt-4 hidden overflow-x-auto sm:block">
+            <div className="institutional-table-wrapper mt-4 overflow-x-auto">
               <table className="institutional-table min-w-[36rem] text-sm">
                 <thead>
                   <tr>

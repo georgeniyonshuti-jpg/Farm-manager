@@ -14,15 +14,7 @@ export function InvestorMemosPage() {
           </p>
         }
       >
-        <ul className="mt-4 space-y-3 sm:hidden">
-          <li className="rounded-xl border border-neutral-200 bg-neutral-50 p-4 text-sm">
-            <p className="font-semibold text-neutral-900">Q1 2026</p>
-            <p className="mt-2 text-neutral-700">
-              Confidential portfolio narrative — visible only with memo access.
-            </p>
-          </li>
-        </ul>
-        <div className="institutional-table-wrapper mt-4 hidden overflow-x-auto sm:block">
+        <div className="institutional-table-wrapper mt-4 overflow-x-auto">
           <table className="institutional-table text-sm">
             <thead>
               <tr>

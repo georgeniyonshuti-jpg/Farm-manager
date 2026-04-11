@@ -3,6 +3,8 @@
 @tailwind utilities;
 
 :root {
+  /* Set dynamically by GlobalHeader (ResizeObserver); fallback for first paint */
+  --app-header-h: 4rem;
   --primary-color: #1d9e75;
   --primary-color-dark: #16805f;
   --primary-color-soft: #d6f4eb;
@@ -82,29 +84,59 @@ textarea:focus {
 
 .institutional-table {
   width: 100%;
+  min-width: 100%;
   border-collapse: collapse;
+  table-layout: auto;
 }
 
 .institutional-table th,
 .institutional-table td {
   word-wrap: break-word;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere;
   white-space: normal;
   vertical-align: top;
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid #e5e5e5;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .institutional-table th {
   text-align: left;
   font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+  background: var(--surface-elevated);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  box-shadow: 0 1px 0 var(--border-color);
+}
+
+.institutional-table tbody tr:nth-child(even) {
+  background: rgba(248, 252, 251, 0.65);
+}
+
+.institutional-table tbody tr:hover td {
+  background: rgba(214, 244, 235, 0.35);
 }
 
 .institutional-table-wrapper {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  /* clip avoids creating a vertical scrollport (keeps thead sticky to <main>) */
+  overflow-y: clip;
+  -webkit-overflow-scrolling: touch;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
   background: var(--surface-color);
-  box-shadow: var(--shadow-soft);
+  box-shadow: var(--shadow-card);
+}
+
+/* Main column scrolls under fixed app header; offset matches --app-header-h */
+.app-shell-body {
+  padding-top: var(--app-header-h, 4rem);
 }
 
 .app-page-enter {
@@ -124,6 +156,10 @@ textarea:focus-visible {
   .institutional-table th,
   .institutional-table td {
     padding: 0.7rem 0.95rem;
+  }
+
+  .institutional-table th {
+    font-size: 0.8125rem;
   }
 }
 

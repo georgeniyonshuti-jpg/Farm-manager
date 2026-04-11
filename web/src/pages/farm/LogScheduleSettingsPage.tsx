@@ -207,7 +207,7 @@ export function LogScheduleSettingsPage() {
                     </li>
                   ))}
                 </ul>
-                <div className="institutional-table-wrapper hidden overflow-x-auto sm:block">
+                <div className="institutional-table-wrapper overflow-x-auto">
                   <table className="institutional-table min-w-[32rem] text-sm">
                     <thead>
                       <tr>

@@ -23,17 +23,13 @@ export function AppShell() {
       ? "md:ml-[84px]"
       : "md:ml-[220px]";
   return (
-    <div
-      className={`flex min-h-screen flex-col bg-[var(--background-color)] md:h-screen md:overflow-hidden ${
-        !compactFieldView && sidebarOpen ? "h-screen overflow-hidden" : ""
-      }`}
-    >
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[var(--background-color)]">
       <GlobalHeader
         showDesktopSidebarToggle={!compactFieldView}
         desktopSidebarCollapsed={desktopSidebarCollapsed}
         onToggleDesktopSidebar={() => setDesktopSidebarCollapsed((v) => !v)}
       />
-      <div className="flex flex-1 min-h-0 flex-col md:pt-16">
+      <div className="app-shell-body flex flex-1 min-h-0 flex-col">
         {user && !user.canViewSensitiveFinancial ? <FinancialRestrictedBanner /> : null}
         {!compactFieldView && sidebarOpen ? (
           <button
@@ -54,7 +50,7 @@ export function AppShell() {
               ☰ Menu
             </button>
             <div
-              className={`fixed left-0 top-0 z-50 h-[100vh] w-[19rem] transform overflow-y-auto border-r border-[var(--border-color)] bg-[var(--surface-elevated)] pb-20 transition-transform [-webkit-overflow-scrolling:touch] md:bottom-0 md:top-16 md:z-[90] md:h-auto md:translate-x-0 md:pb-0 ${desktopSidebarWidthClass} ${
+              className={`fixed bottom-0 left-0 top-[var(--app-header-h,4rem)] z-50 w-[19rem] transform overflow-y-auto border-r border-[var(--border-color)] bg-[var(--surface-elevated)] pb-20 transition-transform [-webkit-overflow-scrolling:touch] md:bottom-0 md:top-[var(--app-header-h,4rem)] md:z-[90] md:h-auto md:translate-x-0 md:pb-0 ${desktopSidebarWidthClass} ${
                 compactFieldView ? "md:hidden" : "md:fixed"
               } ${sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
             >

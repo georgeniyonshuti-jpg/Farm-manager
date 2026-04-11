@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import type { ActiveWorkspace, SessionUser, UserRole } from "../../auth/types";
@@ -152,6 +152,7 @@ export function GlobalHeader({
   desktopSidebarCollapsed = false,
   onToggleDesktopSidebar,
 }: GlobalHeaderProps) {
+  const headerRef = useRef<HTMLElement>(null);
   const { user, logout, activeWorkspace, setActiveWorkspace } = useAuth();
   const location = useLocation();
   const farmWorkspace = useLaborerT("Farm / Poultry");
@@ -164,6 +165,21 @@ export function GlobalHeader({
   const batchCta = useLaborerT("Round schedule");
   const centerTitleRaw = routeTitleKey(location.pathname);
   const centerTitle = useLaborerT(centerTitleRaw ?? "");
+
+  useLayoutEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const apply = () => {
+      document.documentElement.style.setProperty("--app-header-h", `${el.offsetHeight}px`);
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      document.documentElement.style.removeProperty("--app-header-h");
+    };
+  }, [user?.id]);
 
   if (!user) return null;
 
@@ -227,7 +243,10 @@ export function GlobalHeader({
   );
 
   return (
-    <header className="border-b border-[var(--border-color)] bg-[var(--surface-elevated)] shadow-sm backdrop-blur md:fixed md:inset-x-0 md:top-0 md:z-[100]">
+    <header
+      ref={headerRef}
+      className="fixed inset-x-0 top-0 z-[100] border-b border-[var(--border-color)] bg-[var(--surface-elevated)] pt-[env(safe-area-inset-top,0px)] shadow-sm backdrop-blur"
+    >
       <div className="w-full">
         {/* Mobile */}
         <div className="md:hidden">
