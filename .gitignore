@@ -4,3 +4,6 @@ dist
 *.log
 .env
 .env.local
+server/data/*.sqlite
+server/data/*.sqlite-wal
+server/data/*.sqlite-shm

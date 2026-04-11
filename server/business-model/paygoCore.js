@@ -376,7 +376,7 @@ export function profitMilestones(df) {
   };
 }
 
-function replacePaygo(inp, overrides) {
+export function replacePaygoInputs(inp, overrides) {
   return { ...inp, ...overrides };
 }
 
@@ -396,11 +396,11 @@ export function leverScenarioRows(inp) {
 
   const rows = [];
   rows.push(rowFor("Current (inputs)", inp));
-  rows.push(rowFor("Defaults −2 pp", replacePaygo(inp, { def_rate: Math.max(0, inp.def_rate - 0.02) })));
+  rows.push(rowFor("Defaults −2 pp", replacePaygoInputs(inp, { def_rate: Math.max(0, inp.def_rate - 0.02) })));
   rows.push(
     rowFor(
       "All monthly fixed opex −10%",
-      replacePaygo(inp, {
+      replacePaygoInputs(inp, {
         cloud_fix: inp.cloud_fix * 0.9,
         crm_fix: inp.crm_fix * 0.9,
         sup_fix: inp.sup_fix * 0.9,
@@ -411,10 +411,10 @@ export function leverScenarioRows(inp) {
       })
     )
   );
-  rows.push(rowFor("Device cost −RWF 10,000", replacePaygo(inp, { dev_cost: Math.max(50_000, inp.dev_cost - 10_000) })));
-  rows.push(rowFor("Interest −2 pp", replacePaygo(inp, { debt_rate: Math.max(0.05, inp.debt_rate - 0.02) })));
+  rows.push(rowFor("Device cost −RWF 10,000", replacePaygoInputs(inp, { dev_cost: Math.max(50_000, inp.dev_cost - 10_000) })));
+  rows.push(rowFor("Interest −2 pp", replacePaygoInputs(inp, { debt_rate: Math.max(0.05, inp.debt_rate - 0.02) })));
   rows.push(
-    rowFor("Start smaller (50% mo-1 units)", replacePaygo(inp, { dev_start: Math.max(0, Math.floor(inp.dev_start * 0.5)) }))
+    rowFor("Start smaller (50% mo-1 units)", replacePaygoInputs(inp, { dev_start: Math.max(0, Math.floor(inp.dev_start * 0.5)) }))
   );
   return rows;
 }

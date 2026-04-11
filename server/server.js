@@ -14,18 +14,30 @@ import * as systemConfig from "./systemConfig.js";
 import {
   defaultPaygoInputs,
   mergePaygoInputs,
+  replacePaygoInputs,
   runProjection,
   summarizeProjection,
   profitMilestones,
   leverScenarioRows,
 } from "./business-model/paygoCore.js";
+import { defaultPaygoCtl, ctlToInputs, mergePaygoCtl, BUILD_KEYS } from "./business-model/paygoBuilder.js";
+import { buildPaygoHeatmaps } from "./business-model/paygoHeatmaps.js";
+import { capitalStackForReport, capitalSplitFromCtl } from "./business-model/paygoMemorandum.js";
+import { buildVarianceFrame, extractModelKpis } from "./business-model/budgetingCore.js";
 import {
   defaultBroilerInputs,
   mergeBroilerInputs,
   broilerSummary,
   dailyTrajectory,
   insightMessagesBroiler,
+  weeklyMortalityRates,
 } from "./business-model/broilerCore.js";
+import * as budgetDb from "./business-model/budgetDb.js";
+import * as broilerOpsDb from "./business-model/broilerOpsDb.js";
+import { parseActualsCsv } from "./business-model/csvParse.js";
+import { loadSuggestedActuals } from "./business-model/productionSuggestedActuals.js";
+import { buildInvestorPdfBuffer } from "./business-model/pdfInvestor.js";
+import { buildBroilerPdfBuffer } from "./business-model/pdfBroiler.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -5233,7 +5245,12 @@ app.get(
   requireClevaWorkspace,
   requirePageAccess("cleva_business_model"),
   (_req, res) => {
-    res.json({ inputs: defaultPaygoInputs() });
+    const ctl = defaultPaygoCtl();
+    res.json({
+      ctl,
+      inputs: ctlToInputs(ctl),
+      engineDefaults: defaultPaygoInputs(),
+    });
   },
 );
 
@@ -5255,15 +5272,566 @@ app.post(
   (req, res) => {
     try {
       const body = req.body && typeof req.body === "object" ? req.body : {};
-      const inp = mergePaygoInputs(body.inputs);
+      let inp;
+      let ctlOut = null;
+      if (body.ctl && typeof body.ctl === "object") {
+        ctlOut = mergePaygoCtl(body.ctl);
+        inp = ctlToInputs(ctlOut);
+      } else {
+        inp = mergePaygoInputs(body.inputs);
+      }
       const series = runProjection(inp);
       const summary = summarizeProjection(series, inp);
       const milestones = profitMilestones(series);
       const scenarios = leverScenarioRows(inp);
-      res.json({ ok: true, inputs: inp, series, summary, milestones, scenarios });
+      const capCtl = ctlOut ?? body.ctl ?? {};
+      const { investor_pct, creditor_pct } = capitalSplitFromCtl(capCtl);
+      const capitalStack = capitalStackForReport(summary.peak_debt ?? 0, investor_pct, creditor_pct);
+      const modelKpis = extractModelKpis(series, inp);
+      res.json({
+        ok: true,
+        ctl: ctlOut,
+        inputs: inp,
+        series,
+        summary,
+        milestones,
+        scenarios,
+        capitalStack,
+        modelKpis,
+      });
     } catch (e) {
       console.error("[ERROR]", "[api] paygo-projection:", e instanceof Error ? e.message : e);
       res.status(500).json({ error: "Projection failed" });
+    }
+  },
+);
+
+app.post(
+  "/api/business-model/paygo-heatmaps",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const inp = body.ctl && typeof body.ctl === "object" ? ctlToInputs(mergePaygoCtl(body.ctl)) : mergePaygoInputs(body.inputs);
+      const heatmaps = buildPaygoHeatmaps(inp);
+      res.json({ ok: true, inputs: inp, heatmaps });
+    } catch (e) {
+      console.error("[ERROR]", "[api] paygo-heatmaps:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Heatmaps failed" });
+    }
+  },
+);
+
+app.post(
+  "/api/business-model/paygo-compare",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const ctlA = mergePaygoCtl(body.ctlA ?? body.ctl);
+      let ctlB = body.ctlB && typeof body.ctlB === "object" ? mergePaygoCtl(body.ctlB) : null;
+      const inpA = ctlToInputs(ctlA);
+      let inpB;
+      if (ctlB) {
+        inpB = ctlToInputs(ctlB);
+      } else {
+        inpB = replacePaygoInputs(inpA, { def_rate: Math.min(0.2, inpA.def_rate + 0.02) });
+        ctlB = { ...ctlA, def_rate_pct: inpB.def_rate * 100 };
+      }
+      const seriesA = runProjection(inpA);
+      const seriesB = runProjection(inpB);
+      const summaryA = summarizeProjection(seriesA, inpA);
+      const summaryB = summarizeProjection(seriesB, inpB);
+      const milestonesA = profitMilestones(seriesA);
+      const milestonesB = profitMilestones(seriesB);
+      const deltaNi = summaryB.cum_ni - summaryA.cum_ni;
+      const assumptionLabels = {
+        proj_months: "Horizon (months)",
+        volume_mode: "Volume path",
+        def_rate_pct: "Default rate %",
+        debt_rate_pct: "Cost of debt %",
+        device_tier_label: "Device tier",
+        custom_dev_cost_rwf: "Device cost (RWF)",
+        customer_payback_multiple: "Full contract (× device price)",
+        dep_pct: "Down payment %",
+        disc3_pct: "3-mo discount %",
+        disc6_pct: "6-mo discount %",
+        disc12_pct: "12-mo discount %",
+        mix_p3: "Mix 3-mo %",
+        mix_p6: "Mix 6-mo %",
+        mix_p12: "Mix 12-mo %",
+        fixed_opex_per_device: "Fixed cost / device (RWF)",
+        platform_cac_per_unit: "CAC / unit (RWF)",
+        recovery_pct: "Recovery %",
+        ltv_pct: "LTV %",
+        grace_mos: "Grace (months)",
+        amort_mos: "Amortization (months)",
+        investor_capital_pct: "Investor (equity) target %",
+        creditor_capital_pct: "Creditor (debt) target %",
+      };
+      const diffKeys = [...BUILD_KEYS, "investor_capital_pct", "creditor_capital_pct"];
+      const diffRows = [];
+      for (const k of diffKeys) {
+        if (k === "custom_monthly") continue;
+        const va = ctlA[k];
+        const vb = ctlB[k];
+        if (va !== vb) {
+          diffRows.push({ assumption: assumptionLabels[k] ?? k, A: va, B: vb });
+        }
+      }
+      res.json({
+        ok: true,
+        ctlA,
+        ctlB,
+        inputsA: inpA,
+        inputsB: inpB,
+        seriesA,
+        seriesB,
+        summaryA,
+        summaryB,
+        milestonesA,
+        milestonesB,
+        deltaCumulativeNetIncome: deltaNi,
+        assumptionDiffs: diffRows,
+      });
+    } catch (e) {
+      console.error("[ERROR]", "[api] paygo-compare:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Compare failed" });
+    }
+  },
+);
+
+app.post(
+  "/api/business-model/budget-variance",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const inp = body.ctl && typeof body.ctl === "object" ? ctlToInputs(mergePaygoCtl(body.ctl)) : mergePaygoInputs(body.inputs);
+      const series = runProjection(inp);
+      let targets = Array.isArray(body.targets) ? body.targets : [];
+      let actuals = Array.isArray(body.actuals) ? body.actuals : [];
+      if (body.useStoredBudget) {
+        const uid = req.authUser.id;
+        targets = budgetDb.listTargetsLong(uid).map((r) => ({ month: r.month, kpi_key: r.kpi_key, value: r.value }));
+        actuals = budgetDb.listActualsLong(uid).map((r) => ({ month: r.month, kpi_key: r.kpi_key, value: r.value }));
+      }
+      const variance = buildVarianceFrame(series, inp, targets, actuals);
+      res.json({ ok: true, inputs: inp, variance });
+    } catch (e) {
+      console.error("[ERROR]", "[api] budget-variance:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Budget variance failed" });
+    }
+  },
+);
+
+app.get(
+  "/api/business-model/budget/actuals",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const rows = budgetDb.listActualsLong(req.authUser.id);
+      res.json({ ok: true, rows });
+    } catch (e) {
+      console.error("[ERROR]", "[api] budget actuals:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Could not load actuals" });
+    }
+  },
+);
+
+app.get(
+  "/api/business-model/budget/targets",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const rows = budgetDb.listTargetsLong(req.authUser.id);
+      res.json({ ok: true, rows });
+    } catch (e) {
+      console.error("[ERROR]", "[api] budget targets:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Could not load targets" });
+    }
+  },
+);
+
+app.post(
+  "/api/business-model/budget/actual",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const month = Math.floor(Number(body.month));
+      const kpi_key = String(body.kpi_key ?? "");
+      const value = Number(body.value);
+      const source = String(body.source ?? "manual");
+      if (!Number.isFinite(month) || !Number.isFinite(value) || !kpi_key) {
+        res.status(400).json({ error: "month, kpi_key, value required" });
+        return;
+      }
+      budgetDb.upsertActual(req.authUser.id, month, kpi_key, value, source);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("[ERROR]", "[api] budget actual upsert:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Upsert failed" });
+    }
+  },
+);
+
+app.post(
+  "/api/business-model/budget/target",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const month = Math.floor(Number(body.month));
+      const kpi_key = String(body.kpi_key ?? "");
+      const value = Number(body.value);
+      if (!Number.isFinite(month) || !Number.isFinite(value) || !kpi_key) {
+        res.status(400).json({ error: "month, kpi_key, value required" });
+        return;
+      }
+      budgetDb.upsertTarget(req.authUser.id, month, kpi_key, value);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("[ERROR]", "[api] budget target upsert:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Upsert failed" });
+    }
+  },
+);
+
+app.post(
+  "/api/business-model/budget/sync-targets-from-model",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const inp = body.ctl && typeof body.ctl === "object" ? ctlToInputs(mergePaygoCtl(body.ctl)) : mergePaygoInputs(body.inputs);
+      const series = runProjection(inp);
+      const long = extractModelKpis(series, inp);
+      const n = budgetDb.replaceTargetsFromModelKpis(req.authUser.id, long);
+      res.json({ ok: true, inputs: inp, rowsWritten: n });
+    } catch (e) {
+      console.error("[ERROR]", "[api] budget sync targets:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Sync failed" });
+    }
+  },
+);
+
+app.post(
+  "/api/business-model/budget/import-actuals-csv",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const csv = String(body.csv ?? "");
+      if (!csv.trim()) {
+        res.status(400).json({ error: "csv text required" });
+        return;
+      }
+      const rows = parseActualsCsv(csv);
+      const n = budgetDb.bulkUpsertActuals(req.authUser.id, rows, "csv_import");
+      res.json({ ok: true, imported: n });
+    } catch (e) {
+      console.error("[ERROR]", "[api] budget csv import:", e instanceof Error ? e.message : e);
+      res.status(400).json({ error: e instanceof Error ? e.message : "Import failed" });
+    }
+  },
+);
+
+app.get(
+  "/api/business-model/suggested-actuals",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (_req, res) => {
+    const { source, rows, hint } = loadSuggestedActuals();
+    res.json({ ok: true, source, rows, hint });
+  },
+);
+
+app.post(
+  "/api/business-model/budget/append-suggested-actuals",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (_req, res) => {
+    try {
+      const { rows } = loadSuggestedActuals();
+      if (!rows.length) {
+        res.json({ ok: true, appended: 0, message: "No suggested rows from environment." });
+        return;
+      }
+      const n = budgetDb.bulkUpsertActuals(req.authUser.id, rows, "cleva_feed");
+      res.json({ ok: true, appended: n });
+    } catch (e) {
+      console.error("[ERROR]", "[api] append suggested:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Append failed" });
+    }
+  },
+);
+
+app.post(
+  "/api/business-model/investor-pdf",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  async (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const ctl = mergePaygoCtl(body.ctl ?? {});
+      const inp = ctlToInputs(ctl);
+      const series = runProjection(inp);
+      const summary = summarizeProjection(series, inp);
+      const milestones = profitMilestones(series);
+      const stakeholderType = String(body.stakeholderType ?? "investor").toLowerCase() === "lender" ? "lender" : "investor";
+      const buf = await buildInvestorPdfBuffer({
+        series,
+        summary,
+        milestones,
+        ctl,
+        stakeholderType,
+        companyName: String(body.companyName ?? "ClevaCredit"),
+        productName: String(body.productName ?? "PAYGO Credit"),
+      });
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", 'attachment; filename="cleva-paygo-memorandum.pdf"');
+      res.send(buf);
+    } catch (e) {
+      console.error("[ERROR]", "[api] investor-pdf:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "PDF generation failed" });
+    }
+  },
+);
+
+app.post(
+  "/api/business-model/broiler-pdf",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  async (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const inp = mergeBroilerInputs(body.inputs);
+      const summary = broilerSummary(inp);
+      const trajectory = dailyTrajectory(inp);
+      const insights = insightMessagesBroiler(inp, trajectory);
+      const cycleId = String(body.cycleId ?? "default");
+      const comp = broilerOpsDb.complianceScore(req.authUser.id, cycleId, inp.cycle_days);
+      const health = broilerOpsDb.healthStatusFromVet(req.authUser.id, cycleId);
+      const buf = await buildBroilerPdfBuffer({
+        summary,
+        trajectory,
+        insights,
+        farmName: String(body.farmName ?? "Broiler operation"),
+        complianceScore: comp.score,
+        healthStatus: health,
+      });
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", 'attachment; filename="broiler-cycle-report.pdf"');
+      res.send(buf);
+    } catch (e) {
+      console.error("[ERROR]", "[api] broiler-pdf:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "PDF generation failed" });
+    }
+  },
+);
+
+app.get(
+  "/api/business-model/broiler-ops/checkins",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const cycleId = String(req.query.cycleId ?? "flock-1");
+      const rows = broilerOpsDb.listCheckins(req.authUser.id, cycleId);
+      res.json({ ok: true, rows });
+    } catch (e) {
+      console.error("[ERROR]", "[api] broiler-ops checkins:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Load failed" });
+    }
+  },
+);
+
+app.get(
+  "/api/business-model/broiler-ops/mortality",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const cycleId = String(req.query.cycleId ?? "flock-1");
+      const rows = broilerOpsDb.listMortality(req.authUser.id, cycleId);
+      res.json({ ok: true, rows });
+    } catch (e) {
+      console.error("[ERROR]", "[api] broiler-ops mortality:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Load failed" });
+    }
+  },
+);
+
+app.get(
+  "/api/business-model/broiler-ops/vet-reports",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const cycleId = String(req.query.cycleId ?? "flock-1");
+      const rows = broilerOpsDb.listVetReports(req.authUser.id, cycleId);
+      res.json({ ok: true, rows });
+    } catch (e) {
+      console.error("[ERROR]", "[api] broiler-ops vet:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Load failed" });
+    }
+  },
+);
+
+app.get(
+  "/api/business-model/broiler-ops/compliance",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const cycleId = String(req.query.cycleId ?? "flock-1");
+      const cycleDays = Math.floor(Number(req.query.cycleDays ?? 35));
+      const out = broilerOpsDb.complianceScore(req.authUser.id, cycleId, cycleDays);
+      const vet = broilerOpsDb.healthStatusFromVet(req.authUser.id, cycleId);
+      res.json({ ok: true, ...out, vetStatus: vet });
+    } catch (e) {
+      console.error("[ERROR]", "[api] broiler-ops compliance:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Load failed" });
+    }
+  },
+);
+
+app.get(
+  "/api/business-model/broiler-ops/snapshots",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const rows = broilerOpsDb.listSnapshots(req.authUser.id, 24);
+      res.json({ ok: true, rows });
+    } catch (e) {
+      console.error("[ERROR]", "[api] broiler-ops snapshots:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Load failed" });
+    }
+  },
+);
+
+app.post(
+  "/api/business-model/broiler-ops/checkin",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const cycleId = String(body.cycleId ?? "flock-1");
+      const id = broilerOpsDb.addCheckin(req.authUser.id, cycleId, {
+        feedOk: Boolean(body.feedOk ?? true),
+        waterOk: Boolean(body.waterOk ?? true),
+        photoOk: Boolean(body.photoOk),
+        notes: String(body.notes ?? ""),
+        onDate: body.onDate ? String(body.onDate) : null,
+      });
+      res.json({ ok: true, id: Number(id) });
+    } catch (e) {
+      console.error("[ERROR]", "[api] broiler-ops checkin:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Save failed" });
+    }
+  },
+);
+
+app.post(
+  "/api/business-model/broiler-ops/mortality",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const cycleId = String(body.cycleId ?? "flock-1");
+      const id = broilerOpsDb.addMortalityEvent(req.authUser.id, cycleId, Number(body.birdsLost ?? 0), String(body.notes ?? ""), body.onDate ? String(body.onDate) : null);
+      res.json({ ok: true, id: Number(id) });
+    } catch (e) {
+      console.error("[ERROR]", "[api] broiler-ops mortality post:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Save failed" });
+    }
+  },
+);
+
+app.post(
+  "/api/business-model/broiler-ops/vet-report",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const cycleId = String(body.cycleId ?? "flock-1");
+      const id = broilerOpsDb.addVetReport(req.authUser.id, cycleId, String(body.summary ?? ""), String(body.status ?? "Moderate"), body.onDate ? String(body.onDate) : null);
+      res.json({ ok: true, id: Number(id) });
+    } catch (e) {
+      console.error("[ERROR]", "[api] broiler-ops vet post:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Save failed" });
+    }
+  },
+);
+
+app.post(
+  "/api/business-model/broiler-ops/snapshot",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const label = String(body.label ?? "Snapshot");
+      const inputs = body.inputs && typeof body.inputs === "object" ? body.inputs : {};
+      const id = broilerOpsDb.saveCycleSnapshot(req.authUser.id, label, JSON.stringify(inputs));
+      res.json({ ok: true, id: Number(id) });
+    } catch (e) {
+      console.error("[ERROR]", "[api] broiler-ops snapshot:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Save failed" });
+    }
+  },
+);
+
+app.post(
+  "/api/business-model/broiler-ops/seed-demo",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const cycleId = String(body.cycleId ?? "flock-1");
+      const seeded = broilerOpsDb.seedDemoDataIfEmpty(req.authUser.id, cycleId);
+      res.json({ ok: true, seeded });
+    } catch (e) {
+      console.error("[ERROR]", "[api] broiler-ops seed:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Seed failed" });
     }
   },
 );
@@ -5280,7 +5848,8 @@ app.post(
       const summary = broilerSummary(inp);
       const trajectory = dailyTrajectory(inp);
       const insights = insightMessagesBroiler(inp, trajectory);
-      res.json({ ok: true, inputs: inp, summary, trajectory, insights });
+      const weeklyMortality = weeklyMortalityRates(trajectory);
+      res.json({ ok: true, inputs: inp, summary, trajectory, insights, weeklyMortality });
     } catch (e) {
       console.error("[ERROR]", "[api] broiler:", e instanceof Error ? e.message : e);
       res.status(500).json({ error: "Broiler model failed" });
