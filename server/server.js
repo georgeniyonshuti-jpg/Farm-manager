@@ -875,7 +875,7 @@ function hasCheckinInWindowForUserOnDay(userId, flockId, ymd, sched) {
 
 function hasFeedInWindowForUserOnDay(userId, flockId, ymd, sched) {
   for (const e of flockFeedEntries) {
-    if (String(e.flockId) !== String(flockId) || e.enteredByUserId !== userId) continue;
+    if (!sameFlockId(e.flockId, flockId) || e.enteredByUserId !== userId) continue;
     if (kigaliYmd(new Date(e.recordedAt)) !== ymd) continue;
     if (isSubmissionWithinPayrollWindow(e.recordedAt, sched.windowOpen, sched.windowClose)) return true;
   }
@@ -1375,12 +1375,12 @@ function totalFeedKgForFlock(flockId, cutoffMs = Number.POSITIVE_INFINITY) {
   const fid = String(flockId);
   let s = 0;
   for (const c of roundCheckins) {
-    if (String(c.flockId) !== fid) continue;
+    if (!sameFlockId(c.flockId, fid)) continue;
     if (new Date(c.at).getTime() > cutoffMs) continue;
     s += Number(c.feedKg) || 0;
   }
   for (const e of flockFeedEntries) {
-    if (String(e.flockId) !== fid) continue;
+    if (!sameFlockId(e.flockId, fid)) continue;
     if (new Date(e.recordedAt).getTime() > cutoffMs) continue;
     s += Number(e.feedKg) || 0;
   }
@@ -1409,6 +1409,7 @@ function sameFlockId(a, b) {
 
 async function syncFlockFeedEntriesFromDb() {
   if (!hasDb()) return;
+  const preservedMemory = flockFeedEntries.filter((e) => !isPersistableUuid(String(e.id ?? "")));
   const r = await dbQuery(
     `SELECT id::text AS id,
             flock_id::text AS "flockId",
@@ -1438,6 +1439,9 @@ async function syncFlockFeedEntriesFromDb() {
       reviewedAt: row.reviewedAt instanceof Date ? row.reviewedAt.toISOString() : row.reviewedAt != null ? String(row.reviewedAt) : null,
       reviewNotes: row.reviewNotes != null ? String(row.reviewNotes) : null,
     });
+  }
+  if (preservedMemory.length > 0) {
+    flockFeedEntries.push(...preservedMemory);
   }
 }
 
@@ -1548,6 +1552,7 @@ async function syncCheckInsFromDb() {
 
 async function syncMortalityEventsFromDb() {
   if (!hasDb()) return;
+  const preservedMemory = mortalityEvents.filter((m) => !isPersistableUuid(String(m.id ?? "")));
   const r = await dbQuery(
     `SELECT id::text AS id,
             flock_id::text AS "flockId",
@@ -1592,10 +1597,14 @@ async function syncMortalityEventsFromDb() {
       reviewNotes: row.reviewNotes != null ? String(row.reviewNotes) : null,
     });
   }
+  if (preservedMemory.length > 0) {
+    mortalityEvents.push(...preservedMemory);
+  }
 }
 
 async function syncDailyLogsFromDb() {
   if (!hasDb()) return;
+  const preservedMemory = dailyLogs.filter((log) => !isPersistableUuid(String(log.id ?? "")));
   const r = await dbQuery(
     `SELECT id::text AS id,
             flock_id::text AS "flockId",
@@ -1647,6 +1656,9 @@ async function syncDailyLogsFromDb() {
       flaggedHighMortality: Boolean(row.flaggedHighMortality),
       validationStatus: row.validationStatus != null ? String(row.validationStatus) : "draft",
     });
+  }
+  if (preservedMemory.length > 0) {
+    dailyLogs.push(...preservedMemory);
   }
 }
 
@@ -1722,6 +1734,7 @@ function mapInventoryRowFromDb(row) {
 
 async function syncInventoryTransactionsFromDb() {
   if (!hasDb()) return;
+  const preservedMemory = inventoryTransactions.filter((r) => !isPersistableUuid(String(r.id ?? "")));
   const r = await dbQuery(
     `SELECT id::text AS id,
             transaction_type AS type,
@@ -1741,6 +1754,9 @@ async function syncInventoryTransactionsFromDb() {
   inventoryTransactions.length = 0;
   for (const row of r.rows) {
     inventoryTransactions.push(mapInventoryRowFromDb(row));
+  }
+  if (preservedMemory.length > 0) {
+    inventoryTransactions.push(...preservedMemory);
   }
 }
 
@@ -2908,6 +2924,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
       source: "round_checkin",
       affectsLiveCount,
     };
+    let linkedMortalitySavedToDb = false;
     if (hasDb() && isPersistableUuid(f.id) && isPersistableUuid(req.authUser.id)) {
       try {
         const linkUuid = isPersistableUuid(id) ? id : null;
@@ -2933,13 +2950,22 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
           mid = String(mr);
           mortRow.id = mid;
         }
+        linkedMortalitySavedToDb = true;
       } catch (e) {
         console.error("[ERROR]", "[db] round-checkin mortality:", e instanceof Error ? e.message : e);
         res.status(503).json({ error: "Could not save mortality linked to check-in." });
         return;
       }
     }
-    mortalityEvents.push(mortRow);
+    if (linkedMortalitySavedToDb) {
+      try {
+        await syncMortalityEventsFromDb();
+      } catch (syncErr) {
+        console.error("[ERROR]", "[db] syncMortalityEventsFromDb after check-in mortality:", syncErr instanceof Error ? syncErr.message : syncErr);
+      }
+    } else {
+      mortalityEvents.push(mortRow);
+    }
     appendAudit(req.authUser.id, req.authUser.role, "farm.mortality.create", "flock", f.id, {
       mortalityId: mid,
       count: mortalityAtCheckin,
@@ -2990,6 +3016,7 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
     enteredByUserId: req.authUser.id,
     submissionStatus,
   };
+  let feedSavedToDb = false;
   if (hasDb()) {
     try {
       const ins = await dbQuery(
@@ -3003,13 +3030,22 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
       const ra = r0?.recordedAt;
       row.id = id;
       row.recordedAt = ra instanceof Date ? ra.toISOString() : String(ra ?? atIso);
+      feedSavedToDb = true;
     } catch (e) {
       console.error("[ERROR]", "[db] POST /api/flocks/:id/feed-entries:", e instanceof Error ? e.message : e);
       res.status(503).json({ error: "Could not save feed entry." });
       return;
     }
   }
-  flockFeedEntries.push(row);
+  if (feedSavedToDb) {
+    try {
+      await syncFlockFeedEntriesFromDb();
+    } catch (syncErr) {
+      console.error("[ERROR]", "[db] syncFlockFeedEntriesFromDb after feed entry:", syncErr instanceof Error ? syncErr.message : syncErr);
+    }
+  } else {
+    flockFeedEntries.push(row);
+  }
   const { payrollImpact, payrollSaved } = await maybeAutoPayrollForSubmit(
     req.authUser,
     f.id,
@@ -3111,6 +3147,7 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
     submissionStatus,
     affectsLiveCount: true,
   };
+  let mortalitySavedToDb = false;
   if (hasDb() && isPersistableUuid(f.id) && isPersistableUuid(req.authUser.id)) {
     try {
       const linkUuid =
@@ -3138,13 +3175,22 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
         id = String(rid);
         row.id = id;
       }
+      mortalitySavedToDb = true;
     } catch (e) {
       console.error("[ERROR]", "[db] POST mortality-events:", e instanceof Error ? e.message : e);
       res.status(503).json({ error: "Could not save mortality event." });
       return;
     }
   }
-  mortalityEvents.push(row);
+  if (mortalitySavedToDb) {
+    try {
+      await syncMortalityEventsFromDb();
+    } catch (syncErr) {
+      console.error("[ERROR]", "[db] syncMortalityEventsFromDb after mortality POST:", syncErr instanceof Error ? syncErr.message : syncErr);
+    }
+  } else {
+    mortalityEvents.push(row);
+  }
   mortalityRecentByKey.set(dedupeKey, nowMs);
   appendAudit(req.authUser.id, req.authUser.role, "farm.mortality.create", "flock", f.id, {
     mortalityId: id,
@@ -3488,6 +3534,7 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
     createdAt: now,
     updatedAt: now,
   };
+  let vetLogSavedToDb = false;
   if (hasDb() && isPersistableUuid(flockId) && isPersistableUuid(req.authUser.id)) {
     try {
       const ins = await dbQuery(
@@ -3499,13 +3546,16 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
       const r0 = ins.rows[0];
       if (r0?.id) { row.id = String(r0.id); id = row.id; }
       if (r0?.createdAt) row.createdAt = r0.createdAt instanceof Date ? r0.createdAt.toISOString() : String(r0.createdAt);
+      vetLogSavedToDb = true;
     } catch (e) {
       console.error("[ERROR]", "[db] POST /api/vet-logs:", e instanceof Error ? e.message : e);
       res.status(503).json({ error: "Could not save vet log." });
       return;
     }
   }
-  vetLogs.push(row);
+  if (!vetLogSavedToDb) {
+    vetLogs.push(row);
+  }
   appendAudit(req.authUser.id, req.authUser.role, "farm.vet_log.create", "flock", flockId, { vetLogId: id, submissionStatus });
   res.json({ ok: true, log: row });
 });
@@ -3925,14 +3975,14 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
   const mortalityFromEvents = mortalityEvents
     .filter(
       (m) =>
-        String(m.flockId) === fid &&
+        sameFlockId(m.flockId, fid) &&
         new Date(m.at).getTime() <= cutoffMs &&
         shouldCountMortalityForLiveEstimate(m),
     )
     .reduce((s, m) => s + (Number(m.count) || 0), 0);
   const mortalityFromDaily = dailyLogs
     .filter((log) => {
-      if (String(log.flockId) !== fid) return false;
+      if (!sameFlockId(log.flockId, fid)) return false;
       if (!shouldCountDailyLogMortality(log)) return false;
       const d = String(log.logDate ?? "").slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
@@ -4676,6 +4726,7 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     approvedByUserId: null,
     approvedAt: null,
   };
+  let procurementSavedToDb = false;
   if (hasDb() && isPersistableUuid(flockId) && isPersistableUuid(req.authUser.id)) {
     try {
       const ins = await dbQuery(
@@ -4709,13 +4760,22 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
         ]
       );
       row = mapInventoryRowFromDb(ins.rows[0]);
+      procurementSavedToDb = true;
     } catch (e) {
       console.error("[ERROR]", "[db] POST /api/inventory/procurement:", e instanceof Error ? e.message : e);
       res.status(503).json({ error: "Could not save procurement row." });
       return;
     }
   }
-  inventoryTransactions.unshift(row);
+  if (procurementSavedToDb) {
+    try {
+      await syncInventoryTransactionsFromDb();
+    } catch (syncErr) {
+      console.error("[ERROR]", "[db] syncInventoryTransactionsFromDb after procurement:", syncErr instanceof Error ? syncErr.message : syncErr);
+    }
+  } else {
+    inventoryTransactions.unshift(row);
+  }
   appendAudit(req.authUser.id, req.authUser.role, "inventory.procurement.create", "inventory", row.id, {
     flockId,
     quantityKg,
@@ -4773,6 +4833,7 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
     approvedByUserId: null,
     approvedAt: null,
   };
+  let feedConsumptionSavedToDb = false;
   if (hasDb() && isPersistableUuid(flockId) && isPersistableUuid(req.authUser.id)) {
     try {
       const ins = await dbQuery(
@@ -4804,13 +4865,22 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
         ]
       );
       row = mapInventoryRowFromDb(ins.rows[0]);
+      feedConsumptionSavedToDb = true;
     } catch (e) {
       console.error("[ERROR]", "[db] POST /api/inventory/feed-consumption:", e instanceof Error ? e.message : e);
       res.status(503).json({ error: "Could not save feed consumption row." });
       return;
     }
   }
-  inventoryTransactions.unshift(row);
+  if (feedConsumptionSavedToDb) {
+    try {
+      await syncInventoryTransactionsFromDb();
+    } catch (syncErr) {
+      console.error("[ERROR]", "[db] syncInventoryTransactionsFromDb after feed consumption:", syncErr instanceof Error ? syncErr.message : syncErr);
+    }
+  } else {
+    inventoryTransactions.unshift(row);
+  }
   appendAudit(req.authUser.id, req.authUser.role, "inventory.feed.create", "inventory", row.id, {
     flockId,
     quantityKg,
@@ -4854,6 +4924,7 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
     approvedByUserId: req.authUser.id,
     approvedAt: new Date().toISOString(),
   };
+  let adjustmentSavedToDb = false;
   if (hasDb() && isPersistableUuid(flockId) && isPersistableUuid(req.authUser.id)) {
     try {
       const ins = await dbQuery(
@@ -4887,13 +4958,22 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
         ]
       );
       row = mapInventoryRowFromDb(ins.rows[0]);
+      adjustmentSavedToDb = true;
     } catch (e) {
       console.error("[ERROR]", "[db] POST /api/inventory/adjustments:", e instanceof Error ? e.message : e);
       res.status(503).json({ error: "Could not save inventory adjustment." });
       return;
     }
   }
-  inventoryTransactions.unshift(row);
+  if (adjustmentSavedToDb) {
+    try {
+      await syncInventoryTransactionsFromDb();
+    } catch (syncErr) {
+      console.error("[ERROR]", "[db] syncInventoryTransactionsFromDb after adjustment:", syncErr instanceof Error ? syncErr.message : syncErr);
+    }
+  } else {
+    inventoryTransactions.unshift(row);
+  }
   appendAudit(req.authUser.id, req.authUser.role, "inventory.adjustment.create", "inventory", row.id, {
     flockId,
     deltaKg,
@@ -5039,6 +5119,7 @@ app.post("/api/daily-logs", requireAuth, requireFarmAccess, requirePageAccess("f
   const logDateStr = String(payload.logDate).slice(0, 10);
   let dlId = `dl_${crypto.randomBytes(6).toString("hex")}`;
   const receivedAt = new Date().toISOString();
+  let dailySavedToDb = false;
 
   if (hasDb() && isPersistableUuid(String(payload.flockId)) && isPersistableUuid(req.authUser.id)) {
     try {
@@ -5077,6 +5158,7 @@ app.post("/api/daily-logs", requireAuth, requireFarmAccess, requirePageAccess("f
         throw new Error("poultry_daily_logs INSERT returned no id");
       }
       dlId = String(rid);
+      dailySavedToDb = true;
     } catch (e) {
       console.error("[ERROR]", "[db] POST daily-logs:", e instanceof Error ? e.message : e);
       res.status(503).json({ error: "Could not save daily log." });
@@ -5084,18 +5166,34 @@ app.post("/api/daily-logs", requireAuth, requireFarmAccess, requirePageAccess("f
     }
   }
 
-  const record = {
+  let record = {
     id: dlId,
     ...payload,
     receivedAt,
     validation,
     enteredByUserId: req.authUser.id,
   };
-  dailyLogs.push(record);
+  let indexForClient = 0;
+  if (dailySavedToDb) {
+    try {
+      await syncDailyLogsFromDb();
+    } catch (syncErr) {
+      console.error("[ERROR]", "[db] syncDailyLogsFromDb after daily log:", syncErr instanceof Error ? syncErr.message : syncErr);
+    }
+    const synced = dailyLogs.find((d) => String(d.id) === String(dlId));
+    if (synced) {
+      record = { ...synced, validation };
+    }
+    const idx = dailyLogs.findIndex((d) => String(d.id) === String(dlId));
+    indexForClient = idx >= 0 ? idx + 1 : dailyLogs.length;
+  } else {
+    dailyLogs.push(record);
+    indexForClient = dailyLogs.length;
+  }
   appendAudit(req.authUser.id, req.authUser.role, "farm.daily_log.create", "flock", String(payload.flockId), {
     logDate: payload.logDate,
   });
-  res.json({ ok: true, record: { ...record, index: dailyLogs.length }, payrollImpact: null });
+  res.json({ ok: true, record: { ...record, index: indexForClient }, payrollImpact: null });
 });
 
 app.get("/api/server-time", requireAuth, (_req, res) => {
