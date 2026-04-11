@@ -1681,6 +1681,56 @@ async function syncPayrollImpactsFromDb() {
   }
 }
 
+function mapInventoryRowFromDb(row) {
+  const at = row.recordedAt;
+  const approvedAt = row.approvedAt;
+  return {
+    id: String(row.id),
+    type: String(row.type),
+    flockId: String(row.flockId),
+    at: at instanceof Date ? at.toISOString() : String(at),
+    quantityKg: Number(row.quantityKg) || 0,
+    deltaKg: Number(row.deltaKg) || 0,
+    unitCostRwfPerKg:
+      row.unitCostRwfPerKg == null ? null : Number(row.unitCostRwfPerKg),
+    reason: String(row.reason ?? ""),
+    reference: String(row.reference ?? ""),
+    actorUserId: String(row.actorUserId),
+    approvedByUserId:
+      row.approvedByUserId != null ? String(row.approvedByUserId) : null,
+    approvedAt:
+      approvedAt instanceof Date
+        ? approvedAt.toISOString()
+        : approvedAt != null
+          ? String(approvedAt)
+          : null,
+  };
+}
+
+async function syncInventoryTransactionsFromDb() {
+  if (!hasDb()) return;
+  const r = await dbQuery(
+    `SELECT id::text AS id,
+            transaction_type AS type,
+            flock_id::text AS "flockId",
+            recorded_at AS "recordedAt",
+            quantity_kg AS "quantityKg",
+            delta_kg AS "deltaKg",
+            unit_cost_rwf_per_kg AS "unitCostRwfPerKg",
+            reason,
+            reference,
+            actor_user_id::text AS "actorUserId",
+            approved_by_user_id::text AS "approvedByUserId",
+            approved_at AS "approvedAt"
+       FROM farm_inventory_transactions
+      ORDER BY recorded_at DESC, created_at DESC`
+  );
+  inventoryTransactions.length = 0;
+  for (const row of r.rows) {
+    inventoryTransactions.push(mapInventoryRowFromDb(row));
+  }
+}
+
 function rebuildPayrollMissedKeysFromLoadedPayroll() {
   payrollMissedKeys.clear();
   for (const p of payrollImpacts) {
@@ -2370,6 +2420,10 @@ async function syncFlocksFromDbToMemory() {
             verified_live_count AS "verifiedLiveCount",
             verified_live_note AS "verifiedLiveNote",
             verified_live_at AS "verifiedLiveAt",
+            checkin_bands AS "checkinBands",
+            photos_required_per_round AS "photosRequiredPerRound",
+            target_slaughter_day_min AS "targetSlaughterDayMin",
+            target_slaughter_day_max AS "targetSlaughterDayMax",
             status
        FROM poultry_flocks
       WHERE status IN ('active','planned')
@@ -2390,10 +2444,13 @@ async function syncFlocksFromDbToMemory() {
       verifiedLiveCount: row.verifiedLiveCount != null ? Math.max(0, Number(row.verifiedLiveCount)) : null,
       verifiedLiveNote: row.verifiedLiveNote != null ? String(row.verifiedLiveNote) : null,
       verifiedLiveAt: row.verifiedLiveAt != null ? String(row.verifiedLiveAt) : null,
-      checkinBands: prev.checkinBands ?? null,
-      photosRequiredPerRound: prev.photosRequiredPerRound ?? 1,
-      targetSlaughterDayMin: prev.targetSlaughterDayMin ?? 45,
-      targetSlaughterDayMax: prev.targetSlaughterDayMax ?? 50,
+      checkinBands: normalizeBands(row.checkinBands) ?? null,
+      photosRequiredPerRound: Math.max(1, Math.min(5, Number(row.photosRequiredPerRound) || 1)),
+      targetSlaughterDayMin: Math.max(1, Number(row.targetSlaughterDayMin) || 45),
+      targetSlaughterDayMax: Math.max(
+        Math.max(1, Number(row.targetSlaughterDayMin) || 45),
+        Number(row.targetSlaughterDayMax) || 50
+      ),
       status: String(row.status ?? "active"),
     });
   }
@@ -2426,6 +2483,11 @@ async function syncFlocksFromDbToMemory() {
     await syncPayrollImpactsFromDb();
   } catch (e) {
     console.error("[ERROR]", "[db] syncPayrollImpactsFromDb:", e instanceof Error ? e.message : e);
+  }
+  try {
+    await syncInventoryTransactionsFromDb();
+  } catch (e) {
+    console.error("[ERROR]", "[db] syncInventoryTransactionsFromDb:", e instanceof Error ? e.message : e);
   }
   rebuildPayrollMissedKeysFromLoadedPayroll();
 }
@@ -2654,26 +2716,60 @@ app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requ
   }
 });
 
-app.patch("/api/flocks/:id/checkin-schedule", requireAuth, requireFarmAccess, requireCheckinScheduleEditor, (req, res) => {
+app.patch("/api/flocks/:id/checkin-schedule", requireAuth, requireFarmAccess, requireCheckinScheduleEditor, async (req, res) => {
   const f = flocksById.get(req.params.id);
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
     return;
   }
   const body = req.body ?? {};
+  const next = {
+    checkinBands: body.checkinBands !== undefined ? normalizeBands(body.checkinBands) : (f.checkinBands ?? null),
+    photosRequiredPerRound: f.photosRequiredPerRound ?? 1,
+    targetSlaughterDayMin: f.targetSlaughterDayMin ?? 45,
+    targetSlaughterDayMax: f.targetSlaughterDayMax ?? 50,
+  };
   if (body.checkinBands !== undefined) {
-    f.checkinBands = normalizeBands(body.checkinBands);
+    next.checkinBands = normalizeBands(body.checkinBands);
   }
   if (body.photosRequiredPerRound !== undefined) {
     const n = Number(body.photosRequiredPerRound);
-    f.photosRequiredPerRound = Math.max(1, Math.min(5, Number.isFinite(n) ? n : 1));
+    next.photosRequiredPerRound = Math.max(1, Math.min(5, Number.isFinite(n) ? n : 1));
   }
   if (body.targetSlaughterDayMin !== undefined) {
-    f.targetSlaughterDayMin = Math.max(1, Number(body.targetSlaughterDayMin) || 45);
+    next.targetSlaughterDayMin = Math.max(1, Number(body.targetSlaughterDayMin) || 45);
   }
   if (body.targetSlaughterDayMax !== undefined) {
-    f.targetSlaughterDayMax = Math.max(f.targetSlaughterDayMin, Number(body.targetSlaughterDayMax) || 50);
+    next.targetSlaughterDayMax = Math.max(next.targetSlaughterDayMin, Number(body.targetSlaughterDayMax) || 50);
   }
+  if (hasDb() && isPersistableUuid(f.id)) {
+    try {
+      await dbQuery(
+        `UPDATE poultry_flocks
+            SET checkin_bands = $2::jsonb,
+                photos_required_per_round = $3,
+                target_slaughter_day_min = $4,
+                target_slaughter_day_max = $5,
+                updated_at = now()
+          WHERE id::text = $1`,
+        [
+          f.id,
+          next.checkinBands ? JSON.stringify(next.checkinBands) : null,
+          next.photosRequiredPerRound,
+          next.targetSlaughterDayMin,
+          next.targetSlaughterDayMax,
+        ]
+      );
+    } catch (e) {
+      console.error("[ERROR]", "[db] PATCH /api/flocks/:id/checkin-schedule:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not save flock schedule settings." });
+      return;
+    }
+  }
+  f.checkinBands = next.checkinBands;
+  f.photosRequiredPerRound = next.photosRequiredPerRound;
+  f.targetSlaughterDayMin = next.targetSlaughterDayMin;
+  f.targetSlaughterDayMax = next.targetSlaughterDayMax;
   appendAudit(req.authUser.id, req.authUser.role, "flock.checkin_schedule.update", "flock", f.id, {
     hasCustomBands: Boolean(f.checkinBands?.length),
     photosRequiredPerRound: f.photosRequiredPerRound,
@@ -4453,7 +4549,16 @@ function computeInventoryBalances(flockId = null) {
   }));
 }
 
-app.get("/api/inventory/ledger", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), (req, res) => {
+app.get("/api/inventory/ledger", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
+  if (hasDb()) {
+    try {
+      await syncInventoryTransactionsFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET /api/inventory/ledger sync:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Inventory ledger unavailable. Please retry shortly." });
+      return;
+    }
+  }
   const flockId = String(req.query.flock_id ?? "").trim();
   const type = String(req.query.type ?? "").trim();
   const page = Math.max(1, Number(req.query.page) || 1);
@@ -4470,12 +4575,21 @@ app.get("/api/inventory/ledger", requireAuth, requireFarmAccess, requirePageAcce
   res.json({ rows, total, page, pageSize });
 });
 
-app.get("/api/inventory/balance", requireAuth, requireFarmAccess, (req, res) => {
+app.get("/api/inventory/balance", requireAuth, requireFarmAccess, async (req, res) => {
+  if (hasDb()) {
+    try {
+      await syncInventoryTransactionsFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET /api/inventory/balance sync:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Inventory balances unavailable. Please retry shortly." });
+      return;
+    }
+  }
   const flockId = String(req.query.flock_id ?? "").trim() || null;
   res.json({ balances: computeInventoryBalances(flockId) });
 });
 
-app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), (req, res) => {
+app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
   if (!canCreateProcurement(req.authUser)) {
     res.status(403).json({ error: "Only procurement, manager, or superuser can receive stock" });
     return;
@@ -4504,7 +4618,7 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     res.status(400).json({ error: "unitCostRwfPerKg must be >= 0" });
     return;
   }
-  const row = {
+  let row = {
     id: `inv_${crypto.randomBytes(6).toString("hex")}`,
     type: "procurement_receipt",
     flockId,
@@ -4518,6 +4632,45 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     approvedByUserId: null,
     approvedAt: null,
   };
+  if (hasDb() && isPersistableUuid(flockId) && isPersistableUuid(req.authUser.id)) {
+    try {
+      const ins = await dbQuery(
+        `INSERT INTO farm_inventory_transactions (
+           flock_id, transaction_type, recorded_at, quantity_kg, delta_kg,
+           unit_cost_rwf_per_kg, reason, reference, actor_user_id, approved_by_user_id, approved_at
+         )
+         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9::uuid, NULL, NULL)
+         RETURNING id::text AS id,
+                   transaction_type AS type,
+                   flock_id::text AS "flockId",
+                   recorded_at AS "recordedAt",
+                   quantity_kg AS "quantityKg",
+                   delta_kg AS "deltaKg",
+                   unit_cost_rwf_per_kg AS "unitCostRwfPerKg",
+                   reason,
+                   reference,
+                   actor_user_id::text AS "actorUserId",
+                   approved_by_user_id::text AS "approvedByUserId",
+                   approved_at AS "approvedAt"`,
+        [
+          flockId,
+          "procurement_receipt",
+          row.at,
+          quantityKg,
+          quantityKg,
+          unitCostRwfPerKg,
+          reason,
+          reference,
+          req.authUser.id,
+        ]
+      );
+      row = mapInventoryRowFromDb(ins.rows[0]);
+    } catch (e) {
+      console.error("[ERROR]", "[db] POST /api/inventory/procurement:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not save procurement row." });
+      return;
+    }
+  }
   inventoryTransactions.unshift(row);
   appendAudit(req.authUser.id, req.authUser.role, "inventory.procurement.create", "inventory", row.id, {
     flockId,
@@ -4526,7 +4679,7 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
   res.status(201).json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(flockId) });
 });
 
-app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), (req, res) => {
+app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
   if (!canCreateFeedConsumption(req.authUser)) {
     res.status(403).json({ error: "Only laborer, dispatcher, manager, or superuser can log feed usage" });
     return;
@@ -4548,12 +4701,21 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
     res.status(400).json({ error: "quantityKg must be > 0" });
     return;
   }
+  if (hasDb()) {
+    try {
+      await syncInventoryTransactionsFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[db] POST /api/inventory/feed-consumption sync:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Inventory balances unavailable. Please retry shortly." });
+      return;
+    }
+  }
   const currentBalance = computeInventoryBalances(flockId)[0]?.balanceKg ?? 0;
   if (currentBalance - quantityKg < 0 && !canCreateInventoryAdjustment(req.authUser)) {
     res.status(400).json({ error: "Insufficient stock for this flock" });
     return;
   }
-  const row = {
+  let row = {
     id: `inv_${crypto.randomBytes(6).toString("hex")}`,
     type: "feed_consumption",
     flockId,
@@ -4567,6 +4729,43 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
     approvedByUserId: null,
     approvedAt: null,
   };
+  if (hasDb() && isPersistableUuid(flockId) && isPersistableUuid(req.authUser.id)) {
+    try {
+      const ins = await dbQuery(
+        `INSERT INTO farm_inventory_transactions (
+           flock_id, transaction_type, recorded_at, quantity_kg, delta_kg,
+           unit_cost_rwf_per_kg, reason, reference, actor_user_id, approved_by_user_id, approved_at
+         )
+         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, NULL, $6, '', $7::uuid, NULL, NULL)
+         RETURNING id::text AS id,
+                   transaction_type AS type,
+                   flock_id::text AS "flockId",
+                   recorded_at AS "recordedAt",
+                   quantity_kg AS "quantityKg",
+                   delta_kg AS "deltaKg",
+                   unit_cost_rwf_per_kg AS "unitCostRwfPerKg",
+                   reason,
+                   reference,
+                   actor_user_id::text AS "actorUserId",
+                   approved_by_user_id::text AS "approvedByUserId",
+                   approved_at AS "approvedAt"`,
+        [
+          flockId,
+          "feed_consumption",
+          row.at,
+          quantityKg,
+          -quantityKg,
+          reason,
+          req.authUser.id,
+        ]
+      );
+      row = mapInventoryRowFromDb(ins.rows[0]);
+    } catch (e) {
+      console.error("[ERROR]", "[db] POST /api/inventory/feed-consumption:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not save feed consumption row." });
+      return;
+    }
+  }
   inventoryTransactions.unshift(row);
   appendAudit(req.authUser.id, req.authUser.role, "inventory.feed.create", "inventory", row.id, {
     flockId,
@@ -4575,7 +4774,7 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
   res.status(201).json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(flockId) });
 });
 
-app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), (req, res) => {
+app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
   if (!canCreateInventoryAdjustment(req.authUser)) {
     res.status(403).json({ error: "Only manager or superuser can adjust stock" });
     return;
@@ -4597,7 +4796,7 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
     res.status(400).json({ error: "deltaKg must be a non-zero number" });
     return;
   }
-  const row = {
+  let row = {
     id: `inv_${crypto.randomBytes(6).toString("hex")}`,
     type: "adjustment",
     flockId,
@@ -4611,6 +4810,45 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
     approvedByUserId: req.authUser.id,
     approvedAt: new Date().toISOString(),
   };
+  if (hasDb() && isPersistableUuid(flockId) && isPersistableUuid(req.authUser.id)) {
+    try {
+      const ins = await dbQuery(
+        `INSERT INTO farm_inventory_transactions (
+           flock_id, transaction_type, recorded_at, quantity_kg, delta_kg,
+           unit_cost_rwf_per_kg, reason, reference, actor_user_id, approved_by_user_id, approved_at
+         )
+         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, NULL, $6, '', $7::uuid, $8::uuid, $9::timestamptz)
+         RETURNING id::text AS id,
+                   transaction_type AS type,
+                   flock_id::text AS "flockId",
+                   recorded_at AS "recordedAt",
+                   quantity_kg AS "quantityKg",
+                   delta_kg AS "deltaKg",
+                   unit_cost_rwf_per_kg AS "unitCostRwfPerKg",
+                   reason,
+                   reference,
+                   actor_user_id::text AS "actorUserId",
+                   approved_by_user_id::text AS "approvedByUserId",
+                   approved_at AS "approvedAt"`,
+        [
+          flockId,
+          "adjustment",
+          row.at,
+          Math.abs(deltaKg),
+          deltaKg,
+          reason,
+          req.authUser.id,
+          req.authUser.id,
+          row.approvedAt,
+        ]
+      );
+      row = mapInventoryRowFromDb(ins.rows[0]);
+    } catch (e) {
+      console.error("[ERROR]", "[db] POST /api/inventory/adjustments:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not save inventory adjustment." });
+      return;
+    }
+  }
   inventoryTransactions.unshift(row);
   appendAudit(req.authUser.id, req.authUser.role, "inventory.adjustment.create", "inventory", row.id, {
     flockId,
@@ -4619,7 +4857,16 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
   res.status(201).json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(flockId) });
 });
 
-app.patch("/api/inventory/:id", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), (req, res) => {
+app.patch("/api/inventory/:id", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
+  if (hasDb()) {
+    try {
+      await syncInventoryTransactionsFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[db] PATCH /api/inventory/:id sync:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Inventory ledger unavailable. Please retry shortly." });
+      return;
+    }
+  }
   const row = inventoryTransactions.find((r) => r.id === req.params.id);
   if (!row) {
     res.status(404).json({ error: "Inventory row not found" });
@@ -4630,9 +4877,47 @@ app.patch("/api/inventory/:id", requireAuth, requireFarmAccess, requirePageAcces
     return;
   }
   const body = req.body ?? {};
-  if (body.reason !== undefined) row.reason = String(body.reason).slice(0, 400);
-  if (row.type === "procurement_receipt" && body.reference !== undefined) {
-    row.reference = String(body.reference).slice(0, 200);
+  const nextReason = body.reason !== undefined ? String(body.reason).slice(0, 400) : row.reason;
+  const nextReference =
+    row.type === "procurement_receipt" && body.reference !== undefined
+      ? String(body.reference).slice(0, 200)
+      : row.reference;
+
+  if (hasDb() && isPersistableUuid(String(row.id))) {
+    try {
+      const upd = await dbQuery(
+        `UPDATE farm_inventory_transactions
+            SET reason = $2,
+                reference = $3,
+                updated_at = now()
+          WHERE id = $1::uuid
+          RETURNING id::text AS id,
+                    transaction_type AS type,
+                    flock_id::text AS "flockId",
+                    recorded_at AS "recordedAt",
+                    quantity_kg AS "quantityKg",
+                    delta_kg AS "deltaKg",
+                    unit_cost_rwf_per_kg AS "unitCostRwfPerKg",
+                    reason,
+                    reference,
+                    actor_user_id::text AS "actorUserId",
+                    approved_by_user_id::text AS "approvedByUserId",
+                    approved_at AS "approvedAt"`,
+        [row.id, nextReason, nextReference]
+      );
+      if ((upd.rowCount ?? 0) === 0) {
+        res.status(404).json({ error: "Inventory row not found" });
+        return;
+      }
+      Object.assign(row, mapInventoryRowFromDb(upd.rows[0]));
+    } catch (e) {
+      console.error("[ERROR]", "[db] PATCH /api/inventory/:id:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not update inventory row." });
+      return;
+    }
+  } else {
+    row.reason = nextReason;
+    row.reference = nextReference;
   }
   appendAudit(req.authUser.id, req.authUser.role, "inventory.row.update", "inventory", row.id, {});
   res.json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(row.flockId) });
