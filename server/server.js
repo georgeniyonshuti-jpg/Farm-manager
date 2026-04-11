@@ -807,7 +807,7 @@ function findFieldDayPayrollRow(userId, flockId, ymd, bucket) {
   return payrollImpacts.find(
     (p) =>
       p.userId === userId &&
-      p.flockId === flockId &&
+      sameFlockId(p.flockId, flockId) &&
       p.periodStart === ymd &&
       p.logType === bucket &&
       typeof p.reason === "string" &&
@@ -847,7 +847,7 @@ function hasPayrollFieldCreditForBucket(userId, flockId, ymd, bucket) {
  */
 function hasMissedFieldPayroll(userId, flockId, ymd, bucket) {
   return payrollImpacts.some((p) => {
-    if (p.userId !== userId || p.flockId !== flockId || p.periodStart !== ymd) return false;
+    if (p.userId !== userId || !sameFlockId(p.flockId, flockId) || p.periodStart !== ymd) return false;
     if (typeof p.reason !== "string" || !p.reason.startsWith("Missed")) return false;
     const lid = String(p.logId ?? "");
     if (bucket === "check_in") {
@@ -866,7 +866,7 @@ function hasMissedFieldPayroll(userId, flockId, ymd, bucket) {
 
 function hasCheckinInWindowForUserOnDay(userId, flockId, ymd, sched) {
   for (const c of roundCheckins) {
-    if (c.flockId !== flockId || c.laborerId !== userId) continue;
+    if (!sameFlockId(c.flockId, flockId) || c.laborerId !== userId) continue;
     if (kigaliYmd(new Date(c.at)) !== ymd) continue;
     if (isSubmissionWithinPayrollWindow(c.at, sched.windowOpen, sched.windowClose)) return true;
   }
@@ -990,7 +990,7 @@ async function maybeAutoPayrollForSubmit(reqUser, flockId, logType, logId, submi
   if (logType !== "check_in" && logType !== "feed_entry") {
     return { payrollImpact: null, payrollSaved: true };
   }
-  const scheds = logSchedules.filter((s) => s.flockId === flockId && s.role === reqUser.role);
+  const scheds = logSchedules.filter((s) => sameFlockId(s.flockId, flockId) && s.role === reqUser.role);
   const rates = systemConfig.getFieldPayrollRates();
   const comm = systemConfig.getCheckinCommissionRates();
   const ymd = kigaliYmd(new Date(submittedAtIso));
@@ -1242,7 +1242,7 @@ async function runMissedPayrollScan() {
   const missCheck = -rates.missedCheckInRwf;
   const missFeed = -rates.missedFeedRwf;
   for (const sched of logSchedules) {
-    if (!flocksById.has(sched.flockId)) continue;
+    if (!flocksById.has(String(sched.flockId ?? ""))) continue;
     if (!windowHasEndedForKigaliDay(sched, now)) continue;
     for (const u of usersById.values()) {
       if (u.role !== sched.role) continue;
@@ -1392,6 +1392,19 @@ function shouldCountMortalityForLiveEstimate(event) {
   if (event.affectsLiveCount === false) return false;
   const status = String(event.submissionStatus ?? "approved");
   return status !== "rejected";
+}
+
+/** Daily log mortality (legacy) — count toward live estimate when not draft/rejected. */
+function shouldCountDailyLogMortality(log) {
+  if (!log) return false;
+  const vs = String(log.validationStatus ?? "draft");
+  if (vs === "draft" || vs === "rejected") return false;
+  const n = Number(log.mortality);
+  return Number.isFinite(n) && n > 0;
+}
+
+function sameFlockId(a, b) {
+  return String(a ?? "") === String(b ?? "");
 }
 
 async function syncFlockFeedEntriesFromDb() {
@@ -1808,7 +1821,7 @@ function lastCheckinMs(flockId) {
   let best = -Infinity;
   let any = false;
   for (const c of roundCheckins) {
-    if (c.flockId !== flockId) continue;
+    if (!sameFlockId(c.flockId, flockId)) continue;
     const t = new Date(c.at).getTime();
     if (!Number.isFinite(t)) continue;
     any = true;
@@ -1820,7 +1833,7 @@ function lastCheckinMs(flockId) {
 
 function scheduleIntervalHoursForFlockRole(flockId, role) {
   if (!role) return null;
-  const entries = logSchedules.filter((s) => s.flockId === flockId && s.role === role);
+  const entries = logSchedules.filter((s) => sameFlockId(s.flockId, flockId) && s.role === role);
   if (!entries.length) return null;
   const h = Number(entries[0].intervalHours);
   return Number.isFinite(h) && h > 0 ? h : null;
@@ -3028,7 +3041,7 @@ app.get("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requireP
   }
   const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 40));
   const list = flockFeedEntries
-    .filter((e) => String(e.flockId) === flockId)
+    .filter((e) => sameFlockId(e.flockId, flockId))
     .sort((a, b) => (a.recordedAt < b.recordedAt ? 1 : -1))
     .slice(0, limit)
     .map((e) => ({
@@ -3161,7 +3174,7 @@ app.get("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, requ
     return;
   }
   const list = mortalityEvents
-    .filter((m) => m.flockId === f.id)
+    .filter((m) => String(m.flockId) === String(f.id))
     .sort((a, b) => (a.at < b.at ? 1 : -1))
     .map((m) => ({
       ...m,
@@ -3178,7 +3191,7 @@ app.get("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requir
     return;
   }
   const list = roundCheckins
-    .filter((c) => c.flockId === f.id)
+    .filter((c) => sameFlockId(c.flockId, f.id))
     .sort((a, b) => (a.at < b.at ? 1 : -1))
     .map((c) => ({
       ...c,
@@ -3312,7 +3325,7 @@ app.get("/api/feed-entries/pending", requireAuth, requireFarmAccess, requireLead
     }
   }
   let entries = flockFeedEntries.filter((e) => (e.submissionStatus ?? "approved") === "pending_review");
-  if (flockId) entries = entries.filter((e) => e.flockId === flockId);
+  if (flockId) entries = entries.filter((e) => sameFlockId(e.flockId, flockId));
   res.json({ entries: entries.sort((a, b) => (a.recordedAt < b.recordedAt ? 1 : -1)).slice(0, 200) });
 });
 
@@ -3382,7 +3395,7 @@ app.get("/api/mortality-events/pending", requireAuth, requireFarmAccess, require
     }
   }
   let events = mortalityEvents.filter((e) => (e.submissionStatus ?? "approved") === "pending_review");
-  if (flockId) events = events.filter((e) => e.flockId === flockId);
+  if (flockId) events = events.filter((e) => sameFlockId(e.flockId, flockId));
   res.json({ events: events.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 200) });
 });
 
@@ -3540,7 +3553,7 @@ app.get("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("farm
     }
   }
   let logs = [...vetLogs];
-  if (flockId) logs = logs.filter((l) => l.flockId === flockId);
+  if (flockId) logs = logs.filter((l) => sameFlockId(l.flockId, flockId));
   if (status) logs = logs.filter((l) => l.submissionStatus === status);
   if (q) logs = logs.filter((l) => [l.observations, l.actionsTaken, l.recommendations].some((s) => s && String(s).toLowerCase().includes(q)));
   logs.sort((a, b) => (a.logDate < b.logDate ? 1 : -1));
@@ -3719,6 +3732,7 @@ app.get("/api/reports/flocks.csv", requireAuth, requireFarmAccess, requireLeadVe
 });
 
 async function listTreatmentsForFlock(flockId, startIso = null, endIso = null) {
+  const fid = String(flockId);
   if (hasDb()) {
     try {
       const r = await dbQuery(
@@ -3730,7 +3744,7 @@ async function listTreatmentsForFlock(flockId, startIso = null, endIso = null) {
             AND ($2::timestamptz IS NULL OR at >= $2::timestamptz)
             AND ($3::timestamptz IS NULL OR at <= $3::timestamptz)
           ORDER BY at DESC`,
-        [flockId, startIso, endIso]
+        [fid, startIso, endIso]
       );
       return r.rows;
     } catch (e) {
@@ -3741,11 +3755,17 @@ async function listTreatmentsForFlock(flockId, startIso = null, endIso = null) {
   const startMs = startIso ? new Date(startIso).getTime() : Number.NEGATIVE_INFINITY;
   const endMs = endIso ? new Date(endIso).getTime() : Number.POSITIVE_INFINITY;
   return flockTreatments
-    .filter((t) => t.flockId === flockId && new Date(t.at).getTime() >= startMs && new Date(t.at).getTime() <= endMs)
+    .filter(
+      (t) =>
+        sameFlockId(t.flockId, fid) &&
+        new Date(t.at).getTime() >= startMs &&
+        new Date(t.at).getTime() <= endMs,
+    )
     .sort((a, b) => (a.at < b.at ? 1 : -1));
 }
 
 async function listSlaughterForFlock(flockId, startIso = null, endIso = null) {
+  const fid = String(flockId);
   if (hasDb()) {
     try {
       const r = await dbQuery(
@@ -3757,7 +3777,7 @@ async function listSlaughterForFlock(flockId, startIso = null, endIso = null) {
             AND ($2::timestamptz IS NULL OR at >= $2::timestamptz)
             AND ($3::timestamptz IS NULL OR at <= $3::timestamptz)
           ORDER BY at DESC`,
-        [flockId, startIso, endIso]
+        [fid, startIso, endIso]
       );
       return r.rows;
     } catch (e) {
@@ -3768,7 +3788,12 @@ async function listSlaughterForFlock(flockId, startIso = null, endIso = null) {
   const startMs = startIso ? new Date(startIso).getTime() : Number.NEGATIVE_INFINITY;
   const endMs = endIso ? new Date(endIso).getTime() : Number.POSITIVE_INFINITY;
   return slaughterEvents
-    .filter((s) => s.flockId === flockId && new Date(s.at).getTime() >= startMs && new Date(s.at).getTime() <= endMs)
+    .filter(
+      (s) =>
+        sameFlockId(s.flockId, fid) &&
+        new Date(s.at).getTime() >= startMs &&
+        new Date(s.at).getTime() <= endMs,
+    )
     .sort((a, b) => (a.at < b.at ? 1 : -1));
 }
 
@@ -3892,14 +3917,31 @@ function computeBroilerFcrPack(flock, { feedToDate, birdsLiveEstimate, latestAvg
 }
 
 async function buildFlockPerformanceSummary(flockId, atIso = null) {
-  const flock = flocksById.get(flockId);
+  const fid = String(flockId);
+  const flock = flocksById.get(fid);
   if (!flock) return null;
   const cutoffMs = atIso ? new Date(atIso).getTime() : Number.POSITIVE_INFINITY;
-  const feedToDate = totalFeedKgForFlock(flockId, cutoffMs);
-  const mortalityToDate = mortalityEvents
-    .filter((m) => m.flockId === flockId && new Date(m.at).getTime() <= cutoffMs && shouldCountMortalityForLiveEstimate(m))
+  const feedToDate = totalFeedKgForFlock(fid, cutoffMs);
+  const mortalityFromEvents = mortalityEvents
+    .filter(
+      (m) =>
+        String(m.flockId) === fid &&
+        new Date(m.at).getTime() <= cutoffMs &&
+        shouldCountMortalityForLiveEstimate(m),
+    )
     .reduce((s, m) => s + (Number(m.count) || 0), 0);
-  const slRows = await listSlaughterForFlock(flockId);
+  const mortalityFromDaily = dailyLogs
+    .filter((log) => {
+      if (String(log.flockId) !== fid) return false;
+      if (!shouldCountDailyLogMortality(log)) return false;
+      const d = String(log.logDate ?? "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+      const dayEndMs = new Date(`${d}T23:59:59.999Z`).getTime();
+      return dayEndMs <= cutoffMs;
+    })
+    .reduce((s, log) => s + Math.max(0, Number(log.mortality) || 0), 0);
+  const mortalityToDate = mortalityFromEvents + mortalityFromDaily;
+  const slRows = await listSlaughterForFlock(fid);
   const slaughterToDate = slRows
     .filter((s) => new Date(s.at).getTime() <= cutoffMs)
     .reduce((sum, s) => sum + (Number(s.birdsSlaughtered) || 0), 0);
@@ -3931,7 +3973,7 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
           WHERE flock_id = $1
           ORDER BY weigh_date DESC, created_at DESC
           LIMIT 1`,
-        [flockId]
+        [fid]
       );
       const row = wr.rows[0];
       if (row) {
@@ -3962,7 +4004,7 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
   const fcr = fcrBroiler.fcrCumulative ?? fcrSlaughter ?? null;
 
   return {
-    flockId,
+    flockId: fid,
     placementDate: flock.placementDate,
     ageDays: ageDaysNow,
     feedToDateKg: Number(feedToDate.toFixed(2)),
@@ -4529,18 +4571,20 @@ app.get("/api/reports/slaughter.csv", requireAuth, requireFarmAccess, async (req
 });
 
 function inventoryRowPayload(row) {
+  const fid = String(row.flockId ?? "");
   return {
     ...row,
-    flockLabel: flocksById.get(row.flockId)?.label ?? row.flockId,
+    flockLabel: flocksById.get(fid)?.label ?? fid,
   };
 }
 
 function computeInventoryBalances(flockId = null) {
-  const scoped = inventoryTransactions.filter((r) => (flockId ? r.flockId === flockId : true));
+  const scoped = inventoryTransactions.filter((r) => (flockId ? sameFlockId(r.flockId, flockId) : true));
   const byFlock = new Map();
   for (const row of scoped) {
-    const prev = byFlock.get(row.flockId) ?? 0;
-    byFlock.set(row.flockId, prev + Number(row.deltaKg || 0));
+    const fk = String(row.flockId ?? "");
+    const prev = byFlock.get(fk) ?? 0;
+    byFlock.set(fk, prev + Number(row.deltaKg || 0));
   }
   return [...byFlock.entries()].map(([id, balanceKg]) => ({
     flockId: id,
@@ -4565,7 +4609,7 @@ app.get("/api/inventory/ledger", requireAuth, requireFarmAccess, requirePageAcce
   const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 30));
 
   let list = inventoryTransactions;
-  if (flockId) list = list.filter((r) => r.flockId === flockId);
+  if (flockId) list = list.filter((r) => sameFlockId(r.flockId, flockId));
   if (type) list = list.filter((r) => r.type === type);
 
   list = [...list].sort((a, b) => (a.at < b.at ? 1 : -1));
@@ -5120,7 +5164,7 @@ app.post("/api/log-schedule", requireAuth, requireFarmAccess, requirePageAccess(
 
 app.get("/api/log-schedule/:flockId", requireAuth, requireFarmAccess, requirePageAccess("farm_schedule_settings"), requireLogScheduleEditor, (req, res) => {
   const flockId = req.params.flockId;
-  const list = logSchedules.filter((s) => s.flockId === flockId);
+  const list = logSchedules.filter((s) => sameFlockId(s.flockId, flockId));
   res.json({ schedules: list });
 });
 
@@ -6012,15 +6056,43 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
         GROUP BY flock_id`
     ).catch(() => ({ rows: [] }));
 
+    // Mortality: flock_mortality_events (field + check-in) + poultry_daily_logs (legacy daily form).
+    // Same inclusion rules as buildFlockPerformanceSummary. If both channels record the same losses,
+    // totals can double — prefer one operational path per flock.
     const mortalityAgg = await dbQuery(
-      `SELECT flock_id::text AS "flockId",
-              COALESCE(SUM(mortality), 0)::float AS "mortalityTotal",
-              COALESCE(SUM(CASE WHEN log_date >= CURRENT_DATE - INTERVAL '7 days' THEN mortality ELSE 0 END), 0)::float AS "mortality7d",
-              COALESCE(SUM(CASE WHEN log_date >= CURRENT_DATE - INTERVAL '1 day' THEN mortality ELSE 0 END), 0)::float AS "mortality24h",
-              COALESCE(SUM(CASE WHEN log_date >= CURRENT_DATE - INTERVAL '2 days' AND log_date < CURRENT_DATE - INTERVAL '1 day' THEN mortality ELSE 0 END), 0)::float AS "mortalityPrev24h",
-              MAX(log_date)::text AS "latestLogDate"
-         FROM poultry_daily_logs
-        WHERE flock_id IN (SELECT id FROM poultry_flocks WHERE status = 'active')
+      `WITH events AS (
+         SELECT e.flock_id,
+                e.count,
+                (timezone('Africa/Kigali', e.at))::date AS d
+           FROM flock_mortality_events e
+          WHERE e.flock_id IN (SELECT id FROM poultry_flocks WHERE status = 'active')
+            AND e.submission_status IS DISTINCT FROM 'rejected'
+            AND COALESCE(e.affects_live_count, true) = true
+       ),
+       daily AS (
+         SELECT l.flock_id,
+                GREATEST(COALESCE(l.mortality, 0), 0)::int AS count,
+                l.log_date::date AS d
+           FROM poultry_daily_logs l
+          WHERE l.flock_id IN (SELECT id FROM poultry_flocks WHERE status = 'active')
+            AND l.validation_status::text NOT IN ('draft', 'rejected')
+            AND COALESCE(l.mortality, 0) > 0
+       ),
+       combined AS (
+         SELECT flock_id, count, d FROM events
+         UNION ALL
+         SELECT flock_id, count, d FROM daily
+       )
+       SELECT flock_id::text AS "flockId",
+              COALESCE(SUM(count), 0)::float AS "mortalityTotal",
+              COALESCE(SUM(CASE WHEN d >= (timezone('Africa/Kigali', now()))::date - 7 THEN count ELSE 0 END), 0)::float AS "mortality7d",
+              COALESCE(SUM(CASE WHEN d >= (timezone('Africa/Kigali', now()))::date - 1 THEN count ELSE 0 END), 0)::float AS "mortality24h",
+              COALESCE(SUM(CASE
+                WHEN d >= (timezone('Africa/Kigali', now()))::date - 2
+                 AND d < (timezone('Africa/Kigali', now()))::date - 1
+                THEN count ELSE 0 END), 0)::float AS "mortalityPrev24h",
+              MAX(d)::text AS "latestLogDate"
+         FROM combined
         GROUP BY flock_id`
     ).catch(() => ({ rows: [] }));
 
