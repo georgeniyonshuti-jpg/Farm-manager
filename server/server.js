@@ -11,6 +11,21 @@ import { pgClientConfigFromDatabaseUrlAsync } from "./pgConnFromUrl.js";
 import { runMigrations } from "./migrate.js";
 import { checkinSchema, dailyLogSchema, feedEntrySchema, loginSchema, vetLogSchema } from "./utils/validation.js";
 import * as systemConfig from "./systemConfig.js";
+import {
+  defaultPaygoInputs,
+  mergePaygoInputs,
+  runProjection,
+  summarizeProjection,
+  profitMilestones,
+  leverScenarioRows,
+} from "./business-model/paygoCore.js";
+import {
+  defaultBroilerInputs,
+  mergeBroilerInputs,
+  broilerSummary,
+  dailyTrajectory,
+  insightMessagesBroiler,
+} from "./business-model/broilerCore.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -608,6 +623,21 @@ function hasFarmAccess(user) {
 function requireFarmAccess(req, res, next) {
   if (!hasFarmAccess(req.authUser)) {
     res.status(403).json({ error: "Farm access required" });
+    return;
+  }
+  next();
+}
+
+function hasClevaWorkspace(user) {
+  if (!user) return false;
+  if (user.role === "superuser") return true;
+  const a = user.businessUnitAccess;
+  return a === "clevacredit" || a === "both";
+}
+
+function requireClevaWorkspace(req, res, next) {
+  if (!hasClevaWorkspace(req.authUser)) {
+    res.status(403).json({ error: "Clevafarm Finance workspace access required" });
     return;
   }
   next();
@@ -5196,6 +5226,67 @@ app.post("/api/daily-logs", requireAuth, requireFarmAccess, requirePageAccess("f
   });
   res.json({ ok: true, record: { ...record, index: indexForClient }, payrollImpact: null });
 });
+
+app.get(
+  "/api/business-model/paygo-defaults",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (_req, res) => {
+    res.json({ inputs: defaultPaygoInputs() });
+  },
+);
+
+app.get(
+  "/api/business-model/broiler-defaults",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (_req, res) => {
+    res.json({ inputs: defaultBroilerInputs() });
+  },
+);
+
+app.post(
+  "/api/business-model/paygo-projection",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const inp = mergePaygoInputs(body.inputs);
+      const series = runProjection(inp);
+      const summary = summarizeProjection(series, inp);
+      const milestones = profitMilestones(series);
+      const scenarios = leverScenarioRows(inp);
+      res.json({ ok: true, inputs: inp, series, summary, milestones, scenarios });
+    } catch (e) {
+      console.error("[ERROR]", "[api] paygo-projection:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Projection failed" });
+    }
+  },
+);
+
+app.post(
+  "/api/business-model/broiler",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const inp = mergeBroilerInputs(body.inputs);
+      const summary = broilerSummary(inp);
+      const trajectory = dailyTrajectory(inp);
+      const insights = insightMessagesBroiler(inp, trajectory);
+      res.json({ ok: true, inputs: inp, summary, trajectory, insights });
+    } catch (e) {
+      console.error("[ERROR]", "[api] broiler:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Broiler model failed" });
+    }
+  },
+);
 
 app.get("/api/server-time", requireAuth, (_req, res) => {
   const now = new Date();
