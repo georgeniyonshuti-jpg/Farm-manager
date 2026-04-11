@@ -23,6 +23,7 @@ import { FlockDetailPage } from "./pages/farm/FlockDetailPage";
 import { FlockFcrPage } from "./pages/farm/FlockFcrPage";
 import { FarmFcrRedirectPage } from "./pages/farm/FarmFcrRedirectPage";
 import { CreditScoringPage } from "./pages/cleva/CreditScoringPage";
+import { BusinessModelAnalyticsPage } from "./pages/cleva/BusinessModelAnalyticsPage";
 import { InvestorMemosPage } from "./pages/cleva/InvestorMemosPage";
 import { PortfolioPage } from "./pages/cleva/PortfolioPage";
 import { UserManagementPage } from "./pages/admin/UserManagementPage";
@@ -238,6 +239,7 @@ function AppRoutes() {
 
           <Route path="/cleva" element={<ClevaSection />}>
             <Route path="portfolio" element={<PortfolioPage />} />
+            <Route path="business-model" element={<BusinessModelAnalyticsPage />} />
             <Route path="investor-memos" element={<InvestorMemosPage />} />
             <Route path="credit-scoring" element={<CreditScoringPage />} />
           </Route>

@@ -123,6 +123,11 @@ export const PAGE_ACCESS_DEFS: Array<{ key: string; label: string; prefixes: str
   { key: "farm_treatments", label: "Medicine tracking", prefixes: ["/farm/treatments"] },
   { key: "farm_slaughter", label: "Slaughter & FCR", prefixes: ["/farm/slaughter"] },
   { key: "cleva_portfolio", label: "Portfolio analytics", prefixes: ["/cleva/portfolio"] },
+  {
+    key: "cleva_business_model",
+    label: "Business model analytics (Streamlit)",
+    prefixes: ["/cleva/business-model"],
+  },
   { key: "cleva_investor_memos", label: "Investor memos", prefixes: ["/cleva/investor-memos"] },
   { key: "cleva_credit_scoring", label: "Credit scoring", prefixes: ["/cleva/credit-scoring"] },
   { key: "admin_system_config", label: "Type settings", prefixes: ["/admin/system-config"] },

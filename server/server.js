@@ -179,6 +179,7 @@ const PAGE_ACCESS_KEYS = [
   "farm_treatments",
   "farm_slaughter",
   "cleva_portfolio",
+  "cleva_business_model",
   "cleva_investor_memos",
   "cleva_credit_scoring",
   "admin_system_config",
