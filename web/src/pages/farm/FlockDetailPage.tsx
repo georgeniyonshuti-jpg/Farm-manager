@@ -60,6 +60,7 @@ export function FlockDetailPage() {
   const [weighIns, setWeighIns] = useState<WeighIn[]>([]);
 
   const [weighBusy, setWeighBusy] = useState(false);
+  const [showWeighInForm, setShowWeighInForm] = useState(false);
   const [weighForm, setWeighForm] = useState({
     weighDate: new Date().toISOString().slice(0, 10),
     ageDays: "",
@@ -178,6 +179,7 @@ export function FlockDetailPage() {
         targetWeightKg: "",
         notes: "",
       }));
+      setShowWeighInForm(false);
       await load();
     } catch (err) {
       showToast("error", err instanceof Error ? err.message : "Save failed");
@@ -325,86 +327,128 @@ export function FlockDetailPage() {
 
             {weighinAction.mode === "enabled" ? (
               <section id="weigh-in" className="rounded-xl border border-neutral-200 bg-white p-4 text-sm shadow-sm scroll-mt-4">
-                <p className="mb-3 font-semibold text-neutral-800">Record weigh-in</p>
+                <p className="mb-2 font-semibold text-neutral-800">Weigh-in history</p>
                 <p className="mb-3 text-xs text-neutral-600">
-                  Sample average weight and cumulative feed (kg) to this date. Cycle FCR on the dashboard uses check-in
-                  feed totals and this weight × live headcount vs placement weight; the table below also shows feed per kg
-                  of sampled biomass for reference.
+                  Feed per kg of sampled biomass is shown for each entry. Use{" "}
+                  <span className="font-medium text-neutral-800">Record new weigh-in</span> to add a row.
                 </p>
-                <form onSubmit={(ev) => void submitWeighIn(ev)} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  <label className="flex flex-col gap-1">
-                    <span className="text-xs text-neutral-500">Weigh date</span>
-                    <input
-                      type="date"
-                      className="rounded-lg border border-neutral-300 px-3 py-2"
-                      value={weighForm.weighDate}
-                      onChange={(e) => setWeighForm((v) => ({ ...v, weighDate: e.target.value }))}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-xs text-neutral-500">Age (days)</span>
-                    <input
-                      className="rounded-lg border border-neutral-300 px-3 py-2"
-                      inputMode="numeric"
-                      value={weighForm.ageDays}
-                      onChange={(e) => setWeighForm((v) => ({ ...v, ageDays: e.target.value }))}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-xs text-neutral-500">Sample size (birds)</span>
-                    <input
-                      className="rounded-lg border border-neutral-300 px-3 py-2"
-                      inputMode="numeric"
-                      value={weighForm.sampleSize}
-                      onChange={(e) => setWeighForm((v) => ({ ...v, sampleSize: e.target.value }))}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-xs text-neutral-500">Avg weight (kg)</span>
-                    <input
-                      className="rounded-lg border border-neutral-300 px-3 py-2"
-                      inputMode="decimal"
-                      value={weighForm.avgWeightKg}
-                      onChange={(e) => setWeighForm((v) => ({ ...v, avgWeightKg: e.target.value }))}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 sm:col-span-2 lg:col-span-2">
-                    <span className="text-xs text-neutral-500">Total feed used (kg) to this date</span>
-                    <input
-                      className="rounded-lg border border-neutral-300 px-3 py-2"
-                      inputMode="decimal"
-                      value={weighForm.totalFeedUsedKg}
-                      onChange={(e) => setWeighForm((v) => ({ ...v, totalFeedUsedKg: e.target.value }))}
-                      placeholder="Typically matches feed-to-date from check-ins"
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-xs text-neutral-500">Target weight (kg, optional)</span>
-                    <input
-                      className="rounded-lg border border-neutral-300 px-3 py-2"
-                      inputMode="decimal"
-                      value={weighForm.targetWeightKg}
-                      onChange={(e) => setWeighForm((v) => ({ ...v, targetWeightKg: e.target.value }))}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1 sm:col-span-2">
-                    <span className="text-xs text-neutral-500">Notes</span>
-                    <input
-                      className="rounded-lg border border-neutral-300 px-3 py-2"
-                      value={weighForm.notes}
-                      onChange={(e) => setWeighForm((v) => ({ ...v, notes: e.target.value }))}
-                    />
-                  </label>
-                  <div className="flex items-end sm:col-span-2 lg:col-span-3">
-                    <button
-                      type="submit"
-                      disabled={weighBusy}
-                      className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                    >
-                      {weighBusy ? "Saving…" : "Save weigh-in"}
-                    </button>
+                {weighIns.length ? (
+                  <div className="mb-4 space-y-1">
+                    {weighIns.map((w) => {
+                      const ratio = w.feedPerKgSampleBiomass ?? w.fcr;
+                      return (
+                        <div key={w.id} className="grid grid-cols-4 gap-2 text-xs">
+                          <span className="font-medium text-neutral-800">{w.weighDate}</span>
+                          <span className="text-neutral-700">{w.avgWeightKg.toFixed(2)} kg</span>
+                          <span className="text-neutral-700" title="Feed per kg of sampled bird biomass (not cumulative FCR)">
+                            {ratio != null ? `${ratio.toFixed(2)} feed/kg sample` : "—"}
+                          </span>
+                          <span className="text-neutral-600">{w.variancePct != null ? `${w.variancePct > 0 ? "+" : ""}${w.variancePct}%` : "—"}</span>
+                        </div>
+                      );
+                    })}
                   </div>
-                </form>
+                ) : (
+                  <p className="mb-4 text-neutral-500">No weigh-ins yet.</p>
+                )}
+                {!showWeighInForm ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowWeighInForm(true)}
+                    className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
+                  >
+                    Record new weigh-in
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setShowWeighInForm(false)}
+                      className="mb-3 text-sm font-medium text-neutral-600 underline"
+                    >
+                      Cancel
+                    </button>
+                    <p className="mb-3 font-semibold text-neutral-800">Record weigh-in</p>
+                    <p className="mb-3 text-xs text-neutral-600">
+                      Sample average weight and cumulative feed (kg) to this date. Cycle FCR on the dashboard uses check-in
+                      feed totals and this weight × live headcount vs placement weight.
+                    </p>
+                    <form onSubmit={(ev) => void submitWeighIn(ev)} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs text-neutral-500">Weigh date</span>
+                        <input
+                          type="date"
+                          className="rounded-lg border border-neutral-300 px-3 py-2"
+                          value={weighForm.weighDate}
+                          onChange={(e) => setWeighForm((v) => ({ ...v, weighDate: e.target.value }))}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs text-neutral-500">Age (days)</span>
+                        <input
+                          className="rounded-lg border border-neutral-300 px-3 py-2"
+                          inputMode="numeric"
+                          value={weighForm.ageDays}
+                          onChange={(e) => setWeighForm((v) => ({ ...v, ageDays: e.target.value }))}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs text-neutral-500">Sample size (birds)</span>
+                        <input
+                          className="rounded-lg border border-neutral-300 px-3 py-2"
+                          inputMode="numeric"
+                          value={weighForm.sampleSize}
+                          onChange={(e) => setWeighForm((v) => ({ ...v, sampleSize: e.target.value }))}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs text-neutral-500">Avg weight (kg)</span>
+                        <input
+                          className="rounded-lg border border-neutral-300 px-3 py-2"
+                          inputMode="decimal"
+                          value={weighForm.avgWeightKg}
+                          onChange={(e) => setWeighForm((v) => ({ ...v, avgWeightKg: e.target.value }))}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 sm:col-span-2 lg:col-span-2">
+                        <span className="text-xs text-neutral-500">Total feed used (kg) to this date</span>
+                        <input
+                          className="rounded-lg border border-neutral-300 px-3 py-2"
+                          inputMode="decimal"
+                          value={weighForm.totalFeedUsedKg}
+                          onChange={(e) => setWeighForm((v) => ({ ...v, totalFeedUsedKg: e.target.value }))}
+                          placeholder="Typically matches feed-to-date from check-ins"
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs text-neutral-500">Target weight (kg, optional)</span>
+                        <input
+                          className="rounded-lg border border-neutral-300 px-3 py-2"
+                          inputMode="decimal"
+                          value={weighForm.targetWeightKg}
+                          onChange={(e) => setWeighForm((v) => ({ ...v, targetWeightKg: e.target.value }))}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 sm:col-span-2">
+                        <span className="text-xs text-neutral-500">Notes</span>
+                        <input
+                          className="rounded-lg border border-neutral-300 px-3 py-2"
+                          value={weighForm.notes}
+                          onChange={(e) => setWeighForm((v) => ({ ...v, notes: e.target.value }))}
+                        />
+                      </label>
+                      <div className="flex items-end sm:col-span-2 lg:col-span-3">
+                        <button
+                          type="submit"
+                          disabled={weighBusy}
+                          className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                        >
+                          {weighBusy ? "Saving…" : "Save weigh-in"}
+                        </button>
+                      </div>
+                    </form>
+                  </>
+                )}
               </section>
             ) : null}
 
@@ -485,28 +529,6 @@ export function FlockDetailPage() {
                 <li className="text-neutral-700">Check-in due: {new Date(status.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}</li>
                 <li className="text-neutral-700">Review mortality and feed trends for this flock.</li>
               </ul>
-            </div>
-            <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
-              <p className="mb-2 font-semibold text-neutral-800">Weigh-in history</p>
-              {weighIns.length ? (
-                <div className="space-y-1">
-                  {weighIns.map((w) => {
-                    const ratio = w.feedPerKgSampleBiomass ?? w.fcr;
-                    return (
-                      <div key={w.id} className="grid grid-cols-4 gap-2 text-xs">
-                        <span className="font-medium text-neutral-800">{w.weighDate}</span>
-                        <span className="text-neutral-700">{w.avgWeightKg.toFixed(2)} kg</span>
-                        <span className="text-neutral-700" title="Feed per kg of sampled bird biomass (not cumulative FCR)">
-                          {ratio != null ? `${ratio.toFixed(2)} feed/kg sample` : "—"}
-                        </span>
-                        <span className="text-neutral-600">{w.variancePct != null ? `${w.variancePct > 0 ? "+" : ""}${w.variancePct}%` : "—"}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-neutral-500">No weigh-ins yet.</p>
-              )}
             </div>
             <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
               <p className="mb-2 font-semibold text-neutral-800">Mortality & Health</p>

@@ -82,12 +82,22 @@ export function FarmInventoryPage() {
   const [adjDelta, setAdjDelta] = useState("");
   const [adjReasonCode, setAdjReasonCode] = useState("stock_count_correction");
   const [activeTab, setActiveTab] = useState<"procurement" | "consumption" | "adjustment">("procurement");
+  const [showEntryPanel, setShowEntryPanel] = useState(false);
 
   const canProcure =
     user?.role === "procurement_officer" || user?.role === "vet_manager" || user?.role === "manager" || user?.role === "superuser";
   const canFeed =
     user?.role === "laborer" || user?.role === "dispatcher" || user?.role === "vet_manager" || user?.role === "manager" || user?.role === "superuser";
   const canAdjust = user?.role === "manager" || user?.role === "superuser";
+
+  const canRecordAny = canProcure || canFeed || canAdjust;
+
+  function openEntryPanel() {
+    setShowEntryPanel(true);
+    if (canProcure) setActiveTab("procurement");
+    else if (canFeed) setActiveTab("consumption");
+    else if (canAdjust) setActiveTab("adjustment");
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -143,6 +153,7 @@ export function FarmInventoryPage() {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Request failed");
       showToast("success", okMsg);
+      setShowEntryPanel(false);
       await load();
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "Request failed");
@@ -192,37 +203,91 @@ export function FarmInventoryPage() {
                 ))}
               </select>
             </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {canProcure ? (
-                <button
-                  type="button"
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "procurement" ? "border-emerald-700 bg-emerald-50 text-emerald-900" : "border-neutral-300 text-neutral-700"}`}
-                  onClick={() => setActiveTab("procurement")}
-                >
-                  Receive stock
-                </button>
-              ) : null}
-              {canFeed ? (
-                <button
-                  type="button"
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "consumption" ? "border-emerald-700 bg-emerald-50 text-emerald-900" : "border-neutral-300 text-neutral-700"}`}
-                  onClick={() => setActiveTab("consumption")}
-                >
-                  Log consumption
-                </button>
-              ) : null}
-              {canAdjust ? (
-                <button
-                  type="button"
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "adjustment" ? "border-emerald-700 bg-emerald-50 text-emerald-900" : "border-neutral-300 text-neutral-700"}`}
-                  onClick={() => setActiveTab("adjustment")}
-                >
-                  Adjust stock
-                </button>
-              ) : null}
-            </div>
           </div>
 
+          <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-sm font-semibold text-neutral-900">Inventory ledger</h2>
+              <a
+                href={`${API_BASE_URL}/api/reports/feed-inventory.csv${flockId ? `?flockId=${encodeURIComponent(flockId)}` : ""}`}
+                className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+                download
+              >
+                Export CSV
+              </a>
+            </div>
+            <div className="mt-3 space-y-2">
+              {rows.map((r) => (
+                <div key={r.id} className="rounded-lg border border-neutral-200 p-3 text-sm">
+                  <p className="font-medium text-neutral-900">
+                    {r.type} - {r.deltaKg >= 0 ? "+" : ""}{r.deltaKg} kg
+                  </p>
+                  <p className="text-neutral-600">
+                    {reasonLabel(r.type, r.reason, procurementReasons, consumptionReasons, adjustReasons) || "—"}
+                  </p>
+                  <p className="text-xs text-neutral-500">
+                    {new Date(r.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
+                  </p>
+                </div>
+              ))}
+              {!rows.length ? <p className="text-sm text-neutral-500">No inventory records yet.</p> : null}
+            </div>
+          </section>
+
+          {canRecordAny ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {!showEntryPanel ? (
+                <button
+                  type="button"
+                  onClick={() => openEntryPanel()}
+                  className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
+                >
+                  New transaction
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowEntryPanel(false)}
+                  className="rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+                >
+                  Close entry form
+                </button>
+              )}
+            </div>
+          ) : null}
+
+          {showEntryPanel && canRecordAny ? (
+            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap gap-2 border-b border-neutral-100 pb-3">
+                {canProcure ? (
+                  <button
+                    type="button"
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "procurement" ? "border-emerald-700 bg-emerald-50 text-emerald-900" : "border-neutral-300 text-neutral-700"}`}
+                    onClick={() => setActiveTab("procurement")}
+                  >
+                    Receive stock
+                  </button>
+                ) : null}
+                {canFeed ? (
+                  <button
+                    type="button"
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "consumption" ? "border-emerald-700 bg-emerald-50 text-emerald-900" : "border-neutral-300 text-neutral-700"}`}
+                    onClick={() => setActiveTab("consumption")}
+                  >
+                    Log consumption
+                  </button>
+                ) : null}
+                {canAdjust ? (
+                  <button
+                    type="button"
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "adjustment" ? "border-emerald-700 bg-emerald-50 text-emerald-900" : "border-neutral-300 text-neutral-700"}`}
+                    onClick={() => setActiveTab("adjustment")}
+                  >
+                    Adjust stock
+                  </button>
+                ) : null}
+              </div>
+              <div className="mt-4 space-y-4">
           {canProcure && activeTab === "procurement" ? (
             <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
               <h2 className="text-sm font-semibold text-neutral-900">Procurement receipt</h2>
@@ -301,35 +366,9 @@ export function FarmInventoryPage() {
               </button>
             </section>
           ) : null}
-
-          <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold text-neutral-900">Inventory ledger</h2>
-              <a
-                href={`${API_BASE_URL}/api/reports/feed-inventory.csv${flockId ? `?flockId=${encodeURIComponent(flockId)}` : ""}`}
-                className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
-                download
-              >
-                Export CSV
-              </a>
+              </div>
             </div>
-            <div className="mt-3 space-y-2">
-              {rows.map((r) => (
-                <div key={r.id} className="rounded-lg border border-neutral-200 p-3 text-sm">
-                  <p className="font-medium text-neutral-900">
-                    {r.type} - {r.deltaKg >= 0 ? "+" : ""}{r.deltaKg} kg
-                  </p>
-                  <p className="text-neutral-600">
-                    {reasonLabel(r.type, r.reason, procurementReasons, consumptionReasons, adjustReasons) || "—"}
-                  </p>
-                  <p className="text-xs text-neutral-500">
-                    {new Date(r.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
-                  </p>
-                </div>
-              ))}
-              {!rows.length ? <p className="text-sm text-neutral-500">No inventory records yet.</p> : null}
-            </div>
-          </section>
+          ) : null}
         </>
       ) : null}
     </div>

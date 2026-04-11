@@ -75,6 +75,7 @@ export function FlockListPage() {
   const [insights, setInsights] = useState<string[]>([]);
   const [farmHealthScore, setFarmHealthScore] = useState<number | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
+  const [showCreateFlock, setShowCreateFlock] = useState(false);
   const [purgeBusyId, setPurgeBusyId] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState({
     placementDate: new Date().toISOString().slice(0, 10),
@@ -258,6 +259,7 @@ export function FlockListPage() {
       const name = created.flock?.label ?? created.flock?.code ?? "Flock";
       showToast("success", `Flock ${name} added`);
       setCreateForm((prev) => ({ ...prev, initialCount: "", targetWeightKg: "" }));
+      setShowCreateFlock(false);
       await load();
     } catch (e2) {
       showToast("error", e2 instanceof Error ? e2.message : "Failed to create flock");
@@ -320,6 +322,18 @@ export function FlockListPage() {
         </div>
       ) : null}
       {canCreateFlock ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowCreateFlock((v) => !v)}
+            className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
+          >
+            {showCreateFlock ? "Close" : "Create new flock"}
+          </button>
+        </div>
+      ) : null}
+
+      {canCreateFlock && showCreateFlock ? (
         <form onSubmit={(e) => void submitCreateFlock(e)} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
           <p className="text-sm font-semibold text-neutral-900">Add purchased flock</p>
           <p className="mt-1 text-xs text-neutral-600">The system assigns a unique flock name (e.g. FL-000042).</p>

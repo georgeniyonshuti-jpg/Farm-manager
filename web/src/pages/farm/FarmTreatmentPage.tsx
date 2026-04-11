@@ -147,6 +147,9 @@ export function FarmTreatmentPage() {
     notes: "",
   });
   const [tab, setTab] = useState<MedTab>("treatments");
+  const [showTreatmentForm, setShowTreatmentForm] = useState(false);
+  const [showRoundForm, setShowRoundForm] = useState(false);
+  const [showMedicineForm, setShowMedicineForm] = useState(false);
   const [flockStrip, setFlockStrip] = useState<CheckinStatus | null>(null);
   const [flockPerformance, setFlockPerformance] = useState<FieldPerformanceSummary | null>(null);
 
@@ -275,6 +278,12 @@ export function FarmTreatmentPage() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    setShowTreatmentForm(false);
+    setShowRoundForm(false);
+    setShowMedicineForm(false);
+  }, [tab]);
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!flockId) return;
@@ -294,6 +303,7 @@ export function FarmTreatmentPage() {
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Save failed");
       showToast("success", "Treatment logged.");
       setForm((v) => ({ ...v, diseaseOrReason: "", medicineName: "", dose: "", notes: "" }));
+      setShowTreatmentForm(false);
       await load();
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "Save failed");
@@ -337,6 +347,7 @@ export function FarmTreatmentPage() {
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Failed to add medicine");
       showToast("success", "Medicine stock item created.");
       setMedForm((v) => ({ ...v, name: "", quantity: "", supplier: "", expiryDate: "" }));
+      setShowMedicineForm(false);
       await load();
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "Save failed");
@@ -368,6 +379,7 @@ export function FarmTreatmentPage() {
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Failed to create round");
       showToast("success", "Treatment round scheduled.");
       setRoundForm((v) => ({ ...v, plannedQuantity: "", notes: "" }));
+      setShowRoundForm(false);
       await load();
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "Save failed");
@@ -459,58 +471,31 @@ export function FarmTreatmentPage() {
                 <p className="text-sm text-emerald-800">No overdue rounds.</p>
               )}
 
-              <form onSubmit={submit} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-            <div className="grid gap-3 sm:grid-cols-2">
-              <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={startAt} onChange={(e) => setStartAt(e.target.value)} />
-              <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
-              <select className="rounded-lg border border-neutral-300 px-3 py-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
-                {flocks.map((f) => (
-                  <option key={f.id} value={f.id}>{f.label}</option>
-                ))}
-              </select>
-              <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.reasonCode} onChange={(e) => setForm((v) => ({ ...v, reasonCode: e.target.value }))}>
-                {treatmentReasonOptions.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Condition details (optional)" value={form.diseaseOrReason} onChange={(e) => setForm((v) => ({ ...v, diseaseOrReason: e.target.value }))} />
-              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Medicine name" value={form.medicineName} onChange={(e) => setForm((v) => ({ ...v, medicineName: e.target.value }))} />
-              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Dose" inputMode="decimal" value={form.dose} onChange={(e) => setForm((v) => ({ ...v, dose: e.target.value }))} />
-              <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.doseUnit} onChange={(e) => setForm((v) => ({ ...v, doseUnit: e.target.value }))}>
-                {doseUnitOptions.map((u) => (
-                  <option key={u.value} value={u.value}>
-                    {u.label}
-                  </option>
-                ))}
-              </select>
-              <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.route} onChange={(e) => setForm((v) => ({ ...v, route: e.target.value }))}>
-                {routeOptions.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Duration days" inputMode="numeric" value={form.durationDays} onChange={(e) => setForm((v) => ({ ...v, durationDays: e.target.value }))} />
-              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Withdrawal days" inputMode="numeric" value={form.withdrawalDays} onChange={(e) => setForm((v) => ({ ...v, withdrawalDays: e.target.value }))} />
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" onClick={preset.set7d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 7d</button>
-              <button type="button" onClick={preset.set30d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 30d</button>
-              <button type="button" onClick={preset.setCycle} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Cycle to date</button>
-            </div>
-            <textarea className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} placeholder="Notes" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
-            <div className="mt-3 flex justify-end gap-2">
-              <a
-                className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-                href={`${API_BASE_URL}/api/reports/treatments.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                Download CSV
-              </a>
-              <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">{busy ? "Saving..." : "Save treatment"}</button>
-            </div>
-          </form>
+              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                <p className="mb-2 text-sm font-semibold text-neutral-800">List filters</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={startAt} onChange={(e) => setStartAt(e.target.value)} />
+                  <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
+                  <select className="rounded-lg border border-neutral-300 px-3 py-2 sm:col-span-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
+                    {flocks.map((f) => (
+                      <option key={f.id} value={f.id}>{f.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" onClick={preset.set7d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 7d</button>
+                  <button type="button" onClick={preset.set30d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 30d</button>
+                  <button type="button" onClick={preset.setCycle} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Cycle to date</button>
+                  <a
+                    className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700"
+                    href={`${API_BASE_URL}/api/reports/treatments.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Download CSV
+                  </a>
+                </div>
+              </div>
 
               <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
                 <p className="mb-3 text-sm font-semibold text-neutral-800">Recent treatments</p>
@@ -533,6 +518,55 @@ export function FarmTreatmentPage() {
                   {!rows.length ? <p className="text-sm text-neutral-500">No treatments yet.</p> : null}
                 </div>
               </div>
+
+              {!showTreatmentForm ? (
+                <button
+                  type="button"
+                  onClick={() => setShowTreatmentForm(true)}
+                  className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
+                >
+                  Record new treatment
+                </button>
+              ) : (
+                <form onSubmit={submit} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-neutral-800">New treatment</p>
+                    <button type="button" onClick={() => setShowTreatmentForm(false)} className="text-sm font-medium text-neutral-600 underline">
+                      Cancel
+                    </button>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.reasonCode} onChange={(e) => setForm((v) => ({ ...v, reasonCode: e.target.value }))}>
+                      {treatmentReasonOptions.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Condition details (optional)" value={form.diseaseOrReason} onChange={(e) => setForm((v) => ({ ...v, diseaseOrReason: e.target.value }))} />
+                    <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Medicine name" value={form.medicineName} onChange={(e) => setForm((v) => ({ ...v, medicineName: e.target.value }))} />
+                    <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Dose" inputMode="decimal" value={form.dose} onChange={(e) => setForm((v) => ({ ...v, dose: e.target.value }))} />
+                    <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.doseUnit} onChange={(e) => setForm((v) => ({ ...v, doseUnit: e.target.value }))}>
+                      {doseUnitOptions.map((u) => (
+                        <option key={u.value} value={u.value}>
+                          {u.label}
+                        </option>
+                      ))}
+                    </select>
+                    <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.route} onChange={(e) => setForm((v) => ({ ...v, route: e.target.value }))}>
+                      {routeOptions.map((r) => (
+                        <option key={r.value} value={r.value}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Duration days" inputMode="numeric" value={form.durationDays} onChange={(e) => setForm((v) => ({ ...v, durationDays: e.target.value }))} />
+                    <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Withdrawal days" inputMode="numeric" value={form.withdrawalDays} onChange={(e) => setForm((v) => ({ ...v, withdrawalDays: e.target.value }))} />
+                  </div>
+                  <textarea className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} placeholder="Notes" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
+                  <div className="mt-3 flex justify-end">
+                    <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">{busy ? "Saving..." : "Save treatment"}</button>
+                  </div>
+                </form>
+              )}
             </>
           ) : null}
 
@@ -550,36 +584,15 @@ export function FarmTreatmentPage() {
                 </div>
               </div>
 
-              <form onSubmit={submitRound} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-                <p className="mb-3 text-sm font-semibold text-neutral-800">Schedule medicine / vaccine rounds</p>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <select className="rounded-lg border border-neutral-300 px-3 py-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
-                    {flocks.map((f) => (
-                      <option key={f.id} value={f.id}>{f.label}</option>
-                    ))}
-                  </select>
-                  <select className="rounded-lg border border-neutral-300 px-3 py-2" value={roundForm.medicineId} onChange={(e) => setRoundForm((v) => ({ ...v, medicineId: e.target.value }))}>
-                    {medicines.map((m) => (
-                      <option key={m.id} value={m.id}>{m.name}</option>
-                    ))}
-                  </select>
-                  <input className="rounded-lg border border-neutral-300 px-3 py-2" type="datetime-local" value={roundForm.plannedFor} onChange={(e) => setRoundForm((v) => ({ ...v, plannedFor: e.target.value }))} />
-                  <select className="rounded-lg border border-neutral-300 px-3 py-2" value={roundForm.route} onChange={(e) => setRoundForm((v) => ({ ...v, route: e.target.value }))}>
-                    {adminRouteOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Planned qty" inputMode="decimal" value={roundForm.plannedQuantity} onChange={(e) => setRoundForm((v) => ({ ...v, plannedQuantity: e.target.value }))} />
-                  <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Assign to user id (optional)" value={roundForm.assignedToUserId} onChange={(e) => setRoundForm((v) => ({ ...v, assignedToUserId: e.target.value }))} />
-                </div>
-                <div className="mt-3 flex justify-end">
-                  <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">
-                    Schedule round
-                  </button>
-                </div>
-                <div className="mt-3 space-y-2">
+              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                <p className="mb-2 text-sm font-semibold text-neutral-800">Flock</p>
+                <select className="w-full max-w-md rounded-lg border border-neutral-300 px-3 py-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
+                  {flocks.map((f) => (
+                    <option key={f.id} value={f.id}>{f.label}</option>
+                  ))}
+                </select>
+                <p className="mt-4 mb-2 text-sm font-semibold text-neutral-800">Scheduled rounds</p>
+                <div className="space-y-2">
                   {rounds.slice(0, 12).map((r) => (
                     <div key={r.id} className="rounded-lg border border-neutral-200 p-3 text-sm">
                       <p className="font-medium">{r.medicineName} · {new Date(r.plannedFor).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}</p>
@@ -592,7 +605,48 @@ export function FarmTreatmentPage() {
                   ))}
                   {!rounds.length ? <p className="text-sm text-neutral-500">No rounds scheduled yet.</p> : null}
                 </div>
-              </form>
+              </div>
+
+              {!showRoundForm ? (
+                <button
+                  type="button"
+                  onClick={() => setShowRoundForm(true)}
+                  className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
+                >
+                  Schedule new round
+                </button>
+              ) : (
+                <form onSubmit={submitRound} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-neutral-800">Schedule medicine / vaccine round</p>
+                    <button type="button" onClick={() => setShowRoundForm(false)} className="text-sm font-medium text-neutral-600 underline">
+                      Cancel
+                    </button>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <select className="rounded-lg border border-neutral-300 px-3 py-2" value={roundForm.medicineId} onChange={(e) => setRoundForm((v) => ({ ...v, medicineId: e.target.value }))}>
+                      {medicines.map((m) => (
+                        <option key={m.id} value={m.id}>{m.name}</option>
+                      ))}
+                    </select>
+                    <input className="rounded-lg border border-neutral-300 px-3 py-2" type="datetime-local" value={roundForm.plannedFor} onChange={(e) => setRoundForm((v) => ({ ...v, plannedFor: e.target.value }))} />
+                    <select className="rounded-lg border border-neutral-300 px-3 py-2" value={roundForm.route} onChange={(e) => setRoundForm((v) => ({ ...v, route: e.target.value }))}>
+                      {adminRouteOptions.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Planned qty" inputMode="decimal" value={roundForm.plannedQuantity} onChange={(e) => setRoundForm((v) => ({ ...v, plannedQuantity: e.target.value }))} />
+                    <input className="rounded-lg border border-neutral-300 px-3 py-2 sm:col-span-2" placeholder="Assign to user id (optional)" value={roundForm.assignedToUserId} onChange={(e) => setRoundForm((v) => ({ ...v, assignedToUserId: e.target.value }))} />
+                  </div>
+                  <div className="mt-3 flex justify-end">
+                    <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">
+                      Schedule round
+                    </button>
+                  </div>
+                </form>
+              )}
             </>
           ) : null}
 
@@ -629,30 +683,47 @@ export function FarmTreatmentPage() {
                 {!medicines.length ? <p className="text-sm text-neutral-500">No medicines in stock yet.</p> : null}
               </div>
 
-              <p className="mb-2 text-sm font-semibold text-neutral-800">Add catalog item</p>
-              <form onSubmit={submitMedicine} className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
-                <input className="rounded-lg border border-neutral-300 px-3 py-2 lg:col-span-2" placeholder="Medicine name" value={medForm.name} onChange={(e) => setMedForm((v) => ({ ...v, name: e.target.value }))} />
-                <select className="rounded-lg border border-neutral-300 px-3 py-2" value={medForm.category} onChange={(e) => setMedForm((v) => ({ ...v, category: e.target.value }))}>
-                  {medCategoryOptions.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-                <select className="rounded-lg border border-neutral-300 px-3 py-2" value={medForm.unit} onChange={(e) => setMedForm((v) => ({ ...v, unit: e.target.value }))} title="Stock unit (database-enforced)">
-                  {medStockOptions.map((u) => (
-                    <option key={u.value} value={u.value}>
-                      {u.label}
-                    </option>
-                  ))}
-                </select>
-                <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Opening qty" inputMode="decimal" value={medForm.quantity} onChange={(e) => setMedForm((v) => ({ ...v, quantity: e.target.value }))} />
-                <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">
-                  Add item
+              {!showMedicineForm ? (
+                <button
+                  type="button"
+                  onClick={() => setShowMedicineForm(true)}
+                  className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
+                >
+                  Add catalog item
                 </button>
-                <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Withdrawal days" inputMode="numeric" value={medForm.withdrawalDays} onChange={(e) => setMedForm((v) => ({ ...v, withdrawalDays: e.target.value }))} />
-                <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Low-stock alert at" inputMode="numeric" value={medForm.lowStockThreshold} onChange={(e) => setMedForm((v) => ({ ...v, lowStockThreshold: e.target.value }))} />
-              </form>
+              ) : (
+                <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-neutral-800">New catalog item</p>
+                    <button type="button" onClick={() => setShowMedicineForm(false)} className="text-sm font-medium text-neutral-600 underline">
+                      Cancel
+                    </button>
+                  </div>
+                  <form onSubmit={submitMedicine} className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+                    <input className="rounded-lg border border-neutral-300 px-3 py-2 lg:col-span-2" placeholder="Medicine name" value={medForm.name} onChange={(e) => setMedForm((v) => ({ ...v, name: e.target.value }))} />
+                    <select className="rounded-lg border border-neutral-300 px-3 py-2" value={medForm.category} onChange={(e) => setMedForm((v) => ({ ...v, category: e.target.value }))}>
+                      {medCategoryOptions.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <select className="rounded-lg border border-neutral-300 px-3 py-2" value={medForm.unit} onChange={(e) => setMedForm((v) => ({ ...v, unit: e.target.value }))} title="Stock unit (database-enforced)">
+                      {medStockOptions.map((u) => (
+                        <option key={u.value} value={u.value}>
+                          {u.label}
+                        </option>
+                      ))}
+                    </select>
+                    <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Opening qty" inputMode="decimal" value={medForm.quantity} onChange={(e) => setMedForm((v) => ({ ...v, quantity: e.target.value }))} />
+                    <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">
+                      Add item
+                    </button>
+                    <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Withdrawal days" inputMode="numeric" value={medForm.withdrawalDays} onChange={(e) => setMedForm((v) => ({ ...v, withdrawalDays: e.target.value }))} />
+                    <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Low-stock alert at" inputMode="numeric" value={medForm.lowStockThreshold} onChange={(e) => setMedForm((v) => ({ ...v, lowStockThreshold: e.target.value }))} />
+                  </form>
+                </div>
+              )}
             </div>
           ) : null}
         </>

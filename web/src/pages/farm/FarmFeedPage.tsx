@@ -53,6 +53,7 @@ export function FarmFeedPage() {
   const [submitStage, setSubmitStage] = useState<"idle" | "submitting" | "success">("idle");
   const [entriesError, setEntriesError] = useState<string | null>(null);
   const [inventoryBalanceKg, setInventoryBalanceKg] = useState<number | null>(null);
+  const [showFeedForm, setShowFeedForm] = useState(false);
   const feedTypeOptions = useReferenceOptions("feed_type", token, [
     { value: "starter", label: "Starter" },
     { value: "grower", label: "Grower" },
@@ -124,6 +125,7 @@ export function FarmFeedPage() {
       }
       void loadDetails();
       await loadFeedEntries();
+      setShowFeedForm(false);
       setSubmitStage("success");
       window.setTimeout(() => setSubmitStage("idle"), 1200);
     } catch (err) {
@@ -215,52 +217,6 @@ export function FarmFeedPage() {
             </div>
           ) : null}
 
-          <form
-            onSubmit={(ev) => void submit(ev)}
-            className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"
-          >
-            <label className="block text-sm font-medium text-neutral-700">
-              Feed delivered (kg)
-              <input
-                inputMode="decimal"
-                className="mt-1 w-full min-h-[52px] rounded-xl border border-neutral-300 px-4 text-lg"
-                value={feedKg}
-                onChange={(e) => setFeedKg(e.target.value)}
-                placeholder="0"
-              />
-            </label>
-            <label className="block text-sm font-medium text-neutral-700">
-              Feed type
-              <select
-                className="mt-1 w-full min-h-[52px] rounded-xl border border-neutral-300 px-4 text-base"
-                value={feedType}
-                onChange={(e) => setFeedType(e.target.value)}
-              >
-                {feedTypeOptions.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm font-medium text-neutral-700">
-              Notes (optional)
-              <textarea
-                className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm"
-                rows={2}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-              />
-            </label>
-            <button
-              type="submit"
-              disabled={busy || !flockId || !status}
-              className="w-full rounded-xl bg-emerald-700 py-3 text-lg font-semibold text-white disabled:opacity-50"
-            >
-              {busy ? "Saving…" : "Save feed entry"}
-            </button>
-          </form>
-
           {entriesError ? (
             <p className="text-sm text-amber-800" role="status">
               Could not load recent entries.{" "}
@@ -274,9 +230,9 @@ export function FarmFeedPage() {
             </p>
           ) : null}
 
-          {entries.length > 0 ? (
-            <section className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
-              <p className="mb-2 font-semibold text-neutral-800">Recent feed entries</p>
+          <section className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
+            <p className="mb-2 font-semibold text-neutral-800">Recent feed entries</p>
+            {entries.length > 0 ? (
               <ul className="space-y-2">
                 {entries.map((en) => (
                   <li
@@ -294,7 +250,67 @@ export function FarmFeedPage() {
                   </li>
                 ))}
               </ul>
-            </section>
+            ) : (
+              <p className="text-sm text-neutral-500">No feed entries yet for this flock.</p>
+            )}
+          </section>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setShowFeedForm((v) => !v)}
+              className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
+            >
+              {showFeedForm ? "Close" : "Log new feed"}
+            </button>
+          </div>
+
+          {showFeedForm ? (
+            <form
+              onSubmit={(ev) => void submit(ev)}
+              className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"
+            >
+              <label className="block text-sm font-medium text-neutral-700">
+                Feed delivered (kg)
+                <input
+                  inputMode="decimal"
+                  className="mt-1 w-full min-h-[52px] rounded-xl border border-neutral-300 px-4 text-lg"
+                  value={feedKg}
+                  onChange={(e) => setFeedKg(e.target.value)}
+                  placeholder="0"
+                />
+              </label>
+              <label className="block text-sm font-medium text-neutral-700">
+                Feed type
+                <select
+                  className="mt-1 w-full min-h-[52px] rounded-xl border border-neutral-300 px-4 text-base"
+                  value={feedType}
+                  onChange={(e) => setFeedType(e.target.value)}
+                >
+                  {feedTypeOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm font-medium text-neutral-700">
+                Notes (optional)
+                <textarea
+                  className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm"
+                  rows={2}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={busy || !flockId || !status}
+                className="w-full rounded-xl bg-emerald-700 py-3 text-lg font-semibold text-white disabled:opacity-50"
+              >
+                {busy ? "Saving…" : "Save feed entry"}
+              </button>
+            </form>
           ) : null}
 
           <p className="text-xs text-neutral-500">

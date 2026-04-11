@@ -58,6 +58,7 @@ export function UserManagementPage() {
   });
   const [savingEdit, setSavingEdit] = useState(false);
   const [savingPageAccessUserId, setSavingPageAccessUserId] = useState<string | null>(null);
+  const [showCreateUser, setShowCreateUser] = useState(false);
 
   const pageSize = 20;
 
@@ -250,7 +251,24 @@ export function UserManagementPage() {
         }
       />
 
-      <AddUserForm onCreated={() => void loadUsers()} />
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setShowCreateUser((v) => !v)}
+          className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
+        >
+          {showCreateUser ? "Close" : "Create new user"}
+        </button>
+      </div>
+
+      {showCreateUser ? (
+        <AddUserForm
+          onCreated={() => {
+            setShowCreateUser(false);
+            void loadUsers();
+          }}
+        />
+      ) : null}
 
       <section className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-neutral-900">Page visibility matrix</h2>

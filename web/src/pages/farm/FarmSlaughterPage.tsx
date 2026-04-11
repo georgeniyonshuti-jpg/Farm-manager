@@ -64,6 +64,7 @@ export function FarmSlaughterPage() {
     avgCarcassWeightKg: "",
     notes: "",
   });
+  const [showRecordSlaughter, setShowRecordSlaughter] = useState(false);
 
   const preset = useMemo(() => ({
     set7d: () => {
@@ -162,6 +163,7 @@ export function FarmSlaughterPage() {
       }
       showToast("success", "Slaughter record saved.");
       setForm((v) => ({ ...v, birdsSlaughtered: "", avgLiveWeightKg: "", avgCarcassWeightKg: "", notes: "" }));
+      setShowRecordSlaughter(false);
       await load();
     } catch (e) {
       const d = e instanceof Error ? e.message : "Save failed";
@@ -207,39 +209,30 @@ export function FarmSlaughterPage() {
             for this flock.
           </p>
 
-          <form onSubmit={submit} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+          <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
             {!canRecordSlaughter ? (
               <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                 View-only mode: only vet manager, manager, or superuser can save slaughter events.
               </div>
             ) : null}
+            <p className="mb-2 text-sm font-semibold text-neutral-800">Filter list</p>
             <div className="grid gap-3 sm:grid-cols-2">
               <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={startAt} onChange={(e) => setStartAt(e.target.value)} />
               <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
-              <select className="rounded-lg border border-neutral-300 px-3 py-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
+              <select className="rounded-lg border border-neutral-300 px-3 py-2 sm:col-span-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
                 {flocks.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
               </select>
-              <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.reasonCode} onChange={(e) => setForm((v) => ({ ...v, reasonCode: e.target.value }))}>
-                {slaughterReasonOptions.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Birds slaughtered" inputMode="numeric" value={form.birdsSlaughtered} onChange={(e) => setForm((v) => ({ ...v, birdsSlaughtered: e.target.value }))} />
-              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Avg live weight (kg)" inputMode="decimal" value={form.avgLiveWeightKg} onChange={(e) => setForm((v) => ({ ...v, avgLiveWeightKg: e.target.value }))} />
-              <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Avg carcass weight (kg, optional)" inputMode="decimal" value={form.avgCarcassWeightKg} onChange={(e) => setForm((v) => ({ ...v, avgCarcassWeightKg: e.target.value }))} />
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
               <button type="button" onClick={preset.set7d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 7d</button>
               <button type="button" onClick={preset.set30d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 30d</button>
               <button type="button" onClick={preset.setCycle} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Cycle to date</button>
             </div>
-            <textarea className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} placeholder="Notes (optional)" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
-            <div className="mt-3 flex justify-end gap-2">
+            <div className="mt-3 flex flex-wrap gap-2">
               <a className="rounded-lg border border-neutral-300 px-3 py-2 text-sm" href={`${API_BASE_URL}/api/reports/slaughter.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`} target="_blank" rel="noreferrer">Slaughter CSV</a>
               <a className="rounded-lg border border-neutral-300 px-3 py-2 text-sm" href={`${API_BASE_URL}/api/reports/flock-performance.csv?flock_id=${encodeURIComponent(flockId)}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`} target="_blank" rel="noreferrer">Performance CSV</a>
-              <button disabled={!canRecordSlaughter || busy || (eligibility != null && !eligibility.eligibleForSlaughter)} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">{busy ? "Saving..." : "Save slaughter"}</button>
             </div>
-          </form>
+          </div>
           <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
             <p className="mb-3 text-sm font-semibold text-neutral-800">Recent slaughter records</p>
             <div className="space-y-2">
@@ -257,6 +250,47 @@ export function FarmSlaughterPage() {
               {!rows.length ? <p className="text-sm text-neutral-500">No slaughter records yet.</p> : null}
             </div>
           </div>
+          {canRecordSlaughter ? (
+            <div className="space-y-3">
+              {!showRecordSlaughter ? (
+                <button
+                  type="button"
+                  onClick={() => setShowRecordSlaughter(true)}
+                  className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 disabled:opacity-50"
+                  disabled={eligibility != null && !eligibility.eligibleForSlaughter}
+                >
+                  Record new slaughter
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowRecordSlaughter(false)}
+                    className="rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+                  >
+                    Cancel
+                  </button>
+                  <form onSubmit={submit} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                    <p className="mb-3 text-sm font-semibold text-neutral-800">New slaughter record</p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.reasonCode} onChange={(e) => setForm((v) => ({ ...v, reasonCode: e.target.value }))}>
+                        {slaughterReasonOptions.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Birds slaughtered" inputMode="numeric" value={form.birdsSlaughtered} onChange={(e) => setForm((v) => ({ ...v, birdsSlaughtered: e.target.value }))} />
+                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Avg live weight (kg)" inputMode="decimal" value={form.avgLiveWeightKg} onChange={(e) => setForm((v) => ({ ...v, avgLiveWeightKg: e.target.value }))} />
+                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Avg carcass weight (kg, optional)" inputMode="decimal" value={form.avgCarcassWeightKg} onChange={(e) => setForm((v) => ({ ...v, avgCarcassWeightKg: e.target.value }))} />
+                    </div>
+                    <textarea className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} placeholder="Notes (optional)" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
+                    <div className="mt-3 flex justify-end">
+                      <button disabled={busy || (eligibility != null && !eligibility.eligibleForSlaughter)} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">{busy ? "Saving..." : "Save slaughter"}</button>
+                    </div>
+                  </form>
+                </>
+              )}
+            </div>
+          ) : null}
         </>
       ) : null}
     </div>

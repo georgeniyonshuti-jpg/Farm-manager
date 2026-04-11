@@ -58,6 +58,7 @@ export function FarmVetLogsPage() {
   const [recommendations, setRecommendations] = useState("");
   const [logDate, setLogDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [busy, setBusy] = useState(false);
+  const [showNewLog, setShowNewLog] = useState(false);
 
   const loadLogs = useCallback(async () => {
     if (!token) return;
@@ -101,6 +102,7 @@ export function FarmVetLogsPage() {
       setActionsTaken("");
       setRecommendations("");
       setLogDate(new Date().toISOString().slice(0, 10));
+      setShowNewLog(false);
       void loadLogs();
     } catch (err) {
       showToast("error", err instanceof Error ? err.message : "Save failed");
@@ -166,33 +168,10 @@ export function FarmVetLogsPage() {
             </label>
           </div>
 
-          <form onSubmit={(ev) => void handleSubmit(ev)} className="space-y-3 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-            <p className="text-sm font-semibold text-neutral-800">New vet log</p>
-            <label className="block text-sm font-medium text-neutral-700">
-              Log date
-              <input type="date" className="mt-1 block w-44 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm" value={logDate} onChange={(e) => setLogDate(e.target.value)} />
-            </label>
-            <label className="block text-sm font-medium text-neutral-700">
-              Observations
-              <textarea className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm" rows={3} value={observations} onChange={(e) => setObservations(e.target.value)} />
-            </label>
-            <label className="block text-sm font-medium text-neutral-700">
-              Actions taken
-              <textarea className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm" rows={2} value={actionsTaken} onChange={(e) => setActionsTaken(e.target.value)} />
-            </label>
-            <label className="block text-sm font-medium text-neutral-700">
-              Recommendations
-              <textarea className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm" rows={2} value={recommendations} onChange={(e) => setRecommendations(e.target.value)} />
-            </label>
-            <button type="submit" disabled={busy || !flockId} className="rounded-xl bg-emerald-700 px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
-              {busy ? "Saving…" : "Save vet log"}
-            </button>
-          </form>
-
           {logsLoading && <SkeletonList rows={4} />}
 
           {!logsLoading && logs.length === 0 ? (
-            <EmptyState title="No vet logs" description="Submit observations using the form above." />
+            <EmptyState title="No vet logs" description="Create a new log when you have observations to record." />
           ) : null}
 
           {!logsLoading && logs.length > 0 ? (
@@ -243,6 +222,41 @@ export function FarmVetLogsPage() {
                 </span>
               </div>
             </>
+          ) : null}
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setShowNewLog((v) => !v)}
+              className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
+            >
+              {showNewLog ? "Close" : "Create new vet log"}
+            </button>
+          </div>
+
+          {showNewLog ? (
+            <form onSubmit={(ev) => void handleSubmit(ev)} className="space-y-3 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
+              <p className="text-sm font-semibold text-neutral-800">New vet log</p>
+              <label className="block text-sm font-medium text-neutral-700">
+                Log date
+                <input type="date" className="mt-1 block w-44 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm" value={logDate} onChange={(e) => setLogDate(e.target.value)} />
+              </label>
+              <label className="block text-sm font-medium text-neutral-700">
+                Observations
+                <textarea className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm" rows={3} value={observations} onChange={(e) => setObservations(e.target.value)} />
+              </label>
+              <label className="block text-sm font-medium text-neutral-700">
+                Actions taken
+                <textarea className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm" rows={2} value={actionsTaken} onChange={(e) => setActionsTaken(e.target.value)} />
+              </label>
+              <label className="block text-sm font-medium text-neutral-700">
+                Recommendations
+                <textarea className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm" rows={2} value={recommendations} onChange={(e) => setRecommendations(e.target.value)} />
+              </label>
+              <button type="submit" disabled={busy || !flockId} className="rounded-xl bg-emerald-700 px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+                {busy ? "Saving…" : "Save vet log"}
+              </button>
+            </form>
           ) : null}
         </>
       ) : null}
