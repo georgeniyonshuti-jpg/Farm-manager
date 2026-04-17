@@ -75,6 +75,8 @@ export function LaborerEarningsPage() {
   const [totals, setTotals] = useState<PayrollTotals | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const approvedRows = useMemo(() => entries.filter((e) => e.approvedAt != null), [entries]);
+  const pendingRows = useMemo(() => entries.filter((e) => e.approvedAt == null), [entries]);
 
   const backHref = useMemo(() => {
     if (user?.role === "vet") return "/dashboard/vet";
@@ -144,14 +146,17 @@ export function LaborerEarningsPage() {
         <div className="space-y-3">
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
             <p className="text-sm font-medium text-emerald-900">
-              <TranslatedText text={netAllLbl} />:{" "}
-              <span className="text-lg font-bold text-emerald-950">{formatRwf(displayTotals.netAll)}</span>
+              <TranslatedText text={approvedTotalLbl} />:{" "}
+              <span className="text-lg font-bold text-emerald-950">{formatRwf(displayTotals.netApproved)}</span>
             </p>
             <p className="mt-2 text-sm text-emerald-900/90">
-              <TranslatedText text={approvedTotalLbl} />: {formatRwf(displayTotals.netApproved)}
+              <TranslatedText text={netAllLbl} />: {formatRwf(displayTotals.netAll)}
             </p>
             <p className="mt-1 text-sm text-emerald-900/90">
               <TranslatedText text={pendingTotalLbl} />: {formatRwf(displayTotals.netPending)}
+            </p>
+            <p className="mt-1 text-xs text-emerald-900/80">
+              {approvedRows.length} approved · {pendingRows.length} pending
             </p>
           </div>
         </div>
@@ -177,7 +182,7 @@ export function LaborerEarningsPage() {
                 </tr>
               </thead>
               <tbody>
-                {entries.map((e) => (
+                {[...approvedRows, ...pendingRows].map((e) => (
                   <tr key={e.id}>
                     <td>{e.logType}</td>
                     <td className={e.rwfDelta >= 0 ? "text-emerald-800" : "text-red-800"}>
