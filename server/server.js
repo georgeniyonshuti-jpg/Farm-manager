@@ -1419,11 +1419,13 @@ function totalFeedKgForFlock(flockId, cutoffMs = Number.POSITIVE_INFINITY) {
   let s = 0;
   for (const c of roundCheckins) {
     if (!sameFlockId(c.flockId, fid)) continue;
+    if ((c.submissionStatus ?? "approved") === "rejected") continue;
     if (new Date(c.at).getTime() > cutoffMs) continue;
     s += Number(c.feedKg) || 0;
   }
   for (const e of flockFeedEntries) {
     if (!sameFlockId(e.flockId, fid)) continue;
+    if ((e.submissionStatus ?? "approved") === "rejected") continue;
     if (new Date(e.recordedAt).getTime() > cutoffMs) continue;
     s += Number(e.feedKg) || 0;
   }
@@ -2965,15 +2967,16 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
       notes: "Logged at scheduled round check-in",
       linkedCheckinId: id,
       source: "round_checkin",
-      affectsLiveCount,
+      submissionStatus: submissionStatus,
+      affectsLiveCount: submissionStatus === "approved" ? affectsLiveCount : false,
     };
     let linkedMortalitySavedToDb = false;
     if (hasDb() && isPersistableUuid(f.id) && isPersistableUuid(req.authUser.id)) {
       try {
         const linkUuid = isPersistableUuid(id) ? id : null;
         const ins = await dbQuery(
-          `INSERT INTO flock_mortality_events (flock_id, laborer_id, at, count, is_emergency, photos, notes, linked_checkin_id, source, affects_live_count)
-           VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4, $5, $6::jsonb, $7, $8::uuid, $9, $10)
+          `INSERT INTO flock_mortality_events (flock_id, laborer_id, at, count, is_emergency, photos, notes, linked_checkin_id, source, submission_status, affects_live_count)
+           VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4, $5, $6::jsonb, $7, $8::uuid, $9, $10, $11)
            RETURNING id::text AS id`,
           [
             f.id,
@@ -2985,7 +2988,8 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
             mortRow.notes,
             linkUuid,
             "round_checkin",
-            affectsLiveCount,
+            mortRow.submissionStatus,
+            mortRow.affectsLiveCount,
           ]
         );
         const mr = ins.rows[0]?.id;
@@ -3379,9 +3383,46 @@ app.patch("/api/check-ins/:id/review", requireAuth, requireFarmAccess, requirePa
     } else {
       console.warn("[WARN] check-in approve: laborer not in usersById", mem.laborerId);
     }
+    if (hasDb() && isPersistableUuid(checkinId)) {
+      try {
+        await dbQuery(
+          `UPDATE flock_mortality_events
+              SET submission_status = 'approved',
+                  affects_live_count = CASE WHEN source = 'round_checkin' THEN affects_live_count ELSE affects_live_count END
+            WHERE linked_checkin_id = $1::uuid AND submission_status = 'pending_review'`,
+          [checkinId]
+        );
+      } catch (e) {
+        console.error("[ERROR]", "[db] cascade approve to linked mortality:", e instanceof Error ? e.message : e);
+      }
+    }
+    for (const m of mortalityEvents) {
+      if (String(m.linkedCheckinId) === checkinId && m.submissionStatus === "pending_review") {
+        m.submissionStatus = "approved";
+      }
+    }
   }
   if (action === "reject") {
     await removePayrollImpactByLog(checkinId, "check_in");
+    if (hasDb() && isPersistableUuid(checkinId)) {
+      try {
+        await dbQuery(
+          `UPDATE flock_mortality_events
+              SET submission_status = 'rejected', affects_live_count = false,
+                  reviewed_by_user_id = $1::uuid, reviewed_at = now(), review_notes = $2
+            WHERE linked_checkin_id = $3::uuid AND submission_status IN ('pending_review', 'approved')`,
+          [req.authUser.id, reviewNotes ?? "Linked check-in rejected", checkinId]
+        );
+      } catch (e) {
+        console.error("[ERROR]", "[db] cascade reject to linked mortality:", e instanceof Error ? e.message : e);
+      }
+    }
+    for (const m of mortalityEvents) {
+      if (String(m.linkedCheckinId) === checkinId && m.submissionStatus !== "rejected") {
+        m.submissionStatus = "rejected";
+        m.affectsLiveCount = false;
+      }
+    }
   }
   appendAudit(req.authUser.id, req.authUser.role, `farm.check_in.${action}`, "check_in", checkinId, { reviewNotes });
   res.json({ ok: true, status: newStatus });
@@ -3397,7 +3438,7 @@ app.get("/api/feed-entries/pending", requireAuth, requireFarmAccess, requireLead
     try {
       let sql = `SELECT e.id::text AS id, e.flock_id AS "flockId", e.recorded_at AS "recordedAt",
                         e.feed_kg AS "feedKg", e.notes, e.entered_by_user_id AS "enteredByUserId",
-                        e.submission_status AS "submissionStatus", u.name AS "enteredByName"
+                        e.submission_status AS "submissionStatus", u.full_name AS "enteredByName"
                    FROM flock_feed_entries e
                    LEFT JOIN users u ON u.id = e.entered_by_user_id
                   WHERE e.submission_status = 'pending_review'`;
@@ -3446,6 +3487,13 @@ app.patch("/api/feed-entries/:id/review", requireAuth, requireFarmAccess, requir
       return;
     }
   }
+  if (hasDb()) {
+    try {
+      await syncFlockFeedEntriesFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "syncFlockFeedEntriesFromDb after review:", e instanceof Error ? e.message : e);
+    }
+  }
   const mem = flockFeedEntries.find((e) => String(e.id) === entryId);
   if (mem) {
     mem.submissionStatus = newStatus;
@@ -3467,7 +3515,7 @@ app.get("/api/mortality-events/pending", requireAuth, requireFarmAccess, require
     try {
       let sql = `SELECT e.id::text AS id, e.flock_id AS "flockId", e.laborer_id AS "laborerId",
                         e.at, e.count, e.is_emergency AS "isEmergency", e.notes,
-                        e.submission_status AS "submissionStatus", u.name AS "reportedByName"
+                        e.submission_status AS "submissionStatus", u.full_name AS "reportedByName"
                    FROM flock_mortality_events e
                    LEFT JOIN users u ON u.id = e.laborer_id
                   WHERE e.submission_status = 'pending_review'`;
@@ -3518,6 +3566,11 @@ app.patch("/api/mortality-events/:id/review", requireAuth, requireFarmAccess, re
       console.error("[ERROR]", "[db] PATCH mortality-events review:", e instanceof Error ? e.message : e);
       res.status(503).json({ error: "Could not update mortality event." });
       return;
+    }
+    try {
+      await syncMortalityEventsFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "syncMortalityEventsFromDb after review:", e instanceof Error ? e.message : e);
     }
   }
   const mem = mortalityEvents.find((e) => String(e.id) === eventId);
@@ -3623,7 +3676,7 @@ app.get("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("farm
                         v.recommendations, v.submission_status AS "submissionStatus",
                         v.reviewed_by_user_id AS "reviewedByUserId", v.reviewed_at AS "reviewedAt",
                         v.review_notes AS "reviewNotes", v.created_at AS "createdAt",
-                        u.name AS "authorName"
+                        u.full_name AS "authorName"
                    FROM farm_vet_logs v
                    LEFT JOIN users u ON u.id = v.author_user_id
                   WHERE 1=1`;
@@ -3704,9 +3757,9 @@ app.get("/api/reports/mortality.csv", requireAuth, requireFarmAccess, requireLea
   const includeSlaughtered = req.query.includeSlaughtered === "true";
   if (hasDb()) {
     try {
-      let sql = `SELECT e.id, e.flock_id, f.flock_code, e.at, e.count, e.is_emergency,
+      let sql = `SELECT e.id, e.flock_id, f.code AS flock_code, e.at, e.count, e.is_emergency,
                         e.source, e.notes, e.submission_status, e.affects_live_count,
-                        u.name AS reported_by, e.review_notes
+                        u.full_name AS reported_by, e.review_notes
                    FROM flock_mortality_events e
                    JOIN poultry_flocks f ON f.id = e.flock_id
                    LEFT JOIN users u ON u.id = e.laborer_id
@@ -3740,8 +3793,8 @@ app.get("/api/reports/feed-inventory.csv", requireAuth, requireFarmAccess, requi
   const to = req.query.to ? String(req.query.to) : null;
   if (hasDb()) {
     try {
-      let sql = `SELECT e.id, e.flock_id, f.flock_code, e.recorded_at, e.feed_kg,
-                        e.notes, e.submission_status, u.name AS entered_by, e.review_notes
+      let sql = `SELECT e.id, e.flock_id, f.code AS flock_code, e.recorded_at, e.feed_kg,
+                        e.notes, e.submission_status, u.full_name AS entered_by, e.review_notes
                    FROM flock_feed_entries e
                    JOIN poultry_flocks f ON f.id = e.flock_id
                    LEFT JOIN users u ON u.id = e.entered_by_user_id
@@ -3773,14 +3826,14 @@ app.get("/api/reports/medicine-tracking.csv", requireAuth, requireFarmAccess, re
   const to = req.query.to ? String(req.query.to) : null;
   if (hasDb()) {
     try {
-      let sql = `SELECT t.id, t.flock_id, f.flock_code, t.at, t.disease_or_reason, t.medicine_name,
-                        t.dosage_value, t.dosage_unit, t.route, t.notes, u.name AS administered_by
-                   FROM poultry_treatments t
-                   JOIN poultry_flocks f ON f.id = t.flock_id
-                   LEFT JOIN users u ON u.id = t.administered_by_user_id
+      let sql = `SELECT t.id, t.flock_id, f.code AS flock_code, t.at, t.disease_or_reason, t.medicine_name,
+                        t.dose AS dosage_value, t.dose_unit AS dosage_unit, t.route, t.notes, u.full_name AS administered_by
+                   FROM flock_treatments t
+                   JOIN poultry_flocks f ON f.id = t.flock_id::uuid
+                   LEFT JOIN users u ON u.id::text = t.administered_by_user_id
                   WHERE 1=1`;
       const params = [];
-      if (flockId) { params.push(flockId); sql += ` AND t.flock_id = $${params.length}::uuid`; }
+      if (flockId) { params.push(flockId); sql += ` AND t.flock_id = $${params.length}`; }
       if (from) { params.push(from); sql += ` AND t.at >= $${params.length}::timestamptz`; }
       if (to) { params.push(to); sql += ` AND t.at <= $${params.length}::timestamptz`; }
       sql += ` ORDER BY t.at DESC LIMIT 5000`;
@@ -3804,7 +3857,7 @@ app.get("/api/reports/flocks.csv", requireAuth, requireFarmAccess, requireLeadVe
   if (hasDb()) {
     try {
       const r = await dbQuery(
-        `SELECT f.id, f.flock_code, f.breed_code, f.placement_date, f.initial_count,
+        `SELECT f.id, f.code AS flock_code, f.breed_code, f.placement_date, f.initial_count,
                 f.status, f.target_weight_kg, f.created_at
            FROM poultry_flocks f
           ORDER BY f.placement_date DESC LIMIT 5000`
@@ -6122,7 +6175,7 @@ app.get(
                 p.submitted_at AS "submittedAt",
                 p.on_time AS "onTime",
                 p.flock_id::text AS "flockId",
-                COALESCE(u.full_name, u.name, u.email, p.user_id::text) AS "workerName",
+                COALESCE(u.full_name, u.email, p.user_id::text) AS "workerName",
                 COALESCE(u.role, '') AS "workerRole"
            FROM payroll_impact p
            LEFT JOIN users u ON u.id = p.user_id

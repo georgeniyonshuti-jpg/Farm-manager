@@ -63,6 +63,14 @@ async function runMigrationsOnce() {
       }
 
       const sql = await readFile(path.join(migrationsDir, filename), "utf8");
+
+      const DESTRUCTIVE_PATTERN = /\b(DROP\s+TABLE|TRUNCATE\s+TABLE|TRUNCATE\s+\w|DELETE\s+FROM)\b/i;
+      if (process.env.NODE_ENV === "production" && DESTRUCTIVE_PATTERN.test(sql)) {
+        failedCount += 1;
+        console.error(`[BLOCKED] ${filename}: contains destructive statement (DROP/TRUNCATE/DELETE). Skipping in production.`);
+        continue;
+      }
+
       try {
         await client.query("BEGIN");
         await client.query(sql);

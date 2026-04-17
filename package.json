@@ -5,6 +5,7 @@
     "dev": "npm run dev --prefix web",
     "dev:api": "npm run dev --prefix server",
     "dev:all": "npm run dev --prefix server & npm run dev --prefix web",
-    "migrate": "node server/migrate.js"
+    "migrate": "node server/migrate.js",
+    "test": "node --test server/tests/"
   }
 }
