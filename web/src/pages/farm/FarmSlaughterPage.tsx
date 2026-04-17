@@ -174,7 +174,7 @@ export function FarmSlaughterPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <div className="mx-auto max-w-7xl space-y-6">
       <PageHeader title="Slaughter and FCR" subtitle="Capture slaughter metrics and monitor feed conversion ratio." />
       {loading && <SkeletonList rows={3} />}
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
@@ -194,11 +194,27 @@ export function FarmSlaughterPage() {
               </ul>
             </div>
           ) : null}
-          <div className="grid gap-3 sm:grid-cols-4">
-            <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">Feed to date</p><p className="font-semibold">{summary?.feedToDateKg ?? 0} kg</p></div>
-            <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">Live estimate</p><p className="font-semibold">{summary?.birdsLiveEstimate ?? 0}</p></div>
-            <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">Mortality</p><p className="font-semibold">{summary?.mortalityToDate ?? 0}</p></div>
-            <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm"><p className="text-neutral-500">FCR</p><p className="font-semibold">{summary?.fcr != null ? summary.fcr.toFixed(2) : "-"}</p></div>
+          <div className="table-block">
+            <div className="institutional-table-wrapper">
+              <table className="institutional-table">
+                <thead>
+                  <tr>
+                    <th className="tbl-num">Feed to date (kg)</th>
+                    <th className="tbl-num">Live estimate</th>
+                    <th className="tbl-num">Mortality to date</th>
+                    <th className="tbl-num">FCR</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="tbl-num font-semibold">{summary?.feedToDateKg ?? 0}</td>
+                    <td className="tbl-num font-semibold">{summary?.birdsLiveEstimate ?? 0}</td>
+                    <td className="tbl-num font-semibold">{summary?.mortalityToDate ?? 0}</td>
+                    <td className="tbl-num font-semibold">{summary?.fcr != null ? summary.fcr.toFixed(2) : "—"}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </div>
           <p className="text-xs text-neutral-600">
             This screen focuses on harvest-oriented metrics. For full-cycle broiler FCR (feed ÷ flock weight gained),
@@ -209,45 +225,89 @@ export function FarmSlaughterPage() {
             for this flock.
           </p>
 
-          <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-            {!canRecordSlaughter ? (
-              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                View-only mode: only vet manager, manager, or superuser can save slaughter events.
-              </div>
-            ) : null}
-            <p className="mb-2 text-sm font-semibold text-neutral-800">Filter list</p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={startAt} onChange={(e) => setStartAt(e.target.value)} />
-              <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
-              <select className="rounded-lg border border-neutral-300 px-3 py-2 sm:col-span-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
+          <div className="table-block">
+            <div className="table-toolbar">
+              <select
+                className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
+                value={flockId}
+                onChange={(e) => setFlockId(e.target.value)}
+              >
                 {flocks.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
               </select>
+              <input
+                className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
+                type="date"
+                value={startAt}
+                onChange={(e) => setStartAt(e.target.value)}
+                placeholder="From"
+              />
+              <input
+                className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
+                type="date"
+                value={endAt}
+                onChange={(e) => setEndAt(e.target.value)}
+                placeholder="To"
+              />
+              <button type="button" onClick={preset.set7d} className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-neutral-700">Last 7d</button>
+              <button type="button" onClick={preset.set30d} className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-neutral-700">Last 30d</button>
+              <button type="button" onClick={preset.setCycle} className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-neutral-700">Cycle to date</button>
+              <span className="ml-auto flex items-center gap-2">
+                <span className="text-xs text-neutral-500">{rows.length} records</span>
+                <a
+                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+                  href={`${API_BASE_URL}/api/reports/slaughter.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Slaughter CSV
+                </a>
+                <a
+                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+                  href={`${API_BASE_URL}/api/reports/flock-performance.csv?flock_id=${encodeURIComponent(flockId)}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Performance CSV
+                </a>
+              </span>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button type="button" onClick={preset.set7d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 7d</button>
-              <button type="button" onClick={preset.set30d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 30d</button>
-              <button type="button" onClick={preset.setCycle} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Cycle to date</button>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <a className="rounded-lg border border-neutral-300 px-3 py-2 text-sm" href={`${API_BASE_URL}/api/reports/slaughter.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`} target="_blank" rel="noreferrer">Slaughter CSV</a>
-              <a className="rounded-lg border border-neutral-300 px-3 py-2 text-sm" href={`${API_BASE_URL}/api/reports/flock-performance.csv?flock_id=${encodeURIComponent(flockId)}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`} target="_blank" rel="noreferrer">Performance CSV</a>
-            </div>
-          </div>
-          <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-            <p className="mb-3 text-sm font-semibold text-neutral-800">Recent slaughter records</p>
-            <div className="space-y-2">
-              {rows.map((r) => (
-                <div key={r.id} className="rounded-lg border border-neutral-200 p-3 text-sm">
-                  <p className="font-medium">
-                    {r.birdsSlaughtered} birds - {r.avgLiveWeightKg} kg live avg
-                  </p>
-                  <p className="text-neutral-600">{slaughterReasonLabel(r, slaughterReasonOptions)}</p>
-                  <p className="text-neutral-600">
-                    {new Date(r.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
-                  </p>
-                </div>
-              ))}
-              {!rows.length ? <p className="text-sm text-neutral-500">No slaughter records yet.</p> : null}
+
+            {!canRecordSlaughter ? (
+              <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
+                View-only: only vet manager, manager, or superuser can save slaughter events.
+              </div>
+            ) : null}
+
+            <div className="institutional-table-wrapper">
+              <table className="institutional-table min-w-[52rem]">
+                <thead>
+                  <tr>
+                    <th>Date / Time</th>
+                    <th>Reason</th>
+                    <th className="tbl-num">Birds slaughtered</th>
+                    <th className="tbl-num">Avg live wt (kg)</th>
+                    <th className="tbl-num">Avg carcass wt (kg)</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.id}>
+                      <td className="tbl-mono">{new Date(r.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}</td>
+                      <td className="whitespace-nowrap">{slaughterReasonLabel(r, slaughterReasonOptions)}</td>
+                      <td className="tbl-num font-semibold">{r.birdsSlaughtered}</td>
+                      <td className="tbl-num">{r.avgLiveWeightKg}</td>
+                      <td className="tbl-num">{r.avgCarcassWeightKg != null ? r.avgCarcassWeightKg : "—"}</td>
+                      <td style={{ maxWidth: "14rem" }}>{r.notes || "—"}</td>
+                    </tr>
+                  ))}
+                  {!rows.length ? (
+                    <tr>
+                      <td colSpan={6} className="py-6 text-center text-neutral-500">No slaughter records yet.</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
             </div>
           </div>
           {canRecordSlaughter ? (

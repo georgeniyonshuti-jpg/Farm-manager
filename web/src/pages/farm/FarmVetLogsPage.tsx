@@ -132,7 +132,7 @@ export function FarmVetLogsPage() {
   const pageError = ctxError ?? logsError;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5">
+    <div className="mx-auto max-w-7xl space-y-5">
       <PageHeader title="Vet logs" subtitle="Clinical observations per flock/day. Vet+ can submit, vet manager+ can review." />
 
       {listLoading && <SkeletonList rows={3} />}
@@ -146,65 +146,74 @@ export function FarmVetLogsPage() {
 
       {!listLoading && !ctxError && flocks.length > 0 ? (
         <>
-          <div className="flex flex-wrap gap-3 items-end">
-            <label className="text-sm font-medium text-neutral-700">
-              Flock
-              <select className="mt-1 block w-52 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm" value={flockId} onChange={(e) => { setFlockId(e.target.value); setPage(1); }}>
+          <div className="table-block">
+            <div className="table-toolbar">
+              <input
+                className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
+                placeholder="Search keywords…"
+                value={searchQ}
+                onChange={(e) => { setSearchQ(e.target.value); setPage(1); }}
+              />
+              <select
+                className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
+                value={flockId}
+                onChange={(e) => { setFlockId(e.target.value); setPage(1); }}
+              >
                 {flocks.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
               </select>
-            </label>
-            <label className="text-sm font-medium text-neutral-700">
-              Status
-              <select className="mt-1 block w-40 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm" value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}>
-                <option value="all">All</option>
+              <select
+                className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
+                value={statusFilter}
+                onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
+              >
+                <option value="all">All statuses</option>
                 <option value="approved">Approved</option>
                 <option value="pending_review">Pending</option>
                 <option value="rejected">Rejected</option>
               </select>
-            </label>
-            <label className="text-sm font-medium text-neutral-700">
-              Search
-              <input className="mt-1 block w-44 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm" placeholder="Keywords…" value={searchQ} onChange={(e) => { setSearchQ(e.target.value); setPage(1); }} />
-            </label>
-          </div>
+              <span className="ml-auto text-xs text-neutral-500">{total} rows</span>
+            </div>
 
-          {logsLoading && <SkeletonList rows={4} />}
+            {logsLoading && <div className="p-4"><SkeletonList rows={4} /></div>}
 
-          {!logsLoading && logs.length === 0 ? (
-            <EmptyState title="No vet logs" description="Create a new log when you have observations to record." />
-          ) : null}
+            {!logsLoading && logs.length === 0 ? (
+              <div className="p-6">
+                <EmptyState title="No vet logs" description="Create a new log when you have observations to record." />
+              </div>
+            ) : null}
 
-          {!logsLoading && logs.length > 0 ? (
-            <>
-              <div className="institutional-table-wrapper overflow-x-auto">
-                <table className="institutional-table min-w-[52rem] text-sm">
+            {!logsLoading && logs.length > 0 ? (
+              <div className="institutional-table-wrapper">
+                <table className="institutional-table min-w-[64rem]">
                   <thead>
                     <tr>
-                      <th>Date</th>
+                      <th>Log date</th>
                       <th>Author</th>
                       <th>Observations</th>
-                      <th>Actions</th>
+                      <th>Actions taken</th>
+                      <th>Recommendations</th>
                       <th>Status</th>
-                      {isReviewer ? <th>Review</th> : null}
+                      {isReviewer ? <th className="tbl-actions">Review</th> : null}
                     </tr>
                   </thead>
                   <tbody>
                     {logs.map((l) => (
                       <tr key={l.id}>
-                        <td className="whitespace-nowrap font-mono text-xs">{l.logDate}</td>
-                        <td>{l.authorName ?? l.authorUserId?.slice(0, 8)}</td>
-                        <td className="max-w-xs truncate">{l.observations || "—"}</td>
-                        <td className="max-w-xs truncate">{l.actionsTaken || "—"}</td>
-                        <td><StatusBadge status={l.submissionStatus} /></td>
+                        <td className="tbl-mono">{l.logDate}</td>
+                        <td className="whitespace-nowrap">{l.authorName ?? l.authorUserId?.slice(0, 8)}</td>
+                        <td style={{ maxWidth: "16rem" }}>{l.observations || "—"}</td>
+                        <td style={{ maxWidth: "16rem" }}>{l.actionsTaken || "—"}</td>
+                        <td style={{ maxWidth: "16rem" }}>{l.recommendations || "—"}</td>
+                        <td className="tbl-badge"><StatusBadge status={l.submissionStatus} /></td>
                         {isReviewer ? (
-                          <td>
+                          <td className="tbl-actions">
                             {l.submissionStatus === "pending_review" ? (
-                              <span className="flex flex-wrap gap-1">
+                              <span className="flex flex-wrap gap-1 justify-center">
                                 <button type="button" onClick={() => void handleReview(l.id, "approve")} className="rounded bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">Approve</button>
                                 <button type="button" onClick={() => void handleReview(l.id, "reject")} className="rounded bg-red-600 px-2 py-0.5 text-xs font-semibold text-white">Reject</button>
                               </span>
                             ) : (
-                              <span className="text-xs text-neutral-400">—</span>
+                              <span className="text-neutral-400">—</span>
                             )}
                           </td>
                         ) : null}
@@ -213,15 +222,18 @@ export function FarmVetLogsPage() {
                   </tbody>
                 </table>
               </div>
-              <div className="flex items-center justify-between text-sm text-neutral-600">
-                <span>{total} total</span>
-                <span className="flex gap-2">
-                  <button type="button" disabled={page <= 1} className="rounded border px-2 py-1 text-xs disabled:opacity-40" onClick={() => setPage((p) => Math.max(1, p - 1))}>Prev</button>
-                  <span className="px-1">Page {page}</span>
-                  <button type="button" disabled={page * 30 >= total} className="rounded border px-2 py-1 text-xs disabled:opacity-40" onClick={() => setPage((p) => p + 1)}>Next</button>
-                </span>
-              </div>
-            </>
+            ) : null}
+          </div>
+
+          {!logsLoading && logs.length > 0 ? (
+            <div className="flex items-center justify-between text-xs text-neutral-500">
+              <span>{total} total</span>
+              <span className="flex gap-1.5">
+                <button type="button" disabled={page <= 1} className="rounded border px-2 py-1 disabled:opacity-40" onClick={() => setPage((p) => Math.max(1, p - 1))}>← Prev</button>
+                <span className="px-1 py-1">Page {page} of {Math.ceil(total / 30) || 1}</span>
+                <button type="button" disabled={page * 30 >= total} className="rounded border px-2 py-1 disabled:opacity-40" onClick={() => setPage((p) => p + 1)}>Next →</button>
+              </span>
+            </div>
           ) : null}
 
           <div className="flex flex-wrap gap-2">

@@ -72,7 +72,7 @@ export function FlockFcrPage() {
   }, [load]);
 
   return (
-    <div className="mx-auto max-w-lg space-y-4 px-1 sm:max-w-2xl sm:px-0">
+    <div className="mx-auto max-w-2xl space-y-4 px-1 sm:max-w-3xl sm:px-0">
       <PageHeader
         title="Cycle FCR"
         subtitle={
@@ -114,68 +114,97 @@ export function FlockFcrPage() {
 
       {!loading && !error && snap ? (
         <>
-          <section className={`rounded-2xl border border-neutral-200 p-4 shadow-sm ${statusBadgeClass(snap.status)}`}>
-            <p className="text-xs font-semibold uppercase tracking-wide opacity-80">Action center</p>
-            <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <p className="text-xs opacity-80">Current FCR</p>
-                <p className="text-xl font-bold tabular-nums">
-                  {snap.fcrCumulative != null ? snap.fcrCumulative.toFixed(2) : "—"}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs opacity-80">Target (day {snap.ageDays})</p>
-                <p className="text-lg font-semibold tabular-nums">
-                  {snap.fcrTargetMin.toFixed(2)} – {snap.fcrTargetMax.toFixed(2)}
-                </p>
-              </div>
-              <div>
-                <p className="text-xs opacity-80">Days in cycle</p>
-                <p className="font-semibold">{snap.ageDays}</p>
-              </div>
-              <div>
-                <p className="text-xs opacity-80">Status</p>
-                <p className="font-semibold capitalize">{snap.status.replace(/_/g, " ")}</p>
-              </div>
+          <div className="table-block">
+            <div className="table-toolbar">
+              <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500">FCR summary</span>
+              <span className={["ml-auto rounded px-2 py-0.5 text-xs font-semibold capitalize", statusBadgeClass(snap.status)].join(" ")}>
+                {snap.status.replace(/_/g, " ")}
+              </span>
             </div>
-            {snap.reason === "no_weigh_in" ? (
-              <p className="mt-3 text-sm">
-                Add a weigh-in on the flock page to estimate live biomass; cumulative FCR needs average bird weight × headcount.
-              </p>
-            ) : null}
-          </section>
+            <div className="institutional-table-wrapper">
+              <table className="institutional-table">
+                <thead>
+                  <tr>
+                    <th className="tbl-num">Current FCR</th>
+                    <th className="tbl-num">Target min</th>
+                    <th className="tbl-num">Target max</th>
+                    <th className="tbl-num">Days in cycle</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="tbl-num text-xl font-bold">
+                      {snap.fcrCumulative != null ? snap.fcrCumulative.toFixed(2) : "—"}
+                    </td>
+                    <td className="tbl-num font-semibold">{snap.fcrTargetMin.toFixed(2)}</td>
+                    <td className="tbl-num font-semibold">{snap.fcrTargetMax.toFixed(2)}</td>
+                    <td className="tbl-num font-semibold">{snap.ageDays}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
 
-          <section className="rounded-xl border border-neutral-200 bg-white p-4 text-sm text-neutral-800">
-            <p className="font-semibold text-neutral-900">Inputs used</p>
-            <ul className="mt-2 space-y-1 text-neutral-600">
-              <li>
-                Feed to date: <span className="font-medium text-neutral-900">{snap.feedToDateKg} kg</span> (round check-ins
-                + feed log)
-              </li>
-              <li>
-                Live birds (est.): <span className="font-medium text-neutral-900">{snap.birdsLiveEstimate}</span>
-              </li>
-              <li>
-                Initial batch weight: <span className="font-medium text-neutral-900">{snap.initialTotalWeightKg} kg</span>
-              </li>
-              {snap.currentTotalBiomassKg != null ? (
-                <li>
-                  Current biomass est.:{" "}
-                  <span className="font-medium text-neutral-900">{snap.currentTotalBiomassKg} kg</span>
-                </li>
-              ) : null}
-              {snap.weightGainedKg != null ? (
-                <li>
-                  Weight gained: <span className="font-medium text-neutral-900">{snap.weightGainedKg} kg</span>
-                </li>
-              ) : null}
-              {snap.latestWeighDate ? (
-                <li>
-                  Latest weigh-in date: <span className="font-mono text-xs">{snap.latestWeighDate}</span>
-                </li>
-              ) : null}
-            </ul>
-          </section>
+          {snap.reason === "no_weigh_in" ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Add a weigh-in on the flock page to estimate live biomass; cumulative FCR needs average bird weight × headcount.
+            </p>
+          ) : null}
+
+          <div className="table-block">
+            <div className="table-toolbar">
+              <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Inputs used for FCR calculation</span>
+            </div>
+            <div className="institutional-table-wrapper">
+              <table className="institutional-table">
+                <thead>
+                  <tr>
+                    <th>Metric</th>
+                    <th className="tbl-num">Value</th>
+                    <th>Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Feed to date</td>
+                    <td className="tbl-num font-semibold">{snap.feedToDateKg} kg</td>
+                    <td className="text-neutral-500">round check-ins + feed log</td>
+                  </tr>
+                  <tr>
+                    <td>Live birds (est.)</td>
+                    <td className="tbl-num font-semibold">{snap.birdsLiveEstimate}</td>
+                    <td className="text-neutral-500">initial − mortality</td>
+                  </tr>
+                  <tr>
+                    <td>Initial batch weight</td>
+                    <td className="tbl-num font-semibold">{snap.initialTotalWeightKg} kg</td>
+                    <td className="text-neutral-500">at placement</td>
+                  </tr>
+                  {snap.currentTotalBiomassKg != null ? (
+                    <tr>
+                      <td>Current biomass (est.)</td>
+                      <td className="tbl-num font-semibold">{snap.currentTotalBiomassKg} kg</td>
+                      <td className="text-neutral-500">from latest weigh-in</td>
+                    </tr>
+                  ) : null}
+                  {snap.weightGainedKg != null ? (
+                    <tr>
+                      <td>Weight gained</td>
+                      <td className="tbl-num font-semibold">{snap.weightGainedKg} kg</td>
+                      <td className="text-neutral-500">current − initial biomass</td>
+                    </tr>
+                  ) : null}
+                  {snap.latestWeighDate ? (
+                    <tr>
+                      <td>Latest weigh-in date</td>
+                      <td className="tbl-mono">{snap.latestWeighDate}</td>
+                      <td className="text-neutral-500">—</td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
           {snap.playbook.length > 0 ? (
             <section className="rounded-xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-950">

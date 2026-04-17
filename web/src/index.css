@@ -87,6 +87,7 @@ textarea:focus {
   min-width: 100%;
   border-collapse: collapse;
   table-layout: auto;
+  font-size: 0.8125rem;
 }
 
 .institutional-table th,
@@ -94,31 +95,69 @@ textarea:focus {
   word-wrap: break-word;
   overflow-wrap: anywhere;
   white-space: normal;
-  vertical-align: top;
-  padding: 0.5rem 0.75rem;
+  vertical-align: middle;
+  padding: 0.35rem 0.65rem;
   border-bottom: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+}
+
+.institutional-table th:last-child,
+.institutional-table td:last-child {
+  border-right: none;
 }
 
 .institutional-table th {
   text-align: left;
-  font-weight: 600;
-  font-size: 0.75rem;
+  font-weight: 700;
+  font-size: 0.7rem;
   text-transform: uppercase;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
   color: var(--text-secondary);
-  background: var(--surface-elevated);
+  background: #eaeff0;
   position: sticky;
   top: 0;
   z-index: 2;
-  box-shadow: 0 1px 0 var(--border-color);
+  white-space: nowrap;
+  box-shadow: 0 2px 0 var(--border-color);
 }
 
 .institutional-table tbody tr:nth-child(even) {
-  background: rgba(248, 252, 251, 0.65);
+  background: rgba(248, 252, 251, 0.8);
 }
 
 .institutional-table tbody tr:hover td {
-  background: rgba(214, 244, 235, 0.35);
+  background: rgba(214, 244, 235, 0.45);
+}
+
+/* Numeric cell: right-align, tabular-nums, monospace */
+.institutional-table th.tbl-num,
+.institutional-table td.tbl-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: nowrap;
+}
+
+/* Date/code cell: monospace, no wrap */
+.institutional-table th.tbl-mono,
+.institutional-table td.tbl-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+/* Action column: center-align, no wrap */
+.institutional-table th.tbl-actions,
+.institutional-table td.tbl-actions {
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* Badge/status cell: vertical middle, no wrap */
+.institutional-table th.tbl-badge,
+.institutional-table td.tbl-badge {
+  white-space: nowrap;
+  vertical-align: middle;
 }
 
 .institutional-table-wrapper {
@@ -132,6 +171,46 @@ textarea:focus {
   border-radius: var(--radius-lg);
   background: var(--surface-color);
   box-shadow: var(--shadow-card);
+}
+
+/* Toolbar strip above tables */
+.table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: flex-end;
+  padding: 0.625rem 0.875rem;
+  background: #f6faf9;
+  border-bottom: 1px solid var(--border-color);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.table-toolbar + .institutional-table-wrapper {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top: none;
+}
+
+/* Wrapper that includes toolbar + table as one block */
+.table-block {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--surface-color);
+  box-shadow: var(--shadow-card);
+  overflow: hidden;
+}
+
+.table-block .table-toolbar {
+  border-radius: 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.table-block .institutional-table-wrapper {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  overflow-x: auto;
+  overflow-y: clip;
 }
 
 /* Main column scrolls under fixed app header; offset matches --app-header-h */
@@ -155,11 +234,15 @@ textarea:focus-visible {
 @media (min-width: 1024px) {
   .institutional-table th,
   .institutional-table td {
-    padding: 0.7rem 0.95rem;
+    padding: 0.4rem 0.75rem;
+  }
+
+  .institutional-table {
+    font-size: 0.8125rem;
   }
 
   .institutional-table th {
-    font-size: 0.8125rem;
+    font-size: 0.7rem;
   }
 }
 

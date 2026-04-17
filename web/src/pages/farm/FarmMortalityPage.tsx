@@ -106,7 +106,7 @@ export function FarmMortalityPage() {
   const pageError = ctxError ?? eventsError;
 
   return (
-    <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-6">
+    <div className="mx-auto max-w-7xl space-y-5">
       <PageHeader
         title={tTitle}
         subtitle={tLead}
@@ -176,78 +176,83 @@ export function FarmMortalityPage() {
       )}
 
       {!loading && !pageError && rows.length > 0 ? (
-        <div className="mt-4 flex flex-wrap gap-3 items-end">
-          <label className="text-sm font-medium text-neutral-700">
-            Search
+        <div className="table-block">
+          <div className="table-toolbar">
             <input
-              className="mt-1 block w-48 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm"
-              placeholder="Notes, source…"
+              className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
+              placeholder="Search notes, source…"
               value={searchQ}
               onChange={(e) => setSearchQ(e.target.value)}
             />
-          </label>
-          <label className="text-sm font-medium text-neutral-700">
-            {tStatus}
             <select
-              className="mt-1 block w-40 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm"
+              className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
             >
-              <option value="all">All</option>
+              <option value="all">All statuses</option>
               <option value="approved">Approved</option>
               <option value="pending_review">Pending</option>
               <option value="rejected">Rejected</option>
             </select>
-          </label>
-          <a
-            href={`${API_BASE_URL}/api/reports/mortality.csv${flockId ? `?flockId=${encodeURIComponent(flockId)}` : ""}`}
-            className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-            download
-          >
-            Export CSV
-          </a>
+            <span className="ml-auto flex items-center gap-2">
+              <span className="text-xs text-neutral-500">{filteredRows.length} rows</span>
+              <a
+                href={`${API_BASE_URL}/api/reports/mortality.csv${flockId ? `?flockId=${encodeURIComponent(flockId)}` : ""}`}
+                className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+                download
+              >
+                Export CSV
+              </a>
+            </span>
+          </div>
+
+          {!loading && !pageError && filteredRows.length === 0 && flockId ? (
+            <div className="p-6">
+              <EmptyState title={tEmptyTitle} description={tEmptyBody} />
+            </div>
+          ) : null}
+
+          {!loading && !pageError && filteredRows.length > 0 ? (
+            <div className="institutional-table-wrapper">
+              <table className="institutional-table min-w-[44rem]">
+                <thead>
+                  <tr>
+                    <th>{tTime}</th>
+                    <th className="tbl-num">{tCount}</th>
+                    <th>{tType}</th>
+                    <th>{tStatus}</th>
+                    <th>{tLive}</th>
+                    <th>{tNotes}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRows.map((r) => (
+                    <tr key={r.id}>
+                      <td className="tbl-mono">{r.at}</td>
+                      <td className="tbl-num font-semibold">{r.count}</td>
+                      <td className="tbl-badge">
+                        {r.isEmergency ? (
+                          <span className="inline-block rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-800">
+                            <TranslatedText text="Emergency" />
+                          </span>
+                        ) : (
+                          <TranslatedText text={r.source?.replace(/_/g, " ").trim() || "—"} />
+                        )}
+                      </td>
+                      <td className="tbl-badge"><MortStatusBadge status={r.submissionStatus} /></td>
+                      <td className="tbl-badge">{r.affectsLiveCount !== false ? "Yes" : "No"}</td>
+                      <td style={{ maxWidth: "14rem" }}>{r.notes || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
-      {!loading && !pageError && filteredRows.length === 0 && flockId ? (
+      {!loading && !pageError && filteredRows.length === 0 && !rows.length && flockId ? (
         <EmptyState title={tEmptyTitle} description={tEmptyBody} />
-      ) : null}
-
-      {!loading && !pageError && filteredRows.length > 0 ? (
-        <>
-          <div className="institutional-table-wrapper mt-4 overflow-x-auto">
-            <table className="institutional-table min-w-[38rem] text-sm">
-              <thead>
-                <tr>
-                  <th>{tTime}</th>
-                  <th>{tCount}</th>
-                  <th>{tType}</th>
-                  <th>{tStatus}</th>
-                  <th>{tLive}</th>
-                  <th>{tNotes}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRows.map((r) => (
-                  <tr key={r.id}>
-                    <td className="whitespace-nowrap font-mono text-xs">{r.at}</td>
-                    <td>{r.count}</td>
-                    <td>
-                      {r.isEmergency ? (
-                        <TranslatedText text="Emergency" />
-                      ) : (
-                        <TranslatedText text={r.source?.replace(/_/g, " ").trim() || "—"} />
-                      )}
-                    </td>
-                    <td><MortStatusBadge status={r.submissionStatus} /></td>
-                    <td>{r.affectsLiveCount !== false ? "Yes" : "No"}</td>
-                    <td>{r.notes || <TranslatedText text="—" />}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
       ) : null}
     </div>
   );

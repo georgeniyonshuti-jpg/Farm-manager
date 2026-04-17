@@ -395,141 +395,163 @@ export function FlockListPage() {
 
       {!loading && !error && flocks.length > 0 ? (
         <>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setFocusMode((v) => !v)}
-              className={[
-                "rounded-full border px-3 py-1 text-xs font-semibold",
-                focusMode ? "border-red-700 bg-red-50 text-red-900" : "border-neutral-300 text-neutral-700",
-              ].join(" ")}
-            >
-              Focus Mode {focusMode ? "ON" : "OFF"}
-            </button>
-            {[
-              ["all", "All"],
-              ["at_risk", "At risk"],
-              ["blocked", "Blocked"],
-              ["needs_vet", "Needs vet"],
-              ["needs_manager", "Needs manager"],
-              ["overdue_checkins", "Overdue check-ins"],
-            ].map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setRiskFilter(id as typeof riskFilter)}
-                className={[
-                  "rounded-full border px-3 py-1 text-xs font-semibold",
-                  riskFilter === id
-                    ? "border-emerald-700 bg-emerald-50 text-emerald-900"
-                    : "border-neutral-300 text-neutral-700",
-                ].join(" ")}
-              >
-                {label}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => {
-                const highest = [...visibleFlocks].sort((a, b) => Number(b.riskScore ?? 0) - Number(a.riskScore ?? 0))[0];
-                if (highest) window.location.href = `/farm/flocks/${highest.id}`;
-              }}
-              className="rounded-full border border-neutral-300 px-3 py-1 text-xs font-semibold text-neutral-700"
-            >
-              Jump to highest risk flock
-            </button>
-          </div>
-
           {!!barns.length ? (
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {barns.map((b) => (
-                <div key={b.barn} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm text-sm">
-                  <p className="font-semibold text-neutral-900">{b.barn}</p>
-                  <p className="text-neutral-600">{b.flockCount} active flock(s)</p>
-                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                    <p>Avg FCR: <span className="font-semibold text-neutral-800">{b.avgFcr != null ? b.avgFcr.toFixed(2) : "—"}</span></p>
-                    <p>Blocked: <span className={b.blockedFlocks > 0 ? "font-semibold text-red-700" : "font-semibold text-neutral-800"}>{b.blockedFlocks}</span></p>
-                    <p>Overdue rounds: <span className={b.overdueRounds > 0 ? "font-semibold text-amber-700" : "font-semibold text-neutral-800"}>{b.overdueRounds}</span></p>
-                    <p>Mortality 7d: <span className={b.mortality7d > 0 ? "font-semibold text-amber-700" : "font-semibold text-neutral-800"}>{b.mortality7d}</span></p>
+                <div key={b.barn} className="rounded-xl border border-neutral-200 bg-white p-3 shadow-sm text-xs">
+                  <p className="font-semibold text-sm text-neutral-900">{b.barn}</p>
+                  <p className="text-neutral-500">{b.flockCount} active flock(s)</p>
+                  <div className="mt-2 grid grid-cols-2 gap-1">
+                    <span className="text-neutral-500">Avg FCR</span>
+                    <span className="font-semibold text-right tabular-nums">{b.avgFcr != null ? b.avgFcr.toFixed(2) : "—"}</span>
+                    <span className="text-neutral-500">Blocked</span>
+                    <span className={["font-semibold text-right", b.blockedFlocks > 0 ? "text-red-700" : ""].join(" ")}>{b.blockedFlocks}</span>
+                    <span className="text-neutral-500">Overdue rounds</span>
+                    <span className={["font-semibold text-right", b.overdueRounds > 0 ? "text-amber-700" : ""].join(" ")}>{b.overdueRounds}</span>
+                    <span className="text-neutral-500">Mortality 7d</span>
+                    <span className={["font-semibold text-right", b.mortality7d > 0 ? "text-amber-700" : ""].join(" ")}>{b.mortality7d}</span>
                   </div>
                 </div>
               ))}
             </div>
           ) : null}
 
-          <div className="institutional-table-wrapper overflow-x-auto">
-            <table className="institutional-table min-w-[52rem] text-sm">
-              <thead>
-                <tr>
-                  <th>Flock</th>
-                  <th>Age (days)</th>
-                  <th>Interval (h)</th>
-                  <th>FCR</th>
-                  <th>Priority</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleFlocks.map((f) => (
-                  <tr key={f.id}>
-                    <td>
-                      <Link to={`/farm/flocks/${f.id}`} className="font-medium text-emerald-800 hover:underline">
-                        {f.label}
-                      </Link>
-                    </td>
-                    <td>{f.ageDays ?? "—"}</td>
-                    <td>{f.intervalHours ?? "—"}</td>
-                    <td className="text-xs">
-                      {f.latestFcr != null ? `${f.latestFcr.toFixed(2)} (${f.fcrDeviation != null ? `${f.fcrDeviation >= 0 ? "+" : ""}${f.fcrDeviation.toFixed(2)} vs target` : "target —"})` : "—"}
-                    </td>
-                    <td className="text-xs">
-                      Risk <span className="font-semibold">{f.riskScore ?? 0}</span> · {f.timeStatus?.label ?? "updated"}
-                    </td>
-                    <td>
-                      <div className="flex flex-wrap items-center gap-1">
-                        {f.checkinBadge ? <CheckinUrgencyBadge badge={f.checkinBadge} /> : null}
-                        {f.withdrawalActive ? <span className="inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-800">🔴 Withdrawal</span> : null}
-                        {(f.overdueRounds ?? 0) > 0 ? <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">Overdue {f.overdueRounds}</span> : null}
-                        <span className="text-xs text-neutral-700">
-                          {(f.latestWeightKg != null ? `${f.latestWeightKg.toFixed(2)}kg` : "—")} ({(f.weightDeviationPct ?? 0) >= 0 ? "+" : ""}{(f.weightDeviationPct ?? 0).toFixed(1)}%)
-                        </span>
-                        {(f.alerts?.length ?? 0) > 0 ? <span className="text-xs text-amber-800">{f.alerts?.[0]}</span> : null}
-                        {user?.role === "superuser" ? (
-                          <button
-                            type="button"
-                            disabled={purgeBusyId === f.id}
-                            onClick={() => void purgeFlock(f.id, f.label)}
-                            className="ml-1 rounded border border-red-300 px-1.5 py-0.5 text-xs text-red-800 hover:bg-red-50 disabled:opacity-60"
-                          >
-                            {purgeBusyId === f.id ? "Purging..." : "Purge"}
-                          </button>
-                        ) : null}
-                        {!f.checkinBadge && !f.withdrawalActive ? "—" : null}
-                      </div>
-                    </td>
-                    <td className="text-xs">
-                      <div className="flex flex-wrap gap-2">
-                        {flockActionPresentation(user, "treatment.execute").mode === "enabled" ? (
-                          <Link to="/farm/treatments" className="font-medium text-emerald-800 hover:underline">
-                            Resolve round
-                          </Link>
-                        ) : null}
-                        {flockActionPresentation(user, "slaughter.schedule").mode === "enabled" ? (
-                          <Link to="/farm/slaughter" className="font-medium text-emerald-800 hover:underline">
-                            Slaughter
-                          </Link>
-                        ) : null}
-                        {flockActionPresentation(user, "treatment.execute").mode !== "enabled" &&
-                        flockActionPresentation(user, "slaughter.schedule").mode !== "enabled" ? (
-                          <span className="text-neutral-400">—</span>
-                        ) : null}
-                      </div>
-                    </td>
+          <div className="table-block">
+            <div className="table-toolbar">
+              <button
+                type="button"
+                onClick={() => setFocusMode((v) => !v)}
+                className={[
+                  "rounded border px-2.5 py-1.5 text-xs font-semibold",
+                  focusMode ? "border-red-600 bg-red-50 text-red-900" : "border-neutral-300 bg-white text-neutral-700",
+                ].join(" ")}
+              >
+                Focus Mode {focusMode ? "ON" : "OFF"}
+              </button>
+              {([
+                ["all", "All"],
+                ["at_risk", "At risk"],
+                ["blocked", "Blocked"],
+                ["needs_vet", "Needs vet"],
+                ["needs_manager", "Needs manager"],
+                ["overdue_checkins", "Overdue check-ins"],
+              ] as const).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setRiskFilter(id as typeof riskFilter)}
+                  className={[
+                    "rounded border px-2.5 py-1.5 text-xs font-semibold",
+                    riskFilter === id
+                      ? "border-emerald-600 bg-emerald-50 text-emerald-900"
+                      : "border-neutral-300 bg-white text-neutral-700",
+                  ].join(" ")}
+                >
+                  {label}
+                </button>
+              ))}
+              <span className="ml-auto flex items-center gap-2">
+                <span className="text-xs text-neutral-500">{visibleFlocks.length} flocks</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const highest = [...visibleFlocks].sort((a, b) => Number(b.riskScore ?? 0) - Number(a.riskScore ?? 0))[0];
+                    if (highest) window.location.href = `/farm/flocks/${highest.id}`;
+                  }}
+                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-neutral-700"
+                >
+                  Jump to highest risk
+                </button>
+              </span>
+            </div>
+
+            <div className="institutional-table-wrapper">
+              <table className="institutional-table min-w-[72rem]">
+                <thead>
+                  <tr>
+                    <th>Flock</th>
+                    <th className="tbl-num">Age (d)</th>
+                    <th className="tbl-num">Interval (h)</th>
+                    <th className="tbl-num">FCR</th>
+                    <th className="tbl-num">FCR vs target</th>
+                    <th className="tbl-num">Risk score</th>
+                    <th className="tbl-num">Wt (kg)</th>
+                    <th className="tbl-num">Wt dev %</th>
+                    <th className="tbl-num">Mort. 7d</th>
+                    <th>Check-in</th>
+                    <th>Flags</th>
+                    <th className="tbl-actions">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {visibleFlocks.map((f) => (
+                    <tr key={f.id}>
+                      <td className="whitespace-nowrap">
+                        <Link to={`/farm/flocks/${f.id}`} className="font-semibold text-emerald-800 hover:underline">
+                          {f.label}
+                        </Link>
+                      </td>
+                      <td className="tbl-num">{f.ageDays ?? "—"}</td>
+                      <td className="tbl-num">{f.intervalHours ?? "—"}</td>
+                      <td className="tbl-num">{f.latestFcr != null ? f.latestFcr.toFixed(2) : "—"}</td>
+                      <td className={["tbl-num", f.fcrDeviation != null && f.fcrDeviation > 0.2 ? "text-red-700 font-semibold" : ""].join(" ")}>
+                        {f.fcrDeviation != null ? `${f.fcrDeviation >= 0 ? "+" : ""}${f.fcrDeviation.toFixed(2)}` : "—"}
+                      </td>
+                      <td className={["tbl-num font-semibold", Number(f.riskScore ?? 0) > 60 ? "text-red-700" : Number(f.riskScore ?? 0) > 30 ? "text-amber-700" : "text-emerald-700"].join(" ")}>
+                        {f.riskScore ?? 0}
+                      </td>
+                      <td className="tbl-num">{f.latestWeightKg != null ? f.latestWeightKg.toFixed(2) : "—"}</td>
+                      <td className={["tbl-num", (f.weightDeviationPct ?? 0) < -5 ? "text-red-700 font-semibold" : ""].join(" ")}>
+                        {f.weightDeviationPct != null ? `${(f.weightDeviationPct >= 0 ? "+" : "")}${f.weightDeviationPct.toFixed(1)}%` : "—"}
+                      </td>
+                      <td className={["tbl-num", (f.mortality7d ?? 0) > 0 ? "text-amber-700 font-semibold" : ""].join(" ")}>
+                        {f.mortality7d ?? 0}
+                      </td>
+                      <td className="tbl-badge">
+                        {f.checkinBadge ? <CheckinUrgencyBadge badge={f.checkinBadge} /> : <span className="text-neutral-400">—</span>}
+                      </td>
+                      <td>
+                        <div className="flex flex-wrap gap-1">
+                          {f.withdrawalActive ? <span className="inline-flex rounded-full border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-800">Withdrawal</span> : null}
+                          {(f.overdueRounds ?? 0) > 0 ? <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">Overdue ×{f.overdueRounds}</span> : null}
+                          {(f.alerts?.length ?? 0) > 0 ? <span className="text-[10px] text-amber-800">{f.alerts?.[0]}</span> : null}
+                          {!f.withdrawalActive && !(f.overdueRounds) && !(f.alerts?.length) ? <span className="text-neutral-400">—</span> : null}
+                        </div>
+                      </td>
+                      <td className="tbl-actions">
+                        <div className="flex flex-wrap gap-2 justify-center">
+                          {flockActionPresentation(user, "treatment.execute").mode === "enabled" ? (
+                            <Link to="/farm/treatments" className="text-xs font-medium text-emerald-800 hover:underline">
+                              Resolve
+                            </Link>
+                          ) : null}
+                          {flockActionPresentation(user, "slaughter.schedule").mode === "enabled" ? (
+                            <Link to="/farm/slaughter" className="text-xs font-medium text-emerald-800 hover:underline">
+                              Slaughter
+                            </Link>
+                          ) : null}
+                          {user?.role === "superuser" ? (
+                            <button
+                              type="button"
+                              disabled={purgeBusyId === f.id}
+                              onClick={() => void purgeFlock(f.id, f.label)}
+                              className="rounded border border-red-300 px-1.5 py-0.5 text-[10px] text-red-800 hover:bg-red-50 disabled:opacity-60"
+                            >
+                              {purgeBusyId === f.id ? "…" : "Purge"}
+                            </button>
+                          ) : null}
+                          {flockActionPresentation(user, "treatment.execute").mode !== "enabled" &&
+                          flockActionPresentation(user, "slaughter.schedule").mode !== "enabled" &&
+                          user?.role !== "superuser" ? (
+                            <span className="text-neutral-400">—</span>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </>
       ) : null}

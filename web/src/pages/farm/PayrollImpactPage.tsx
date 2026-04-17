@@ -322,42 +322,38 @@ export function PayrollImpactPage() {
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-        <div>
-          <label htmlFor="p-from" className="mb-1 block text-xs font-medium text-neutral-600">
-            From
-          </label>
+      <div className="flex flex-wrap gap-2 items-end">
+        <label className="text-xs font-medium text-neutral-600">
+          From
           <input
             id="p-from"
             type="date"
-            className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+            className="mt-1 block rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
             value={from}
             onChange={(e) => setFrom(e.target.value)}
           />
-        </div>
-        <div>
-          <label htmlFor="p-to" className="mb-1 block text-xs font-medium text-neutral-600">
-            To
-          </label>
+        </label>
+        <label className="text-xs font-medium text-neutral-600">
+          To
           <input
             id="p-to"
             type="date"
-            className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+            className="mt-1 block rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
             value={to}
             onChange={(e) => setTo(e.target.value)}
           />
-        </div>
+        </label>
         <button
           type="button"
           onClick={() => void load()}
-          className="rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-medium hover:bg-neutral-50"
+          className="rounded border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-neutral-50"
         >
           Apply range
         </button>
         <button
           type="button"
           onClick={() => void exportCsv()}
-          className="rounded-lg border border-neutral-300 bg-neutral-50 px-4 py-2 text-sm font-medium"
+          className="rounded border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium"
         >
           Export CSV
         </button>
@@ -365,9 +361,9 @@ export function PayrollImpactPage() {
           type="button"
           disabled={busyId != null || summary.pending === 0}
           onClick={() => void approveAllPending()}
-          className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+          className="rounded bg-emerald-800 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
         >
-          Approve all pending
+          Approve all pending ({summary.pending})
         </button>
       </div>
 
@@ -404,52 +400,68 @@ export function PayrollImpactPage() {
       ) : null}
 
       {!loading && !error && entries.length > 0 ? (
-        <div className="institutional-table-wrapper overflow-x-auto">
-          <table className="institutional-table min-w-[48rem] text-sm">
-            <thead>
-              <tr>
-                <th>Worker</th>
-                <th>Role</th>
-                <th>Log type</th>
-                <th>Submitted</th>
-                <th>On-time</th>
-                <th>RWF</th>
-                <th>Reason</th>
-                <th>Approved</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((e) => (
-                <tr key={e.id}>
-                  <td>{e.workerName}</td>
-                  <td>{e.workerRole}</td>
-                  <td>{e.logType}</td>
-                  <td className="font-mono text-xs">{e.submittedAt}</td>
-                  <td>{e.onTime == null ? "—" : e.onTime ? "Yes" : "No"}</td>
-                  <td className={e.rwfDelta >= 0 ? "font-semibold text-emerald-800" : "font-semibold text-red-800"}>
-                    {formatRwf(e.rwfDelta)}
-                  </td>
-                  <td className="max-w-[12rem] truncate">{e.reason}</td>
-                  <td>{e.approvedAt ? "Yes" : "No"}</td>
-                  <td>
-                    {e.approvedAt == null ? (
-                      <button
-                        type="button"
-                        disabled={busyId != null}
-                        onClick={() => void approveOne(e.id)}
-                        className="text-sm font-medium text-emerald-800 hover:underline disabled:opacity-50"
-                      >
-                        Approve
-                      </button>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
+        <div className="table-block">
+          <div className="table-toolbar">
+            <span className="text-xs font-medium text-neutral-600">{entries.length} rows</span>
+            <span className="ml-auto text-xs text-amber-700 font-semibold">{summary.pending} pending approval</span>
+          </div>
+          <div className="institutional-table-wrapper">
+            <table className="institutional-table min-w-[56rem]">
+              <thead>
+                <tr>
+                  <th>Worker</th>
+                  <th>Role</th>
+                  <th>Log type</th>
+                  <th>Submitted</th>
+                  <th>On-time</th>
+                  <th className="tbl-num">RWF delta</th>
+                  <th>Reason</th>
+                  <th>Approved</th>
+                  <th className="tbl-actions">Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {entries.map((e) => (
+                  <tr key={e.id}>
+                    <td className="whitespace-nowrap font-medium">{e.workerName}</td>
+                    <td className="whitespace-nowrap text-neutral-600">{e.workerRole}</td>
+                    <td className="whitespace-nowrap">{e.logType}</td>
+                    <td className="tbl-mono">{e.submittedAt}</td>
+                    <td className="tbl-badge">
+                      {e.onTime == null ? "—" : e.onTime
+                        ? <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-800">Yes</span>
+                        : <span className="inline-block rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-800">No</span>
+                      }
+                    </td>
+                    <td className={["tbl-num font-semibold", e.rwfDelta >= 0 ? "text-emerald-800" : "text-red-800"].join(" ")}>
+                      {formatRwf(e.rwfDelta)}
+                    </td>
+                    <td style={{ maxWidth: "14rem" }}>{e.reason}</td>
+                    <td className="tbl-badge">
+                      {e.approvedAt
+                        ? <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-800">Yes</span>
+                        : <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-800">Pending</span>
+                      }
+                    </td>
+                    <td className="tbl-actions">
+                      {e.approvedAt == null ? (
+                        <button
+                          type="button"
+                          disabled={busyId != null}
+                          onClick={() => void approveOne(e.id)}
+                          className="rounded bg-emerald-700 px-2 py-0.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+                        >
+                          Approve
+                        </button>
+                      ) : (
+                        <span className="text-neutral-400">—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : null}
     </div>
