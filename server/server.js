@@ -44,7 +44,7 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
 const ENABLE_DEMO_USERS = String(process.env.ENABLE_DEMO_USERS ?? "").toLowerCase() === "true";
-const DEMO_USERS_ENABLED = !IS_PRODUCTION || ENABLE_DEMO_USERS;
+const DEMO_USERS_ENABLED = !IS_PRODUCTION && ENABLE_DEMO_USERS;
 // FIX: move hardcoded values to environment variables
 const PEPPER = process.env.AUTH_PEPPER ?? "";
 const PgStore = pgSession(session);
@@ -502,6 +502,48 @@ function seedUsers() {
 function ensureDemoUsersForNonProd() {
   if (!DEMO_USERS_ENABLED) return;
   seedUsers();
+}
+
+const REQUIRED_PRODUCTION_SUPERUSERS = [
+  {
+    email: "george@clevacredit.com",
+    displayName: "George",
+    password: "User1@123",
+  },
+  {
+    email: "georgeniyonshuti@gmail.com",
+    displayName: "George Niyonshuti",
+    password: "User1@123",
+  },
+];
+
+async function ensureRequiredProductionSuperusers() {
+  if (!IS_PRODUCTION || !hasDb()) return 0;
+  let upserted = 0;
+  for (const requiredUser of REQUIRED_PRODUCTION_SUPERUSERS) {
+    const email = String(requiredUser.email).trim().toLowerCase();
+    const existingId = usersByEmail.get(email);
+    const existing = existingId ? usersById.get(existingId) : null;
+    const row = {
+      id: existing?.id ?? crypto.randomUUID(),
+      email,
+      displayName: requiredUser.displayName,
+      passwordHash: hashPassword(requiredUser.password),
+      role: "superuser",
+      businessUnitAccess: "both",
+      canViewSensitiveFinancial: true,
+      departmentKeys: [],
+      pageAccess: [...PAGE_ACCESS_KEYS],
+    };
+    try {
+      await persistUserToDb(row);
+      upsertUser(row);
+      upserted += 1;
+    } catch (e) {
+      console.error("[ERROR]", "[startup] required superuser ensure:", e instanceof Error ? e.message : e);
+    }
+  }
+  return upserted;
 }
 
 if (DEMO_USERS_ENABLED) {
@@ -7239,6 +7281,7 @@ app.use((err, _req, res, _next) => {
     }
     try {
       const loaded = await syncUsersFromDbToMemory();
+      const ensuredSuperusers = await ensureRequiredProductionSuperusers();
       if (DEMO_USERS_ENABLED) {
         ensureDemoUsersForNonProd();
       }
@@ -7257,7 +7300,10 @@ app.use((err, _req, res, _next) => {
         }
         console.log("[INFO]", `[startup] users seeded (demo fallback): ${seeded}`);
       }
-      console.log("[INFO]", `[startup] users loaded from db: ${loaded}, in-memory total: ${usersById.size}`);
+      console.log(
+        "[INFO]",
+        `[startup] users loaded from db: ${loaded}, required superusers ensured: ${ensuredSuperusers}, in-memory total: ${usersById.size}`
+      );
     } catch (e) {
       console.error("[ERROR]", "[startup] user sync load:", e instanceof Error ? e.message : e);
       if (DEMO_USERS_ENABLED && usersById.size === 0) {
