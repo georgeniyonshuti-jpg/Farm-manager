@@ -10,6 +10,7 @@ import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { SubmissionStageScreen } from "../../components/farm/SubmissionStageScreen";
+import { useLaborerT, TranslatedText } from "../../i18n/laborerI18n";
 
 type FeedEntry = {
   id: string;
@@ -26,7 +27,7 @@ function StatusBadge({ status }: { status?: string }) {
       ? "bg-amber-100 text-amber-800"
       : "bg-red-100 text-red-800";
   const label = status === "pending_review" ? "Pending review" : "Rejected";
-  return <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${cls}`}>{label}</span>;
+  return <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${cls}`}><TranslatedText text={label} /></span>;
 }
 
 export function FarmFeedPage() {
@@ -139,6 +140,27 @@ export function FarmFeedPage() {
   const selected = flocks.find((f) => f.id === flockId);
   const loading = listLoading;
 
+  const tTitle = useLaborerT("Feed request / log");
+  const tSubtitle = useLaborerT("Record feed delivered. Lower roles require manager approval. Totals count toward cycle FCR with round check-ins.");
+  const tHome = useLaborerT("Home");
+  const tFlock = useLaborerT("Flock");
+  const tLoadingCtx = useLaborerT("Loading flock context\u2026");
+  const tNoFlocks = useLaborerT("No active flocks. Create a flock to start logging feed.");
+  const tFeedStock = useLaborerT("Feed stock:");
+  const tCouldNotLoad = useLaborerT("Could not load recent entries.");
+  const tRetry = useLaborerT("Retry");
+  const tRecentEntries = useLaborerT("Recent feed entries");
+  const tNoEntries = useLaborerT("No feed entries yet for this flock.");
+  const tClose = useLaborerT("Close");
+  const tLogNew = useLaborerT("Log new feed");
+  const tFeedKg = useLaborerT("Feed delivered (kg)");
+  const tFeedType = useLaborerT("Feed type");
+  const tNotesOpt = useLaborerT("Notes (optional)");
+  const tSaving = useLaborerT("Saving\u2026");
+  const tSaveEntry = useLaborerT("Save feed entry");
+  const tRoundCheckin = useLaborerT("Round check-in");
+  const tStillCaptures = useLaborerT("still captures photos, water, and mortality with each round.");
+
   if (submitStage === "submitting" || submitStage === "success") {
     return (
       <SubmissionStageScreen
@@ -151,14 +173,14 @@ export function FarmFeedPage() {
   return (
     <div className="mx-auto max-w-lg space-y-5 sm:max-w-xl">
       <PageHeader
-        title="Feed request / log"
-        subtitle="Record feed delivered. Lower roles require manager approval. Totals count toward cycle FCR with round check-ins."
+        title={tTitle}
+        subtitle={tSubtitle}
         action={
           <Link
             to="/dashboard/laborer"
             className="text-sm font-medium text-emerald-800 hover:underline"
           >
-            Home
+            {tHome}
           </Link>
         }
       />
@@ -178,7 +200,7 @@ export function FarmFeedPage() {
       {!loading && !ctxError ? (
         <>
           <label className="block text-sm font-medium text-neutral-700">
-            Flock
+            {tFlock}
             <select
               className="mt-1 w-full min-h-[48px] rounded-xl border border-neutral-300 px-3 text-base"
               value={flockId}
@@ -205,33 +227,33 @@ export function FarmFeedPage() {
               mortalityToDate={performance?.mortalityToDate}
             />
           ) : flockId && detailLoading ? (
-            <p className="text-sm text-neutral-500">Loading flock context…</p>
+            <p className="text-sm text-neutral-500">{tLoadingCtx}</p>
           ) : !flockId ? (
-            <p className="text-sm text-amber-800">No active flocks. Create a flock to start logging feed.</p>
+            <p className="text-sm text-amber-800">{tNoFlocks}</p>
           ) : null}
 
           {inventoryBalanceKg != null ? (
             <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
-              <span className="font-semibold text-emerald-900">Feed stock:</span>
+              <span className="font-semibold text-emerald-900">{tFeedStock}</span>
               <span className="font-mono tabular-nums text-emerald-800">{inventoryBalanceKg.toFixed(2)} kg</span>
             </div>
           ) : null}
 
           {entriesError ? (
             <p className="text-sm text-amber-800" role="status">
-              Could not load recent entries.{" "}
+              {tCouldNotLoad}{" "}
               <button
                 type="button"
                 className="font-semibold underline"
                 onClick={() => void loadFeedEntries()}
               >
-                Retry
+                {tRetry}
               </button>
             </p>
           ) : null}
 
           <section className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
-            <p className="mb-2 font-semibold text-neutral-800">Recent feed entries</p>
+            <p className="mb-2 font-semibold text-neutral-800">{tRecentEntries}</p>
             {entries.length > 0 ? (
               <ul className="space-y-2">
                 {entries.map((en) => (
@@ -251,7 +273,7 @@ export function FarmFeedPage() {
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-neutral-500">No feed entries yet for this flock.</p>
+              <p className="text-sm text-neutral-500">{tNoEntries}</p>
             )}
           </section>
 
@@ -261,7 +283,7 @@ export function FarmFeedPage() {
               onClick={() => setShowFeedForm((v) => !v)}
               className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
             >
-              {showFeedForm ? "Close" : "Log new feed"}
+              {showFeedForm ? tClose : tLogNew}
             </button>
           </div>
 
@@ -271,7 +293,7 @@ export function FarmFeedPage() {
               className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"
             >
               <label className="block text-sm font-medium text-neutral-700">
-                Feed delivered (kg)
+                {tFeedKg}
                 <input
                   inputMode="decimal"
                   className="mt-1 w-full min-h-[52px] rounded-xl border border-neutral-300 px-4 text-lg"
@@ -281,7 +303,7 @@ export function FarmFeedPage() {
                 />
               </label>
               <label className="block text-sm font-medium text-neutral-700">
-                Feed type
+                {tFeedType}
                 <select
                   className="mt-1 w-full min-h-[52px] rounded-xl border border-neutral-300 px-4 text-base"
                   value={feedType}
@@ -295,7 +317,7 @@ export function FarmFeedPage() {
                 </select>
               </label>
               <label className="block text-sm font-medium text-neutral-700">
-                Notes (optional)
+                {tNotesOpt}
                 <textarea
                   className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm"
                   rows={2}
@@ -308,16 +330,16 @@ export function FarmFeedPage() {
                 disabled={busy || !flockId || !status}
                 className="w-full rounded-xl bg-emerald-700 py-3 text-lg font-semibold text-white disabled:opacity-50"
               >
-                {busy ? "Saving…" : "Save feed entry"}
+                {busy ? tSaving : tSaveEntry}
               </button>
             </form>
           ) : null}
 
           <p className="text-xs text-neutral-500">
             <Link className="font-medium text-emerald-800 underline" to="/farm/checkin">
-              Round check-in
+              {tRoundCheckin}
             </Link>{" "}
-            still captures photos, water, and mortality with each round.
+            {tStillCaptures}
           </p>
         </>
       ) : null}

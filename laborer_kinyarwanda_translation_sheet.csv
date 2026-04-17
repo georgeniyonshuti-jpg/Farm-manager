@@ -1,0 +1,197 @@
+id,english_text,kinyarwanda_text,approved_term,notes_for_translator,status
+1,Home,Ahabanza,,,todo
+2,Rounds,Gutanga raporo,,,todo
+3,Mortality,Mortality,,,todo
+4,Feed,Ibiryo,,,todo
+5,Action center,Action center,,,todo
+6,My earnings,Amafaranga nakoreye,,,todo
+7,Round schedule,Gahunda yo gutanga raporo,,,todo
+8,Sign out,Gusohoka,,,todo
+9,Farm / Poultry,Ikiraro / Inkoko,,,todo
+10,Laborer,Umukozi,,,todo
+11,Menu,Menu,,,todo
+12,Language,Ururimi,,,todo
+13,Close navigation,Funga menu,,,todo
+14,Field operations hub,Imirimo yo ku kiraro,,,todo
+15,Junior vet hub,Imirimo ya Junior Vet,,,todo
+16,"Track rounds, flock health, and urgent work.","Kurikirana raporo, ubuzima bw'inkoko, n'ibikorwa byihutirwa.",,,todo
+17,Daily tasks optimized for your phone.,Imirimo ya buri munsi yoroheye telefone yawe.,,,todo
+18,Round check-in,Gutanga raporo,,,todo
+19,Log mortality,Kwerekana inkoko zapfuye,,,todo
+20,Feed log,Raporo y'ibiryo,,,todo
+21,No flock available,Nta itsinda ry'inkoko (flock) ririho,,,todo
+22,Round status appears when a flock is assigned to your site.,Imiterere ya Raporo igaragara iyo itsinda ry'inkoko rishyizwe aho ukorera.,,,todo
+23,Preparing round check-in status…,Turimo gutegura aho utangira raporo…,,,todo
+24,Could not load round check-in. Try again.,Gutanga raporo byanze. Ongera ugerageze.,,,todo
+25,No round schedule available right now.,Nta gahunda ya rounds ihari ubu.,,,todo
+26,Round check-in is overdue by,Wakererewe gutanga raporo,,,todo
+27,minutes. Inspect the flock now.,minuta. Genzyura inkoko ubu.,,,todo
+28,You are on track.,Uri ku gihe.,,,todo
+29,About,Ibisobanuro,,,todo
+30,minutes until the next round.,Iminoto ibura kuri raporo itaha.,,,todo
+31,flocks need check-in — details below for the most overdue.,amatsinda y'inkoko akeneye gutangirwa raporo— amakuru ari hano hasi kubakererewe cyane.,,,todo
+32,Try again,Ongera ugerageze,,,todo
+33,Flock,Itsinda ry’inkoko,,,todo
+34,Photos required • confirm feed & water available • optional birds lost,Amafoto arakenewe • emeza ko ibiryo n'amazi bihari • inkoko zapfuye (si itegeko),,,todo
+35,Feed is available,Ibiryo bihari,,,todo
+36,Water is available,Amazi ahari,,,todo
+37,Birds lost at this check-in (optional),Inkoko zapfuye Igihe cy’iyi raporo (si itegeko),,,todo
+38,Also file in mortality log (affects live count),Bishyire no muri raporo y'izapfuye (bihindura umubare w'iziriho),,,todo
+39,Notes,Ibindi wavuga,,,todo
+40,Saving…,Birimo kubikwa...,,,todo
+41,Submit round check-in,Ohereza raporo,,,todo
+42,Round check-in saved.,Raporo yabitswe.,,,todo
+43,Save failed,Kubika byanze,,,todo
+44,Add a flock before submitting round check-ins.,Hitamo itsinda ry'inkoko (flock) mbere yo gutanga raporo.,,,todo
+45,FCR,FCR,,,todo
+46,Dismiss,Kuraho,,,todo
+47,Log feed only (no photos),Andika ibiryo gusa (nta mafoto),,,todo
+48,Round check-in submitted successfully.,Raporo byoherejwe neza.,,,todo
+49,Next due:,Raporo itaha:,,,todo
+50,Overdue — please complete check-in as soon as possible.,Wakererewe — nyabuneka tanda raporo vuba bishoboka.,,,todo
+51,other flock(s) are also overdue.,ayandi matsinda y'inkoko nayo yakererewe.,,,todo
+52,Current policy: every,Amabwiriza tigenderaho: buri,,,todo
+53,age-based default,ibijyanye n'imyaka (default),,,todo
+54,custom batch,itsinda ryihariye (custom),,,todo
+55,remaining,isigaye,,,todo
+56,Age → frequency curve,Age → frequency curve,,,todo
+57,"Management, vet, or superuser can customize this batch under Check-in schedule.","Abayobozi, veterineri, cyangwa 'superuser' bashobora guhindura iri tsinda muri 'Check-in schedule'.",,,todo
+58,Tap to add photos,Kanda hano ushyireho amafoto,,,todo
+59,required,birakenewe,,,todo
+60,up to,kugeza,,,todo
+61,Photo error,Ifoto ifite ikibazo,,,todo
+62,OVERDUE,WAKEREREWE,,,todo
+63,Due soon,Iri hafi,,,todo
+64,On track,Uri ku gihe,,,todo
+65,Before day,Mbere y'umunsi wa,,,todo
+66,every,buri,,,todo
+67,Placement,Igihe zaziye,,,todo
+68,Day,Umunsi,,,todo
+69,Feed to date,Ibiryo zimaze kurya,,,todo
+70,kg,ibiro,,,todo
+71,Initial placed:,Igihe zaziye:,,,todo
+72,Live birds (est.):,Inkoko zikiri nzima:,,,todo
+73,Verified count:,Umubare wemejwe:,,,todo
+74,Mortality to date:,Izapfuye kugeza ubu:,,,todo
+75,Feed total includes round check-ins and entries from the feed log (used for cycle FCR).,Umubare w'ibiryo urimo ibyanditswe kuri round check-ins n'ibyo muri feed log (bikoreshwa kuri FCR).,,,todo
+76,Anytime — at a round check-in or as an emergency. Photos required.,Igihe cyose — kuri round check-in cyangwa byihutirwa. Amafoto arakenewe.,,,todo
+77,History,Amateka,,,todo
+78,Number of birds,Umubare w'inkoko,,,todo
+79,Emergency / unusual loss,Birihutirwa / impfu zidasanzwe,,,todo
+80,Flags the event for faster vet review and may trigger alerts.,Bimenyesha veterineri vuba kandi bishobora gutanga integuza (alerts).,,,todo
+81,Notes (optional),Ibindi wvuga (si itegeko),,,todo
+82,Submit mortality,Ohereza izapfuye,,,todo
+83,Emergency mortality logged.,Izapfuye bitunguranye zanditswe.,,,todo
+84,Mortality logged.,Izapfuye zanditswe.,,,todo
+85,Add a flock before logging mortality.,Hitamo itsinda ry'inkoko mbere yo kwandika izapfuye.,,,todo
+86,Mortality submitted successfully.,Raporo y'izapfuye yoherejwe neza.,,,todo
+87,Please wait a few seconds before submitting again.,Tegereza amasegonda make mbere yo kongera kohereza.,,,todo
+88,Add at least one photo of the mortality.,Ongeraho nibura ifoto imwe y'inkoko zapfuye.,,,todo
+89,Enter number of birds (1 or more).,Shyiramo umubare w'inkoko (imwe cyangwa nyinshi).,,,todo
+90,Duplicate entry,Byanditswe kabiri,,,todo
+91,Mortality tracking,Gukurikirana izapfuye,,,todo
+92,"Full report of all mortality events, with filters and export.",Raporo yuzuye y'impfu zose,,,todo
+93,Time,Igihe,,,todo
+94,Count,Umubare,,,todo
+95,Type,Ubwoko,,,todo
+96,Status,Imiterere,,,todo
+97,Affects live count,Bihindura umubare w'iziriho,,,todo
+98,No mortality logged yet,Nta nkoko zapfuye zirandikwa,,,todo
+99,Submit losses from the mortality log — photos are required.,Ohereza izapfuye ubinyujije muri mortality log — amafoto arakenewe.,,,todo
+100,Search,Shakisha,,,todo
+101,"Notes, source…","Ibindi, aho byaturutse...",,,todo
+102,All,Zose,,,todo
+103,Approved,Byemejwe,,,todo
+104,Pending,Birategereje,,,todo
+105,Rejected,Byanzwe,,,todo
+106,Emergency,Birihutirwa,,,todo
+107,Yes,Yego,,,todo
+108,No,Oya,,,todo
+109,Export CSV,Bika muri CSV,,,todo
+110,Load failed,Gufunguka byanze,,,todo
+111,Feed request / log,Gusaba / kwandika ibiryo,,,todo
+112,Record feed delivered. Lower roles require manager approval. Totals count toward cycle FCR with round check-ins.,Andika ibiryo byatanzwe. Bimwe bisaba kwemezwa n'umuyobozi. Byose bihuzwa n'ibyanditswe kuri round check-ins kuri FCR.,,,todo
+113,Loading flock context…,Turimo gufungura amakuru y'itsinda...,,,todo
+114,No active flocks. Create a flock to start logging feed.,Nta matsinda y'inkoko ahari. Fungura itsinda (flock) kugira ngo utangire kwandika ibiryo.,,,todo
+115,Feed stock:,Ibiryo bihari (stock):,,,todo
+116,Could not load recent entries.,Ibiherutse kwandikwa byanze gufunguka.,,,todo
+117,Retry,Ongera ugerageze,,,todo
+118,Recent feed entries,Ibiryo biherutse kwandikwa,,,todo
+119,No feed entries yet for this flock.,Nta biryo birandikirwa iri tsinda.,,,todo
+120,Close,Funga,,,todo
+121,Log new feed,Andika ibiryo bishya,,,todo
+122,Feed delivered (kg),Ibiryo byatanzwe (kg),,,todo
+123,Feed type,Ubwoko bw'ibiryo,,,todo
+124,Save feed entry,Bika ibiryo,,,todo
+125,"still captures photos, water, and mortality with each round.","iracyabika amafoto, amazi, n'izapfuye kuri buri raporo.",,,todo
+126,Feed logged.,Ibiryo byanditswe.,,,todo
+127,Enter feed weight in kg (greater than zero).,Shyiramo ibiro by'ibiryo (kg) birenze zeru.,,,todo
+128,Feed log submitted successfully.,Raporo y'ibiryo yoherejwe neza.,,,todo
+129,Pending review,Bitegereje gusuzumwa,,,todo
+130,Starter,Starter,,,todo
+131,Grower,Grower,,,todo
+132,Finisher,Finisher,,,todo
+133,Supplement,Supplement,,,todo
+134,Feed inventory,Ibiryo bihari (Inventory),,,todo
+135,"Role-based stock controls for procurement, feeding, and adjustments.","Igenzura rya stock rishingiye ku nshingano mu kugura, kugaburira, no guhindura imibare.",,,todo
+136,Current balance (kg),Ibisigaye ubu (kg),,,todo
+137,Records,Amakuru yanditswe,,,todo
+138,Role,Uruhare / Inshingano,,,todo
+139,Inventory ledger,Inventory ledger,,,todo
+140,No inventory records yet.,Nta makuru y'ibiryo ahari.,,,todo
+141,New transaction,Andika ibyakozwe bishya,,,todo
+142,Close entry form,Funga ifomu,,,todo
+143,Receive stock,Yakira ibiryo,,,todo
+144,Log consumption,Andika ibyariwe,,,todo
+145,Adjust stock,Kosora imibare ya stock,,,todo
+146,Procurement receipt,Inyemezabuguzi y'ibyo mwasabye,,,todo
+147,Feed consumption,Ibiryo byariwe,,,todo
+148,Manager adjustment,Ikosora ry'umuyobozi,,,todo
+149,Quantity kg,Umubare (kg),,,todo
+150,Reference (invoice/GRN),Nimero ya fagitire / GRN,,,todo
+151,Consumption quantity (kg),Umubare w'ibyariwe (ibiro),,,todo
+152,Delta kg (+/-),Delta kg (+/-),,,todo
+153,Save procurement,Bika ibyo mwaguze,,,todo
+154,Save feed usage,Bika ibyakoreshejwe,,,todo
+155,Save adjustment,Bika ikosora,,,todo
+156,Stock received,Ibiryo byakiriwe,,,todo
+157,Feed usage logged,Ibyakoreshejwe byanditswe,,,todo
+158,Adjustment saved,Ikosora ryabitswe,,,todo
+159,Supplier delivery,Ibyatanzwe n'umuguzi (Supplier),,,todo
+160,Internal transfer in,Ibyavuye ahandi (Internal transfer),,,todo
+161,Returned stock,Ibiryo byagaruriwe stock,,,todo
+162,Other,Ibindi,,,todo
+163,Round feed,Raporo y’ibiryo,,,todo
+164,Catch-up feed,Ibiryo by'inyongezo ,,,todo
+165,Spillage adjusted,Ibiryo byamenetse,,,todo
+166,Stock count correction,Ikosora ry'umubare wa stock,,,todo
+167,Damage/loss,Ibyangiritse / Ibyabuze,,,todo
+168,Expired feed,Ibiryo byarengeje igihe,,,todo
+169,Credits and deductions from round check-ins and feed logs this month (read-only).,Ibirimo n'ibivamo biva kuri round check-ins n'ibiryo byanditswe muri uku kwezi (gusoma gusa).,,,todo
+170,Back to action center,Subira Ahabanza,,,todo
+171,Amount,Umubare,,,todo
+172,On-time,Ku gihe,,,todo
+173,When,Ryari,,,todo
+174,Reason,Impamvu,,,todo
+175,No entries yet this month.,Nta byanditswe biraboneka muri uku kwezi.,,,todo
+176,Net (all),Yose hamwe (Net),,,todo
+177,Pending approval,Bitegereje kwemezwa,,,todo
+178,Submitting...,Birimo koherezwa...,,,todo
+179,Please wait while we save your submission.,Tegereza gato mu gihe tubika ibyo wohereje.,,,todo
+180,Submitted successfully.,Byoherejwe neza.,,,todo
+181,Your update has been saved.,Ibyo wahinduye byabitswe.,,,todo
+182,Install Clevafarm app,Shyira 'Clevafarm app' muri telefone,,,todo
+183,"Install from this popup for a faster, app-like experience.",Yishyire muri telefone unyuze hano kugira ngo ikore vuba.,,,todo
+184,"Add to your home screen for a faster, app-like experience.",Yishyire kuri 'home screen' yawe kugira ngo ikore vuba.,,,todo
+185,Install app,Shyira 'app' muri telefone,,,todo
+186,Not now,Si ubu,,,todo
+187,"On iPhone/iPad: tap Share, then Add to Home Screen.","Kuri iPhone/iPad: kanda 'Share', hanyuma ukande 'Add to Home Screen'.",,,todo
+188,"If the install popup does not open, use your browser menu and choose Install app.","Niba idafungutse, kanda kuri 'menu' ya browser yawe uhitemo 'Install app'.",,,todo
+189,Farm Manager,Umuyobozi w'isambu,,,todo
+190,Loading your workspace...,Turimo gufungura aho ukorera...,,,todo
+191,Financial access restricted. Contact your admin.,Amakuru y'imari ntiwemerewe kuyareba. Vugana n'umuyobozi wawe.,,,todo
+192,Close entry form,Funga ifomu,,,todo
+193,No flock available,Nta tsinda ry'inkoko rihari,,,todo
+194,Home,Ahabanza,,,todo
+195,Round check-in,Tanga raporo,,,todo
+196,Log mortality,Andika izapfuye,,,todo

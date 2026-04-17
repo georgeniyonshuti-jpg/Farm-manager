@@ -10,6 +10,7 @@ import { useAuth } from "../auth/AuthContext";
 import type { SessionUser, UserRole } from "../auth/types";
 import { API_BASE_URL } from "../api/config";
 import { jsonAuthHeaders } from "../lib/authHeaders";
+import { lookupRw } from "./rwDictionary";
 
 export type LaborerLocale = "rw" | "en";
 
@@ -101,7 +102,8 @@ export type LaborerTranslationState = {
 };
 
 /**
- * Laborers only: when locale is Kinyarwanda, translates via Gemini (server). Cached in sessionStorage.
+ * Laborers only: when locale is Kinyarwanda, uses static dictionary first,
+ * then falls back to Gemini API translation. Cached in sessionStorage.
  * Other roles always see English source text.
  */
 export function useLaborerTranslation(english: string): LaborerTranslationState {
@@ -125,6 +127,18 @@ export function useLaborerTranslation(english: string): LaborerTranslationState 
       return;
     }
 
+    const dictHit = lookupRw(english);
+    if (dictHit) {
+      setText(dictHit);
+      setIsLoading(false);
+      setUsedFallback(false);
+      return;
+    }
+
+    if (import.meta.env.DEV) {
+      console.warn(`[i18n] Missing RW dictionary key: "${english}"`);
+    }
+
     let cancelled = false;
     const run = async () => {
       setIsLoading(true);
@@ -144,7 +158,6 @@ export function useLaborerTranslation(english: string): LaborerTranslationState 
           /* ignore */
         }
 
-        // ENV: moved to environment variable
         const res = await fetch(`${API_BASE_URL}/api/laborer/translate`, {
           method: "POST",
           headers: jsonAuthHeaders(token),
@@ -194,7 +207,8 @@ export function useLaborerT(english: string): string {
 }
 
 /**
- * Sign-in screen copy: when `locale === "rw"`, translate via the public endpoint (no auth).
+ * Sign-in screen copy: when `locale === "rw"`, uses static dictionary first,
+ * then falls back to the public translate endpoint (no auth).
  * Same sessionStorage cache keys as useLaborerT so laborer sees consistent strings after login.
  */
 export function usePreLoginRwT(english: string, locale: LaborerLocale): string {
@@ -208,6 +222,16 @@ export function usePreLoginRwT(english: string, locale: LaborerLocale): string {
     if (locale !== "rw") {
       setOut(english);
       return;
+    }
+
+    const dictHit = lookupRw(english);
+    if (dictHit) {
+      setOut(dictHit);
+      return;
+    }
+
+    if (import.meta.env.DEV) {
+      console.warn(`[i18n] Missing RW dictionary key (pre-login): "${english}"`);
     }
 
     let cancelled = false;
@@ -224,7 +248,6 @@ export function usePreLoginRwT(english: string, locale: LaborerLocale): string {
           /* ignore */
         }
 
-        // ENV: moved to environment variable
         const res = await fetch(`${API_BASE_URL}/api/i18n/translate-public`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

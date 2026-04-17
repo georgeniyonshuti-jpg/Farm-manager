@@ -4,6 +4,7 @@ import {
   subscribeInstallPrompt,
   triggerNativeInstallPrompt,
 } from "../../pwa/installPrompt";
+import { useLaborerT } from "../../i18n/laborerI18n";
 
 type PromptState = {
   canPromptNatively: boolean;
@@ -17,15 +18,13 @@ const initialState: PromptState = {
   shouldShowToday: false,
 };
 
-function getInstallFallbackText() {
-  const ua = window.navigator.userAgent.toLowerCase();
+function useInstallFallbackText() {
+  const tIos = useLaborerT("On iPhone/iPad: tap Share, then Add to Home Screen.");
+  const tGeneric = useLaborerT("If the install popup does not open, use your browser menu and choose Install app.");
+  const ua = typeof window !== "undefined" ? window.navigator.userAgent.toLowerCase() : "";
   const isIos = /iphone|ipad|ipod/.test(ua);
   const isSafari = /safari/.test(ua) && !/crios|fxios|edgios/.test(ua);
-
-  if (isIos && isSafari) {
-    return "On iPhone/iPad: tap Share, then Add to Home Screen.";
-  }
-  return "If the install popup does not open, use your browser menu and choose Install app.";
+  return isIos && isSafari ? tIos : tGeneric;
 }
 
 export function InstallPromptBanner() {
@@ -39,6 +38,13 @@ export function InstallPromptBanner() {
     [promptState.isInstalled, promptState.shouldShowToday]
   );
 
+  const tTitle = useLaborerT("Install Clevafarm app");
+  const tNativeSubtitle = useLaborerT("Install from this popup for a faster, app-like experience.");
+  const tManualSubtitle = useLaborerT("Add to your home screen for a faster, app-like experience.");
+  const tInstall = useLaborerT("Install app");
+  const tNotNow = useLaborerT("Not now");
+  const fallbackText = useInstallFallbackText();
+
   if (!visible) return null;
 
   return (
@@ -46,14 +52,12 @@ export function InstallPromptBanner() {
       <div className="mx-auto max-w-2xl rounded-2xl border border-[var(--border-color)] bg-white/95 p-3 shadow-2xl backdrop-blur">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-[var(--text-primary)]">Install Clevafarm app</p>
+            <p className="text-sm font-semibold text-[var(--text-primary)]">{tTitle}</p>
             <p className="text-xs text-[var(--text-secondary)]">
-              {promptState.canPromptNatively
-                ? "Install from this popup for a faster, app-like experience."
-                : "Add to your home screen for a faster, app-like experience."}
+              {promptState.canPromptNatively ? tNativeSubtitle : tManualSubtitle}
             </p>
             {showFallbackInstructions ? (
-              <p className="mt-1 text-xs text-[var(--text-muted)]">{getInstallFallbackText()}</p>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">{fallbackText}</p>
             ) : null}
           </div>
           <div className="flex items-center gap-2">
@@ -67,7 +71,7 @@ export function InstallPromptBanner() {
               }}
               className="bounce-tap inline-flex min-h-[40px] items-center justify-center rounded-lg bg-[var(--primary-color)] px-3 py-2 text-xs font-semibold text-white"
             >
-              Install app
+              {tInstall}
             </button>
             <button
               type="button"
@@ -77,7 +81,7 @@ export function InstallPromptBanner() {
               }}
               className="bounce-tap inline-flex min-h-[40px] items-center justify-center rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)]"
             >
-              Not now
+              {tNotNow}
             </button>
           </div>
         </div>

@@ -98,7 +98,11 @@ function CheckinPhotoBlock({
   busy: boolean;
   onPhotos: (urls: string[]) => void;
 }) {
-  const pickerLabel = useLaborerT(`Tap to add photos (${minCount}+ required, up to 6)`);
+  const pickerLabel = useLaborerT(
+    minCount === 1
+      ? "Tap to add photos (1+ required, up to 6)"
+      : `Tap to add photos (${minCount}+ required, up to 6)`
+  );
   return (
     <PhotoCaptureInput
       minCount={minCount}
