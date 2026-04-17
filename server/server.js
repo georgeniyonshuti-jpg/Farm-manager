@@ -38,6 +38,8 @@ import { parseActualsCsv } from "./business-model/csvParse.js";
 import { loadSuggestedActuals } from "./business-model/productionSuggestedActuals.js";
 import { buildInvestorPdfBuffer } from "./business-model/pdfInvestor.js";
 import { buildBroilerPdfBuffer } from "./business-model/pdfBroiler.js";
+import { extractLiveDbActuals } from "./business-model/liveDbActuals.js";
+import { projectionToCsv, varianceToCsv, compareToCsv, heatmapsToCsv } from "./business-model/exportCsv.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -5696,10 +5698,12 @@ app.post(
       const summary = summarizeProjection(series, inp);
       const milestones = profitMilestones(series);
       const stakeholderType = String(body.stakeholderType ?? "investor").toLowerCase() === "lender" ? "lender" : "investor";
+      const scenarios = leverScenarioRows(inp);
       const buf = await buildInvestorPdfBuffer({
         series,
         summary,
         milestones,
+        scenarios,
         ctl,
         stakeholderType,
         companyName: String(body.companyName ?? "ClevaCredit"),
@@ -5730,10 +5734,13 @@ app.post(
       const cycleId = String(body.cycleId ?? "default");
       const comp = broilerOpsDb.complianceScore(req.authUser.id, cycleId, inp.cycle_days);
       const health = broilerOpsDb.healthStatusFromVet(req.authUser.id, cycleId);
+      const weeklyMortality = weeklyMortalityRates(trajectory);
       const buf = await buildBroilerPdfBuffer({
         summary,
         trajectory,
         insights,
+        inputs: inp,
+        weeklyMortality,
         farmName: String(body.farmName ?? "Broiler operation"),
         complianceScore: comp.score,
         healthStatus: health,
@@ -5950,6 +5957,145 @@ app.post(
       res.status(500).json({ error: "Broiler model failed" });
     }
   },
+);
+
+// ─── LIVE DB ACTUALS ────────────────────────────────────────────────────────
+app.get(
+  "/api/business-model/live-actuals",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  async (req, res) => {
+    if (!hasDb()) {
+      res.json({ ok: true, rows: [], meta: { months_found: 0, pulled_at: new Date().toISOString(), note: "No database connected" } });
+      return;
+    }
+    try {
+      const refMonth = Math.max(1, Math.floor(Number(req.query.referenceMonth ?? 1)));
+      const { rows, meta } = await extractLiveDbActuals(dbQuery, { referenceMonth: refMonth });
+      res.json({ ok: true, rows, meta });
+    } catch (e) {
+      console.error("[ERROR]", "[api] live-actuals:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Failed to extract live actuals" });
+    }
+  }
+);
+
+// ─── CSV EXPORT ENDPOINTS ────────────────────────────────────────────────────
+app.post(
+  "/api/business-model/export-csv/projection",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const ctl = mergePaygoCtl(body.ctl ?? {});
+      const inp = ctlToInputs(ctl);
+      const series = runProjection(inp);
+      const summary = summarizeProjection(series, inp);
+      const milestones = profitMilestones(series);
+      const runMeta = {
+        timestamp: new Date().toISOString(),
+        horizonMonths: ctl.proj_months,
+        volumeMode: ctl.volume_mode,
+        volMult: ctl.vol_mult,
+        defRatePct: ctl.def_rate_pct,
+        debtRatePct: ctl.debt_rate_pct,
+        deviceTier: ctl.device_tier_label,
+        deviceCostRwf: ctl.custom_dev_cost_rwf,
+        investorPct: ctl.investor_capital_pct,
+        creditorPct: ctl.creditor_capital_pct,
+        hurdleAnnual: 15,
+      };
+      const csv = projectionToCsv(series, summary, milestones, runMeta);
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", 'attachment; filename="cleva-paygo-projection.csv"');
+      res.send(csv);
+    } catch (e) {
+      console.error("[ERROR]", "[api] export-csv projection:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Export failed" });
+    }
+  }
+);
+
+app.post(
+  "/api/business-model/export-csv/variance",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const inp = body.ctl && typeof body.ctl === "object" ? ctlToInputs(mergePaygoCtl(body.ctl)) : mergePaygoInputs(body.inputs);
+      const series = runProjection(inp);
+      const uid = req.authUser.id;
+      const targets = budgetDb.listTargetsLong(uid).map((r) => ({ month: r.month, kpi_key: r.kpi_key, value: r.value }));
+      const actuals = budgetDb.listActualsLong(uid).map((r) => ({ month: r.month, kpi_key: r.kpi_key, value: r.value }));
+      const variance = buildVarianceFrame(series, inp, targets, actuals);
+      const runMeta = { timestamp: new Date().toISOString() };
+      const csv = varianceToCsv(variance, runMeta);
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", 'attachment; filename="cleva-budget-variance.csv"');
+      res.send(csv);
+    } catch (e) {
+      console.error("[ERROR]", "[api] export-csv variance:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Export failed" });
+    }
+  }
+);
+
+app.post(
+  "/api/business-model/export-csv/compare",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const ctlA = mergePaygoCtl(body.ctlA ?? body.ctl ?? {});
+      const ctlB = body.ctlB && typeof body.ctlB === "object" ? mergePaygoCtl(body.ctlB) : { ...ctlA, def_rate_pct: Math.min(20, ctlA.def_rate_pct + 2) };
+      const inpA = ctlToInputs(ctlA);
+      const inpB = ctlToInputs(ctlB);
+      const seriesA = runProjection(inpA);
+      const seriesB = runProjection(inpB);
+      const summaryA = summarizeProjection(seriesA, inpA);
+      const summaryB = summarizeProjection(seriesB, inpB);
+      const diffRows = [...BUILD_KEYS].filter(k => k !== "custom_monthly").reduce((acc, k) => {
+        if (ctlA[k] !== ctlB[k]) acc.push({ assumption: k, A: ctlA[k], B: ctlB[k] });
+        return acc;
+      }, []);
+      const compareResult = { seriesA, seriesB, summaryA, summaryB, assumptionDiffs: diffRows };
+      const csv = compareToCsv(compareResult, { timestamp: new Date().toISOString() });
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", 'attachment; filename="cleva-scenario-compare.csv"');
+      res.send(csv);
+    } catch (e) {
+      console.error("[ERROR]", "[api] export-csv compare:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Export failed" });
+    }
+  }
+);
+
+app.post(
+  "/api/business-model/export-csv/heatmaps",
+  requireAuth,
+  requireClevaWorkspace,
+  requirePageAccess("cleva_business_model"),
+  (req, res) => {
+    try {
+      const body = req.body && typeof req.body === "object" ? req.body : {};
+      const inp = body.ctl && typeof body.ctl === "object" ? ctlToInputs(mergePaygoCtl(body.ctl)) : mergePaygoInputs(body.inputs);
+      const heatmaps = buildPaygoHeatmaps(inp);
+      const csv = heatmapsToCsv(heatmaps, { timestamp: new Date().toISOString() });
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", 'attachment; filename="cleva-sensitivity-heatmaps.csv"');
+      res.send(csv);
+    } catch (e) {
+      console.error("[ERROR]", "[api] export-csv heatmaps:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Export failed" });
+    }
+  }
 );
 
 app.get("/api/server-time", requireAuth, (_req, res) => {
