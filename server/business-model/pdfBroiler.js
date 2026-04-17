@@ -49,6 +49,13 @@ function addPage(doc, pc, farmName, reportDate) {
   drawPageFooter(doc, pc.n, farmName, reportDate);
 }
 
+function ensureSpace(doc, pc, farmName, reportDate, needed = 120) {
+  const bottomLimit = doc.page.height - 64;
+  if (doc.y + needed > bottomLimit) {
+    addPage(doc, pc, farmName, reportDate);
+  }
+}
+
 function sectionHeader(doc, text, color = COLORS.navy) {
   doc.moveDown(0.5);
   doc.rect(48, doc.y, doc.page.width - 96, 24).fill(color);
@@ -256,14 +263,20 @@ export function buildBroilerPdfBuffer(opts) {
       ["Break-even Price", bepPriceStr, "Min price/kg to break even", null],
     ], 3);
 
-    // ── PAGE 2: BATCH ECONOMICS ──────────────────────────────────────────────
-    addPage(doc, pc, farmName, reportDate);
+    // ── SECTION 1: BATCH ECONOMICS ───────────────────────────────────────────
+    ensureSpace(doc, pc, farmName, reportDate, 320);
     sectionHeader(doc, "1. BATCH ECONOMICS", COLORS.emerald);
 
     bodyText(doc,
       `This batch used ${(inputs.chicks ?? 0).toLocaleString()} chicks over a ${inputs.cycle_days ?? 35}-day cycle ` +
       `with a modeled mortality rate of ${inputs.mortality_pct ?? "—"}% and a feed conversion ratio (FCR) of ${inputs.fcr ?? "—"}. ` +
       `Birds are sold at RWF ${inputs.price_per_kg ?? "—"}/kg with an average finish weight of ${inputs.finish_weight_kg ?? "—"} kg.`
+    );
+    bodyText(
+      doc,
+      "The economics view should be interpreted in three layers: biological efficiency (survival and FCR), " +
+        "commercial efficiency (weight and selling price), and cost discipline (feed, chick, and overhead structure). " +
+        "Weakness in any single layer can erase margin even when top-line revenue looks healthy."
     );
     doc.moveDown(0.4);
 
@@ -288,8 +301,8 @@ export function buildBroilerPdfBuffer(opts) {
       ["ROI (cycle)", roiStr, "Return on total cost invested"],
     ], 3);
 
-    // ── PAGE 3: COST BREAKDOWN ───────────────────────────────────────────────
-    addPage(doc, pc, farmName, reportDate);
+    // ── SECTION 2: COST BREAKDOWN ────────────────────────────────────────────
+    ensureSpace(doc, pc, farmName, reportDate, 360);
     sectionHeader(doc, "2. COST BREAKDOWN", COLORS.blue);
 
     bodyText(doc, "Itemized cost structure for this batch. Feed cost typically represents 65-75% of total cost of production.");
@@ -355,10 +368,12 @@ export function buildBroilerPdfBuffer(opts) {
       `Cost per bird: ${summary.birds_end ? money(totalCost / Math.max(1, summary.birds_end)) : "—"} (excl. feed: ${summary.birds_end ? money((totalCost - feedCost) / Math.max(1, summary.birds_end)) : "—"})`,
       `Cost per kg produced: ${summary.birds_end && inputs.finish_weight_kg ? money(totalCost / Math.max(1, summary.birds_end * inputs.finish_weight_kg)) : "—"}`,
       `Effective FCR: ${summary.effective_fcr?.toFixed(3) ?? "—"} (industry target: 1.60–1.75 for 35-day cycle)`,
+      "Interpretation tip: if feed share is high and FCR is weak, focus first on feed quality, feeding rhythm, and health stress events.",
+      "Interpretation tip: if non-feed costs are high, review labor efficiency, transport planning, and fixed-overhead allocation by cycle.",
     ]);
 
-    // ── PAGE 4: MORTALITY & TRAJECTORY ──────────────────────────────────────
-    addPage(doc, pc, farmName, reportDate);
+    // ── SECTION 3: MORTALITY & TRAJECTORY ────────────────────────────────────
+    ensureSpace(doc, pc, farmName, reportDate, 300);
     sectionHeader(doc, "3. MORTALITY PROFILE & DAILY TRAJECTORY", COLORS.amber);
 
     if (weeklyMortality?.length) {
@@ -378,6 +393,11 @@ export function buildBroilerPdfBuffer(opts) {
         "Daily flock trajectory showing birds alive (left axis) and cumulative cost vs revenue (right axis). " +
         "Revenue crossover above cost line signals batch-level breakeven."
       );
+      bodyText(
+        doc,
+        "Operational use: if cumulative cost stays above revenue late in cycle, the farm should check market price realization, " +
+          "harvest weight variance, and avoidable mortality causes. The gap between lines approximates loss pressure."
+      );
       doc.moveDown(0.6);
       drawDualLine(
         doc,
@@ -391,8 +411,8 @@ export function buildBroilerPdfBuffer(opts) {
       doc.y += 140;
     }
 
-    // ── PAGE 5: VET, COMPLIANCE & INSIGHTS ──────────────────────────────────
-    addPage(doc, pc, farmName, reportDate);
+    // ── SECTION 4: VET, COMPLIANCE & INSIGHTS ────────────────────────────────
+    ensureSpace(doc, pc, farmName, reportDate, 280);
     sectionHeader(doc, "4. VET STATUS, COMPLIANCE & INSIGHTS", COLORS.violet);
 
     subHeader(doc, "Operational Status");
@@ -417,6 +437,7 @@ export function buildBroilerPdfBuffer(opts) {
 
     if (insights?.length) {
       for (let i = 0; i < insights.length; i++) {
+        ensureSpace(doc, pc, farmName, reportDate, 26);
         const ins = insights[i];
         const isWarning = ins.toLowerCase().includes("high") || ins.toLowerCase().includes("below") || ins.toLowerCase().includes("risk");
         const bullet = isWarning ? "⚠" : "✓";
@@ -429,8 +450,17 @@ export function buildBroilerPdfBuffer(opts) {
       bodyText(doc, "Run the broiler model to generate insights.");
     }
 
-    // ── PAGE 6: METHODOLOGY ──────────────────────────────────────────────────
-    addPage(doc, pc, farmName, reportDate);
+    ensureSpace(doc, pc, farmName, reportDate, 90);
+    subHeader(doc, "Management action checklist");
+    bulletList(doc, [
+      "Review weekly mortality spikes against vet reports and check-in compliance logs.",
+      "Track feed cost per kg gain weekly; escalating values are an early margin warning signal.",
+      "Compare achieved selling price/kg to break-even price/kg before scheduling harvest.",
+      "Document corrective actions and rerun model assumptions for next cycle planning.",
+    ]);
+
+    // ── SECTION 5: METHODOLOGY ───────────────────────────────────────────────
+    ensureSpace(doc, pc, farmName, reportDate, 280);
     sectionHeader(doc, "5. ASSUMPTIONS & METHODOLOGY", COLORS.navy);
 
     subHeader(doc, "Model Inputs");
@@ -462,6 +492,7 @@ export function buildBroilerPdfBuffer(opts) {
     ];
 
     for (const [label, formula] of formulas) {
+      ensureSpace(doc, pc, farmName, reportDate, 28);
       doc.fillColor(COLORS.navy).fontSize(8).font("Helvetica-Bold").text(label, 48, doc.y, { width: 160 });
       doc.y -= 12;
       doc.fillColor(COLORS.slate).fontSize(7.5).font("Helvetica").text(formula, 220, doc.y, { width: doc.page.width - 268 });

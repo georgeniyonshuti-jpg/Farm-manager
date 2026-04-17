@@ -63,6 +63,13 @@ function addPage(doc, pageCounter, companyName, reportDate) {
   drawPageFooter(doc, pageCounter.n, companyName, reportDate);
 }
 
+function ensureSpace(doc, pageCounter, companyName, reportDate, needed = 120) {
+  const bottomLimit = doc.page.height - 64;
+  if (doc.y + needed > bottomLimit) {
+    addPage(doc, pageCounter, companyName, reportDate);
+  }
+}
+
 function sectionHeader(doc, text, color = COLORS.navy) {
   doc.moveDown(0.5);
   doc.rect(48, doc.y, doc.page.width - 96, 24).fill(color);
@@ -360,8 +367,8 @@ export function buildInvestorPdfBuffer(opts) {
       doc.moveDown(0.4);
     }
 
-    // ── PAGE 2: EXECUTIVE SUMMARY ────────────────────────────────────────────
-    addPage(doc, pc, companyName, reportDate);
+    // ── SECTION 1: EXECUTIVE SUMMARY ─────────────────────────────────────────
+    ensureSpace(doc, pc, companyName, reportDate, 260);
     sectionHeader(doc, "1. EXECUTIVE SUMMARY & KEY METRICS", COLORS.navy);
 
     bodyText(
@@ -373,6 +380,12 @@ export function buildInvestorPdfBuffer(opts) {
         : `This memorandum presents the forward financial model for ${companyName}'s ${productName} business. ` +
           `The analysis covers a ${ctl.proj_months ?? 36}-month projection horizon under the selected scenario assumptions, ` +
           `demonstrating the growth profile, capital requirements, return potential, and path to profitability.`
+    );
+    bodyText(
+      doc,
+      "This report is structured to support decision meetings with investment committees, risk teams, and treasury. " +
+        "Each section explains the financial signal, the operating driver behind that signal, and the downside sensitivity. " +
+        "Where relevant, the model highlights covenant pressure points and assumptions that should be validated with live portfolio data."
     );
     doc.moveDown(0.4);
 
@@ -411,8 +424,8 @@ export function buildInvestorPdfBuffer(opts) {
       `Strongest EBITDA month: Month ${milestones?.strongest_ebitda_month ?? "—"} (${money(milestones?.strongest_ebitda_rwf)})`,
     ]);
 
-    // ── PAGE 3: CAPITAL STACK ────────────────────────────────────────────────
-    addPage(doc, pc, companyName, reportDate);
+    // ── SECTION 2: CAPITAL STACK ─────────────────────────────────────────────
+    ensureSpace(doc, pc, companyName, reportDate, 240);
     sectionHeader(doc, "2. CAPITAL STACK & FACILITY STRUCTURE", COLORS.violet);
 
     bodyText(
@@ -457,13 +470,14 @@ export function buildInvestorPdfBuffer(opts) {
       ]);
     }
 
-    // ── PAGE 4: CHARTS ───────────────────────────────────────────────────────
-    addPage(doc, pc, companyName, reportDate);
+    // ── SECTION 3: CHARTS ────────────────────────────────────────────────────
+    ensureSpace(doc, pc, companyName, reportDate, 340);
     sectionHeader(doc, "3. REVENUE & GROWTH TRAJECTORY", COLORS.emerald);
 
     if (series.length > 0) {
       bodyText(doc, "Monthly collections (total cash received from customers) and units sold by sales cohort.");
       doc.moveDown(0.6);
+      ensureSpace(doc, pc, companyName, reportDate, 170);
       drawLineChart(
         doc,
         48,
@@ -484,6 +498,7 @@ export function buildInvestorPdfBuffer(opts) {
           "and fixed overheads before the portfolio generates sufficient recurring cash."
       );
       doc.moveDown(0.4);
+      ensureSpace(doc, pc, companyName, reportDate, 150);
       drawLineChart(
         doc,
         48,
@@ -500,8 +515,8 @@ export function buildInvestorPdfBuffer(opts) {
       bodyText(doc, "(No projection series available — run the model from the PAYGO workspace first.)");
     }
 
-    // ── PAGE 5: CASH & DEBT ─────────────────────────────────────────────────
-    addPage(doc, pc, companyName, reportDate);
+    // ── SECTION 4: CASH & DEBT ───────────────────────────────────────────────
+    ensureSpace(doc, pc, companyName, reportDate, 330);
     sectionHeader(doc, "4. CASH FLOW & DEBT SERVICE", COLORS.blue);
 
     if (series.length > 0) {
@@ -511,6 +526,7 @@ export function buildInvestorPdfBuffer(opts) {
           "facility drawdowns. Debt repayment begins after the grace period and is amortized over the agreed schedule."
       );
       doc.moveDown(0.6);
+      ensureSpace(doc, pc, companyName, reportDate, 170);
       drawLineChart(
         doc,
         48,
@@ -528,6 +544,7 @@ export function buildInvestorPdfBuffer(opts) {
       doc.moveDown(0.4);
       const dscrSeries = series.filter((r) => r.dscr != null && Number.isFinite(r.dscr));
       if (dscrSeries.length) {
+        ensureSpace(doc, pc, companyName, reportDate, 150);
         drawLineChart(
           doc,
           48,
@@ -543,8 +560,8 @@ export function buildInvestorPdfBuffer(opts) {
       }
     }
 
-    // ── PAGE 5: UNIT ECONOMICS ──────────────────────────────────────────────
-    addPage(doc, pc, companyName, reportDate);
+    // ── SECTION 5: UNIT ECONOMICS ────────────────────────────────────────────
+    ensureSpace(doc, pc, companyName, reportDate, 300);
     sectionHeader(doc, "5. UNIT ECONOMICS", COLORS.amber);
 
     kpiGrid(
@@ -575,8 +592,8 @@ export function buildInvestorPdfBuffer(opts) {
       3
     );
 
-    // ── PAGE 6: PROJECTION TABLE ─────────────────────────────────────────────
-    addPage(doc, pc, companyName, reportDate);
+    // ── SECTION 6: PROJECTION TABLE ──────────────────────────────────────────
+    ensureSpace(doc, pc, companyName, reportDate, 360);
     sectionHeader(doc, "6. MONTHLY PROJECTION TABLE", COLORS.navy);
     bodyText(
       doc,
@@ -591,8 +608,8 @@ export function buildInvestorPdfBuffer(opts) {
       bodyText(doc, "(Run the PAYGO model to generate the projection series.)");
     }
 
-    // ── PAGE 7: SCENARIO ANALYSIS ────────────────────────────────────────────
-    addPage(doc, pc, companyName, reportDate);
+    // ── SECTION 7: SCENARIO ANALYSIS ─────────────────────────────────────────
+    ensureSpace(doc, pc, companyName, reportDate, 260);
     sectionHeader(doc, "7. SCENARIO ANALYSIS", COLORS.navy);
 
     bodyText(
@@ -619,6 +636,19 @@ export function buildInvestorPdfBuffer(opts) {
       doc.font("Helvetica");
 
       for (let ri = 0; ri < scenarios.length; ri++) {
+        if (ty + rowH > doc.page.height - 64) {
+          addPage(doc, pc, companyName, reportDate);
+          sectionHeader(doc, "7. SCENARIO ANALYSIS (continued)", COLORS.navy);
+          ty = doc.y;
+          doc.rect(startX, ty, colW * hdrs.length, rowH).fill(COLORS.navy);
+          cx2 = startX;
+          for (const h of hdrs) {
+            doc.fillColor("#ffffff").fontSize(6.5).font("Helvetica-Bold").text(h, cx2 + 2, ty + 4, { width: colW - 4 });
+            cx2 += colW;
+          }
+          ty += rowH;
+          doc.font("Helvetica");
+        }
         const bg = ri % 2 === 0 ? "#ffffff" : COLORS.bg;
         doc.rect(startX, ty, colW * hdrs.length, rowH).fill(bg).stroke(COLORS.border);
         cx2 = startX;
@@ -634,8 +664,8 @@ export function buildInvestorPdfBuffer(opts) {
       bodyText(doc, "(Run the model from the Scenario tab to populate this table.)");
     }
 
-    // ── PAGE 8: KPI INTERPRETATION ───────────────────────────────────────────
-    addPage(doc, pc, companyName, reportDate);
+    // ── SECTION 8: KPI INTERPRETATION ────────────────────────────────────────
+    ensureSpace(doc, pc, companyName, reportDate, 300);
     sectionHeader(doc, "8. KPI INTERPRETATION & RISK FACTORS", COLORS.red);
 
     const kpiMeta = [
@@ -687,6 +717,7 @@ export function buildInvestorPdfBuffer(opts) {
     ];
 
     for (const m of kpiMeta) {
+      ensureSpace(doc, pc, companyName, reportDate, 110);
       subHeader(doc, `${m.name} — ${m.full}`);
       doc.fillColor(COLORS.mid).fontSize(7.5).font("Helvetica-Oblique").text(`Formula: ${m.formula}`, { indent: 8 });
       doc.font("Helvetica").moveDown(0.15);
@@ -695,8 +726,8 @@ export function buildInvestorPdfBuffer(opts) {
       doc.moveDown(0.6);
     }
 
-    // ── PAGE 9: ASSUMPTIONS ───────────────────────────────────────────────────
-    addPage(doc, pc, companyName, reportDate);
+    // ── SECTION 9: ASSUMPTIONS ───────────────────────────────────────────────
+    ensureSpace(doc, pc, companyName, reportDate, 300);
     sectionHeader(doc, "9. ASSUMPTIONS & METHODOLOGY", COLORS.slate);
 
     subHeader(doc, "Volume Assumptions");
@@ -739,8 +770,8 @@ export function buildInvestorPdfBuffer(opts) {
       "Warehouse & logistics fixed costs",
     ]);
 
-    // ── PAGE 10: APPENDIX ────────────────────────────────────────────────────
-    addPage(doc, pc, companyName, reportDate);
+    // ── SECTION 10: APPENDIX ─────────────────────────────────────────────────
+    ensureSpace(doc, pc, companyName, reportDate, 260);
     sectionHeader(doc, "10. APPENDIX — FORMULA REFERENCE", COLORS.navy);
 
     const formulas = [
@@ -763,6 +794,7 @@ export function buildInvestorPdfBuffer(opts) {
     ];
 
     for (const [label, formula] of formulas) {
+      ensureSpace(doc, pc, companyName, reportDate, 28);
       doc.fillColor(COLORS.navy).fontSize(8).font("Helvetica-Bold").text(label, 48, doc.y, { width: 160, continued: false });
       doc.y -= 12;
       doc.fillColor(COLORS.slate).fontSize(7.5).font("Helvetica").text(formula, 220, doc.y, { width: doc.page.width - 268 });

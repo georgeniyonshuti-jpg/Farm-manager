@@ -16,6 +16,7 @@ type Props = { onNavigate?: () => void; collapsed?: boolean };
 const CLEVA_NAV: NavItem[] = [
   { to: "/cleva/portfolio", label: "Portfolio analytics", end: true },
   { to: "/cleva/business-model", label: "Business model" },
+  { to: "/cleva/general-lending", label: "General lending" },
   { to: "/cleva/investor-memos", label: "Investor memos" },
   { to: "/cleva/credit-scoring", label: "Credit scoring" },
 ];
@@ -133,6 +134,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
   const nav = activeWorkspace === "farm" ? farmNav : clevaNav.filter((item) => {
     if (item.to === "/cleva/portfolio") return canSee("cleva_portfolio");
     if (item.to === "/cleva/business-model") return canSee("cleva_business_model");
+    if (item.to === "/cleva/general-lending") return canSee("cleva_business_model");
     if (item.to === "/cleva/investor-memos") return canSee("cleva_investor_memos");
     if (item.to === "/cleva/credit-scoring") return canSee("cleva_credit_scoring");
     return true;

@@ -144,8 +144,9 @@ function BroilerPdfPanel({ token }: { token: string | null }) {
       <div>
         <h2 className="text-base font-semibold text-neutral-900">Broiler Batch Performance Report</h2>
         <p className="mt-1 text-sm text-neutral-600">
-          A detailed 6-section broiler performance PDF. Uses default model inputs and generates charts, cost breakdown,
-          weekly mortality profile, and insight recommendations.
+          A detailed broiler performance memorandum with expanded management commentary. The report now auto-fits pages
+          with no blank sheets, includes deeper economics interpretation, operational action checklist, trajectory analysis,
+          and richer risk/explanation language for field and finance teams.
         </p>
       </div>
 
