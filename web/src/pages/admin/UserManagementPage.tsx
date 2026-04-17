@@ -28,6 +28,20 @@ const AUDIT_ACTION_QUICK_FILTERS: Array<{ label: string; value: string }> = [
   { label: "Treatments", value: "flock.treatment.create" },
 ];
 
+const USER_ROLE_OPTIONS: SessionUser["role"][] = [
+  "superuser",
+  "manager",
+  "vet",
+  "vet_manager",
+  "laborer",
+  "procurement_officer",
+  "sales_coordinator",
+  "investor",
+  "dispatcher",
+];
+
+const BU_OPTIONS: SessionUser["businessUnitAccess"][] = ["farm", "clevacredit", "both"];
+
 export function UserManagementPage() {
   const { token } = useAuth();
   const { showToast } = useToast();
@@ -202,6 +216,10 @@ export function UserManagementPage() {
     }
   }
 
+  function beginEditUser(userId: string) {
+    setEditingUserId(userId);
+  }
+
   async function togglePageAccess(userId: string, pageKey: string, checked: boolean) {
     const target = users.find((u) => u.id === userId);
     if (!target) return;
@@ -223,6 +241,8 @@ export function UserManagementPage() {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Page access update failed");
       setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, pageAccess } : u)));
+      const edited = users.find((u) => u.id === userId);
+      showToast("success", `Page access updated for ${edited?.displayName ?? "user"}`);
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "Page access update failed");
     } finally {
@@ -314,94 +334,111 @@ export function UserManagementPage() {
           </table>
         </div>
       </section>
-      <section className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-neutral-900">Edit user (including password)</h2>
-        <p className="mt-1 text-xs text-neutral-500">Password is optional here. Leave blank to keep current password.</p>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <label className="block text-sm font-medium text-neutral-700">
-            User
-            <select
-              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-              value={editingUserId}
-              onChange={(e) => setEditingUserId(e.target.value)}
+      {editingUserId ? (
+        <section className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-semibold text-neutral-900">Edit user (including password)</h2>
+              <p className="mt-1 text-xs text-neutral-500">
+                Password is optional here. Leave blank to keep current password.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+              onClick={() => setEditingUserId("")}
             >
-              <option value="">Select user</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.displayName} ({u.email})
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm font-medium text-neutral-700">
-            Display name
-            <input
-              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-              value={editForm.displayName}
-              onChange={(e) => setEditForm((f) => ({ ...f, displayName: e.target.value }))}
-            />
-          </label>
-          <label className="block text-sm font-medium text-neutral-700">
-            Email
-            <input
-              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-              value={editForm.email}
-              onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
-            />
-          </label>
-          <label className="block text-sm font-medium text-neutral-700">
-            Role
-            <input
-              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-              value={editForm.role}
-              onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value }))}
-            />
-          </label>
-          <label className="block text-sm font-medium text-neutral-700">
-            Business unit access
-            <input
-              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-              value={editForm.businessUnitAccess}
-              onChange={(e) => setEditForm((f) => ({ ...f, businessUnitAccess: e.target.value }))}
-            />
-          </label>
-          <label className="block text-sm font-medium text-neutral-700">
-            Department keys (comma-separated)
-            <input
-              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-              value={editForm.departmentKeys}
-              onChange={(e) => setEditForm((f) => ({ ...f, departmentKeys: e.target.value }))}
-            />
-          </label>
-          <label className="flex items-center gap-2 text-sm font-medium text-neutral-700">
-            <input
-              type="checkbox"
-              checked={editForm.canViewSensitiveFinancial}
-              onChange={(e) => setEditForm((f) => ({ ...f, canViewSensitiveFinancial: e.target.checked }))}
-            />
-            Can view sensitive financial data
-          </label>
-          <label className="block text-sm font-medium text-neutral-700">
-            New password (optional)
-            <input
-              type="password"
-              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-              value={editForm.password}
-              onChange={(e) => setEditForm((f) => ({ ...f, password: e.target.value }))}
-            />
-          </label>
-        </div>
-        <div className="mt-4">
-          <button
-            type="button"
-            disabled={savingEdit || !editingUserId}
-            className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            onClick={() => void saveUserEdit()}
-          >
-            {savingEdit ? "Saving..." : "Save user changes"}
-          </button>
-        </div>
-      </section>
+              Close editor
+            </button>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm font-medium text-neutral-700">
+              Display name
+              <input
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
+                value={editForm.displayName}
+                onChange={(e) => setEditForm((f) => ({ ...f, displayName: e.target.value }))}
+              />
+            </label>
+            <label className="block text-sm font-medium text-neutral-700">
+              Email
+              <input
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
+                value={editForm.email}
+                onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+              />
+            </label>
+            <label className="block text-sm font-medium text-neutral-700">
+              Role
+              <select
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
+                value={editForm.role}
+                onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value as SessionUser["role"] }))}
+              >
+                {USER_ROLE_OPTIONS.map((r) => (
+                  <option key={r} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm font-medium text-neutral-700">
+              Business unit access
+              <select
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
+                value={editForm.businessUnitAccess}
+                onChange={(e) =>
+                  setEditForm((f) => ({
+                    ...f,
+                    businessUnitAccess: e.target.value as SessionUser["businessUnitAccess"],
+                  }))
+                }
+              >
+                {BU_OPTIONS.map((bu) => (
+                  <option key={bu} value={bu}>
+                    {bu}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm font-medium text-neutral-700">
+              Department keys (comma-separated)
+              <input
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
+                value={editForm.departmentKeys}
+                onChange={(e) => setEditForm((f) => ({ ...f, departmentKeys: e.target.value }))}
+              />
+            </label>
+            <label className="block text-sm font-medium text-neutral-700">
+              New password (optional)
+              <input
+                type="password"
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
+                value={editForm.password}
+                onChange={(e) => setEditForm((f) => ({ ...f, password: e.target.value }))}
+              />
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium text-neutral-700 sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={editForm.canViewSensitiveFinancial}
+                onChange={(e) => setEditForm((f) => ({ ...f, canViewSensitiveFinancial: e.target.checked }))}
+              />
+              Can view sensitive financial data
+            </label>
+          </div>
+          <div className="mt-4">
+            <button
+              type="button"
+              disabled={savingEdit || !editingUserId}
+              className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              onClick={() => void saveUserEdit()}
+            >
+              {savingEdit ? "Saving..." : "Save user changes"}
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-neutral-900">Active users</h2>
@@ -427,6 +464,7 @@ export function UserManagementPage() {
                     <th>Units</th>
                     <th>Sensitive $</th>
                     <th>Departments</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -438,6 +476,15 @@ export function UserManagementPage() {
                       <td>{u.businessUnitAccess}</td>
                       <td>{u.canViewSensitiveFinancial ? "Yes" : "No"}</td>
                       <td>{u.departmentKeys.length ? u.departmentKeys.join(", ") : "—"}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="rounded border border-neutral-300 bg-white px-2 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+                          onClick={() => beginEditUser(u.id)}
+                        >
+                          {editingUserId === u.id ? "Editing" : "Edit"}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
