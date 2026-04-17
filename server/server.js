@@ -1801,7 +1801,7 @@ function mapInventoryRowFromDb(row) {
   return {
     id: String(row.id),
     type: String(row.type),
-    flockId: String(row.flockId),
+    flockId: row.flockId != null ? String(row.flockId) : null,
     at: at instanceof Date ? at.toISOString() : String(at),
     quantityKg: Number(row.quantityKg) || 0,
     deltaKg: Number(row.deltaKg) || 0,
@@ -1818,6 +1818,8 @@ function mapInventoryRowFromDb(row) {
         : approvedAt != null
           ? String(approvedAt)
           : null,
+    feedType: row.feedType != null ? String(row.feedType) : null,
+    feedEntryId: row.feedEntryId != null ? String(row.feedEntryId) : null,
   };
 }
 
@@ -1836,7 +1838,9 @@ async function syncInventoryTransactionsFromDb() {
             reference,
             actor_user_id::text AS "actorUserId",
             approved_by_user_id::text AS "approvedByUserId",
-            approved_at AS "approvedAt"
+            approved_at AS "approvedAt",
+            feed_type AS "feedType",
+            feed_entry_id::text AS "feedEntryId"
        FROM farm_inventory_transactions
       ORDER BY recorded_at DESC, created_at DESC`
   );
@@ -3545,6 +3549,39 @@ app.patch("/api/feed-entries/:id/review", requireAuth, requireFarmAccess, requir
     mem.reviewedAt = new Date().toISOString();
     mem.reviewNotes = reviewNotes;
   }
+
+  // Auto-deduct inventory when a feed log is approved (idempotent via feed_entry_id unique index)
+  if (action === "approve" && hasDb() && isPersistableUuid(entryId) && isPersistableUuid(req.authUser.id)) {
+    const entry = mem ?? flockFeedEntries.find((e) => String(e.id) === entryId);
+    if (entry) {
+      const feedKg = Number(entry.feedKg ?? 0);
+      // Feed type is encoded in notes as "feed_type:starter | ..."
+      const ftMatch = String(entry.notes ?? "").match(/^feed_type:(\w+)/);
+      const feedType = ftMatch ? ftMatch[1] : null;
+      const flockId = entry.flockId && isPersistableUuid(String(entry.flockId)) ? String(entry.flockId) : null;
+      if (feedKg > 0) {
+        try {
+          await dbQuery(
+            `INSERT INTO farm_inventory_transactions (
+               flock_id, transaction_type, recorded_at, quantity_kg, delta_kg,
+               reason, reference, actor_user_id, approved_by_user_id, approved_at,
+               feed_type, feed_entry_id
+             )
+             VALUES ($1::uuid, 'feed_consumption', now(), $2::numeric, $3::numeric,
+                     'approved_feed_log', $4, $5::uuid, $5::uuid, now(),
+                     $6, $7::uuid)
+             ON CONFLICT (feed_entry_id) WHERE feed_entry_id IS NOT NULL DO NOTHING`,
+            [flockId, feedKg, -feedKg, `feed_log:${entryId}`, req.authUser.id, feedType, entryId]
+          );
+          await syncInventoryTransactionsFromDb();
+        } catch (autoErr) {
+          console.error("[ERROR]", "[db] auto-consume inventory on feed-entry approval:", autoErr instanceof Error ? autoErr.message : autoErr);
+          // Non-fatal: review was already saved, don't roll back
+        }
+      }
+    }
+  }
+
   appendAudit(req.authUser.id, req.authUser.role, `farm.feed_entry.${action}`, "feed_entry", entryId, { reviewNotes });
   res.json({ ok: true, status: newStatus });
 });
@@ -4761,10 +4798,10 @@ app.get("/api/reports/slaughter.csv", requireAuth, requireFarmAccess, async (req
 });
 
 function inventoryRowPayload(row) {
-  const fid = String(row.flockId ?? "");
+  const fid = row.flockId != null ? String(row.flockId) : null;
   return {
     ...row,
-    flockLabel: flocksById.get(fid)?.label ?? fid,
+    flockLabel: fid ? (flocksById.get(fid)?.label ?? fid) : null,
   };
 }
 
@@ -4783,6 +4820,46 @@ function computeInventoryBalances(flockId = null) {
   }));
 }
 
+function computeInventoryStockSummary(feedTypeFilter = null) {
+  let rows = inventoryTransactions;
+  if (feedTypeFilter) rows = rows.filter((r) => r.feedType === feedTypeFilter);
+  const byFeedType = new Map();
+  for (const row of rows) {
+    const ft = row.feedType ?? "unspecified";
+    if (!byFeedType.has(ft)) {
+      byFeedType.set(ft, { feedType: ft === "unspecified" ? null : ft, purchasedKg: 0, usedKg: 0, adjustmentsKg: 0 });
+    }
+    const bucket = byFeedType.get(ft);
+    const delta = Number(row.deltaKg || 0);
+    if (row.type === "procurement_receipt") bucket.purchasedKg += delta;
+    else if (row.type === "feed_consumption") bucket.usedKg += Math.abs(delta);
+    else if (row.type === "adjustment") bucket.adjustmentsKg += delta;
+  }
+  const summary = [...byFeedType.values()].map((b) => ({
+    ...b,
+    purchasedKg: Number(b.purchasedKg.toFixed(3)),
+    usedKg: Number(b.usedKg.toFixed(3)),
+    adjustmentsKg: Number(b.adjustmentsKg.toFixed(3)),
+    balanceKg: Number((b.purchasedKg - b.usedKg + b.adjustmentsKg).toFixed(3)),
+  }));
+  summary.sort((a, b) => String(a.feedType ?? "").localeCompare(String(b.feedType ?? "")));
+  return summary;
+}
+
+app.get("/api/inventory/stock-summary", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
+  if (hasDb()) {
+    try {
+      await syncInventoryTransactionsFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET /api/inventory/stock-summary sync:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Inventory stock summary unavailable. Please retry shortly." });
+      return;
+    }
+  }
+  const feedTypeFilter = String(req.query.feed_type ?? "").trim() || null;
+  res.json({ summary: computeInventoryStockSummary(feedTypeFilter) });
+});
+
 app.get("/api/inventory/ledger", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
   if (hasDb()) {
     try {
@@ -4794,12 +4871,14 @@ app.get("/api/inventory/ledger", requireAuth, requireFarmAccess, requirePageAcce
     }
   }
   const flockId = String(req.query.flock_id ?? "").trim();
+  const feedType = String(req.query.feed_type ?? "").trim();
   const type = String(req.query.type ?? "").trim();
   const page = Math.max(1, Number(req.query.page) || 1);
-  const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 30));
+  const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 50));
 
   let list = inventoryTransactions;
   if (flockId) list = list.filter((r) => sameFlockId(r.flockId, flockId));
+  if (feedType) list = list.filter((r) => r.feedType === feedType);
   if (type) list = list.filter((r) => r.type === type);
 
   list = [...list].sort((a, b) => (a.at < b.at ? 1 : -1));
@@ -4829,7 +4908,9 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     return;
   }
   const body = req.body ?? {};
-  const flockId = String(body.flockId ?? "").trim();
+  // flockId is now optional — farm-wide stock when omitted
+  const flockId = String(body.flockId ?? "").trim() || null;
+  const feedType = String(body.feedType ?? "").trim() || null;
   const quantityKg = Number(body.quantityKg);
   const unitCostRwfPerKg =
     body.unitCostRwfPerKg == null || body.unitCostRwfPerKg === "" ? null : Number(body.unitCostRwfPerKg);
@@ -4840,8 +4921,8 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
   }
   const reason = String(body.reason ?? reasonCode).slice(0, 400);
   const reference = String(body.reference ?? "").slice(0, 200);
-  if (!flockId || !flocksById.has(flockId)) {
-    res.status(400).json({ error: "Valid flockId is required" });
+  if (flockId && !flocksById.has(flockId)) {
+    res.status(400).json({ error: "Invalid flockId" });
     return;
   }
   if (!Number.isFinite(quantityKg) || quantityKg <= 0) {
@@ -4856,6 +4937,8 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     id: `inv_${crypto.randomBytes(6).toString("hex")}`,
     type: "procurement_receipt",
     flockId,
+    feedType,
+    feedEntryId: null,
     at: new Date().toISOString(),
     quantityKg,
     deltaKg: quantityKg,
@@ -4867,14 +4950,16 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     approvedAt: null,
   };
   let procurementSavedToDb = false;
-  if (hasDb() && isPersistableUuid(flockId) && isPersistableUuid(req.authUser.id)) {
+  const canPersistActor = isPersistableUuid(req.authUser.id);
+  if (hasDb() && canPersistActor) {
     try {
       const ins = await dbQuery(
         `INSERT INTO farm_inventory_transactions (
            flock_id, transaction_type, recorded_at, quantity_kg, delta_kg,
-           unit_cost_rwf_per_kg, reason, reference, actor_user_id, approved_by_user_id, approved_at
+           unit_cost_rwf_per_kg, reason, reference, actor_user_id, approved_by_user_id, approved_at,
+           feed_type, feed_entry_id
          )
-         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9::uuid, NULL, NULL)
+         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9::uuid, NULL, NULL, $10, NULL)
          RETURNING id::text AS id,
                    transaction_type AS type,
                    flock_id::text AS "flockId",
@@ -4886,7 +4971,9 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
                    reference,
                    actor_user_id::text AS "actorUserId",
                    approved_by_user_id::text AS "approvedByUserId",
-                   approved_at AS "approvedAt"`,
+                   approved_at AS "approvedAt",
+                   feed_type AS "feedType",
+                   feed_entry_id::text AS "feedEntryId"`,
         [
           flockId,
           "procurement_receipt",
@@ -4897,6 +4984,7 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
           reason,
           reference,
           req.authUser.id,
+          feedType,
         ]
       );
       row = mapInventoryRowFromDb(ins.rows[0]);
@@ -4918,9 +5006,10 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
   }
   appendAudit(req.authUser.id, req.authUser.role, "inventory.procurement.create", "inventory", row.id, {
     flockId,
+    feedType,
     quantityKg,
   });
-  res.status(201).json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(flockId) });
+  res.status(201).json({ row: inventoryRowPayload(row), summary: computeInventoryStockSummary() });
 });
 
 app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
@@ -5034,7 +5123,9 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
     return;
   }
   const body = req.body ?? {};
-  const flockId = String(body.flockId ?? "").trim();
+  // flockId is now optional — farm-wide adjustment when omitted
+  const flockId = String(body.flockId ?? "").trim() || null;
+  const feedType = String(body.feedType ?? "").trim() || null;
   const deltaKg = Number(body.deltaKg);
   const reasonCode = String(body.reasonCode ?? "").trim() || "stock_count_correction";
   if (!systemConfig.validateAgainstCategory("inventory_adjust_reason", reasonCode, INVENTORY_REASON_CODES.adjustment)) {
@@ -5042,8 +5133,8 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
     return;
   }
   const reason = String(body.reason ?? reasonCode).slice(0, 400);
-  if (!flockId || !flocksById.has(flockId)) {
-    res.status(400).json({ error: "Valid flockId is required" });
+  if (flockId && !flocksById.has(flockId)) {
+    res.status(400).json({ error: "Invalid flockId" });
     return;
   }
   if (!Number.isFinite(deltaKg) || deltaKg === 0) {
@@ -5054,6 +5145,8 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
     id: `inv_${crypto.randomBytes(6).toString("hex")}`,
     type: "adjustment",
     flockId,
+    feedType,
+    feedEntryId: null,
     at: new Date().toISOString(),
     quantityKg: Math.abs(deltaKg),
     deltaKg,
@@ -5065,14 +5158,15 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
     approvedAt: new Date().toISOString(),
   };
   let adjustmentSavedToDb = false;
-  if (hasDb() && isPersistableUuid(flockId) && isPersistableUuid(req.authUser.id)) {
+  if (hasDb() && isPersistableUuid(req.authUser.id)) {
     try {
       const ins = await dbQuery(
         `INSERT INTO farm_inventory_transactions (
            flock_id, transaction_type, recorded_at, quantity_kg, delta_kg,
-           unit_cost_rwf_per_kg, reason, reference, actor_user_id, approved_by_user_id, approved_at
+           unit_cost_rwf_per_kg, reason, reference, actor_user_id, approved_by_user_id, approved_at,
+           feed_type, feed_entry_id
          )
-         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, NULL, $6, '', $7::uuid, $8::uuid, $9::timestamptz)
+         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, NULL, $6, '', $7::uuid, $8::uuid, $9::timestamptz, $10, NULL)
          RETURNING id::text AS id,
                    transaction_type AS type,
                    flock_id::text AS "flockId",
@@ -5084,7 +5178,9 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
                    reference,
                    actor_user_id::text AS "actorUserId",
                    approved_by_user_id::text AS "approvedByUserId",
-                   approved_at AS "approvedAt"`,
+                   approved_at AS "approvedAt",
+                   feed_type AS "feedType",
+                   feed_entry_id::text AS "feedEntryId"`,
         [
           flockId,
           "adjustment",
@@ -5095,6 +5191,7 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
           req.authUser.id,
           req.authUser.id,
           row.approvedAt,
+          feedType,
         ]
       );
       row = mapInventoryRowFromDb(ins.rows[0]);
@@ -5116,9 +5213,10 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
   }
   appendAudit(req.authUser.id, req.authUser.role, "inventory.adjustment.create", "inventory", row.id, {
     flockId,
+    feedType,
     deltaKg,
   });
-  res.status(201).json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(flockId) });
+  res.status(201).json({ row: inventoryRowPayload(row), summary: computeInventoryStockSummary() });
 });
 
 app.patch("/api/inventory/:id", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {

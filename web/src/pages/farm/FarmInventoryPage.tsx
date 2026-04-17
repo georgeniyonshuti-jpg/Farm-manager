@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "../../components/PageHeader";
-import { useLaborerT } from "../../i18n/laborerI18n";
 import { useAuth } from "../../auth/AuthContext";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { API_BASE_URL } from "../../api/config";
@@ -8,30 +7,39 @@ import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 
-type Flock = { id: string; label: string };
+type StockRow = {
+  feedType: string | null;
+  purchasedKg: number;
+  usedKg: number;
+  adjustmentsKg: number;
+  balanceKg: number;
+};
+
 type LedgerRow = {
   id: string;
   type: "procurement_receipt" | "feed_consumption" | "adjustment";
   at: string;
-  flockId: string;
-  flockLabel: string;
+  flockId: string | null;
+  flockLabel: string | null;
+  feedType: string | null;
+  feedEntryId: string | null;
   quantityKg: number;
   deltaKg: number;
   reason: string;
   reference: string;
 };
 
+const FEED_TYPE_OPTIONS = [
+  { value: "starter", label: "Starter" },
+  { value: "grower", label: "Grower" },
+  { value: "finisher", label: "Finisher" },
+  { value: "supplement", label: "Supplement" },
+];
+
 const PROCUREMENT_REASON_OPTIONS = [
   { value: "supplier_delivery", label: "Supplier delivery" },
   { value: "internal_transfer_in", label: "Internal transfer in" },
   { value: "returned_stock", label: "Returned stock" },
-  { value: "other", label: "Other" },
-];
-
-const CONSUMPTION_REASON_OPTIONS = [
-  { value: "round_feed", label: "Round feed" },
-  { value: "catchup_feed", label: "Catch-up feed" },
-  { value: "spillage_adjusted", label: "Spillage adjusted" },
   { value: "other", label: "Other" },
 ];
 
@@ -42,119 +50,138 @@ const ADJUST_REASON_OPTIONS = [
   { value: "other", label: "Other" },
 ];
 
-function reasonLabel(
-  type: LedgerRow["type"],
-  reason: string,
-  procurement: { value: string; label: string }[],
-  consumption: { value: string; label: string }[],
-  adjust: { value: string; label: string }[],
-): string {
-  const table =
-    type === "procurement_receipt"
-      ? procurement
-      : type === "feed_consumption"
-        ? consumption
-        : adjust;
-  return table.find((x) => x.value === reason)?.label ?? reason;
+function txLabel(type: LedgerRow["type"]): string {
+  if (type === "procurement_receipt") return "Received";
+  if (type === "feed_consumption") return "Used";
+  return "Adjustment";
+}
+
+function txBadgeClass(type: LedgerRow["type"]): string {
+  if (type === "procurement_receipt") return "bg-emerald-100 text-emerald-800";
+  if (type === "feed_consumption") return "bg-amber-100 text-amber-800";
+  return "bg-blue-100 text-blue-800";
+}
+
+function feedTypeLabel(ft: string | null): string {
+  return FEED_TYPE_OPTIONS.find((o) => o.value === ft)?.label ?? ft ?? "—";
 }
 
 export function FarmInventoryPage() {
   const { token, user } = useAuth();
   const procurementReasons = useReferenceOptions("inventory_procurement_reason", token, PROCUREMENT_REASON_OPTIONS);
-  const consumptionReasons = useReferenceOptions("inventory_consumption_reason", token, CONSUMPTION_REASON_OPTIONS);
   const adjustReasons = useReferenceOptions("inventory_adjust_reason", token, ADJUST_REASON_OPTIONS);
   const { showToast } = useToast();
-  const tTitle = useLaborerT("Feed inventory");
-  const tBody = useLaborerT("Role-based stock controls for procurement, feeding, and adjustments.");
-  const [loading, setLoading] = useState(true);
+
+  const [loadingStock, setLoadingStock] = useState(true);
+  const [loadingLedger, setLoadingLedger] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [flocks, setFlocks] = useState<Flock[]>([]);
-  const [flockId, setFlockId] = useState("");
-  const [rows, setRows] = useState<LedgerRow[]>([]);
-  const [balanceKg, setBalanceKg] = useState<number>(0);
+  const [summary, setSummary] = useState<StockRow[]>([]);
+  const [ledger, setLedger] = useState<LedgerRow[]>([]);
+  const [ledgerTotal, setLedgerTotal] = useState(0);
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const PAGE_SIZE = 50;
+
+  // Filters
+  const [feedTypeFilter, setFeedTypeFilter] = useState("");
+
+  // Entry panel state
+  const [showEntryPanel, setShowEntryPanel] = useState(false);
+  const [activeTab, setActiveTab] = useState<"procurement" | "adjustment">("procurement");
   const [busy, setBusy] = useState(false);
 
+  // Procurement form
   const [procQty, setProcQty] = useState("");
+  const [procFeedType, setProcFeedType] = useState("starter");
   const [procReasonCode, setProcReasonCode] = useState("supplier_delivery");
   const [procRef, setProcRef] = useState("");
-  const [feedQty, setFeedQty] = useState<number>(0);
-  const [feedReasonCode, setFeedReasonCode] = useState("round_feed");
+  const [procUnitCost, setProcUnitCost] = useState("");
+
+  // Adjustment form
   const [adjDelta, setAdjDelta] = useState("");
+  const [adjFeedType, setAdjFeedType] = useState("starter");
   const [adjReasonCode, setAdjReasonCode] = useState("stock_count_correction");
-  const [activeTab, setActiveTab] = useState<"procurement" | "consumption" | "adjustment">("procurement");
-  const [showEntryPanel, setShowEntryPanel] = useState(false);
 
   const canProcure =
-    user?.role === "procurement_officer" || user?.role === "vet_manager" || user?.role === "manager" || user?.role === "superuser";
-  const canFeed =
-    user?.role === "laborer" || user?.role === "dispatcher" || user?.role === "vet_manager" || user?.role === "manager" || user?.role === "superuser";
+    user?.role === "procurement_officer" ||
+    user?.role === "vet_manager" ||
+    user?.role === "manager" ||
+    user?.role === "superuser";
   const canAdjust = user?.role === "manager" || user?.role === "superuser";
+  const canRecordAny = canProcure || canAdjust;
 
-  const canRecordAny = canProcure || canFeed || canAdjust;
-
-  function openEntryPanel() {
-    setShowEntryPanel(true);
-    if (canProcure) setActiveTab("procurement");
-    else if (canFeed) setActiveTab("consumption");
-    else if (canAdjust) setActiveTab("adjustment");
-  }
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const loadStock = useCallback(async () => {
+    setLoadingStock(true);
     try {
-      const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
-      const fd = await fr.json();
-      if (!fr.ok) throw new Error(fd.error ?? "Failed to load flocks");
-      const allFlocks = (fd.flocks as Flock[]) ?? [];
-      setFlocks(allFlocks);
-      const selected = flockId || allFlocks[0]?.id || "";
-      setFlockId(selected);
-      if (!selected) {
-        setRows([]);
-        setBalanceKg(0);
-        return;
-      }
-      const [lr, br] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/inventory/ledger?flock_id=${encodeURIComponent(selected)}`, {
-          headers: readAuthHeaders(token),
-        }),
-        fetch(`${API_BASE_URL}/api/inventory/balance?flock_id=${encodeURIComponent(selected)}`, {
-          headers: readAuthHeaders(token),
-        }),
-      ]);
-      const ld = await lr.json();
-      const bd = await br.json();
-      if (!lr.ok) throw new Error(ld.error ?? "Failed to load inventory ledger");
-      if (!br.ok) throw new Error(bd.error ?? "Failed to load balances");
-      setRows((ld.rows as LedgerRow[]) ?? []);
-      const b = ((bd.balances as Array<{ balanceKg: number }>) ?? [])[0]?.balanceKg ?? 0;
-      setBalanceKg(Number(b) || 0);
+      const r = await fetch(`${API_BASE_URL}/api/inventory/stock-summary`, {
+        headers: readAuthHeaders(token),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Failed to load stock summary");
+      setSummary((d as { summary: StockRow[] }).summary ?? []);
+      setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
-      setLoading(false);
+      setLoadingStock(false);
     }
-  }, [token, flockId]);
+  }, [token]);
+
+  const loadLedger = useCallback(async (page = 1) => {
+    setLoadingLedger(true);
+    try {
+      const params = new URLSearchParams({
+        page: String(page),
+        pageSize: String(PAGE_SIZE),
+      });
+      if (feedTypeFilter) params.set("feed_type", feedTypeFilter);
+      const r = await fetch(`${API_BASE_URL}/api/inventory/ledger?${params.toString()}`, {
+        headers: readAuthHeaders(token),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Failed to load ledger");
+      setLedger((d as { rows: LedgerRow[] }).rows ?? []);
+      setLedgerTotal((d as { total: number }).total ?? 0);
+      setLedgerPage(page);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Ledger load failed");
+    } finally {
+      setLoadingLedger(false);
+    }
+  }, [token, feedTypeFilter]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadStock();
+    void loadLedger(1);
+  }, [loadStock, loadLedger]);
 
-  async function post(url: string, body: Record<string, unknown>, okMsg: string) {
-    if (!flockId) return;
+  async function postProcurement() {
+    const qty = Number(procQty);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      showToast("error", "Enter a valid quantity in kg.");
+      return;
+    }
     setBusy(true);
     try {
-      const r = await fetch(`${API_BASE_URL}${url}`, {
+      const r = await fetch(`${API_BASE_URL}/api/inventory/procurement`, {
         method: "POST",
         headers: jsonAuthHeaders(token),
-        body: JSON.stringify({ flockId, ...body }),
+        body: JSON.stringify({
+          feedType: procFeedType,
+          quantityKg: qty,
+          reasonCode: procReasonCode,
+          reason: procReasonCode,
+          reference: procRef,
+          unitCostRwfPerKg: procUnitCost ? Number(procUnitCost) : undefined,
+        }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Request failed");
-      showToast("success", okMsg);
+      showToast("success", `Received ${qty} kg of ${feedTypeLabel(procFeedType)}`);
+      setProcQty("");
+      setProcRef("");
+      setProcUnitCost("");
       setShowEntryPanel(false);
-      await load();
+      await Promise.all([loadStock(), loadLedger(1)]);
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "Request failed");
     } finally {
@@ -162,84 +189,126 @@ export function FarmInventoryPage() {
     }
   }
 
-  const summaryCards = useMemo(
-    () => [
-      { label: "Current balance (kg)", value: balanceKg.toFixed(2) },
-      { label: "Records", value: String(rows.length) },
-      { label: "Role", value: user?.role ?? "-" },
-    ],
-    [balanceKg, rows.length, user?.role]
+  async function postAdjustment() {
+    const delta = Number(adjDelta);
+    if (!Number.isFinite(delta) || delta === 0) {
+      showToast("error", "Enter a non-zero delta in kg (use - for losses).");
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/inventory/adjustments`, {
+        method: "POST",
+        headers: jsonAuthHeaders(token),
+        body: JSON.stringify({
+          feedType: adjFeedType,
+          deltaKg: delta,
+          reasonCode: adjReasonCode,
+          reason: adjReasonCode,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Request failed");
+      showToast("success", `Adjustment saved (${delta > 0 ? "+" : ""}${delta} kg)`);
+      setAdjDelta("");
+      setShowEntryPanel(false);
+      await Promise.all([loadStock(), loadLedger(1)]);
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const totalBalance = useMemo(
+    () => summary.reduce((s, r) => s + r.balanceKg, 0),
+    [summary]
   );
+
+  const totalPages = Math.ceil(ledgerTotal / PAGE_SIZE);
+
+  const loading = loadingStock && loadingLedger;
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <PageHeader title={tTitle} subtitle={tBody} />
+      <PageHeader
+        title="Feed stock"
+        subtitle="Farm-wide feed inventory — purchases in, approved logs out, balance remaining."
+      />
 
-      {loading ? <SkeletonList rows={3} /> : null}
-      {!loading && error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
+      {loading && <SkeletonList rows={4} />}
+      {!loading && error && <ErrorState message={error} onRetry={() => { void loadStock(); void loadLedger(1); }} />}
 
-      {!loading && !error ? (
+      {!loading && !error && (
         <>
-          <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-            <div className="grid gap-3 sm:grid-cols-3">
-              {summaryCards.map((c) => (
-                <div key={c.label} className="rounded-lg border border-neutral-200 p-3 text-sm">
-                  <p className="text-neutral-500">{c.label}</p>
-                  <p className="font-semibold text-neutral-900">{c.value}</p>
-                </div>
-              ))}
+          {/* ── Stock summary by feed type ── */}
+          <section className="rounded-xl border border-neutral-200 bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 px-4 py-3">
+              <h2 className="text-sm font-semibold text-neutral-900">
+                Stock summary
+                <span className="ml-2 font-normal text-neutral-500">— all feed types</span>
+              </h2>
+              <span className="text-sm font-semibold text-emerald-800">
+                Total: {totalBalance.toFixed(1)} kg
+              </span>
             </div>
-            <div className="mt-3">
-              <label className="mb-1 block text-sm font-medium text-neutral-700">Flock</label>
-              <select
-                className="w-full rounded-lg border border-neutral-300 px-3 py-2"
-                value={flockId}
-                onChange={(e) => setFlockId(e.target.value)}
-              >
-                {flocks.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.label}
-                  </option>
-                ))}
-              </select>
+            <div className="table-block">
+              <div className="institutional-table-wrapper">
+                <table className="institutional-table">
+                  <thead>
+                    <tr>
+                      <th>Feed type</th>
+                      <th className="tbl-num">Purchased (kg)</th>
+                      <th className="tbl-num">Used (kg)</th>
+                      <th className="tbl-num">Adjustments (kg)</th>
+                      <th className="tbl-num">Balance (kg)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="py-6 text-center text-sm text-neutral-500">
+                          No stock movements recorded yet.
+                        </td>
+                      </tr>
+                    ) : (
+                      summary.map((row) => (
+                        <tr
+                          key={row.feedType ?? "unspecified"}
+                          className={row.balanceKg < 0 ? "bg-red-50" : ""}
+                        >
+                          <td className="font-medium">{feedTypeLabel(row.feedType)}</td>
+                          <td className="tbl-num text-emerald-700">+{row.purchasedKg.toFixed(1)}</td>
+                          <td className="tbl-num text-amber-700">−{row.usedKg.toFixed(1)}</td>
+                          <td className={`tbl-num ${row.adjustmentsKg < 0 ? "text-red-700" : "text-blue-700"}`}>
+                            {row.adjustmentsKg >= 0 ? "+" : ""}{row.adjustmentsKg.toFixed(1)}
+                          </td>
+                          <td className={`tbl-num font-semibold ${row.balanceKg < 0 ? "text-red-700" : "text-neutral-900"}`}>
+                            {row.balanceKg.toFixed(1)}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-
-          <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold text-neutral-900">Inventory ledger</h2>
-              <a
-                href={`${API_BASE_URL}/api/reports/feed-inventory.csv${flockId ? `?flockId=${encodeURIComponent(flockId)}` : ""}`}
-                className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
-                download
-              >
-                Export CSV
-              </a>
-            </div>
-            <div className="mt-3 space-y-2">
-              {rows.map((r) => (
-                <div key={r.id} className="rounded-lg border border-neutral-200 p-3 text-sm">
-                  <p className="font-medium text-neutral-900">
-                    {r.type} - {r.deltaKg >= 0 ? "+" : ""}{r.deltaKg} kg
-                  </p>
-                  <p className="text-neutral-600">
-                    {reasonLabel(r.type, r.reason, procurementReasons, consumptionReasons, adjustReasons) || "—"}
-                  </p>
-                  <p className="text-xs text-neutral-500">
-                    {new Date(r.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
-                  </p>
-                </div>
-              ))}
-              {!rows.length ? <p className="text-sm text-neutral-500">No inventory records yet.</p> : null}
-            </div>
+            <p className="px-4 py-2 text-xs text-neutral-400">
+              "Used" counts only approved feed logs and manual consumption entries. Pending feed logs are not deducted until approved.
+            </p>
           </section>
 
-          {canRecordAny ? (
+          {/* ── Quick actions ── */}
+          {canRecordAny && (
             <div className="flex flex-wrap items-center gap-2">
               {!showEntryPanel ? (
                 <button
                   type="button"
-                  onClick={() => openEntryPanel()}
+                  onClick={() => {
+                    setShowEntryPanel(true);
+                    if (canProcure) setActiveTab("procurement");
+                    else setActiveTab("adjustment");
+                  }}
                   className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
                 >
                   New transaction
@@ -250,16 +319,17 @@ export function FarmInventoryPage() {
                   onClick={() => setShowEntryPanel(false)}
                   className="rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
                 >
-                  Close entry form
+                  Close form
                 </button>
               )}
             </div>
-          ) : null}
+          )}
 
-          {showEntryPanel && canRecordAny ? (
+          {/* ── Entry panel ── */}
+          {showEntryPanel && canRecordAny && (
             <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
               <div className="flex flex-wrap gap-2 border-b border-neutral-100 pb-3">
-                {canProcure ? (
+                {canProcure && (
                   <button
                     type="button"
                     className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "procurement" ? "border-emerald-700 bg-emerald-50 text-emerald-900" : "border-neutral-300 text-neutral-700"}`}
@@ -267,17 +337,8 @@ export function FarmInventoryPage() {
                   >
                     Receive stock
                   </button>
-                ) : null}
-                {canFeed ? (
-                  <button
-                    type="button"
-                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "consumption" ? "border-emerald-700 bg-emerald-50 text-emerald-900" : "border-neutral-300 text-neutral-700"}`}
-                    onClick={() => setActiveTab("consumption")}
-                  >
-                    Log consumption
-                  </button>
-                ) : null}
-                {canAdjust ? (
+                )}
+                {canAdjust && (
                   <button
                     type="button"
                     className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "adjustment" ? "border-emerald-700 bg-emerald-50 text-emerald-900" : "border-neutral-300 text-neutral-700"}`}
@@ -285,92 +346,244 @@ export function FarmInventoryPage() {
                   >
                     Adjust stock
                   </button>
-                ) : null}
+                )}
               </div>
-              <div className="mt-4 space-y-4">
-          {canProcure && activeTab === "procurement" ? (
-            <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <h2 className="text-sm font-semibold text-neutral-900">Procurement receipt</h2>
-              <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Quantity kg" inputMode="decimal" value={procQty} onChange={(e) => setProcQty(e.target.value)} />
-                <select className="rounded-lg border border-neutral-300 px-3 py-2" value={procReasonCode} onChange={(e) => setProcReasonCode(e.target.value)}>
-                  {procurementReasons.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-                <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Reference (invoice/GRN)" value={procRef} onChange={(e) => setProcRef(e.target.value)} />
-              </div>
-              <button
-                disabled={busy || !procQty}
-                onClick={() =>
-                  void post(
-                    "/api/inventory/procurement",
-                    { quantityKg: Number(procQty), reasonCode: procReasonCode, reason: procReasonCode, reference: procRef },
-                    "Stock received"
-                  )
-                }
-                className="mt-3 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-              >
-                Save procurement
-              </button>
-            </section>
-          ) : null}
 
-          {canFeed && activeTab === "consumption" ? (
-            <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <h2 className="text-sm font-semibold text-neutral-900">Feed consumption</h2>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <div className="space-y-2 rounded-lg border border-neutral-300 px-3 py-2">
-                  <p className="text-xs font-medium text-neutral-600">Consumption quantity (kg)</p>
-                  <div className="flex items-center gap-2">
-                    <button type="button" className="rounded border border-neutral-300 px-2 py-1 text-xs" onClick={() => setFeedQty((v) => Math.max(0, Number((v - 5).toFixed(2))))}>-5</button>
-                    <button type="button" className="rounded border border-neutral-300 px-2 py-1 text-xs" onClick={() => setFeedQty((v) => Math.max(0, Number((v - 1).toFixed(2))))}>-1</button>
-                    <input readOnly className="w-full rounded border border-neutral-200 bg-neutral-50 px-2 py-1 text-center text-sm font-semibold" value={feedQty.toFixed(2)} />
-                    <button type="button" className="rounded border border-neutral-300 px-2 py-1 text-xs" onClick={() => setFeedQty((v) => Number((v + 1).toFixed(2)))}>+1</button>
-                    <button type="button" className="rounded border border-neutral-300 px-2 py-1 text-xs" onClick={() => setFeedQty((v) => Number((v + 5).toFixed(2)))}>+5</button>
+              {canProcure && activeTab === "procurement" && (
+                <div className="mt-4 space-y-3">
+                  <h3 className="text-sm font-semibold text-neutral-800">Receive stock</h3>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-neutral-600">Feed type</label>
+                      <select
+                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        value={procFeedType}
+                        onChange={(e) => setProcFeedType(e.target.value)}
+                      >
+                        {FEED_TYPE_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-neutral-600">Quantity (kg)</label>
+                      <input
+                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        placeholder="e.g. 500"
+                        inputMode="decimal"
+                        value={procQty}
+                        onChange={(e) => setProcQty(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-neutral-600">Reason</label>
+                      <select
+                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        value={procReasonCode}
+                        onChange={(e) => setProcReasonCode(e.target.value)}
+                      >
+                        {procurementReasons.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-neutral-600">Reference (GRN / invoice)</label>
+                      <input
+                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        placeholder="Optional"
+                        value={procRef}
+                        onChange={(e) => setProcRef(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-neutral-600">Unit cost (RWF/kg, optional)</label>
+                      <input
+                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        placeholder="e.g. 450"
+                        inputMode="decimal"
+                        value={procUnitCost}
+                        onChange={(e) => setProcUnitCost(e.target.value)}
+                      />
+                    </div>
                   </div>
+                  <button
+                    type="button"
+                    disabled={busy || !procQty}
+                    onClick={() => void postProcurement()}
+                    className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  >
+                    {busy ? "Saving…" : "Save receipt"}
+                  </button>
                 </div>
-                <select className="rounded-lg border border-neutral-300 px-3 py-2" value={feedReasonCode} onChange={(e) => setFeedReasonCode(e.target.value)}>
-                  {consumptionReasons.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-              <button
-                disabled={busy || feedQty <= 0}
-                onClick={() => void post("/api/inventory/feed-consumption", { quantityKg: feedQty, reasonCode: feedReasonCode, reason: feedReasonCode }, "Feed usage logged")}
-                className="mt-3 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-              >
-                Save feed usage
-              </button>
-            </section>
-          ) : null}
+              )}
 
-          {canAdjust && activeTab === "adjustment" ? (
-            <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <h2 className="text-sm font-semibold text-neutral-900">Manager adjustment</h2>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Delta kg (+/-)" inputMode="decimal" value={adjDelta} onChange={(e) => setAdjDelta(e.target.value)} />
-                <select className="rounded-lg border border-neutral-300 px-3 py-2" value={adjReasonCode} onChange={(e) => setAdjReasonCode(e.target.value)}>
-                  {adjustReasons.map((o) => (
+              {canAdjust && activeTab === "adjustment" && (
+                <div className="mt-4 space-y-3">
+                  <h3 className="text-sm font-semibold text-neutral-800">Manual adjustment</h3>
+                  <p className="text-xs text-neutral-500">Use negative values for losses (damage, expiry, count corrections).</p>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-neutral-600">Feed type</label>
+                      <select
+                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        value={adjFeedType}
+                        onChange={(e) => setAdjFeedType(e.target.value)}
+                      >
+                        {FEED_TYPE_OPTIONS.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-neutral-600">Delta kg (+/-)</label>
+                      <input
+                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        placeholder="e.g. -20 or +50"
+                        inputMode="decimal"
+                        value={adjDelta}
+                        onChange={(e) => setAdjDelta(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-neutral-600">Reason</label>
+                      <select
+                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        value={adjReasonCode}
+                        onChange={(e) => setAdjReasonCode(e.target.value)}
+                      >
+                        {adjustReasons.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy || !adjDelta}
+                    onClick={() => void postAdjustment()}
+                    className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  >
+                    {busy ? "Saving…" : "Save adjustment"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Ledger ── */}
+          <section className="rounded-xl border border-neutral-200 bg-white shadow-sm">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 px-4 py-3">
+              <h2 className="text-sm font-semibold text-neutral-900">Transaction ledger</h2>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs"
+                  value={feedTypeFilter}
+                  onChange={(e) => setFeedTypeFilter(e.target.value)}
+                >
+                  <option value="">All feed types</option>
+                  {FEED_TYPE_OPTIONS.map((o) => (
                     <option key={o.value} value={o.value}>{o.label}</option>
                   ))}
                 </select>
-              </div>
-              <button
-                disabled={busy || !adjDelta}
-                onClick={() => void post("/api/inventory/adjustments", { deltaKg: Number(adjDelta), reasonCode: adjReasonCode, reason: adjReasonCode }, "Adjustment saved")}
-                className="mt-3 rounded-lg bg-neutral-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-              >
-                Save adjustment
-              </button>
-            </section>
-          ) : null}
+                <a
+                  href={`${API_BASE_URL}/api/reports/feed-inventory.csv${feedTypeFilter ? `?feed_type=${encodeURIComponent(feedTypeFilter)}` : ""}`}
+                  className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+                  download
+                >
+                  Export CSV
+                </a>
               </div>
             </div>
-          ) : null}
+
+            {loadingLedger ? (
+              <div className="p-4"><SkeletonList rows={3} /></div>
+            ) : (
+              <>
+                <div className="table-block">
+                  <div className="institutional-table-wrapper">
+                    <table className="institutional-table">
+                      <thead>
+                        <tr>
+                          <th>Date / time</th>
+                          <th>Type</th>
+                          <th>Feed type</th>
+                          <th className="tbl-num">Qty (kg)</th>
+                          <th className="tbl-num">Delta (kg)</th>
+                          <th>Reason</th>
+                          <th>Flock / reference</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ledger.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="py-6 text-center text-sm text-neutral-500">
+                              No transactions found.
+                            </td>
+                          </tr>
+                        ) : (
+                          ledger.map((row) => (
+                            <tr key={row.id}>
+                              <td className="tbl-mono whitespace-nowrap">
+                                {new Date(row.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
+                              </td>
+                              <td>
+                                <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${txBadgeClass(row.type)}`}>
+                                  {txLabel(row.type)}
+                                </span>
+                                {row.feedEntryId && (
+                                  <span className="ml-1 inline-block rounded-full bg-neutral-100 px-1.5 py-0.5 text-[9px] font-medium text-neutral-500">
+                                    auto
+                                  </span>
+                                )}
+                              </td>
+                              <td>{feedTypeLabel(row.feedType)}</td>
+                              <td className="tbl-num">{row.quantityKg.toFixed(1)}</td>
+                              <td className={`tbl-num font-semibold ${row.deltaKg >= 0 ? "text-emerald-700" : "text-amber-700"}`}>
+                                {row.deltaKg >= 0 ? "+" : ""}{row.deltaKg.toFixed(1)}
+                              </td>
+                              <td className="text-neutral-600">{row.reason || "—"}</td>
+                              <td className="tbl-mono text-neutral-500">
+                                {row.flockLabel ?? row.reference ?? "—"}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between border-t border-neutral-100 px-4 py-3">
+                    <span className="text-xs text-neutral-500">
+                      Page {ledgerPage} of {totalPages} ({ledgerTotal} total)
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={ledgerPage <= 1}
+                        onClick={() => void loadLedger(ledgerPage - 1)}
+                        className="rounded border border-neutral-300 px-2 py-1 text-xs disabled:opacity-40"
+                      >
+                        ← Prev
+                      </button>
+                      <button
+                        type="button"
+                        disabled={ledgerPage >= totalPages}
+                        onClick={() => void loadLedger(ledgerPage + 1)}
+                        className="rounded border border-neutral-300 px-2 py-1 text-xs disabled:opacity-40"
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </section>
         </>
-      ) : null}
+      )}
     </div>
   );
 }

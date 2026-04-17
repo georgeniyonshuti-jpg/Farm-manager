@@ -72,7 +72,11 @@ export function FarmFeedPage() {
     try {
       const [er, br] = await Promise.all([
         fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/feed-entries?limit=25`, { headers: readAuthHeaders(token) }),
-        fetch(`${API_BASE_URL}/api/inventory/balance?flock_id=${encodeURIComponent(flockId)}`, { headers: readAuthHeaders(token) }),
+        // Farm-wide balance for the selected feed type
+        fetch(
+          `${API_BASE_URL}/api/inventory/stock-summary${feedType ? `?feed_type=${encodeURIComponent(feedType)}` : ""}`,
+          { headers: readAuthHeaders(token) }
+        ),
       ]);
       const ed = await er.json();
       if (!er.ok) throw new Error((ed as { error?: string }).error ?? "Entries failed");
@@ -80,8 +84,14 @@ export function FarmFeedPage() {
       setEntriesError(null);
       try {
         const bd = await br.json();
-        const bal = ((bd as { balances?: Array<{ balanceKg: number }> }).balances ?? [])[0]?.balanceKg;
-        setInventoryBalanceKg(typeof bal === "number" ? bal : null);
+        const rows = (bd as { summary?: Array<{ feedType: string | null; balanceKg: number }> }).summary ?? [];
+        const matchedRow = feedType
+          ? rows.find((r) => r.feedType === feedType)
+          : rows.reduce(
+              (acc, r) => ({ feedType: null, balanceKg: acc.balanceKg + r.balanceKg }),
+              { feedType: null, balanceKg: 0 }
+            );
+        setInventoryBalanceKg(matchedRow?.balanceKg ?? null);
       } catch {
         setInventoryBalanceKg(null);
       }
@@ -89,7 +99,7 @@ export function FarmFeedPage() {
       setEntries([]);
       setEntriesError(e instanceof Error ? e.message : "Entries failed");
     }
-  }, [flockId, token]);
+  }, [flockId, token, feedType]);
 
   useEffect(() => {
     void loadFeedEntries();
@@ -236,8 +246,15 @@ export function FarmFeedPage() {
             <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
               <span className="font-semibold text-emerald-900">{tFeedStock}</span>
               <span className="font-mono tabular-nums text-emerald-800">{inventoryBalanceKg.toFixed(2)} kg</span>
+              <span className="ml-auto text-[10px] font-medium text-emerald-700 opacity-70">
+                {feedType ? feedTypeOptions.find((o) => o.value === feedType)?.label ?? feedType : "all types"}
+              </span>
             </div>
           ) : null}
+
+          <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-2 text-xs text-blue-700">
+            <TranslatedText text="Stock is deducted automatically when your feed log is approved by a manager." />
+          </div>
 
           {entriesError ? (
             <p className="text-sm text-amber-800" role="status">
