@@ -41,6 +41,11 @@ import { buildBroilerPdfBuffer } from "./business-model/pdfBroiler.js";
 import { extractLiveDbActuals } from "./business-model/liveDbActuals.js";
 import { projectionToCsv, varianceToCsv, compareToCsv, heatmapsToCsv } from "./business-model/exportCsv.js";
 import accountingRouter from "./src/routes/accounting.js";
+import accountingApprovalsRouter, { initAccountingApprovalsRouter } from "./src/routes/accountingApprovals.js";
+import ias41Router, { initIas41Service } from "./src/routes/ias41Routes.js";
+import reconciliationRouter, { initReconciliationRouter } from "./src/routes/accountingReconciliation.js";
+import { initOdooSyncWorker, processOdooSyncOutbox, enqueueOdooSync } from "./src/services/odoo/odooSyncWorker.js";
+import { mapFeedProcurementToBill, mapMedicineLotToBill, mapSlaughterToJournalEntry } from "./src/services/odoo/odooFarmMappers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -4410,6 +4415,15 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
     perf = null;
   }
   appendAudit(req.authUser.id, req.authUser.role, "flock.slaughter.create", "flock", f.id, { slaughterId: row.id });
+
+  // Accounting: always pending_approval for slaughter (manager must confirm fair value)
+  if (hasDb()) {
+    dbQuery(
+      `UPDATE flock_slaughter_events SET accounting_status = 'pending_approval' WHERE id = $1`,
+      [row.id]
+    ).catch((e) => console.error("[ERROR]", "[accounting] slaughter accounting_status:", e instanceof Error ? e.message : e));
+  }
+
   res.status(201).json({ slaughter: row, fcr: perf?.fcr ?? null, performance: perf });
 });
 
@@ -5010,6 +5024,39 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     feedType,
     quantityKg,
   });
+
+  // Accounting: auto-approve + enqueue Odoo sync if manager+; otherwise set pending_approval
+  const feedProcRole = ROLE_RANK[req.authUser.role] ?? -1;
+  const isManagerLevel = feedProcRole >= ROLE_RANK["manager"];
+  if (hasDb() && procurementSavedToDb && row.id) {
+    const acctStatus = isManagerLevel ? "approved" : "pending_approval";
+    try {
+      await dbQuery(
+        `UPDATE farm_inventory_transactions
+            SET accounting_status = $1
+          WHERE id::text = $2`,
+        [acctStatus, row.id]
+      );
+    } catch (e) {
+      console.error("[ERROR]", "[accounting] set feed proc accounting_status:", e instanceof Error ? e.message : e);
+    }
+    if (isManagerLevel && unitCostRwfPerKg != null) {
+      const payload = mapFeedProcurementToBill({
+        ...row,
+        at: row.at,
+        supplierName: String(req.body?.supplierName ?? "").trim() || null,
+      });
+      enqueueOdooSync({
+        sourceTable: "farm_inventory_transactions",
+        sourceId: row.id,
+        eventType: "feed_purchase",
+        payload,
+        triggeredByUserId: req.authUser.id,
+        triggeredByRole: req.authUser.role,
+      }).catch(() => {});
+    }
+  }
+
   res.status(201).json({ row: inventoryRowPayload(row), summary: computeInventoryStockSummary() });
 });
 
@@ -6772,6 +6819,40 @@ app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requirePageAccess
       medicineId,
       quantityReceived,
     });
+
+    // Accounting: manager+ auto-approves + enqueues; lower roles => pending_approval
+    const medLotRole = ROLE_RANK[req.authUser.role] ?? -1;
+    const medIsManager = medLotRole >= ROLE_RANK["manager"];
+    const medLotId = ins.rows[0]?.id?.toString?.() ?? null;
+    if (medLotId) {
+      const medAcctStatus = medIsManager ? "approved" : "pending_approval";
+      const unitCostRwf = body.unitCostRwf == null ? null : Number(body.unitCostRwf);
+      await client.query(
+        `UPDATE medicine_lots SET accounting_status = $1, unit_cost_rwf = $2 WHERE id::text = $3`,
+        [medAcctStatus, unitCostRwf ?? null, medLotId]
+      ).catch(() => {});
+      if (medIsManager && unitCostRwf != null) {
+        const medName = String(body.medicineName ?? "Medicine");
+        const medPayload = mapMedicineLotToBill({
+          id: medLotId,
+          medicineName: medName,
+          lotNumber,
+          quantityReceived,
+          unitCostRwf,
+          supplier,
+          receivedAt,
+        });
+        enqueueOdooSync({
+          sourceTable: "medicine_lots",
+          sourceId: medLotId,
+          eventType: "medicine_purchase",
+          payload: medPayload,
+          triggeredByUserId: req.authUser.id,
+          triggeredByRole: req.authUser.role,
+        }).catch(() => {});
+      }
+    }
+
     res.status(201).json({ lot: ins.rows[0] });
   } catch (e) {
     try { await client.query("ROLLBACK"); } catch {}
@@ -7477,6 +7558,9 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
 });
 
 app.use("/api/accounting", accountingRouter);
+app.use("/api/accounting-approvals", requireAuth, accountingApprovalsRouter);
+app.use("/api/ias41", requireAuth, ias41Router);
+app.use("/api/accounting-reconciliation", requireAuth, reconciliationRouter);
 
 // FIX: generic 404 handler
 app.use((_req, res) => {
@@ -7519,6 +7603,20 @@ app.use((err, _req, res, _next) => {
       process.exit(1);
     }
   }
+
+  // Init Odoo sync worker and accounting approvals router with DB access
+  initOdooSyncWorker(dbQuery, hasDb);
+  initAccountingApprovalsRouter(dbQuery, hasDb);
+  initIas41Service(dbQuery, hasDb);
+  initReconciliationRouter(dbQuery, hasDb);
+  // Background worker: process any unprocessed outbox rows every 5 minutes
+  setInterval(() => {
+    if (hasDb()) {
+      processOdooSyncOutbox(10).catch((e) => {
+        console.error("[ERROR]", "[odoo-worker] background run:", e instanceof Error ? e.message : e);
+      });
+    }
+  }, 5 * 60 * 1000);
 
   if (hasDb()) {
     try {

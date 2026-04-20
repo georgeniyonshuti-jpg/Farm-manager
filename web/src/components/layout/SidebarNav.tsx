@@ -106,6 +106,12 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
       ? { to: "/laborer/earnings", label: "My earnings" }
       : null;
 
+  const accountingApprovalsNavItem: NavItem | null =
+    activeWorkspace === "farm" &&
+    (user.role === "manager" || user.role === "superuser")
+      ? { to: "/farm/accounting-approvals", label: "Accounting approvals" }
+      : null;
+
   const farmExtras = [
     laborerEarningsItem,
     flocksItem,
@@ -116,6 +122,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
     treatmentNavItem,
     slaughterNavItem,
     cycleFcrNavItem,
+    accountingApprovalsNavItem,
   ].filter(Boolean) as NavItem[];
   const farmCore = farmCoreNavItems(user).filter((item) => {
     const byPath: Record<string, string> = {

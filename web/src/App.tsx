@@ -40,6 +40,7 @@ import { SystemStatus } from "./components/SystemStatus";
 import { InstallPromptBanner } from "./components/pwa/InstallPromptBanner";
 import { FarmTreatmentPage } from "./pages/farm/FarmTreatmentPage";
 import { FarmSlaughterPage } from "./pages/farm/FarmSlaughterPage";
+import { AccountingApprovalsPage } from "./pages/farm/AccountingApprovalsPage";
 import { FARM_FIELD_OPS_ROLES } from "./auth/permissions";
 import { useAuth } from "./auth/AuthContext";
 import { AppLoadingScreen } from "./components/AppLoadingScreen";
@@ -233,6 +234,14 @@ function AppRoutes() {
               element={
                 <ProtectedRoute roles={["manager", "vet_manager", "superuser"]}>
                   <PayrollImpactPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="accounting-approvals"
+              element={
+                <ProtectedRoute roles={["manager", "superuser"]}>
+                  <AccountingApprovalsPage />
                 </ProtectedRoute>
               }
             />
