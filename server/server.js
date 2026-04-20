@@ -40,6 +40,7 @@ import { buildInvestorPdfBuffer } from "./business-model/pdfInvestor.js";
 import { buildBroilerPdfBuffer } from "./business-model/pdfBroiler.js";
 import { extractLiveDbActuals } from "./business-model/liveDbActuals.js";
 import { projectionToCsv, varianceToCsv, compareToCsv, heatmapsToCsv } from "./business-model/exportCsv.js";
+import accountingRouter from "./src/routes/accounting.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -7474,6 +7475,8 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
     res.status(503).json({ error: "Unable to build operations board." });
   }
 });
+
+app.use("/api/accounting", accountingRouter);
 
 // FIX: generic 404 handler
 app.use((_req, res) => {
