@@ -827,6 +827,226 @@ function normalizeQueueRow(row) {
   };
 }
 
+const TRACE_SOURCE_TABLES = {
+  farm_inventory_transactions: {
+    idCast: "::text",
+    statusField: "accounting_status",
+    selectSql: `
+      SELECT id::text AS id, transaction_type, feed_type, quantity_kg, unit_cost_rwf_per_kg, supplier_name,
+             recorded_at, accounting_status, accounting_approved_at
+        FROM farm_inventory_transactions
+       WHERE id::text = $1
+       LIMIT 1`,
+  },
+  medicine_lots: {
+    idCast: "::text",
+    statusField: "accounting_status",
+    selectSql: `
+      SELECT l.id::text AS id, l.lot_number, l.quantity_received, l.unit_cost_rwf, l.supplier,
+             l.received_at, l.accounting_status, l.accounting_approved_at,
+             m.name AS medicine_name
+        FROM medicine_lots l
+        LEFT JOIN medicine_inventory m ON m.id = l.medicine_id
+       WHERE l.id::text = $1
+       LIMIT 1`,
+  },
+  flock_slaughter_events: {
+    idCast: "::text",
+    statusField: "accounting_status",
+    selectSql: `
+      SELECT s.id::text AS id, s.flock_id::text AS flock_id, s.birds_slaughtered, s.avg_live_weight_kg,
+             s.avg_carcass_weight_kg, s.fair_value_rwf, s.at, s.accounting_status, s.accounting_approved_at,
+             f.code AS flock_code
+        FROM flock_slaughter_events s
+        LEFT JOIN poultry_flocks f ON f.id::text = s.flock_id::text
+       WHERE s.id::text = $1
+       LIMIT 1`,
+  },
+  poultry_sales_orders: {
+    idCast: "::text",
+    statusField: "accounting_status",
+    selectSql: `
+      SELECT s.id::text AS id, s.flock_id::text AS flock_id, s.order_date, s.number_of_birds, s.total_weight_kg,
+             s.price_per_kg, s.buyer_name, s.buyer_email, s.submission_status, s.accounting_status, s.reviewed_at,
+             f.code AS flock_code
+        FROM poultry_sales_orders s
+        LEFT JOIN poultry_flocks f ON f.id = s.flock_id
+       WHERE s.id::text = $1
+       LIMIT 1`,
+  },
+  flock_mortality_events: {
+    idCast: "::text",
+    statusField: "accounting_status",
+    selectSql: `
+      SELECT m.id::text AS id, m.flock_id::text AS flock_id, m.count, m.cause, m.notes,
+             m.impairment_value_rwf, m.at, m.accounting_status, m.accounting_approved_at,
+             f.code AS flock_code
+        FROM flock_mortality_events m
+        LEFT JOIN poultry_flocks f ON f.id::text = m.flock_id::text
+       WHERE m.id::text = $1
+       LIMIT 1`,
+  },
+  payroll_period_closures: {
+    idCast: "::text",
+    statusField: "accounting_status",
+    selectSql: `
+      SELECT id::text AS id, period_start, period_end, net_payroll_rwf, worker_count, notes,
+             accounting_status, approved_at
+        FROM payroll_period_closures
+       WHERE id::text = $1
+       LIMIT 1`,
+  },
+  poultry_flocks: {
+    idCast: "::text",
+    statusField: "bio_asset_accounting_status",
+    selectSql: `
+      SELECT id::text AS id, code, initial_count, placement_date, purchase_cost_rwf, cost_per_chick_rwf,
+             purchase_supplier, purchase_date, bio_asset_accounting_status
+        FROM poultry_flocks
+       WHERE id::text = $1
+       LIMIT 1`,
+  },
+};
+
+/**
+ * GET /api/accounting-approvals/trace?sourceTable=&sourceId=
+ * Deep diagnostics for one accounting-impact source row:
+ * - source snapshot (including accounting status fields)
+ * - outbox row + payload + error
+ * - sync link row
+ * - timeline of key events
+ */
+router.get("/trace", async (req, res) => {
+  if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+
+  const sourceTable = String(req.query.sourceTable ?? "").trim();
+  const sourceId = String(req.query.sourceId ?? "").trim();
+  if (!sourceTable || !sourceId) {
+    return res.status(400).json({ error: "sourceTable and sourceId are required query params." });
+  }
+  const sourceMeta = TRACE_SOURCE_TABLES[sourceTable];
+  if (!sourceMeta) {
+    return res.status(400).json({
+      error: "Unsupported sourceTable for trace.",
+      allowed: Object.keys(TRACE_SOURCE_TABLES),
+    });
+  }
+
+  try {
+    const [sourceRowResult, outboxResult, linkResult] = await Promise.all([
+      dbQuery(sourceMeta.selectSql, [sourceId]),
+      dbQuery(
+        `SELECT id::text AS id, source_table, source_id, event_type, status, payload, attempts,
+                next_retry_at, last_attempted_at, last_error, odoo_move_id, odoo_move_name,
+                odoo_move_state, created_at, updated_at
+           FROM odoo_sync_outbox
+          WHERE source_table = $1 AND source_id = $2
+          ORDER BY created_at DESC
+          LIMIT 1`,
+        [sourceTable, sourceId]
+      ),
+      dbQuery(
+        `SELECT source_table, source_id, odoo_move_id, odoo_move_name, odoo_move_type, odoo_move_state, synced_at
+           FROM odoo_sync_links
+          WHERE source_table = $1 AND source_id = $2
+          LIMIT 1`,
+        [sourceTable, sourceId]
+      ),
+    ]);
+
+    const sourceRecord = sourceRowResult.rows[0] ?? null;
+    const outbox = outboxResult.rows[0] ?? null;
+    const link = linkResult.rows[0] ?? null;
+
+    if (!sourceRecord && !outbox && !link) {
+      return res.status(404).json({ error: "No matching source record, outbox row, or sync link found." });
+    }
+
+    const timeline = [
+      sourceRecord
+        ? {
+            at: sourceRecord.recorded_at
+              ?? sourceRecord.received_at
+              ?? sourceRecord.at
+              ?? sourceRecord.order_date
+              ?? sourceRecord.placement_date
+              ?? sourceRecord.period_start
+              ?? null,
+            event: "source_record_present",
+            detail: `${sourceTable}:${sourceId}`,
+          }
+        : null,
+      sourceRecord?.[sourceMeta.statusField] != null
+        ? {
+            at:
+              sourceRecord.accounting_approved_at
+              ?? sourceRecord.approved_at
+              ?? sourceRecord.reviewed_at
+              ?? null,
+            event: "source_accounting_status",
+            detail: String(sourceRecord[sourceMeta.statusField]),
+          }
+        : null,
+      outbox
+        ? {
+            at: outbox.created_at ?? null,
+            event: "outbox_created",
+            detail: `${outbox.event_type} (${outbox.status})`,
+          }
+        : null,
+      outbox?.last_attempted_at
+        ? {
+            at: outbox.last_attempted_at,
+            event: "outbox_last_attempt",
+            detail: `attempts=${outbox.attempts ?? 0}${outbox.last_error ? " with error" : ""}`,
+          }
+        : null,
+      outbox?.last_error
+        ? {
+            at: outbox.updated_at ?? null,
+            event: "outbox_error",
+            detail: outbox.last_error,
+          }
+        : null,
+      outbox?.odoo_move_name
+        ? {
+            at: outbox.updated_at ?? null,
+            event: "odoo_move_recorded",
+            detail: `${outbox.odoo_move_name} (${outbox.odoo_move_state ?? "unknown"})`,
+          }
+        : null,
+      link
+        ? {
+            at: link.synced_at ?? null,
+            event: "sync_link_present",
+            detail: `${link.odoo_move_name ?? link.odoo_move_id ?? "linked"}`,
+          }
+        : null,
+    ]
+      .filter(Boolean)
+      .sort((a, b) => new Date(String(a.at ?? 0)).getTime() - new Date(String(b.at ?? 0)).getTime());
+
+    return res.json({
+      sourceTable,
+      sourceId,
+      sourceStatusField: sourceMeta.statusField,
+      sourceRecord,
+      outbox,
+      link,
+      diagnostics: {
+        hasSourceRecord: Boolean(sourceRecord),
+        hasOutbox: Boolean(outbox),
+        hasSyncLink: Boolean(link),
+        userError: outbox?.last_error ? mapOdooErrorToUserMessage(outbox.last_error) : null,
+      },
+      timeline,
+    });
+  } catch (e) {
+    return res.status(503).json({ error: e instanceof Error ? e.message : "Trace query failed." });
+  }
+});
+
 /**
  * Upsert outbox row with a fresh payload and reset to pending.
  * @param {{ sourceTable: string, sourceId: string, eventType: string, payload: object, userId: string, role: string }} opts
