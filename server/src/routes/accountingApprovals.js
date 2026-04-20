@@ -27,6 +27,7 @@ import {
   processOdooSyncOutbox,
   retryOutboxRow,
 } from "../services/odoo/odooSyncWorker.js";
+import { mapOdooErrorToUserMessage } from "../services/odoo/odooHelpers.js";
 
 const router = express.Router();
 
@@ -736,6 +737,642 @@ router.patch("/mortality-events/:id/approve", async (req, res) => {
     res.json({ ok: true, event });
   } catch (e) {
     res.status(503).json({ error: e instanceof Error ? e.message : "Approval failed." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 9. Unified Action Queue — all unsent / failed items
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Map outbox error to user-facing category + message.
+ * @param {string | null} rawError
+ */
+function userErrorFrom(rawError) {
+  if (!rawError) return null;
+  return mapOdooErrorToUserMessage(rawError);
+}
+
+/**
+ * Return the set of editable fields for a given event type, seeded with current record data.
+ * @param {string} eventType
+ * @param {Record<string,unknown>} data
+ */
+function getFixableFields(eventType, data) {
+  const d = data ?? {};
+  switch (eventType) {
+    case "feed_purchase":
+      return [
+        { key: "unitCostRwfPerKg", label: "Unit cost (RWF/kg)", type: "number", value: d.unitCostRwfPerKg ?? "", required: true, hint: "Required to generate a vendor bill in Odoo" },
+        { key: "supplierName", label: "Supplier name", type: "text", value: d.supplierName ?? "", required: false, hint: "Should match a contact in Odoo" },
+      ];
+    case "medicine_purchase":
+      return [
+        { key: "unitCostRwf", label: "Unit cost (RWF per unit)", type: "number", value: d.unitCostRwf ?? "", required: true, hint: "Required to generate a vendor bill" },
+        { key: "supplier", label: "Supplier name", type: "text", value: d.supplier ?? "", required: false, hint: "Should match a contact in Odoo" },
+      ];
+    case "slaughter_conversion":
+      return [
+        { key: "fairValueRwf", label: "Fair value of meat stock (RWF total)", type: "number", value: d.fairValueRwf ?? "", required: true, hint: "IAS 41: market value less costs to sell" },
+        { key: "carryingValueRwf", label: "Carrying value of live birds (RWF)", type: "number", value: "", required: false, hint: "Leave blank to use fair value" },
+      ];
+    case "meat_sale":
+      return [
+        { key: "pricePerKg", label: "Price per kg (RWF)", type: "number", value: d.pricePerKg ?? "", required: true },
+        { key: "buyerName", label: "Buyer name", type: "text", value: d.buyerName ?? "", required: false, hint: "Should match a customer in Odoo" },
+        { key: "buyerEmail", label: "Buyer email", type: "email", value: d.buyerEmail ?? "", required: false },
+      ];
+    case "mortality_impairment":
+      return [
+        { key: "impairmentValueRwf", label: "Impairment value of dead birds (RWF)", type: "number", value: d.impairmentValueRwf ?? "", required: true, hint: "Estimated fair value × count" },
+      ];
+    case "bio_asset_opening":
+      return [
+        { key: "purchaseCostRwf", label: "Total purchase cost (RWF)", type: "number", value: d.purchaseCostRwf ?? "", required: true },
+        { key: "costPerChickRwf", label: "Cost per chick (RWF)", type: "number", value: d.costPerChickRwf ?? "", required: false },
+        { key: "purchaseSupplier", label: "Supplier / hatchery", type: "text", value: d.purchaseSupplier ?? "", required: false, hint: "Should match a contact in Odoo" },
+        { key: "purchaseDate", label: "Purchase date", type: "date", value: d.purchaseDate ?? "", required: false },
+      ];
+    case "payroll_wages":
+      return [
+        { key: "notes", label: "Notes", type: "text", value: d.notes ?? "", required: false, hint: "Description on the journal entry" },
+      ];
+    default:
+      return [];
+  }
+}
+
+/**
+ * Normalize a raw DB queue row into the API shape.
+ * @param {Record<string,unknown>} row
+ */
+function normalizeQueueRow(row) {
+  const rawError = row.last_error ?? null;
+  return {
+    eventType: row.event_type,
+    sourceTable: row.source_table,
+    sourceId: row.source_id,
+    outboxId: row.outbox_id ?? null,
+    eventAt: row.event_at,
+    sourceStatus: row.source_status,
+    outboxStatus: row.outbox_status,
+    attempts: Number(row.attempts ?? 0),
+    lastAttemptedAt: row.last_attempted_at ?? null,
+    nextRetryAt: row.next_retry_at ?? null,
+    lastError: rawError,
+    userError: userErrorFrom(String(rawError ?? "")),
+    recordData: row.record_data ?? {},
+    summary: row.summary ?? {},
+    fixableFields: getFixableFields(String(row.event_type), row.record_data ?? {}),
+  };
+}
+
+/**
+ * Upsert outbox row with a fresh payload and reset to pending.
+ * @param {{ sourceTable: string, sourceId: string, eventType: string, payload: object, userId: string, role: string }} opts
+ */
+async function upsertAndResetOutbox({ sourceTable, sourceId, eventType, payload, userId, role }) {
+  await dbQuery(
+    `INSERT INTO odoo_sync_outbox
+       (source_table, source_id, event_type, payload, status, next_retry_at, attempts,
+        triggered_by_user_id, triggered_by_role)
+     VALUES ($1, $2, $3, $4::jsonb, 'pending', now(), 0, $5, $6)
+     ON CONFLICT (source_table, source_id) DO UPDATE
+       SET payload = EXCLUDED.payload,
+           status = 'pending',
+           next_retry_at = now(),
+           last_error = NULL,
+           attempts = 0,
+           triggered_by_user_id = EXCLUDED.triggered_by_user_id,
+           triggered_by_role = EXCLUDED.triggered_by_role,
+           updated_at = now()`,
+    [sourceTable, sourceId, eventType, JSON.stringify(payload), userId ?? null, role ?? null]
+  );
+}
+
+/**
+ * GET /api/accounting-approvals/action-queue
+ * Returns all records across all accounting event types that need manager action:
+ *   - pending_approval (need human approval to queue for Odoo)
+ *   - approved but outbox is missing, failed, or pending (need fix or resend)
+ */
+router.get("/action-queue", async (req, res) => {
+  if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+
+  try {
+    const [feed, medicine, slaughter, sales, mortality, flockOpenings, payroll] = await Promise.all([
+      dbQuery(
+        `SELECT 'feed_purchase' AS event_type, 'farm_inventory_transactions' AS source_table,
+                t.id::text AS source_id, t.recorded_at AS event_at,
+                t.accounting_status AS source_status,
+                COALESCE(o.status, 'not_queued') AS outbox_status,
+                o.id::text AS outbox_id, o.last_error, o.attempts, o.last_attempted_at, o.next_retry_at,
+                jsonb_build_object(
+                  'feedType', t.feed_type,
+                  'quantityKg', t.quantity_kg::float,
+                  'unitCostRwfPerKg', t.unit_cost_rwf_per_kg::float,
+                  'supplierName', t.supplier_name,
+                  'reference', t.reference
+                ) AS record_data,
+                jsonb_build_object(
+                  'label', CONCAT(INITCAP(COALESCE(t.feed_type, 'Feed')), ' feed — ', t.quantity_kg, ' kg'),
+                  'detail', to_char(t.recorded_at AT TIME ZONE 'Africa/Kigali', 'DD Mon YYYY')
+                ) AS summary
+           FROM farm_inventory_transactions t
+           LEFT JOIN odoo_sync_outbox o ON o.source_table = 'farm_inventory_transactions' AND o.source_id = t.id::text
+          WHERE t.transaction_type = 'procurement_receipt'
+            AND t.accounting_status NOT IN ('sent_to_odoo', 'not_applicable')
+            AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
+          ORDER BY t.recorded_at DESC LIMIT 100`
+      ),
+      dbQuery(
+        `SELECT 'medicine_purchase' AS event_type, 'medicine_lots' AS source_table,
+                l.id::text AS source_id, l.received_at AS event_at,
+                l.accounting_status AS source_status,
+                COALESCE(o.status, 'not_queued') AS outbox_status,
+                o.id::text AS outbox_id, o.last_error, o.attempts, o.last_attempted_at, o.next_retry_at,
+                jsonb_build_object(
+                  'medicineName', m.name,
+                  'lotNumber', l.lot_number,
+                  'quantityReceived', l.quantity_received::float,
+                  'unitCostRwf', l.unit_cost_rwf::float,
+                  'supplier', l.supplier
+                ) AS record_data,
+                jsonb_build_object(
+                  'label', CONCAT(m.name, ' lot — ', l.quantity_received, ' units'),
+                  'detail', to_char(l.received_at AT TIME ZONE 'Africa/Kigali', 'DD Mon YYYY')
+                ) AS summary
+           FROM medicine_lots l
+           JOIN medicine_inventory m ON m.id = l.medicine_id
+           LEFT JOIN odoo_sync_outbox o ON o.source_table = 'medicine_lots' AND o.source_id = l.id::text
+          WHERE l.accounting_status NOT IN ('sent_to_odoo', 'not_applicable')
+            AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
+          ORDER BY l.received_at DESC LIMIT 100`
+      ),
+      dbQuery(
+        `SELECT 'slaughter_conversion' AS event_type, 'flock_slaughter_events' AS source_table,
+                s.id::text AS source_id, s.at AS event_at,
+                s.accounting_status AS source_status,
+                COALESCE(o.status, 'not_queued') AS outbox_status,
+                o.id::text AS outbox_id, o.last_error, o.attempts, o.last_attempted_at, o.next_retry_at,
+                jsonb_build_object(
+                  'birdsSlaughtered', s.birds_slaughtered,
+                  'avgLiveWeightKg', s.avg_live_weight_kg::float,
+                  'avgCarcassWeightKg', s.avg_carcass_weight_kg::float,
+                  'fairValueRwf', s.fair_value_rwf::float,
+                  'flockCode', f.code
+                ) AS record_data,
+                jsonb_build_object(
+                  'label', CONCAT('Flock ', COALESCE(f.code, s.flock_id::text), ' — ', s.birds_slaughtered, ' birds slaughtered'),
+                  'detail', to_char(s.at AT TIME ZONE 'Africa/Kigali', 'DD Mon YYYY')
+                ) AS summary
+           FROM flock_slaughter_events s
+           LEFT JOIN poultry_flocks f ON f.id::text = s.flock_id
+           LEFT JOIN odoo_sync_outbox o ON o.source_table = 'flock_slaughter_events' AND o.source_id = s.id::text
+          WHERE s.accounting_status NOT IN ('sent_to_odoo', 'not_applicable')
+            AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
+          ORDER BY s.at DESC LIMIT 100`
+      ),
+      dbQuery(
+        `SELECT 'meat_sale' AS event_type, 'poultry_sales_orders' AS source_table,
+                s.id::text AS source_id, s.order_date::timestamptz AS event_at,
+                s.accounting_status AS source_status,
+                COALESCE(o.status, 'not_queued') AS outbox_status,
+                o.id::text AS outbox_id, o.last_error, o.attempts, o.last_attempted_at, o.next_retry_at,
+                jsonb_build_object(
+                  'numberOfBirds', s.number_of_birds,
+                  'totalWeightKg', s.total_weight_kg::float,
+                  'pricePerKg', s.price_per_kg::float,
+                  'buyerName', s.buyer_name,
+                  'buyerEmail', s.buyer_email,
+                  'flockCode', f.code
+                ) AS record_data,
+                jsonb_build_object(
+                  'label', CONCAT('Flock ', COALESCE(f.code, s.flock_id::text), ' — ', s.number_of_birds, ' birds sold'),
+                  'detail', to_char(s.order_date, 'DD Mon YYYY')
+                ) AS summary
+           FROM poultry_sales_orders s
+           LEFT JOIN poultry_flocks f ON f.id = s.flock_id
+           LEFT JOIN odoo_sync_outbox o ON o.source_table = 'poultry_sales_orders' AND o.source_id = s.id::text
+          WHERE s.accounting_status NOT IN ('sent_to_odoo', 'not_applicable')
+            AND s.submission_status != 'rejected'
+            AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
+          ORDER BY s.order_date DESC LIMIT 100`
+      ),
+      dbQuery(
+        `SELECT 'mortality_impairment' AS event_type, 'flock_mortality_events' AS source_table,
+                m.id::text AS source_id, m.at AS event_at,
+                m.accounting_status AS source_status,
+                COALESCE(o.status, 'not_queued') AS outbox_status,
+                o.id::text AS outbox_id, o.last_error, o.attempts, o.last_attempted_at, o.next_retry_at,
+                jsonb_build_object(
+                  'count', m.count,
+                  'cause', m.cause,
+                  'notes', m.notes,
+                  'impairmentValueRwf', m.impairment_value_rwf::float,
+                  'flockCode', f.code
+                ) AS record_data,
+                jsonb_build_object(
+                  'label', CONCAT('Flock ', COALESCE(f.code, m.flock_id::text), ' — ', m.count, ' birds dead'),
+                  'detail', to_char(m.at AT TIME ZONE 'Africa/Kigali', 'DD Mon YYYY')
+                ) AS summary
+           FROM flock_mortality_events m
+           LEFT JOIN poultry_flocks f ON f.id::text = m.flock_id::text
+           LEFT JOIN odoo_sync_outbox o ON o.source_table = 'flock_mortality_events' AND o.source_id = m.id::text
+          WHERE m.accounting_status NOT IN ('sent_to_odoo', 'not_applicable')
+            AND m.count >= 5
+            AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
+          ORDER BY m.at DESC LIMIT 100`
+      ),
+      dbQuery(
+        `SELECT 'bio_asset_opening' AS event_type, 'poultry_flocks' AS source_table,
+                f.id::text AS source_id, f.placement_date::timestamptz AS event_at,
+                f.bio_asset_accounting_status AS source_status,
+                COALESCE(o.status, 'not_queued') AS outbox_status,
+                o.id::text AS outbox_id, o.last_error, o.attempts, o.last_attempted_at, o.next_retry_at,
+                jsonb_build_object(
+                  'code', f.code,
+                  'initialCount', f.initial_count,
+                  'purchaseCostRwf', f.purchase_cost_rwf::float,
+                  'costPerChickRwf', f.cost_per_chick_rwf::float,
+                  'purchaseSupplier', f.purchase_supplier,
+                  'purchaseDate', f.purchase_date::text
+                ) AS record_data,
+                jsonb_build_object(
+                  'label', CONCAT('Flock ', COALESCE(f.code, f.id::text), ' — ', f.initial_count, ' chicks placed'),
+                  'detail', to_char(f.placement_date, 'DD Mon YYYY')
+                ) AS summary
+           FROM poultry_flocks f
+           LEFT JOIN odoo_sync_outbox o ON o.source_table = 'poultry_flocks' AND o.source_id = f.id::text
+          WHERE f.bio_asset_accounting_status IS NOT NULL
+            AND f.bio_asset_accounting_status NOT IN ('sent_to_odoo', 'not_applicable')
+            AND (f.purchase_cost_rwf IS NOT NULL OR f.cost_per_chick_rwf IS NOT NULL)
+            AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
+          ORDER BY f.placement_date DESC LIMIT 100`
+      ),
+      dbQuery(
+        `SELECT 'payroll_wages' AS event_type, 'payroll_period_closures' AS source_table,
+                p.id::text AS source_id, p.approved_at AS event_at,
+                p.accounting_status AS source_status,
+                COALESCE(o.status, 'not_queued') AS outbox_status,
+                o.id::text AS outbox_id, o.last_error, o.attempts, o.last_attempted_at, o.next_retry_at,
+                jsonb_build_object(
+                  'periodStart', p.period_start::text,
+                  'periodEnd', p.period_end::text,
+                  'netPayrollRwf', p.net_payroll_rwf::float,
+                  'workerCount', p.worker_count,
+                  'notes', p.notes
+                ) AS record_data,
+                jsonb_build_object(
+                  'label', CONCAT('Payroll ', p.period_start, ' → ', p.period_end),
+                  'detail', CONCAT(p.worker_count, ' workers · ', p.net_payroll_rwf, ' RWF net')
+                ) AS summary
+           FROM payroll_period_closures p
+           LEFT JOIN odoo_sync_outbox o ON o.source_table = 'payroll_period_closures' AND o.source_id = p.id::text
+          WHERE p.accounting_status NOT IN ('sent_to_odoo', 'not_applicable')
+            AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
+          ORDER BY p.period_start DESC LIMIT 60`
+      ),
+    ]);
+
+    const all = [
+      ...feed.rows,
+      ...medicine.rows,
+      ...slaughter.rows,
+      ...sales.rows,
+      ...mortality.rows,
+      ...flockOpenings.rows,
+      ...payroll.rows,
+    ].map(normalizeQueueRow);
+
+    // Sort: failed first, then pending_approval, then not_queued, by recency
+    const statusPriority = { failed: 0, pending: 1, not_queued: 2 };
+    all.sort((a, b) => {
+      const pa = statusPriority[a.outboxStatus] ?? 3;
+      const pb = statusPriority[b.outboxStatus] ?? 3;
+      if (pa !== pb) return pa - pb;
+      return new Date(b.eventAt).getTime() - new Date(a.eventAt).getTime();
+    });
+
+    res.json({ items: all, total: all.length });
+  } catch (e) {
+    res.status(503).json({ error: e instanceof Error ? e.message : "Query failed." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 10. Action Queue — per-event correction + re-queue endpoints
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/accounting-approvals/action-queue/:outboxId/resend-now
+ * Reset outbox row and trigger immediate processing. No field changes.
+ */
+router.post("/action-queue/:outboxId/resend-now", async (req, res) => {
+  if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  const { outboxId } = req.params;
+  try {
+    await dbQuery(
+      `UPDATE odoo_sync_outbox
+          SET status = 'pending', next_retry_at = now(), last_error = NULL, attempts = 0, updated_at = now()
+        WHERE id::text = $1`,
+      [outboxId]
+    );
+    const result = await processOdooSyncOutbox(1);
+    const updated = await dbQuery(
+      `SELECT id::text AS id, status, last_error AS "lastError", odoo_move_name AS "odooMoveName", attempts
+         FROM odoo_sync_outbox WHERE id::text = $1`,
+      [outboxId]
+    );
+    const row = updated.rows[0] ?? null;
+    const userError = row?.lastError ? mapOdooErrorToUserMessage(row.lastError) : null;
+    res.json({ ok: true, result, status: row?.status ?? "unknown", odooMoveName: row?.odooMoveName ?? null, userError });
+  } catch (e) {
+    res.status(503).json({ error: e instanceof Error ? e.message : "Resend failed." });
+  }
+});
+
+/**
+ * PATCH /api/accounting-approvals/action-queue/feed/:id
+ * Update feed procurement fields, approve, re-map and (re)queue for Odoo.
+ * Body: { unitCostRwfPerKg?, supplierName? }
+ */
+router.patch("/action-queue/feed/:id", async (req, res) => {
+  if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  const { id } = req.params;
+  const body = req.body ?? {};
+  const unitCostRwfPerKg = body.unitCostRwfPerKg != null && body.unitCostRwfPerKg !== "" ? Number(body.unitCostRwfPerKg) : null;
+  const supplierName = body.supplierName != null ? String(body.supplierName).trim() || null : undefined;
+
+  try {
+    const r = await dbQuery(
+      `UPDATE farm_inventory_transactions
+          SET unit_cost_rwf_per_kg = COALESCE($2::numeric, unit_cost_rwf_per_kg),
+              supplier_name = COALESCE($3, supplier_name),
+              accounting_status = 'approved',
+              updated_at = now()
+        WHERE id::text = $1 AND transaction_type = 'procurement_receipt'
+        RETURNING id::text AS id, recorded_at AS "recordedAt", quantity_kg AS "quantityKg",
+                  unit_cost_rwf_per_kg AS "unitCostRwfPerKg", feed_type AS "feedType",
+                  supplier_name AS "supplierName", reference`,
+      [id, unitCostRwfPerKg, supplierName ?? null]
+    );
+    if ((r.rowCount ?? 0) === 0) return res.status(404).json({ error: "Feed procurement not found." });
+    const row = r.rows[0];
+    if (!row.unitCostRwfPerKg) return res.status(400).json({ error: "unitCostRwfPerKg is required to send to Odoo." });
+
+    const payload = mapFeedProcurementToBill({ ...row, at: row.recordedAt });
+    await upsertAndResetOutbox({ sourceTable: "farm_inventory_transactions", sourceId: id, eventType: "feed_purchase", payload, userId: req.authUser.id, role: req.authUser.role });
+    processOdooSyncOutbox(1).catch(() => {});
+    res.json({ ok: true, row });
+  } catch (e) {
+    res.status(503).json({ error: e instanceof Error ? e.message : "Update failed." });
+  }
+});
+
+/**
+ * PATCH /api/accounting-approvals/action-queue/medicine-lot/:id
+ * Body: { unitCostRwf?, supplier? }
+ */
+router.patch("/action-queue/medicine-lot/:id", async (req, res) => {
+  if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  const { id } = req.params;
+  const body = req.body ?? {};
+  const unitCostRwf = body.unitCostRwf != null && body.unitCostRwf !== "" ? Number(body.unitCostRwf) : null;
+  const supplier = body.supplier != null ? String(body.supplier).trim() || null : undefined;
+
+  try {
+    const r = await dbQuery(
+      `UPDATE medicine_lots
+          SET unit_cost_rwf = COALESCE($2::numeric, unit_cost_rwf),
+              supplier = COALESCE($3, supplier),
+              accounting_status = 'approved'
+        WHERE id::text = $1
+        RETURNING id::text AS id, lot_number AS "lotNumber", received_at AS "receivedAt",
+                  quantity_received AS "quantityReceived", unit_cost_rwf AS "unitCostRwf",
+                  supplier, medicine_id AS "medicineId"`,
+      [id, unitCostRwf, supplier ?? null]
+    );
+    if ((r.rowCount ?? 0) === 0) return res.status(404).json({ error: "Medicine lot not found." });
+    const lot = r.rows[0];
+    if (!lot.unitCostRwf) return res.status(400).json({ error: "unitCostRwf is required to send to Odoo." });
+
+    let medicineName = "Medicine";
+    try {
+      const mRow = await dbQuery(`SELECT name FROM medicine_inventory WHERE id = $1::uuid`, [lot.medicineId]);
+      if (mRow.rows[0]) medicineName = mRow.rows[0].name;
+    } catch {}
+
+    const payload = mapMedicineLotToBill({ ...lot, medicineName });
+    await upsertAndResetOutbox({ sourceTable: "medicine_lots", sourceId: id, eventType: "medicine_purchase", payload, userId: req.authUser.id, role: req.authUser.role });
+    processOdooSyncOutbox(1).catch(() => {});
+    res.json({ ok: true, lot });
+  } catch (e) {
+    res.status(503).json({ error: e instanceof Error ? e.message : "Update failed." });
+  }
+});
+
+/**
+ * PATCH /api/accounting-approvals/action-queue/slaughter/:id
+ * Body: { fairValueRwf, carryingValueRwf? }
+ */
+router.patch("/action-queue/slaughter/:id", async (req, res) => {
+  if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  const { id } = req.params;
+  const body = req.body ?? {};
+  const fairValueRwf = Number(body.fairValueRwf ?? 0);
+  const carryingValueRwf = Number(body.carryingValueRwf ?? fairValueRwf);
+  if (!fairValueRwf || fairValueRwf <= 0) return res.status(400).json({ error: "fairValueRwf is required and must be > 0." });
+
+  try {
+    const r = await dbQuery(
+      `UPDATE flock_slaughter_events
+          SET fair_value_rwf = $2, fair_value_basis = 'manager_approved',
+              accounting_status = 'approved',
+              accounting_approved_by = $3, accounting_approved_at = now()
+        WHERE id::text = $1
+        RETURNING id::text AS id, flock_id AS "flockId", at, birds_slaughtered AS "birdsSlaughtered",
+                  avg_live_weight_kg AS "avgLiveWeightKg", avg_carcass_weight_kg AS "avgCarcassWeightKg",
+                  fair_value_rwf AS "fairValueRwf"`,
+      [id, fairValueRwf, req.authUser.id]
+    );
+    if ((r.rowCount ?? 0) === 0) return res.status(404).json({ error: "Slaughter event not found." });
+    const event = r.rows[0];
+
+    let flockCode = null;
+    try {
+      const fRow = await dbQuery(`SELECT code FROM poultry_flocks WHERE id::text = $1`, [event.flockId]);
+      flockCode = fRow.rows[0]?.code ?? null;
+    } catch {}
+
+    const payload = mapSlaughterToJournalEntry({ ...event, flockCode }, { carryingValueRwf });
+    await upsertAndResetOutbox({ sourceTable: "flock_slaughter_events", sourceId: id, eventType: "slaughter_conversion", payload, userId: req.authUser.id, role: req.authUser.role });
+    processOdooSyncOutbox(1).catch(() => {});
+    res.json({ ok: true, event });
+  } catch (e) {
+    res.status(503).json({ error: e instanceof Error ? e.message : "Update failed." });
+  }
+});
+
+/**
+ * PATCH /api/accounting-approvals/action-queue/sale/:id
+ * Body: { pricePerKg?, buyerName?, buyerEmail? }
+ */
+router.patch("/action-queue/sale/:id", async (req, res) => {
+  if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  const { id } = req.params;
+  const body = req.body ?? {};
+  const pricePerKg = body.pricePerKg != null && body.pricePerKg !== "" ? Number(body.pricePerKg) : null;
+  const buyerName = body.buyerName != null ? String(body.buyerName).trim() || null : undefined;
+  const buyerEmail = body.buyerEmail != null ? String(body.buyerEmail).trim() || null : undefined;
+
+  try {
+    const r = await dbQuery(
+      `UPDATE poultry_sales_orders
+          SET price_per_kg = COALESCE($2::numeric, price_per_kg),
+              buyer_name = COALESCE($3, buyer_name),
+              buyer_email = COALESCE($4, buyer_email),
+              submission_status = 'approved',
+              accounting_status = 'approved',
+              updated_at = now()
+        WHERE id::text = $1
+        RETURNING id::text AS id, flock_id::text AS "flockId", order_date AS "orderDate",
+                  number_of_birds AS "numberOfBirds", total_weight_kg AS "totalWeightKg",
+                  price_per_kg AS "pricePerKg", buyer_name AS "buyerName", buyer_email AS "buyerEmail"`,
+      [id, pricePerKg, buyerName ?? null, buyerEmail ?? null]
+    );
+    if ((r.rowCount ?? 0) === 0) return res.status(404).json({ error: "Sale order not found." });
+    const order = r.rows[0];
+
+    const payload = mapSaleOrderToInvoice(order);
+    await upsertAndResetOutbox({ sourceTable: "poultry_sales_orders", sourceId: id, eventType: "meat_sale", payload, userId: req.authUser.id, role: req.authUser.role });
+    processOdooSyncOutbox(1).catch(() => {});
+    res.json({ ok: true, order });
+  } catch (e) {
+    res.status(503).json({ error: e instanceof Error ? e.message : "Update failed." });
+  }
+});
+
+/**
+ * PATCH /api/accounting-approvals/action-queue/mortality/:id
+ * Body: { impairmentValueRwf }
+ */
+router.patch("/action-queue/mortality/:id", async (req, res) => {
+  if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  const { id } = req.params;
+  const impairmentValueRwf = Number(req.body?.impairmentValueRwf ?? 0);
+  if (!impairmentValueRwf || impairmentValueRwf <= 0) return res.status(400).json({ error: "impairmentValueRwf is required and must be > 0." });
+
+  try {
+    const r = await dbQuery(
+      `UPDATE flock_mortality_events
+          SET impairment_value_rwf = $2, accounting_status = 'approved',
+              accounting_approved_by = $3, accounting_approved_at = now()
+        WHERE id::text = $1
+        RETURNING id::text AS id, flock_id AS "flockId", at, count, cause`,
+      [id, impairmentValueRwf, req.authUser.id]
+    );
+    if ((r.rowCount ?? 0) === 0) return res.status(404).json({ error: "Mortality event not found." });
+    const event = r.rows[0];
+
+    let flockCode = null;
+    try {
+      const fr = await dbQuery(`SELECT code FROM poultry_flocks WHERE id::text = $1`, [event.flockId]);
+      flockCode = fr.rows[0]?.code ?? null;
+    } catch {}
+
+    const payload = mapMortalityToImpairmentEntry({ ...event, flockCode, impairmentValueRwf });
+    if (payload) {
+      await upsertAndResetOutbox({ sourceTable: "flock_mortality_events", sourceId: id, eventType: "mortality_impairment", payload, userId: req.authUser.id, role: req.authUser.role });
+      processOdooSyncOutbox(1).catch(() => {});
+    }
+    res.json({ ok: true, event });
+  } catch (e) {
+    res.status(503).json({ error: e instanceof Error ? e.message : "Update failed." });
+  }
+});
+
+/**
+ * PATCH /api/accounting-approvals/action-queue/flock-opening/:id
+ * Body: { purchaseCostRwf?, costPerChickRwf?, purchaseSupplier?, purchaseDate? }
+ */
+router.patch("/action-queue/flock-opening/:id", async (req, res) => {
+  if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  const { id } = req.params;
+  const body = req.body ?? {};
+  const purchaseCostRwf = body.purchaseCostRwf != null && body.purchaseCostRwf !== "" ? Number(body.purchaseCostRwf) : null;
+  const costPerChickRwf = body.costPerChickRwf != null && body.costPerChickRwf !== "" ? Number(body.costPerChickRwf) : null;
+  const purchaseSupplier = body.purchaseSupplier ? String(body.purchaseSupplier).trim() : null;
+  const purchaseDate = body.purchaseDate ? String(body.purchaseDate).slice(0, 10) : null;
+
+  try {
+    const r = await dbQuery(
+      `UPDATE poultry_flocks
+          SET purchase_cost_rwf = COALESCE($2::numeric, purchase_cost_rwf),
+              cost_per_chick_rwf = COALESCE($3::numeric, cost_per_chick_rwf),
+              purchase_supplier = COALESCE($4, purchase_supplier),
+              purchase_date = COALESCE($5::date, purchase_date),
+              bio_asset_accounting_status = 'approved'
+        WHERE id::text = $1
+        RETURNING id::text AS id, code, initial_count AS "initialCount",
+                  purchase_cost_rwf AS "purchaseCostRwf", cost_per_chick_rwf AS "costPerChickRwf",
+                  purchase_supplier AS "purchaseSupplier", purchase_date AS "purchaseDate",
+                  placement_date AS "placementDate", created_at AS "createdAt"`,
+      [id, purchaseCostRwf, costPerChickRwf, purchaseSupplier, purchaseDate]
+    );
+    if ((r.rowCount ?? 0) === 0) return res.status(404).json({ error: "Flock not found." });
+    const flock = r.rows[0];
+    if (!flock.purchaseCostRwf) return res.status(400).json({ error: "purchaseCostRwf is required to send to Odoo." });
+
+    const payload = mapFlockOpeningToBill(flock);
+    await upsertAndResetOutbox({ sourceTable: "poultry_flocks", sourceId: id, eventType: "bio_asset_opening", payload, userId: req.authUser.id, role: req.authUser.role });
+    processOdooSyncOutbox(1).catch(() => {});
+    res.json({ ok: true, flock });
+  } catch (e) {
+    res.status(503).json({ error: e instanceof Error ? e.message : "Update failed." });
+  }
+});
+
+/**
+ * PATCH /api/accounting-approvals/action-queue/payroll-closure/:id
+ * Body: { notes? } — re-sends the payroll closure with updated notes.
+ */
+router.patch("/action-queue/payroll-closure/:id", async (req, res) => {
+  if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  const { id } = req.params;
+  const body = req.body ?? {};
+  const notes = body.notes != null ? String(body.notes).slice(0, 500) || null : undefined;
+
+  try {
+    const r = await dbQuery(
+      `UPDATE payroll_period_closures
+          SET notes = COALESCE($2, notes), accounting_status = 'approved'
+        WHERE id::text = $1
+        RETURNING id::text AS id, period_start AS "periodStart", period_end AS "periodEnd",
+                  net_payroll_rwf AS "netPayrollRwf", total_credits_rwf AS "totalCreditsRwf",
+                  total_deductions_rwf AS "totalDeductionsRwf", worker_count AS "workerCount", notes`,
+      [id, notes ?? null]
+    );
+    if ((r.rowCount ?? 0) === 0) return res.status(404).json({ error: "Payroll closure not found." });
+    const closure = r.rows[0];
+
+    const payload = mapPayrollClosureToJournalEntry(closure);
+    if (payload) {
+      await upsertAndResetOutbox({ sourceTable: "payroll_period_closures", sourceId: id, eventType: "payroll_wages", payload, userId: req.authUser.id, role: req.authUser.role });
+      processOdooSyncOutbox(1).catch(() => {});
+    }
+    res.json({ ok: true, closure });
+  } catch (e) {
+    res.status(503).json({ error: e instanceof Error ? e.message : "Update failed." });
   }
 });
 

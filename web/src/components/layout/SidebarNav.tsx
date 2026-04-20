@@ -112,6 +112,12 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
       ? { to: "/farm/accounting-approvals", label: "Accounting approvals" }
       : null;
 
+  const odooSetupNavItem: NavItem | null =
+    activeWorkspace === "farm" &&
+    (user.role === "manager" || user.role === "superuser")
+      ? { to: "/farm/odoo-setup", label: "Odoo integration" }
+      : null;
+
   const farmExtras = [
     laborerEarningsItem,
     flocksItem,
@@ -123,6 +129,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
     slaughterNavItem,
     cycleFcrNavItem,
     accountingApprovalsNavItem,
+    odooSetupNavItem,
   ].filter(Boolean) as NavItem[];
   const farmCore = farmCoreNavItems(user).filter((item) => {
     const byPath: Record<string, string> = {

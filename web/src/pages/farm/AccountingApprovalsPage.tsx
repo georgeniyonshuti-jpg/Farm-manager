@@ -1,7 +1,8 @@
 /**
- * Accounting Approvals Page
+ * Accounting Approvals & Recovery Page
  *
  * Manager+ dashboard for:
+ *  - Needs Action queue: view all unsent/failed Odoo items, fix inline, resend
  *  - Reviewing pending feed procurement / medicine / slaughter events for Odoo
  *  - Recording and approving meat sales
  *  - Monitoring Odoo sync outbox (sent, failed, retry)
@@ -131,7 +132,36 @@ type PayrollClosure = {
   approvedAt: string;
 };
 
-type Tab = "feed" | "medicine" | "slaughter" | "sales" | "mortality" | "payroll" | "valuation" | "outbox";
+type Tab = "action" | "feed" | "medicine" | "slaughter" | "sales" | "mortality" | "payroll" | "valuation" | "outbox";
+
+type FixableField = {
+  key: string;
+  label: string;
+  type: "text" | "number" | "email" | "date";
+  value: string | number | null;
+  required: boolean;
+  hint?: string;
+};
+
+type UserError = { category: string; message: string } | null;
+
+type ActionQueueItem = {
+  eventType: string;
+  sourceTable: string;
+  sourceId: string;
+  outboxId: string | null;
+  eventAt: string;
+  sourceStatus: string;
+  outboxStatus: string;
+  attempts: number;
+  lastAttemptedAt: string | null;
+  nextRetryAt: string | null;
+  lastError: string | null;
+  userError: UserError;
+  recordData: Record<string, unknown>;
+  summary: { label: string; detail: string };
+  fixableFields: FixableField[];
+};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -152,10 +182,30 @@ function eventTypeLabel(t: string): string {
     slaughter_conversion: "Slaughter → Meat stock",
     meat_sale: "Meat sale invoice",
     fcr_fair_value_adjustment: "FCR fair value adjustment",
+    payroll_wages: "Payroll wages",
     payroll_expense: "Payroll expense",
+    mortality_impairment: "Mortality impairment",
+    bio_asset_opening: "Flock opening (chick purchase)",
   };
   return map[t] ?? t;
 }
+
+const EVENT_PATCH_PATH: Record<string, string> = {
+  feed_purchase: "feed",
+  medicine_purchase: "medicine-lot",
+  slaughter_conversion: "slaughter",
+  meat_sale: "sale",
+  mortality_impairment: "mortality",
+  bio_asset_opening: "flock-opening",
+  payroll_wages: "payroll-closure",
+};
+
+function actionLabel(item: ActionQueueItem): string {
+  if (item.outboxStatus === "failed") return "Fix & send to Odoo";
+  if (item.sourceStatus === "pending_approval") return "Approve & send to Odoo";
+  return "Send to Odoo";
+}
+
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -163,7 +213,7 @@ export function AccountingApprovalsPage() {
   const { token, user } = useAuth();
   const { showToast } = useToast();
   const isManager = roleAtLeast(user, "manager");
-  const [tab, setTab] = useState<Tab>("feed");
+  const [tab, setTab] = useState<Tab>("action");
 
   // Feed
   const [feedRows, setFeedRows] = useState<FeedRow[]>([]);
@@ -201,11 +251,41 @@ export function AccountingApprovalsPage() {
   const [newValuation, setNewValuation] = useState({ flockId: "", snapshotDate: new Date().toISOString().slice(0, 10), marketPricePerKgRwf: "", costsToSellPerKgRwf: "" });
   const [valuationSubmitting, setValuationSubmitting] = useState(false);
 
+  // Action queue
+  const [actionQueue, setActionQueue] = useState<ActionQueueItem[]>([]);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [editForms, setEditForms] = useState<Record<string, Record<string, string>>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
+
   // Outbox
   const [outboxRows, setOutboxRows] = useState<OutboxRow[]>([]);
   const [outboxLoading, setOutboxLoading] = useState(false);
 
   // ── Loaders ──
+  const loadActionQueue = useCallback(async () => {
+    setActionLoading(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/accounting-approvals/action-queue`, { headers: readAuthHeaders(token) });
+      const d = await r.json();
+      const items: ActionQueueItem[] = d.items ?? [];
+      setActionQueue(items);
+      // Seed edit forms from fixableFields for new items not yet edited
+      setEditForms(prev => {
+        const next = { ...prev };
+        items.forEach(item => {
+          if (!next[item.sourceId]) {
+            const fields: Record<string, string> = {};
+            item.fixableFields.forEach(f => { fields[f.key] = f.value != null ? String(f.value) : ""; });
+            next[item.sourceId] = fields;
+          }
+        });
+        return next;
+      });
+    } catch { /* leave stale */ }
+    setActionLoading(false);
+  }, [token]);
+
   const loadFeed = useCallback(async () => {
     setFeedLoading(true);
     try {
@@ -288,7 +368,8 @@ export function AccountingApprovalsPage() {
 
   useEffect(() => {
     if (!isManager) return;
-    if (tab === "feed") loadFeed();
+    if (tab === "action") loadActionQueue();
+    else if (tab === "feed") loadFeed();
     else if (tab === "medicine") loadMed();
     else if (tab === "slaughter") loadSlaughter();
     else if (tab === "sales") loadSales();
@@ -296,7 +377,7 @@ export function AccountingApprovalsPage() {
     else if (tab === "payroll") loadPayrollClosures();
     else if (tab === "valuation") loadValuation();
     else if (tab === "outbox") loadOutbox();
-  }, [tab, isManager, loadFeed, loadMed, loadSlaughter, loadSales, loadMortality, loadPayrollClosures, loadValuation, loadOutbox]);
+  }, [tab, isManager, loadActionQueue, loadFeed, loadMed, loadSlaughter, loadSales, loadMortality, loadPayrollClosures, loadValuation, loadOutbox]);
 
   // ── Actions ──
   async function approveFeed(id: string) {
@@ -442,6 +523,62 @@ export function AccountingApprovalsPage() {
     loadValuation();
   }
 
+  async function saveAndSendQueueItem(item: ActionQueueItem) {
+    const patchPath = EVENT_PATCH_PATH[item.eventType];
+    if (!patchPath) { showToast("error", `No correction endpoint for event type: ${item.eventType}`); return; }
+    setSavingId(item.sourceId);
+    try {
+      const form = editForms[item.sourceId] ?? {};
+      const r = await fetch(`${API_BASE_URL}/api/accounting-approvals/action-queue/${patchPath}/${item.sourceId}`, {
+        method: "PATCH",
+        headers: jsonAuthHeaders(token),
+        body: JSON.stringify(form),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        showToast("error", d.error ?? "Save failed. Check the fields and try again.");
+        setSavingId(null);
+        return;
+      }
+      showToast("success", "Saved and queued for Odoo. Check back shortly for sync status.");
+      loadActionQueue();
+    } catch {
+      showToast("error", "Network error. Please try again.");
+    }
+    setSavingId(null);
+  }
+
+  async function resendNow(item: ActionQueueItem) {
+    if (!item.outboxId) {
+      showToast("error", "No outbox entry found — use Save & send instead.");
+      return;
+    }
+    setResendingId(item.outboxId);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/accounting-approvals/action-queue/${item.outboxId}/resend-now`, {
+        method: "POST",
+        headers: jsonAuthHeaders(token),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        showToast("error", d.error ?? "Resend failed.");
+        setResendingId(null);
+        return;
+      }
+      if (d.odooMoveName) {
+        showToast("success", `Sent to Odoo: ${d.odooMoveName}`);
+      } else if (d.status === "failed") {
+        showToast("error", d.userError?.message ?? "Odoo rejected the entry. See error below.");
+      } else {
+        showToast("success", "Resent. Check back shortly for Odoo confirmation.");
+      }
+      loadActionQueue();
+    } catch {
+      showToast("error", "Network error. Please try again.");
+    }
+    setResendingId(null);
+  }
+
   async function retryOutbox(id: string) {
     const r = await fetch(`${API_BASE_URL}/api/accounting-approvals/odoo-outbox/${id}/retry`, {
       method: "POST", headers: jsonAuthHeaders(token),
@@ -460,7 +597,10 @@ export function AccountingApprovalsPage() {
     );
   }
 
-  const tabs: { id: Tab; label: string }[] = [
+  const needsActionCount = actionQueue.filter(i => i.outboxStatus === "failed" || i.outboxStatus === "not_queued").length;
+
+  const tabs: { id: Tab; label: string; badge?: number }[] = [
+    { id: "action", label: "Needs Action", badge: needsActionCount || undefined },
     { id: "feed", label: "Feed purchases" },
     { id: "medicine", label: "Medicine purchases" },
     { id: "slaughter", label: "Slaughter conversion" },
@@ -481,15 +621,128 @@ export function AccountingApprovalsPage() {
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors
+            className={`px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5
               ${tab === t.id
                 ? "border-b-2 border-emerald-600 text-emerald-700"
                 : "text-gray-500 hover:text-gray-700"}`}
           >
             {t.label}
+            {t.badge != null && t.badge > 0 && (
+              <span className="bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full leading-none">
+                {t.badge}
+              </span>
+            )}
           </button>
         ))}
       </div>
+
+      {/* ─── Needs Action ─────────────────────────────────────────────────── */}
+      {tab === "action" && (
+        <section className="space-y-4">
+          <p className="text-sm text-gray-500">
+            All financial records that have not yet reached Odoo — failed syncs, missing data, or awaiting your approval.
+            Fix any issues inline and press <strong>Send to Odoo</strong>.
+          </p>
+
+          {actionLoading && <p className="text-sm text-gray-400 animate-pulse">Loading…</p>}
+
+          {!actionLoading && actionQueue.length === 0 && (
+            <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-6 text-center text-sm text-emerald-700">
+              All caught up — no records need attention right now.
+            </div>
+          )}
+
+          {/* Failed group */}
+          {actionQueue.filter(i => i.outboxStatus === "failed").length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-red-700 flex items-center gap-2 mb-2">
+                <span className="w-2 h-2 bg-red-500 rounded-full inline-block" />
+                Failed — Odoo rejected or connection error
+              </h3>
+              <div className="space-y-3">
+                {actionQueue.filter(i => i.outboxStatus === "failed").map(item => (
+                  <ActionQueueCard
+                    key={item.sourceId}
+                    item={item}
+                    editForm={editForms[item.sourceId] ?? {}}
+                    onFieldChange={(key, val) =>
+                      setEditForms(p => ({ ...p, [item.sourceId]: { ...(p[item.sourceId] ?? {}), [key]: val } }))
+                    }
+                    isSaving={savingId === item.sourceId}
+                    isResending={resendingId === item.outboxId}
+                    onSave={() => saveAndSendQueueItem(item)}
+                    onResend={() => resendNow(item)}
+                    borderClass="border-red-200 bg-red-50"
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Needs approval group */}
+          {actionQueue.filter(i => i.sourceStatus === "pending_approval" && i.outboxStatus !== "failed").length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-blue-700 flex items-center gap-2 mb-2">
+                <span className="w-2 h-2 bg-blue-500 rounded-full inline-block" />
+                Awaiting your approval before sending to Odoo
+              </h3>
+              <div className="space-y-3">
+                {actionQueue.filter(i => i.sourceStatus === "pending_approval" && i.outboxStatus !== "failed").map(item => (
+                  <ActionQueueCard
+                    key={item.sourceId}
+                    item={item}
+                    editForm={editForms[item.sourceId] ?? {}}
+                    onFieldChange={(key, val) =>
+                      setEditForms(p => ({ ...p, [item.sourceId]: { ...(p[item.sourceId] ?? {}), [key]: val } }))
+                    }
+                    isSaving={savingId === item.sourceId}
+                    isResending={resendingId === item.outboxId}
+                    onSave={() => saveAndSendQueueItem(item)}
+                    onResend={() => resendNow(item)}
+                    borderClass="border-blue-200 bg-blue-50"
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Not queued / missing data group */}
+          {actionQueue.filter(i => i.outboxStatus === "not_queued" && i.sourceStatus !== "pending_approval").length > 0 && (
+            <div>
+              <h3 className="text-sm font-semibold text-amber-700 flex items-center gap-2 mb-2">
+                <span className="w-2 h-2 bg-amber-400 rounded-full inline-block" />
+                Not yet sent — complete details to send
+              </h3>
+              <div className="space-y-3">
+                {actionQueue.filter(i => i.outboxStatus === "not_queued" && i.sourceStatus !== "pending_approval").map(item => (
+                  <ActionQueueCard
+                    key={item.sourceId}
+                    item={item}
+                    editForm={editForms[item.sourceId] ?? {}}
+                    onFieldChange={(key, val) =>
+                      setEditForms(p => ({ ...p, [item.sourceId]: { ...(p[item.sourceId] ?? {}), [key]: val } }))
+                    }
+                    isSaving={savingId === item.sourceId}
+                    isResending={resendingId === item.outboxId}
+                    onSave={() => saveAndSendQueueItem(item)}
+                    onResend={() => resendNow(item)}
+                    borderClass="border-amber-200 bg-amber-50"
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!actionLoading && actionQueue.length > 0 && (
+            <button
+              onClick={loadActionQueue}
+              className="text-xs text-gray-400 hover:text-gray-600 underline"
+            >
+              Refresh list
+            </button>
+          )}
+        </section>
+      )}
 
       {/* Feed Procurements */}
       {tab === "feed" && (
@@ -916,6 +1169,107 @@ export function AccountingApprovalsPage() {
           </div>
         </section>
       )}
+    </div>
+  );
+}
+
+// ─── ActionQueueCard component ─────────────────────────────────────────────────
+
+type ActionQueueCardProps = {
+  item: ActionQueueItem;
+  editForm: Record<string, string>;
+  onFieldChange: (key: string, value: string) => void;
+  isSaving: boolean;
+  isResending: boolean;
+  onSave: () => void;
+  onResend: () => void;
+  borderClass: string;
+};
+
+function ActionQueueCard({ item, editForm, onFieldChange, isSaving, isResending, onSave, onResend, borderClass }: ActionQueueCardProps) {
+  const canResendWithoutChanges = item.outboxId != null && item.outboxStatus === "failed";
+
+  return (
+    <div className={`border rounded-xl p-4 space-y-3 ${borderClass}`}>
+      {/* Header row */}
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              {eventTypeLabel(item.eventType)}
+            </span>
+            <OdooSyncBadge
+              status={item.outboxStatus === "failed" ? "failed" : item.sourceStatus === "pending_approval" ? "pending_approval" : "approved"}
+            />
+          </div>
+          <div className="font-medium text-sm text-gray-800">{item.summary.label}</div>
+          <div className="text-xs text-gray-500">{item.summary.detail}</div>
+          {item.attempts > 0 && (
+            <div className="text-xs text-gray-400">
+              {item.attempts} attempt{item.attempts !== 1 ? "s" : ""}
+              {item.lastAttemptedAt ? ` · last tried ${new Date(item.lastAttemptedAt).toLocaleString()}` : ""}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Error message (if failed) */}
+      {item.userError && (
+        <div className="bg-red-100 border border-red-200 rounded-lg px-3 py-2 space-y-1">
+          <div className="text-xs font-semibold text-red-700">Reason for failure</div>
+          <div className="text-sm text-red-800">{item.userError.message}</div>
+          {item.userError.category === "connection_error" && (
+            <div className="text-xs text-red-600">Tip: Try &quot;Resend without changes&quot; — the data may be fine.</div>
+          )}
+        </div>
+      )}
+
+      {/* Editable fields */}
+      {item.fixableFields.length > 0 && (
+        <div>
+          <div className="text-xs font-medium text-gray-600 mb-2">
+            {item.outboxStatus === "failed" ? "Correct any fields, then resend:" : "Complete these fields to send:"}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {item.fixableFields.map(field => (
+              <div key={field.key}>
+                <label className="block text-xs text-gray-500 mb-0.5">
+                  {field.label}
+                  {field.required && <span className="text-red-500 ml-0.5">*</span>}
+                </label>
+                <input
+                  type={field.type}
+                  placeholder={field.type === "number" ? "0" : ""}
+                  value={editForm[field.key] ?? (field.value != null ? String(field.value) : "")}
+                  onChange={e => onFieldChange(field.key, e.target.value)}
+                  className="w-full border border-gray-300 bg-white rounded px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                {field.hint && <p className="text-xs text-gray-400 mt-0.5">{field.hint}</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div className="flex items-center gap-2 flex-wrap pt-1">
+        <button
+          onClick={onSave}
+          disabled={isSaving || isResending}
+          className="bg-emerald-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors font-medium"
+        >
+          {isSaving ? "Saving…" : actionLabel(item)}
+        </button>
+        {canResendWithoutChanges && (
+          <button
+            onClick={onResend}
+            disabled={isSaving || isResending}
+            className="bg-white text-blue-600 border border-blue-300 text-sm px-4 py-2 rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors"
+          >
+            {isResending ? "Sending…" : "Resend without changes"}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

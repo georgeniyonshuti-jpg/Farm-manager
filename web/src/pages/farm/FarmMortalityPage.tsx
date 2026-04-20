@@ -247,7 +247,7 @@ export function FarmMortalityPage() {
                       <td style={{ maxWidth: "14rem" }}>{r.notes || "—"}</td>
                       <td>
                         {r.count >= 5 && (
-                          <OdooSyncBadge status={r.accountingStatus} compact />
+                          <OdooSyncBadge status={r.accountingStatus} compact approvalsHref="/farm/accounting-approvals" />
                         )}
                       </td>
                     </tr>

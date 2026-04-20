@@ -14,6 +14,7 @@ import {
  */
 
 async function findPartnerByEmail(email) {
+  if (!String(email ?? "").trim()) return null;
   const ids = await withRetry(
     () => execute("res.partner", "search", [[["email", "=", String(email).trim()]]], { limit: 1 }),
     "res.partner.search(email)"
@@ -21,24 +22,81 @@ async function findPartnerByEmail(email) {
   return Array.isArray(ids) && ids.length ? ids[0] : null;
 }
 
-async function createPartner(name, email, supplierRank = 0) {
+async function findPartnerByName(name) {
+  if (!String(name ?? "").trim()) return null;
+  const ids = await withRetry(
+    () => execute("res.partner", "search", [[["name", "ilike", String(name).trim()]]], { limit: 1 }),
+    "res.partner.search(name)"
+  );
+  return Array.isArray(ids) && ids.length ? ids[0] : null;
+}
+
+async function createPartner(name, email, supplierRank = 0, customerRank = 0) {
   return withRetry(
     () => execute("res.partner", "create", [{
-      name: String(name).trim(),
+      name: String(name ?? "Farm Partner").trim(),
       email: String(email ?? "").trim() || false,
-      customer_rank: 1,
+      customer_rank: customerRank,
       supplier_rank: supplierRank,
     }]),
     "res.partner.create"
   );
 }
 
-async function findOrCreatePartner({ name, email, supplierRank = 0 }) {
+/**
+ * Find or create a vendor/supplier in Odoo.
+ * Searches by email first, then by name. Creates with supplier_rank=1 if not found.
+ */
+async function findOrCreateVendor({ name, email }) {
+  const safeName = String(name ?? "").trim() || "Farm Supplier";
+  // Skip generic placeholder names for lookup — just create
+  const isGenericName = ["Feed Supplier", "Veterinary Supplier", "Chick Supplier", "Farm Supplier"].includes(safeName);
   if (email) {
-    const existingId = await findPartnerByEmail(email);
-    if (existingId) return existingId;
+    const byEmail = await findPartnerByEmail(email);
+    if (byEmail) return byEmail;
   }
-  return createPartner(name, email, supplierRank);
+  if (!isGenericName) {
+    const byName = await findPartnerByName(safeName);
+    if (byName) {
+      // Make sure they have supplier_rank set
+      await withRetry(
+        () => execute("res.partner", "write", [[byName], { supplier_rank: 1 }]),
+        "res.partner.write(supplier_rank)"
+      ).catch(() => {});
+      return byName;
+    }
+  }
+  return createPartner(safeName, email, 1, 0);
+}
+
+/**
+ * Find or create a customer in Odoo.
+ * Searches by email first, then by name. Creates with customer_rank=1 if not found.
+ */
+async function findOrCreateCustomer({ name, email }) {
+  const safeName = String(name ?? "").trim() || "Farm Customer";
+  const isGenericName = ["Farm Customer"].includes(safeName);
+  if (email) {
+    const byEmail = await findPartnerByEmail(email);
+    if (byEmail) return byEmail;
+  }
+  if (!isGenericName && safeName) {
+    const byName = await findPartnerByName(safeName);
+    if (byName) {
+      await withRetry(
+        () => execute("res.partner", "write", [[byName], { customer_rank: 1 }]),
+        "res.partner.write(customer_rank)"
+      ).catch(() => {});
+      return byName;
+    }
+  }
+  return createPartner(safeName, email, 0, 1);
+}
+
+/** @deprecated Use findOrCreateVendor or findOrCreateCustomer instead */
+async function findOrCreatePartner({ name, email, supplierRank = 0 }) {
+  if (supplierRank > 0) return findOrCreateVendor({ name, email });
+  return findOrCreateCustomer({ name, email });
 }
 
 async function findProductByName(name) {
@@ -142,10 +200,9 @@ async function resolveDefaultExpenseAccountId() {
 export async function createCustomerInvoice(data, { draft = true } = {}) {
   validateInvoicePayload(data);
 
-  const partnerId = await findOrCreatePartner({
+  const partnerId = await findOrCreateCustomer({
     name: data.partnerName,
     email: data.partnerEmail,
-    supplierRank: 0,
   });
 
   const invoiceLines = [];
@@ -198,10 +255,9 @@ export async function createCustomerInvoice(data, { draft = true } = {}) {
  */
 export async function createVendorBill(data, { draft = true, defaultAccountCode } = {}) {
   validateVendorBillPayload(data);
-  const partnerId = await findOrCreatePartner({
+  const partnerId = await findOrCreateVendor({
     name: data.vendorName,
-    email: data.vendorEmail ?? "",
-    supplierRank: 1,
+    email: data.vendorEmail,
   });
   const journalId = await resolvePurchaseJournalId();
 

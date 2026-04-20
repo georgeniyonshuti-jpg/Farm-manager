@@ -44,6 +44,7 @@ import accountingRouter from "./src/routes/accounting.js";
 import accountingApprovalsRouter, { initAccountingApprovalsRouter } from "./src/routes/accountingApprovals.js";
 import ias41Router, { initIas41Service } from "./src/routes/ias41Routes.js";
 import reconciliationRouter, { initReconciliationRouter } from "./src/routes/accountingReconciliation.js";
+import odooSetupRouter from "./src/routes/odooSetupRoute.js";
 import { initOdooSyncWorker, processOdooSyncOutbox, enqueueOdooSync } from "./src/services/odoo/odooSyncWorker.js";
 import { mapFeedProcurementToBill, mapMedicineLotToBill, mapSlaughterToJournalEntry } from "./src/services/odoo/odooFarmMappers.js";
 
@@ -7600,6 +7601,7 @@ app.use("/api/accounting", accountingRouter);
 app.use("/api/accounting-approvals", requireAuth, accountingApprovalsRouter);
 app.use("/api/ias41", requireAuth, ias41Router);
 app.use("/api/accounting-reconciliation", requireAuth, reconciliationRouter);
+app.use("/api/odoo-setup", requireAuth, odooSetupRouter);
 
 // FIX: generic 404 handler
 app.use((_req, res) => {

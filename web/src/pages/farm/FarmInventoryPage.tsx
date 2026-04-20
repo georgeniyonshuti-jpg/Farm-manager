@@ -571,7 +571,7 @@ export function FarmInventoryPage() {
                               </td>
                               <td>
                                 {row.type === "procurement_receipt" && (
-                                  <OdooSyncBadge status={row.accountingStatus} compact />
+                                  <OdooSyncBadge status={row.accountingStatus} compact approvalsHref="/farm/accounting-approvals" />
                                 )}
                               </td>
                             </tr>

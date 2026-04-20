@@ -310,7 +310,7 @@ export function FarmSlaughterPage() {
                       <td className="tbl-num">{r.avgLiveWeightKg}</td>
                       <td className="tbl-num">{r.avgCarcassWeightKg != null ? r.avgCarcassWeightKg : "—"}</td>
                       <td style={{ maxWidth: "14rem" }}>{r.notes || "—"}</td>
-                      <td><OdooSyncBadge status={r.accountingStatus} compact /></td>
+                      <td><OdooSyncBadge status={r.accountingStatus} compact approvalsHref="/farm/accounting-approvals" /></td>
                     </tr>
                   ))}
                   {!rows.length ? (

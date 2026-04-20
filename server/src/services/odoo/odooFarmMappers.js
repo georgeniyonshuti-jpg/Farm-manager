@@ -4,7 +4,31 @@
  * expected by odooAccounting.js draft-first functions.
  *
  * All mappers are pure (no async/DB calls) so they can be unit tested easily.
+ *
+ * Account codes come from FARM_ACCOUNT_DEFS in odooSetup.js.
+ * odooAccounting.js resolves them to Odoo account IDs at dispatch time.
+ * If an account with that code doesn't exist in Odoo, the dispatch will fail
+ * with a clear error that shows up in the Needs Action queue.
+ * Use the Odoo Setup page to create all farm accounts first.
  */
+
+// Account codes — mirror FARM_ACCOUNT_DEFS.code values in odooSetup.js
+const ACC = {
+  bio_assets: "101001",
+  meat_inventory: "101002",
+  feed_inventory: "101003",
+  medicine_inventory: "101004",
+  meat_sales_revenue: "401001",
+  bio_asset_gain: "401002",
+  harvest_gain: "401003",
+  feed_expense: "601001",
+  medicine_expense: "601002",
+  wage_expense: "601003",
+  mortality_loss: "601004",
+  harvest_loss: "601005",
+  bio_asset_loss: "601006",
+  wages_payable: "201001",
+};
 
 /**
  * Maps a feed procurement row to a vendor bill payload.
@@ -27,7 +51,7 @@ export function mapFeedProcurementToBill(row) {
         description,
         quantity: Number(row.quantityKg),
         unitPrice: Number(row.unitCostRwfPerKg ?? 0),
-        accountCode: null, // resolved from accounting_event_configs or defaults
+        accountCode: ACC.feed_expense,
       },
     ],
   };
@@ -48,7 +72,7 @@ export function mapMedicineLotToBill(lot) {
         description: `${lot.medicineName || "Medicine"} — Lot ${lot.lotNumber || "unknown"} (${Number(lot.quantityReceived)} units)`,
         quantity: Number(lot.quantityReceived),
         unitPrice: Number(lot.unitCostRwf ?? 0),
-        accountCode: null,
+        accountCode: ACC.medicine_expense,
       },
     ],
   };
@@ -79,13 +103,13 @@ export function mapSlaughterToJournalEntry(event, opts = {}) {
 
   const lines = [
     {
-      accountCode: null, // Meat Inventory — resolved at runtime
+      accountCode: ACC.meat_inventory,
       label: `Meat stock from slaughter — ${flockLabel} (${event.birdsSlaughtered} birds)`,
       debit: fairValue,
       credit: 0,
     },
     {
-      accountCode: null, // Biological Assets — resolved at runtime
+      accountCode: ACC.bio_assets,
       label: `Derecognise live birds — ${flockLabel}`,
       debit: 0,
       credit: carryingValue,
@@ -95,14 +119,14 @@ export function mapSlaughterToJournalEntry(event, opts = {}) {
   if (Math.abs(harvestGainLoss) > 0.01) {
     if (harvestGainLoss > 0) {
       lines.push({
-        accountCode: null, // Gain on harvest — resolved at runtime
+        accountCode: ACC.harvest_gain,
         label: `Gain on harvest — ${flockLabel}`,
         debit: 0,
         credit: harvestGainLoss,
       });
     } else {
       lines.push({
-        accountCode: null, // Loss on harvest — resolved at runtime
+        accountCode: ACC.harvest_loss,
         label: `Loss on harvest — ${flockLabel}`,
         debit: Math.abs(harvestGainLoss),
         credit: 0,
@@ -157,13 +181,13 @@ export function mapPayrollClosureToJournalEntry(closure) {
     externalRef: ref,
     lines: [
       {
-        accountCode: null, // Wage Expense — resolved at runtime
+        accountCode: ACC.wage_expense,
         label,
         debit: net,
         credit: 0,
       },
       {
-        accountCode: null, // Wages Payable — resolved at runtime
+        accountCode: ACC.wages_payable,
         label: `Wages payable — ${closure.periodStart} to ${closure.periodEnd}`,
         debit: 0,
         credit: net,
@@ -191,7 +215,7 @@ export function mapFlockOpeningToBill(flock) {
         description: `Live chick purchase — Flock ${flock.code || flock.id} (${flock.initialCount} birds @ ${costPerChick.toFixed(0)} RWF each)`,
         quantity: Number(flock.initialCount ?? 1),
         unitPrice: costPerChick,
-        accountCode: null, // Biological Assets account — resolved at runtime
+        accountCode: ACC.bio_assets,
       },
     ],
   };
@@ -218,13 +242,13 @@ export function mapMortalityToImpairmentEntry(event) {
     externalRef: ref,
     lines: [
       {
-        accountCode: null, // Impairment Loss — resolved at runtime
+        accountCode: ACC.mortality_loss,
         label: `Mortality impairment — ${flockLabel} (${event.count} birds, IAS 41)`,
         debit: loss,
         credit: 0,
       },
       {
-        accountCode: null, // Biological Assets — resolved at runtime
+        accountCode: ACC.bio_assets,
         label: `Derecognise dead birds — ${flockLabel}`,
         debit: 0,
         credit: loss,
@@ -251,13 +275,13 @@ export function mapFeedWriteOffToJournalEntry(row) {
     externalRef: ref,
     lines: [
       {
-        accountCode: null, // Feed Write-off Expense
+        accountCode: ACC.feed_expense,
         label: `Feed write-off — ${row.reason || "damage/loss"} (${lossKg.toFixed(0)} kg)`,
         debit: totalLoss,
         credit: 0,
       },
       {
-        accountCode: null, // Feed Inventory Asset
+        accountCode: ACC.feed_inventory,
         label: `Feed inventory reduction — ${row.reason || "write-off"}`,
         debit: 0,
         credit: totalLoss,
@@ -290,13 +314,13 @@ export function mapValuationSnapshotToJournalEntry(snapshot) {
   if (change > 0) {
     lines = [
       {
-        accountCode: null, // Biological Assets — resolved at runtime
+        accountCode: ACC.bio_assets,
         label: `Fair value increase — ${flockLabel}`,
         debit: change,
         credit: 0,
       },
       {
-        accountCode: null, // Gain from fair value change — resolved at runtime
+        accountCode: ACC.bio_asset_gain,
         label: `Gain on biological asset revaluation — ${flockLabel}`,
         debit: 0,
         credit: change,
@@ -306,13 +330,13 @@ export function mapValuationSnapshotToJournalEntry(snapshot) {
     const absChange = Math.abs(change);
     lines = [
       {
-        accountCode: null, // Loss from fair value change — resolved at runtime
+        accountCode: ACC.bio_asset_loss,
         label: `Loss on biological asset revaluation — ${flockLabel}`,
         debit: absChange,
         credit: 0,
       },
       {
-        accountCode: null, // Biological Assets — resolved at runtime
+        accountCode: ACC.bio_assets,
         label: `Fair value decrease — ${flockLabel}`,
         debit: 0,
         credit: absChange,

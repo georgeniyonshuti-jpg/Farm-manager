@@ -87,12 +87,13 @@ function requireNumber(value, field) {
 
 /**
  * Validation for customer invoice payload.
+ * partnerEmail is optional — we search by name when email is absent.
  * @param {unknown} payload
  */
 export function validateInvoicePayload(payload) {
   const data = /** @type {any} */ (payload ?? {});
   requireNonEmptyString(data.partnerName, "partnerName");
-  requireNonEmptyString(data.partnerEmail, "partnerEmail");
+  // partnerEmail is optional; partner is resolved by name when email is missing
   requireNonEmptyString(data.date, "date");
   if (!Array.isArray(data.lines) || data.lines.length === 0) {
     throw new Error("Invalid payload: lines must be a non-empty array.");
@@ -107,6 +108,7 @@ export function validateInvoicePayload(payload) {
 
 /**
  * Validation for vendor bill payload.
+ * accountCode per line is optional — falls back to event-type account or Odoo default.
  * @param {unknown} payload
  */
 export function validateVendorBillPayload(payload) {
@@ -119,7 +121,7 @@ export function validateVendorBillPayload(payload) {
   for (let i = 0; i < data.lines.length; i += 1) {
     const line = data.lines[i] ?? {};
     requireNonEmptyString(line.description, `lines[${i}].description`);
-    requireNonEmptyString(line.accountCode, `lines[${i}].accountCode`);
+    // accountCode is optional — resolved at dispatch time
     requireNumber(line.quantity, `lines[${i}].quantity`);
     requireNumber(line.unitPrice, `lines[${i}].unitPrice`);
   }
@@ -127,6 +129,7 @@ export function validateVendorBillPayload(payload) {
 
 /**
  * Validation for journal entry payload.
+ * accountCode per line is optional — resolved via farm account map at dispatch time.
  * @param {unknown} payload
  */
 export function validateJournalPayload(payload) {
@@ -140,7 +143,7 @@ export function validateJournalPayload(payload) {
   let creditTotal = 0;
   for (let i = 0; i < data.lines.length; i += 1) {
     const line = data.lines[i] ?? {};
-    requireNonEmptyString(line.accountCode, `lines[${i}].accountCode`);
+    // accountCode optional — resolved at dispatch time
     requireNonEmptyString(line.label, `lines[${i}].label`);
     requireNumber(line.debit, `lines[${i}].debit`);
     requireNumber(line.credit, `lines[${i}].credit`);
@@ -161,4 +164,49 @@ export function validateInvoiceFilters(payload) {
   if (data.dateFrom != null && !String(data.dateFrom).trim()) throw new Error("dateFrom must be a non-empty date string.");
   if (data.dateTo != null && !String(data.dateTo).trim()) throw new Error("dateTo must be a non-empty date string.");
   if (data.state != null && !String(data.state).trim()) throw new Error("state must be a non-empty string.");
+}
+
+/**
+ * Map a raw Odoo error string to a user-facing message with a category code.
+ * Used by the accounting recovery page to guide users on what to fix.
+ * @param {string | null | undefined} errorMsg
+ * @returns {{ category: string, message: string }}
+ */
+export function mapOdooErrorToUserMessage(errorMsg) {
+  const raw = String(errorMsg ?? "").trim();
+  const msg = raw.toLowerCase();
+
+  if (!raw) return { category: "unknown_error", message: "Unknown error. Try resending." };
+
+  if (msg.includes("access denied") || msg.includes("authentication failed") || msg.includes("api key")) {
+    return { category: "auth_error", message: "Odoo authentication failed. Check ODOO_USER and ODOO_API_KEY in server settings." };
+  }
+  if (msg.includes("name or service not known") || msg.includes("enotfound") || msg.includes("odoo_url")) {
+    return { category: "config_error", message: "Cannot reach Odoo. Check the ODOO_URL server setting." };
+  }
+  if (msg.includes("socket hang up") || msg.includes("econnreset") || msg.includes("etimedout") || msg.includes("timeout")) {
+    return { category: "connection_error", message: "Odoo connection timed out. Odoo may be temporarily offline — try resending." };
+  }
+  if (msg.includes("res.partner") || (msg.includes("partner") && msg.includes("not found"))) {
+    return { category: "missing_supplier", message: "Supplier/partner not found in Odoo. Edit the supplier name so it matches a contact in Odoo, then resend." };
+  }
+  if ((msg.includes("account") || msg.includes("account.account")) && (msg.includes("not found") || msg.includes("does not exist") || msg.includes("invalid"))) {
+    return { category: "missing_account", message: "Account code not found in Odoo. Contact your accountant to verify the chart of accounts." };
+  }
+  if ((msg.includes("account.journal") || msg.includes("journal")) && (msg.includes("not found") || msg.includes("does not exist"))) {
+    return { category: "missing_journal", message: "Journal not found in Odoo. Contact your accountant to verify journal configuration." };
+  }
+  if (msg.includes("missing required") || msg.includes("required field") || (msg.includes("amount") && msg.includes("0"))) {
+    return { category: "missing_amount", message: "A required value (amount, description, or date) is missing. Edit the record to fill it in, then resend." };
+  }
+  if (msg.includes("validationerror") || msg.includes("validation")) {
+    return { category: "validation_error", message: "Odoo rejected this record due to a validation rule. Edit the fields and resend." };
+  }
+  if (msg.includes("database") && msg.includes("does not exist")) {
+    return { category: "config_error", message: "Odoo database name is incorrect. Check the ODOO_DB server setting." };
+  }
+  if (msg.includes("missing required odoo environment")) {
+    return { category: "config_error", message: "Odoo is not configured on this server. Check ODOO_URL, ODOO_DB, ODOO_USER, and ODOO_API_KEY." };
+  }
+  return { category: "unknown_error", message: raw };
 }

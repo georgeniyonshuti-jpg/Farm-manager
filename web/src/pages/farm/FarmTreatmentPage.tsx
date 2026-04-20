@@ -833,7 +833,7 @@ export function FarmTreatmentPage() {
                             <td className="tbl-num">{l.quantityRemaining}</td>
                             <td className="tbl-num">{l.unitCostRwf != null ? l.unitCostRwf.toLocaleString() : "—"}</td>
                             <td>{l.supplier ?? "—"}</td>
-                            <td><OdooSyncBadge status={l.accountingStatus} compact /></td>
+                            <td><OdooSyncBadge status={l.accountingStatus} compact approvalsHref="/farm/accounting-approvals" /></td>
                           </tr>
                         ))}
                       </tbody>
