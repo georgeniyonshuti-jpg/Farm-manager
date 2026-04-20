@@ -773,6 +773,11 @@ function needsApproval(user) {
   return r < ROLE_RANK["vet_manager"];
 }
 
+function canDirectPostAccountingToOdoo(user) {
+  if (!user) return false;
+  return user.role === "manager" || user.role === "superuser";
+}
+
 function isVetOrAbove(user) {
   if (!user) return false;
   return (ROLE_RANK[user.role] ?? -1) >= ROLE_RANK["vet"];
@@ -1850,6 +1855,7 @@ function mapInventoryRowFromDb(row) {
       row.unitCostRwfPerKg == null ? null : Number(row.unitCostRwfPerKg),
     reason: String(row.reason ?? ""),
     reference: String(row.reference ?? ""),
+    supplierName: row.supplierName != null ? String(row.supplierName) : null,
     actorUserId: String(row.actorUserId),
     approvedByUserId:
       row.approvedByUserId != null ? String(row.approvedByUserId) : null,
@@ -1878,6 +1884,7 @@ async function syncInventoryTransactionsFromDb() {
             unit_cost_rwf_per_kg AS "unitCostRwfPerKg",
             reason,
             reference,
+            supplier_name AS "supplierName",
             actor_user_id::text AS "actorUserId",
             approved_by_user_id::text AS "approvedByUserId",
             approved_at AS "approvedAt",
@@ -2780,33 +2787,37 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
       createdCode = inserted.rows[0]?.code != null ? String(inserted.rows[0].code) : createdCode;
       createdLabel = String(inserted.rows[0]?.label ?? createdCode);
       if (purchaseCostRwf != null || costPerChickRwf != null) {
+        const canDirectPost = canDirectPostAccountingToOdoo(req.authUser);
+        const openingAcctStatus = canDirectPost ? "approved" : "pending_approval";
         dbQuery(
           `UPDATE poultry_flocks
-              SET bio_asset_accounting_status = 'approved',
+              SET bio_asset_accounting_status = $4,
                   purchase_cost_rwf = COALESCE(purchase_cost_rwf, $2::numeric),
                   cost_per_chick_rwf = COALESCE(cost_per_chick_rwf, $3::numeric),
                   updated_at = now()
             WHERE id::text = $1`,
-          [createdId, purchaseCostRwf, costPerChickRwf]
+          [createdId, purchaseCostRwf, costPerChickRwf, openingAcctStatus]
         ).catch((e) => console.error("[ERROR]", "[accounting] flock bio_asset_accounting_status:", e instanceof Error ? e.message : e));
 
-        const payload = mapFlockOpeningToBill({
-          id: createdId,
-          code: createdCode,
-          initialCount: Math.floor(initialCount),
-          purchaseCostRwf: Number(purchaseCostRwf ?? 0),
-          purchaseSupplier,
-          purchaseDate,
-          createdAt: new Date().toISOString(),
-        });
-        enqueueOdooSync({
-          sourceTable: "poultry_flocks",
-          sourceId: createdId,
-          eventType: "bio_asset_opening",
-          payload,
-          triggeredByUserId: req.authUser.id,
-          triggeredByRole: req.authUser.role,
-        }).then(() => processOdooSyncOutbox(3)).catch(() => {});
+        if (canDirectPost) {
+          const payload = mapFlockOpeningToBill({
+            id: createdId,
+            code: createdCode,
+            initialCount: Math.floor(initialCount),
+            purchaseCostRwf: Number(purchaseCostRwf ?? 0),
+            purchaseSupplier,
+            purchaseDate,
+            createdAt: new Date().toISOString(),
+          });
+          enqueueOdooSync({
+            sourceTable: "poultry_flocks",
+            sourceId: createdId,
+            eventType: "bio_asset_opening",
+            payload,
+            triggeredByUserId: req.authUser.id,
+            triggeredByRole: req.authUser.role,
+          }).then(() => processOdooSyncOutbox(3)).catch(() => {});
+        }
       }
     }
     const flockRow = {
@@ -3180,12 +3191,13 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
     }
     if (linkedMortalitySavedToDb) {
       if (hasDb() && mid && mortalityAtCheckin > 0) {
+        const canDirectPost = canDirectPostAccountingToOdoo(req.authUser);
         const checkinPerBirdValue = await estimateBirdValueRwfForFlock(f.id);
         const checkinImpairmentRwf =
           checkinPerBirdValue != null && checkinPerBirdValue > 0
             ? Number(checkinPerBirdValue) * Number(mortalityAtCheckin)
             : 0;
-        const checkinMortAcctStatus = checkinImpairmentRwf > 0 ? "approved" : "pending_approval";
+        const checkinMortAcctStatus = canDirectPost && checkinImpairmentRwf > 0 ? "approved" : "pending_approval";
         dbQuery(
           `UPDATE flock_mortality_events
               SET accounting_status = $2,
@@ -3195,7 +3207,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
           [mid, checkinMortAcctStatus, checkinImpairmentRwf > 0 ? checkinImpairmentRwf : null]
         ).catch((e) => console.error("[ERROR]", "[accounting] check-in mortality accounting_status:", e instanceof Error ? e.message : e));
 
-        if (checkinImpairmentRwf > 0) {
+        if (canDirectPost && checkinImpairmentRwf > 0) {
           const payload = mapMortalityToImpairmentEntry({
             id: mid,
             flockId: f.id,
@@ -3459,10 +3471,11 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
 
   // Accounting: post mortality impairment directly when we can derive a value.
   if (hasDb() && mortalitySavedToDb && id && count > 0) {
+    const canDirectPost = canDirectPostAccountingToOdoo(req.authUser);
     const perBirdValue = await estimateBirdValueRwfForFlock(f.id);
     const impairmentValueRwf =
       perBirdValue != null && perBirdValue > 0 ? Number(perBirdValue) * Number(count) : 0;
-    const mortAcctStatus = impairmentValueRwf > 0 ? "approved" : "pending_approval";
+    const mortAcctStatus = canDirectPost && impairmentValueRwf > 0 ? "approved" : "pending_approval";
     dbQuery(
       `UPDATE flock_mortality_events
           SET accounting_status = $2,
@@ -3472,7 +3485,7 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
       [id, mortAcctStatus, impairmentValueRwf > 0 ? impairmentValueRwf : null]
     ).catch((e) => console.error("[ERROR]", "[accounting] mortality accounting_status:", e instanceof Error ? e.message : e));
 
-    if (impairmentValueRwf > 0) {
+    if (canDirectPost && impairmentValueRwf > 0) {
       const payload = mapMortalityToImpairmentEntry({
         id,
         flockId: f.id,
@@ -4651,7 +4664,8 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
       carryingValueRwf = Number(perBirdValue) * Number(row.birdsSlaughtered || 0);
     }
 
-    const slaughterAcctStatus = fairValueRwf > 0 ? "approved" : "pending_approval";
+    const canDirectPost = canDirectPostAccountingToOdoo(req.authUser);
+    const slaughterAcctStatus = canDirectPost && fairValueRwf > 0 ? "approved" : "pending_approval";
     dbQuery(
       `UPDATE flock_slaughter_events
           SET accounting_status = $2,
@@ -4666,7 +4680,7 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
       [row.id, slaughterAcctStatus, fairValueRwf > 0 ? fairValueRwf : null, pricePerKgRwfInput]
     ).catch((e) => console.error("[ERROR]", "[accounting] slaughter accounting_status:", e instanceof Error ? e.message : e));
 
-    if (fairValueRwf > 0) {
+    if (canDirectPost && fairValueRwf > 0) {
       const flockLabel = f.code ?? f.label ?? f.id;
       const payload = mapSlaughterToJournalEntry(
         {
@@ -5192,6 +5206,27 @@ app.get("/api/inventory/balance", requireAuth, requireFarmAccess, async (req, re
   res.json({ balances: computeInventoryBalances(flockId) });
 });
 
+app.get("/api/inventory/suppliers", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
+  if (!hasDb()) {
+    res.json({ suppliers: [] });
+    return;
+  }
+  try {
+    const r = await dbQuery(
+      `SELECT DISTINCT supplier_name AS name
+         FROM farm_inventory_transactions
+        WHERE supplier_name IS NOT NULL
+          AND btrim(supplier_name) <> ''
+        ORDER BY supplier_name ASC
+        LIMIT 500`
+    );
+    res.json({ suppliers: r.rows.map((x) => String(x.name)) });
+  } catch (e) {
+    console.error("[ERROR]", "[db] GET /api/inventory/suppliers:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Supplier list unavailable. Please retry shortly." });
+  }
+});
+
 app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
   if (!canCreateProcurement(req.authUser)) {
     res.status(403).json({ error: "Only procurement, manager, or superuser can receive stock" });
@@ -5211,6 +5246,7 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
   }
   const reason = String(body.reason ?? reasonCode).slice(0, 400);
   const reference = String(body.reference ?? "").slice(0, 200);
+  const supplierName = String(body.supplierName ?? "").trim() || null;
   if (flockId && !flocksById.has(flockId)) {
     res.status(400).json({ error: "Invalid flockId" });
     return;
@@ -5235,6 +5271,7 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     unitCostRwfPerKg: unitCostRwfPerKg != null ? unitCostRwfPerKg : null,
     reason,
     reference,
+    supplierName,
     actorUserId: req.authUser.id,
     approvedByUserId: null,
     approvedAt: null,
@@ -5246,10 +5283,10 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
       const ins = await dbQuery(
         `INSERT INTO farm_inventory_transactions (
            flock_id, transaction_type, recorded_at, quantity_kg, delta_kg,
-           unit_cost_rwf_per_kg, reason, reference, actor_user_id, approved_by_user_id, approved_at,
+           unit_cost_rwf_per_kg, reason, reference, supplier_name, actor_user_id, approved_by_user_id, approved_at,
            feed_type, feed_entry_id
          )
-         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9::uuid, NULL, NULL, $10, NULL)
+         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9, $10::uuid, NULL, NULL, $11, NULL)
          RETURNING id::text AS id,
                    transaction_type AS type,
                    flock_id::text AS "flockId",
@@ -5259,6 +5296,7 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
                    unit_cost_rwf_per_kg AS "unitCostRwfPerKg",
                    reason,
                    reference,
+                   supplier_name AS "supplierName",
                    actor_user_id::text AS "actorUserId",
                    approved_by_user_id::text AS "approvedByUserId",
                    approved_at AS "approvedAt",
@@ -5273,6 +5311,7 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
           unitCostRwfPerKg,
           reason,
           reference,
+          supplierName,
           req.authUser.id,
           feedType,
         ]
@@ -5302,7 +5341,9 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
 
   // Accounting: post procurement directly to Odoo when cost is available.
   if (hasDb() && procurementSavedToDb && row.id) {
-    const acctStatus = "approved";
+    const canDirectPost = canDirectPostAccountingToOdoo(req.authUser);
+    const acctStatus = canDirectPost && unitCostRwfPerKg != null ? "approved" : "pending_approval";
+    row.accountingStatus = acctStatus;
     try {
       await dbQuery(
         `UPDATE farm_inventory_transactions
@@ -5313,11 +5354,11 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     } catch (e) {
       console.error("[ERROR]", "[accounting] set feed proc accounting_status:", e instanceof Error ? e.message : e);
     }
-    if (unitCostRwfPerKg != null) {
+    if (canDirectPost && unitCostRwfPerKg != null) {
       const payload = mapFeedProcurementToBill({
         ...row,
         at: row.at,
-        supplierName: String(req.body?.supplierName ?? "").trim() || null,
+        supplierName,
       });
       enqueueOdooSync({
         sourceTable: "farm_inventory_transactions",
@@ -7099,7 +7140,8 @@ app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requirePageAccess
     const medLotId = ins.rows[0]?.id?.toString?.() ?? null;
     if (medLotId) {
       const unitCostRwf = body.unitCostRwf == null ? null : Number(body.unitCostRwf);
-      const medAcctStatus = unitCostRwf != null ? "approved" : "pending_approval";
+      const canDirectPost = canDirectPostAccountingToOdoo(req.authUser);
+      const medAcctStatus = canDirectPost && unitCostRwf != null ? "approved" : "pending_approval";
       try {
         await dbQuery(
           `UPDATE medicine_lots
@@ -7112,7 +7154,7 @@ app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requirePageAccess
       } catch (e) {
         console.error("[ERROR]", "[accounting] set medicine lot accounting_status:", e instanceof Error ? e.message : e);
       }
-      if (unitCostRwf != null) {
+      if (canDirectPost && unitCostRwf != null) {
         // Resolve the medicine name from the inventory table (INSERT RETURNING doesn't join).
         let medName = "Medicine";
         try {

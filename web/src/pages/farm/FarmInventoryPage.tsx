@@ -28,6 +28,7 @@ type LedgerRow = {
   deltaKg: number;
   reason: string;
   reference: string;
+  supplierName?: string | null;
   accountingStatus: string | null;
 };
 
@@ -97,7 +98,10 @@ export function FarmInventoryPage() {
   const [procReasonCode, setProcReasonCode] = useState("supplier_delivery");
   const [procRef, setProcRef] = useState("");
   const [procUnitCost, setProcUnitCost] = useState("");
-  const [procSupplier, setProcSupplier] = useState("");
+  const [supplierOptions, setSupplierOptions] = useState<string[]>([]);
+  const [procSupplierMode, setProcSupplierMode] = useState<"existing" | "new">("existing");
+  const [procSupplierExisting, setProcSupplierExisting] = useState("");
+  const [procSupplierNew, setProcSupplierNew] = useState("");
 
   // Adjustment form
   const [adjDelta, setAdjDelta] = useState("");
@@ -152,10 +156,22 @@ export function FarmInventoryPage() {
     }
   }, [token, feedTypeFilter]);
 
+  const loadSuppliers = useCallback(async () => {
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/inventory/suppliers`, { headers: readAuthHeaders(token) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return;
+      setSupplierOptions(Array.isArray((d as { suppliers?: string[] }).suppliers) ? (d as { suppliers: string[] }).suppliers : []);
+    } catch {
+      setSupplierOptions([]);
+    }
+  }, [token]);
+
   useEffect(() => {
     void loadStock();
     void loadLedger(1);
-  }, [loadStock, loadLedger]);
+    void loadSuppliers();
+  }, [loadStock, loadLedger, loadSuppliers]);
 
   async function postProcurement() {
     const qty = Number(procQty);
@@ -175,21 +191,27 @@ export function FarmInventoryPage() {
           reason: procReasonCode,
           reference: procRef,
           unitCostRwfPerKg: procUnitCost ? Number(procUnitCost) : undefined,
-          supplierName: procSupplier.trim() || undefined,
+          supplierName:
+            procSupplierMode === "new"
+              ? (procSupplierNew.trim() || undefined)
+              : (procSupplierExisting.trim() || undefined),
         }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Request failed");
-      const acctMsg = procUnitCost
-        ? " Draft bill queued for Odoo."
-        : " Add a unit cost to enable Odoo accounting.";
+      const acctStatus = (d as { row?: { accountingStatus?: string | null } }).row?.accountingStatus ?? null;
+      const acctMsg = acctStatus === "approved"
+        ? " Sent to Odoo."
+        : " Waiting for manager/superuser approval before sending to Odoo.";
       showToast("success", `Received ${qty} kg of ${feedTypeLabel(procFeedType)}.${acctMsg}`);
       setProcQty("");
       setProcRef("");
       setProcUnitCost("");
-      setProcSupplier("");
+      setProcSupplierMode("existing");
+      setProcSupplierExisting("");
+      setProcSupplierNew("");
       setShowEntryPanel(false);
-      await Promise.all([loadStock(), loadLedger(1)]);
+      await Promise.all([loadStock(), loadLedger(1), loadSuppliers()]);
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "Request failed");
     } finally {
@@ -415,18 +437,39 @@ export function FarmInventoryPage() {
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-neutral-600">Supplier name (optional)</label>
-                      <input
+                      <label className="mb-1 block text-xs font-medium text-neutral-600">Supplier</label>
+                      <select
                         className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-                        placeholder="e.g. Inyange Feed Co."
-                        value={procSupplier}
-                        onChange={(e) => setProcSupplier(e.target.value)}
-                      />
+                        value={procSupplierMode === "new" ? "__new__" : procSupplierExisting}
+                        onChange={(e) => {
+                          if (e.target.value === "__new__") {
+                            setProcSupplierMode("new");
+                            setProcSupplierExisting("");
+                          } else {
+                            setProcSupplierMode("existing");
+                            setProcSupplierExisting(e.target.value);
+                          }
+                        }}
+                      >
+                        <option value="">Select saved supplier</option>
+                        {supplierOptions.map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                        <option value="__new__">+ Add new supplier</option>
+                      </select>
+                      {procSupplierMode === "new" && (
+                        <input
+                          className="mt-2 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                          placeholder="Enter new supplier name"
+                          value={procSupplierNew}
+                          onChange={(e) => setProcSupplierNew(e.target.value)}
+                        />
+                      )}
                     </div>
                   </div>
                   {procUnitCost && (
                     <p className="text-xs text-emerald-700">
-                      A draft vendor bill will be sent to Odoo automatically on save.
+                      If you are manager/superuser this sends to Odoo now; otherwise it waits in Accounting Approvals for manager push.
                     </p>
                   )}
                   <button
