@@ -201,13 +201,32 @@ export function getAppSettingNumber(key, defaultValue) {
   return Number.isFinite(n) ? n : defaultValue;
 }
 
-/** Fixed RWF amounts for field auto payroll (laborer-facing check-in / feed). */
+/**
+ * All field payroll rates, unified into a single place.
+ * These are the rates that the manager sets on the Payroll page.
+ * The legacy checkin_commission_* keys are now ignored (check-in always uses checkInRwf).
+ */
 export function getFieldPayrollRates() {
+  // If checkin_commission_on_time_rwf was previously set to something non-default,
+  // honour it as the initial checkInRwf so existing production data isn't disrupted.
+  const legacyCommission = getAppSettingNumber("checkin_commission_on_time_rwf", 0);
+  const fieldCheckIn = getAppSettingNumber("field_payroll_check_in_rwf", 500);
+  // Prefer the explicitly-set field rate; fall back to commission rate if field rate is still at old default (100).
+  const checkInRwf = fieldCheckIn !== 100 ? fieldCheckIn : (legacyCommission > 0 ? legacyCommission : fieldCheckIn);
+
   return {
-    checkInRwf: Math.max(0, Math.floor(getAppSettingNumber("field_payroll_check_in_rwf", 100))),
+    checkInRwf: Math.max(0, Math.floor(checkInRwf)),
     feedRwf: Math.max(0, Math.floor(getAppSettingNumber("field_payroll_feed_rwf", 300))),
     missedCheckInRwf: Math.max(0, Math.floor(getAppSettingNumber("field_payroll_missed_check_in_rwf", 200))),
     missedFeedRwf: Math.max(0, Math.floor(getAppSettingNumber("field_payroll_missed_feed_rwf", 200))),
+    lateDeductionRwf: Math.max(0, Math.floor(
+      getAppSettingNumber("field_payroll_late_deduction_rwf",
+        getAppSettingNumber("checkin_deduction_late_rwf", 300))
+    )),
+    missedCheckInDeductionRwf: Math.max(0, Math.floor(
+      getAppSettingNumber("field_payroll_missed_check_in_rwf",
+        getAppSettingNumber("checkin_deduction_missed_rwf", 500))
+    )),
   };
 }
 
@@ -231,6 +250,7 @@ const FIELD_PAYROLL_DB_KEYS = [
   "field_payroll_feed_rwf",
   "field_payroll_missed_check_in_rwf",
   "field_payroll_missed_feed_rwf",
+  "field_payroll_late_deduction_rwf",
 ];
 
 /**
@@ -250,6 +270,11 @@ export async function persistFieldPayrollRates(dbQuery, hasDbFn, body) {
     field_payroll_feed_rwf: clamp(body.feedRwf),
     field_payroll_missed_check_in_rwf: clamp(body.missedCheckInRwf),
     field_payroll_missed_feed_rwf: clamp(body.missedFeedRwf),
+    field_payroll_late_deduction_rwf: clamp(body.lateDeductionRwf ?? body.missedCheckInRwf),
+    // Mirror into the legacy keys so existing reads don't break
+    checkin_commission_on_time_rwf: clamp(body.checkInRwf),
+    checkin_deduction_late_rwf: clamp(body.lateDeductionRwf ?? body.missedCheckInRwf),
+    checkin_deduction_missed_rwf: clamp(body.missedCheckInRwf),
   };
   memAppSettings = {
     ...memAppSettings,

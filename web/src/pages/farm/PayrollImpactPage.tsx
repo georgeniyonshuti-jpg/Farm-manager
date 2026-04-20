@@ -41,6 +41,7 @@ type FieldPayrollRates = {
   feedRwf: number;
   missedCheckInRwf: number;
   missedFeedRwf: number;
+  lateDeductionRwf: number;
 };
 
 export function PayrollImpactPage() {
@@ -62,6 +63,7 @@ export function PayrollImpactPage() {
     feedRwf: "",
     missedCheckInRwf: "",
     missedFeedRwf: "",
+    lateDeductionRwf: "",
   });
 
   const loadFieldRates = useCallback(async () => {
@@ -79,6 +81,7 @@ export function PayrollImpactPage() {
         feedRwf: String(fr.feedRwf),
         missedCheckInRwf: String(fr.missedCheckInRwf),
         missedFeedRwf: String(fr.missedFeedRwf),
+        lateDeductionRwf: String(fr.lateDeductionRwf),
       });
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "Could not load field payroll rates");
@@ -206,6 +209,7 @@ export function PayrollImpactPage() {
       feedRwf: Number(fieldRatesForm.feedRwf),
       missedCheckInRwf: Number(fieldRatesForm.missedCheckInRwf),
       missedFeedRwf: Number(fieldRatesForm.missedFeedRwf),
+      lateDeductionRwf: Number(fieldRatesForm.lateDeductionRwf),
     };
     for (const v of Object.values(parsed)) {
       if (!Number.isFinite(v) || v < 0) {
@@ -248,14 +252,14 @@ export function PayrollImpactPage() {
 
       {canEditFieldRates ? (
         <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <h2 className="text-sm font-semibold text-neutral-900">Field laborer payroll rates (RWF)</h2>
+          <h2 className="text-sm font-semibold text-neutral-900">Laborer payroll rates (RWF)</h2>
           <p className="mt-1 text-xs text-neutral-600">
-            In-window round check-in and feed credits, and missed-window deductions (per schedule day). Applies to the
-            next auto payroll rows.
+            These are the <strong>effective</strong> rates applied to every laborer check-in and feed log.
+            Changes take effect on the next submitted log.
           </p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <label className="block text-xs font-medium text-neutral-700">
-              Check-in credit
+              On-time check-in credit (RWF)
               <input
                 type="number"
                 min={0}
@@ -265,17 +269,20 @@ export function PayrollImpactPage() {
               />
             </label>
             <label className="block text-xs font-medium text-neutral-700">
-              Feed entry credit
+              Late check-in deduction (subtracted from credit)
               <input
                 type="number"
                 min={0}
                 className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-                value={fieldRatesForm.feedRwf}
-                onChange={(e) => setFieldRatesForm((f) => ({ ...f, feedRwf: e.target.value }))}
+                value={fieldRatesForm.lateDeductionRwf}
+                onChange={(e) => setFieldRatesForm((f) => ({ ...f, lateDeductionRwf: e.target.value }))}
               />
+              <span className="block mt-0.5 text-neutral-400 font-normal">
+                e.g. credit 500 − deduction 300 = 200 for late
+              </span>
             </label>
             <label className="block text-xs font-medium text-neutral-700">
-              Missed check-in deduction
+              Missed check-in deduction (RWF)
               <input
                 type="number"
                 min={0}
@@ -285,7 +292,17 @@ export function PayrollImpactPage() {
               />
             </label>
             <label className="block text-xs font-medium text-neutral-700">
-              Missed feed deduction
+              On-time feed log credit (RWF)
+              <input
+                type="number"
+                min={0}
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                value={fieldRatesForm.feedRwf}
+                onChange={(e) => setFieldRatesForm((f) => ({ ...f, feedRwf: e.target.value }))}
+              />
+            </label>
+            <label className="block text-xs font-medium text-neutral-700">
+              Missed feed log deduction (RWF)
               <input
                 type="number"
                 min={0}
@@ -315,8 +332,8 @@ export function PayrollImpactPage() {
           </div>
           {fieldRates ? (
             <p className="mt-3 text-xs text-neutral-500">
-              Current: check-in {fieldRates.checkInRwf} · feed {fieldRates.feedRwf} · missed check-in −
-              {fieldRates.missedCheckInRwf} · missed feed −{fieldRates.missedFeedRwf}
+              Active: on-time check-in +{fieldRates.checkInRwf} · late check-in +{Math.max(0, fieldRates.checkInRwf - fieldRates.lateDeductionRwf)} · missed check-in −{fieldRates.missedCheckInRwf}
+              {" · "}feed log +{fieldRates.feedRwf} · missed feed −{fieldRates.missedFeedRwf}
             </p>
           ) : null}
         </div>

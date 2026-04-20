@@ -503,4 +503,240 @@ router.get("/event-configs", async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────────────────────
+// 6. Payroll period closure → Odoo wage expense
+// ─────────────────────────────────────────────────────────────
+
+import { mapPayrollClosureToJournalEntry } from "../services/odoo/odooFarmMappers.js";
+
+/**
+ * POST /api/accounting-approvals/payroll-closures
+ * Manager closes a payroll period: sums all approved payroll_impact rows in range,
+ * creates a payroll_period_closures record, and enqueues the Odoo journal entry.
+ * Body: { periodStart, periodEnd, notes? }
+ */
+router.post("/payroll-closures", async (req, res) => {
+  if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  const body = req.body ?? {};
+  const periodStart = String(body.periodStart ?? "").slice(0, 10);
+  const periodEnd = String(body.periodEnd ?? "").slice(0, 10);
+  const notes = body.notes ? String(body.notes).slice(0, 500) : null;
+  if (!periodStart || !periodEnd) return res.status(400).json({ error: "periodStart and periodEnd are required." });
+
+  try {
+    // Sum approved payroll rows in period
+    const totals = await dbQuery(
+      `SELECT
+         COUNT(DISTINCT user_id)::int AS worker_count,
+         COALESCE(SUM(CASE WHEN rwf_delta > 0 THEN rwf_delta ELSE 0 END), 0) AS total_credits,
+         COALESCE(SUM(CASE WHEN rwf_delta < 0 THEN ABS(rwf_delta) ELSE 0 END), 0) AS total_deductions,
+         COALESCE(SUM(rwf_delta), 0) AS net_payroll
+         FROM payroll_impact
+        WHERE period_start >= $1::date
+          AND period_end <= $2::date
+          AND approved_at IS NOT NULL`,
+      [periodStart, periodEnd]
+    );
+    const t = totals.rows[0];
+    const netPayrollRwf = Number(t.net_payroll);
+    if (netPayrollRwf === 0) return res.status(400).json({ error: "No approved payroll rows in this period." });
+
+    const ins = await dbQuery(
+      `INSERT INTO payroll_period_closures
+         (period_start, period_end, total_credits_rwf, total_deductions_rwf, net_payroll_rwf, worker_count, approved_by, notes)
+       VALUES ($1::date, $2::date, $3::numeric, $4::numeric, $5::numeric, $6, $7, $8)
+       ON CONFLICT (period_start, period_end) DO UPDATE
+         SET total_credits_rwf = EXCLUDED.total_credits_rwf,
+             total_deductions_rwf = EXCLUDED.total_deductions_rwf,
+             net_payroll_rwf = EXCLUDED.net_payroll_rwf,
+             worker_count = EXCLUDED.worker_count,
+             approved_by = EXCLUDED.approved_by,
+             notes = EXCLUDED.notes,
+             accounting_status = 'approved',
+             approved_at = now()
+       RETURNING id::text AS id`,
+      [periodStart, periodEnd, t.total_credits, t.total_deductions, netPayrollRwf, t.worker_count, req.authUser.id, notes]
+    );
+    const closureId = ins.rows[0].id;
+
+    const payload = mapPayrollClosureToJournalEntry({
+      id: closureId, periodStart, periodEnd, netPayrollRwf,
+      totalCreditsRwf: Number(t.total_credits),
+      totalDeductionsRwf: Number(t.total_deductions),
+      workerCount: t.worker_count,
+    });
+
+    if (payload) {
+      await enqueueOdooSync({
+        sourceTable: "payroll_period_closures",
+        sourceId: closureId,
+        eventType: "payroll_wages",
+        payload,
+        triggeredByUserId: req.authUser.id,
+        triggeredByRole: req.authUser.role,
+      });
+      processOdooSyncOutbox(5).catch(() => {});
+    }
+
+    res.status(201).json({ ok: true, closureId, periodStart, periodEnd, netPayrollRwf, workerCount: t.worker_count });
+  } catch (e) {
+    res.status(503).json({ error: e instanceof Error ? e.message : "Payroll closure failed." });
+  }
+});
+
+/**
+ * GET /api/accounting-approvals/payroll-closures
+ */
+router.get("/payroll-closures", async (req, res) => {
+  if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  try {
+    const r = await dbQuery(
+      `SELECT id::text AS id, period_start AS "periodStart", period_end AS "periodEnd",
+              total_credits_rwf AS "totalCreditsRwf", total_deductions_rwf AS "totalDeductionsRwf",
+              net_payroll_rwf AS "netPayrollRwf", worker_count AS "workerCount",
+              accounting_status AS "accountingStatus", odoo_move_name AS "odooMoveName",
+              notes, approved_at AS "approvedAt"
+         FROM payroll_period_closures
+        ORDER BY period_start DESC LIMIT 60`
+    );
+    res.json({ closures: r.rows });
+  } catch (e) {
+    res.status(503).json({ error: e instanceof Error ? e.message : "Query failed." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 7. Flock opening (chick purchase) — biological asset recognition
+// ─────────────────────────────────────────────────────────────
+
+import { mapFlockOpeningToBill } from "../services/odoo/odooFarmMappers.js";
+
+/**
+ * POST /api/accounting-approvals/flock-openings/:flockId/send-to-odoo
+ * Manager sends the initial chick purchase bill to Odoo.
+ * The flock must have purchase_cost_rwf set.
+ */
+router.post("/flock-openings/:flockId/send-to-odoo", async (req, res) => {
+  if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  const { flockId } = req.params;
+  const body = req.body ?? {};
+
+  try {
+    // Upsert purchase cost onto the flock
+    const purchaseCostRwf = body.purchaseCostRwf != null ? Number(body.purchaseCostRwf) : null;
+    const purchaseSupplier = body.purchaseSupplier ? String(body.purchaseSupplier).trim() : null;
+    const purchaseDate = body.purchaseDate ? String(body.purchaseDate).slice(0, 10) : null;
+
+    const r = await dbQuery(
+      `UPDATE poultry_flocks
+          SET purchase_cost_rwf = COALESCE($2::numeric, purchase_cost_rwf),
+              purchase_supplier = COALESCE($3, purchase_supplier),
+              purchase_date = COALESCE($4::date, purchase_date),
+              bio_asset_accounting_status = 'approved'
+        WHERE id::text = $1
+        RETURNING id::text AS id, code, initial_count AS "initialCount",
+                  purchase_cost_rwf AS "purchaseCostRwf", purchase_supplier AS "purchaseSupplier",
+                  purchase_date AS "purchaseDate", created_at AS "createdAt"`,
+      [flockId, purchaseCostRwf, purchaseSupplier, purchaseDate]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: "Flock not found." });
+    const flock = r.rows[0];
+    if (!flock.purchaseCostRwf) return res.status(400).json({ error: "purchase_cost_rwf must be set on the flock." });
+
+    const payload = mapFlockOpeningToBill(flock);
+    await enqueueOdooSync({
+      sourceTable: "poultry_flocks",
+      sourceId: flockId,
+      eventType: "bio_asset_opening",
+      payload,
+      triggeredByUserId: req.authUser.id,
+      triggeredByRole: req.authUser.role,
+    });
+    processOdooSyncOutbox(5).catch(() => {});
+    res.json({ ok: true, flock });
+  } catch (e) {
+    res.status(503).json({ error: e instanceof Error ? e.message : "Failed to queue flock opening." });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// 8. Mortality impairment — pending accounting approval
+// ─────────────────────────────────────────────────────────────
+
+import { mapMortalityToImpairmentEntry } from "../services/odoo/odooFarmMappers.js";
+
+/**
+ * GET /api/accounting-approvals/mortality-events/pending
+ */
+router.get("/mortality-events/pending", async (req, res) => {
+  if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  try {
+    const r = await dbQuery(
+      `SELECT m.id::text AS id, m.flock_id AS "flockId", f.code AS "flockCode",
+              m.at, m.count, m.cause, m.notes,
+              m.impairment_value_rwf AS "impairmentValueRwf",
+              m.accounting_status AS "accountingStatus"
+         FROM flock_mortality_events m
+         LEFT JOIN poultry_flocks f ON f.id::text = m.flock_id::text
+        WHERE m.accounting_status = 'pending_approval'
+          AND m.count >= 5
+        ORDER BY m.at DESC LIMIT 200`
+    );
+    res.json({ rows: r.rows });
+  } catch (e) {
+    res.status(503).json({ error: e instanceof Error ? e.message : "Query failed." });
+  }
+});
+
+/**
+ * PATCH /api/accounting-approvals/mortality-events/:id/approve
+ * Body: { impairmentValueRwf }
+ */
+router.patch("/mortality-events/:id/approve", async (req, res) => {
+  if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  const { id } = req.params;
+  const impairmentValueRwf = Number(req.body?.impairmentValueRwf ?? 0);
+  try {
+    const r = await dbQuery(
+      `UPDATE flock_mortality_events
+          SET accounting_status = 'approved',
+              impairment_value_rwf = $2,
+              accounting_approved_by = $3,
+              accounting_approved_at = now()
+        WHERE id::text = $1 AND accounting_status = 'pending_approval'
+        RETURNING id::text AS id, flock_id AS "flockId", at, count, cause`,
+      [id, impairmentValueRwf, req.authUser.id]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: "Event not found or already approved." });
+    const event = r.rows[0];
+
+    let flockCode = null;
+    try {
+      const fr = await dbQuery(`SELECT code FROM poultry_flocks WHERE id::text = $1`, [event.flockId]);
+      flockCode = fr.rows[0]?.code ?? null;
+    } catch {}
+
+    const payload = mapMortalityToImpairmentEntry({ ...event, flockCode, impairmentValueRwf });
+    if (payload) {
+      await enqueueOdooSync({
+        sourceTable: "flock_mortality_events",
+        sourceId: id,
+        eventType: "mortality_impairment",
+        payload,
+        triggeredByUserId: req.authUser.id,
+        triggeredByRole: req.authUser.role,
+      });
+      processOdooSyncOutbox(5).catch(() => {});
+    }
+    res.json({ ok: true, event });
+  } catch (e) {
+    res.status(503).json({ error: e instanceof Error ? e.message : "Approval failed." });
+  }
+});
+
 export default router;

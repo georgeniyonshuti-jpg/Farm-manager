@@ -1085,13 +1085,14 @@ async function maybeAutoPayrollForSubmit(reqUser, flockId, logType, logId, submi
   }
   const scheds = logSchedules.filter((s) => sameFlockId(s.flockId, flockId) && s.role === reqUser.role);
   const rates = systemConfig.getFieldPayrollRates();
-  const comm = systemConfig.getCheckinCommissionRates();
   const ymd = kigaliYmd(new Date(submittedAtIso));
   const bucket = logType;
 
   if (logType === "check_in") {
-    const baseOnTime = comm.onTimeRwf > 0 ? comm.onTimeRwf : rates.checkInRwf;
-    const lateDed = comm.lateDeductionRwf;
+    // Use checkInRwf as the single source of truth (set by manager on the Payroll page).
+    // lateDeductionRwf is stored alongside it in field_payroll_late_deduction_rwf.
+    const baseOnTime = rates.checkInRwf;
+    const lateDed = rates.lateDeductionRwf;
     let onTime = true;
     let creditRwf = baseOnTime;
     let reason = "Round check-in credit (no payroll window configured for your role on this flock)";
@@ -1101,7 +1102,7 @@ async function maybeAutoPayrollForSubmit(reqUser, flockId, logType, logId, submi
       creditRwf = onTime ? baseOnTime : Math.max(0, baseOnTime - lateDed);
       reason = onTime
         ? "On-time: round check-in within payroll window"
-        : "Late round check-in: commission reduced per policy";
+        : "Late round check-in: credit reduced per policy";
     }
     if (creditRwf <= 0) return { payrollImpact: null, payrollSaved: true };
 
@@ -1663,7 +1664,8 @@ async function syncMortalityEventsFromDb() {
             COALESCE(affects_live_count, true) AS "affectsLiveCount",
             reviewed_by_user_id::text AS "reviewedByUserId",
             reviewed_at AS "reviewedAt",
-            review_notes AS "reviewNotes"
+            review_notes AS "reviewNotes",
+            accounting_status AS "accountingStatus"
        FROM flock_mortality_events
        ORDER BY at ASC`
   );
@@ -1690,6 +1692,7 @@ async function syncMortalityEventsFromDb() {
       reviewedByUserId: row.reviewedByUserId != null ? String(row.reviewedByUserId) : null,
       reviewedAt: row.reviewedAt instanceof Date ? row.reviewedAt.toISOString() : row.reviewedAt != null ? String(row.reviewedAt) : null,
       reviewNotes: row.reviewNotes != null ? String(row.reviewNotes) : null,
+      accountingStatus: row.accountingStatus != null ? String(row.accountingStatus) : null,
     });
   }
   if (preservedMemory.length > 0) {
@@ -1826,6 +1829,7 @@ function mapInventoryRowFromDb(row) {
           : null,
     feedType: row.feedType != null ? String(row.feedType) : null,
     feedEntryId: row.feedEntryId != null ? String(row.feedEntryId) : null,
+    accountingStatus: row.accountingStatus != null ? String(row.accountingStatus) : null,
   };
 }
 
@@ -1846,7 +1850,8 @@ async function syncInventoryTransactionsFromDb() {
             approved_by_user_id::text AS "approvedByUserId",
             approved_at AS "approvedAt",
             feed_type AS "feedType",
-            feed_entry_id::text AS "feedEntryId"
+            feed_entry_id::text AS "feedEntryId",
+            COALESCE(accounting_status, 'not_applicable') AS "accountingStatus"
        FROM farm_inventory_transactions
       ORDER BY recorded_at DESC, created_at DESC`
   );
@@ -2439,6 +2444,7 @@ app.get("/api/admin/field-payroll-rates", requireAuth, requireFarmAccess, requir
     feedRwf: r.feedRwf,
     missedCheckInRwf: r.missedCheckInRwf,
     missedFeedRwf: r.missedFeedRwf,
+    lateDeductionRwf: r.lateDeductionRwf,
   });
 });
 
@@ -2448,6 +2454,13 @@ app.put("/api/admin/field-payroll-rates", requireAuth, requireFarmAccess, requir
     const x = Number(b[key]);
     if (!Number.isFinite(x) || x < 0) {
       res.status(400).json({ error: "Each rate must be a non-negative number" });
+      return;
+    }
+  }
+  if (b.lateDeductionRwf != null) {
+    const x = Number(b.lateDeductionRwf);
+    if (!Number.isFinite(x) || x < 0) {
+      res.status(400).json({ error: "lateDeductionRwf must be a non-negative number" });
       return;
     }
   }
@@ -2654,6 +2667,11 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
   const targetWeightKgRaw = body.targetWeightKg;
   const targetWeightKg =
     targetWeightKgRaw == null || targetWeightKgRaw === "" ? null : Number(targetWeightKgRaw);
+  const purchaseCostRwf = body.purchaseCostRwf == null || body.purchaseCostRwf === "" ? null : Number(body.purchaseCostRwf);
+  const costPerChickRwf = body.costPerChickRwf == null || body.costPerChickRwf === "" ? null : Number(body.costPerChickRwf);
+  const purchaseSupplier = String(body.purchaseSupplier ?? "").trim() || null;
+  const purchaseDateRaw = String(body.purchaseDate ?? "").trim();
+  const purchaseDate = /^\d{4}-\d{2}-\d{2}$/.test(purchaseDateRaw) ? purchaseDateRaw : null;
 
   if (!placementDate || !Number.isFinite(initialCount) || initialCount <= 0 || !breedCode) {
     res.status(400).json({ error: "placementDate, initialCount (>0), and breedCode are required" });
@@ -2677,17 +2695,26 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
       await ensurePoultryFlockCodeSequence();
       const inserted = await dbQuery(
         `INSERT INTO poultry_flocks
-          (breed_code, placement_date, initial_count, target_weight_kg, status, code)
+          (breed_code, placement_date, initial_count, target_weight_kg, status, code,
+           purchase_cost_rwf, cost_per_chick_rwf, purchase_supplier, purchase_date)
          VALUES ($1, $2::date, $3, $4, $5,
-                 'FL-' || lpad(nextval('poultry_flock_code_seq')::text, 6, '0'))
+                 'FL-' || lpad(nextval('poultry_flock_code_seq')::text, 6, '0'),
+                 $6, $7, $8, $9::date)
          RETURNING id::text AS id,
                    COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
                    code`,
-        [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, status]
+        [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, status,
+         purchaseCostRwf, costPerChickRwf, purchaseSupplier, purchaseDate]
       );
       createdId = String(inserted.rows[0]?.id ?? createdId);
       createdCode = inserted.rows[0]?.code != null ? String(inserted.rows[0].code) : createdCode;
       createdLabel = String(inserted.rows[0]?.label ?? createdCode);
+      if (purchaseCostRwf != null || costPerChickRwf != null) {
+        dbQuery(
+          `UPDATE poultry_flocks SET bio_asset_accounting_status = 'pending_approval' WHERE id::text = $1`,
+          [createdId]
+        ).catch((e) => console.error("[ERROR]", "[accounting] flock bio_asset_accounting_status:", e instanceof Error ? e.message : e));
+      }
     }
     const flockRow = {
       id: createdId,
@@ -3299,6 +3326,15 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
     isEmergency,
     submissionStatus,
   });
+
+  // Accounting: significant mortality (≥5 birds) → pending accounting approval for impairment
+  if (hasDb() && mortalitySavedToDb && id && count >= 5) {
+    dbQuery(
+      `UPDATE flock_mortality_events SET accounting_status = 'pending_approval' WHERE id::text = $1`,
+      [id]
+    ).catch((e) => console.error("[ERROR]", "[accounting] mortality accounting_status:", e instanceof Error ? e.message : e));
+  }
+
   const processed = await handleMortalityLog({
     flockId: f.id,
     mortalityId: id,
@@ -4004,7 +4040,8 @@ async function listSlaughterForFlock(flockId, startIso = null, endIso = null) {
       const r = await dbQuery(
         `SELECT id, flock_id AS "flockId", at, birds_slaughtered AS "birdsSlaughtered",
                 reason_code AS "reasonCode", avg_live_weight_kg AS "avgLiveWeightKg", avg_carcass_weight_kg AS "avgCarcassWeightKg",
-                notes, entered_by_user_id AS "enteredByUserId"
+                notes, entered_by_user_id AS "enteredByUserId",
+                accounting_status AS "accountingStatus"
            FROM flock_slaughter_events
           WHERE flock_id = $1
             AND ($2::timestamptz IS NULL OR at >= $2::timestamptz)
@@ -5053,7 +5090,7 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
         payload,
         triggeredByUserId: req.authUser.id,
         triggeredByRole: req.authUser.role,
-      }).catch(() => {});
+      }).then(() => processOdooSyncOutbox(3)).catch(() => {});
     }
   }
 
@@ -6770,7 +6807,9 @@ app.get("/api/medicine/lots", requireAuth, requireFarmAccess, requirePageAccess(
       `SELECT l.id, l.medicine_id AS "medicineId", m.name AS "medicineName",
               l.lot_number AS "lotNumber", l.received_at AS "receivedAt", l.expiry_date AS "expiryDate",
               l.quantity_received AS "quantityReceived", l.quantity_remaining AS "quantityRemaining",
-              l.supplier, l.invoice_ref AS "invoiceRef", l.created_at AS "createdAt"
+              l.supplier, l.invoice_ref AS "invoiceRef", l.created_at AS "createdAt",
+              l.unit_cost_rwf AS "unitCostRwf",
+              l.accounting_status AS "accountingStatus"
          FROM medicine_lots l
          JOIN medicine_inventory m ON m.id = l.medicine_id
         WHERE ($1 = '' OR l.medicine_id::text = $1)
@@ -6849,7 +6888,7 @@ app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requirePageAccess
           payload: medPayload,
           triggeredByUserId: req.authUser.id,
           triggeredByRole: req.authUser.role,
-        }).catch(() => {});
+        }).then(() => processOdooSyncOutbox(3)).catch(() => {});
       }
     }
 

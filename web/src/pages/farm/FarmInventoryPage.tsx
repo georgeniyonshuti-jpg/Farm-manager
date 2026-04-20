@@ -6,6 +6,7 @@ import { API_BASE_URL } from "../../api/config";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
+import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
 
 type StockRow = {
   feedType: string | null;
@@ -27,6 +28,7 @@ type LedgerRow = {
   deltaKg: number;
   reason: string;
   reference: string;
+  accountingStatus: string | null;
 };
 
 const FEED_TYPE_OPTIONS = [
@@ -95,6 +97,7 @@ export function FarmInventoryPage() {
   const [procReasonCode, setProcReasonCode] = useState("supplier_delivery");
   const [procRef, setProcRef] = useState("");
   const [procUnitCost, setProcUnitCost] = useState("");
+  const [procSupplier, setProcSupplier] = useState("");
 
   // Adjustment form
   const [adjDelta, setAdjDelta] = useState("");
@@ -172,14 +175,19 @@ export function FarmInventoryPage() {
           reason: procReasonCode,
           reference: procRef,
           unitCostRwfPerKg: procUnitCost ? Number(procUnitCost) : undefined,
+          supplierName: procSupplier.trim() || undefined,
         }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Request failed");
-      showToast("success", `Received ${qty} kg of ${feedTypeLabel(procFeedType)}`);
+      const acctMsg = procUnitCost
+        ? " Draft bill queued for Odoo."
+        : " Add a unit cost to enable Odoo accounting.";
+      showToast("success", `Received ${qty} kg of ${feedTypeLabel(procFeedType)}.${acctMsg}`);
       setProcQty("");
       setProcRef("");
       setProcUnitCost("");
+      setProcSupplier("");
       setShowEntryPanel(false);
       await Promise.all([loadStock(), loadLedger(1)]);
     } catch (e) {
@@ -406,7 +414,21 @@ export function FarmInventoryPage() {
                         onChange={(e) => setProcUnitCost(e.target.value)}
                       />
                     </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-neutral-600">Supplier name (optional)</label>
+                      <input
+                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        placeholder="e.g. Inyange Feed Co."
+                        value={procSupplier}
+                        onChange={(e) => setProcSupplier(e.target.value)}
+                      />
+                    </div>
                   </div>
+                  {procUnitCost && (
+                    <p className="text-xs text-emerald-700">
+                      A draft vendor bill will be sent to Odoo automatically on save.
+                    </p>
+                  )}
                   <button
                     type="button"
                     disabled={busy || !procQty}
@@ -512,12 +534,13 @@ export function FarmInventoryPage() {
                           <th className="tbl-num">Delta (kg)</th>
                           <th>Reason</th>
                           <th>Flock / reference</th>
+                          <th>Odoo</th>
                         </tr>
                       </thead>
                       <tbody>
                         {ledger.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="py-6 text-center text-sm text-neutral-500">
+                            <td colSpan={8} className="py-6 text-center text-sm text-neutral-500">
                               No transactions found.
                             </td>
                           </tr>
@@ -545,6 +568,11 @@ export function FarmInventoryPage() {
                               <td className="text-neutral-600">{row.reason || "—"}</td>
                               <td className="tbl-mono text-neutral-500">
                                 {row.flockLabel ?? row.reference ?? "—"}
+                              </td>
+                              <td>
+                                {row.type === "procurement_receipt" && (
+                                  <OdooSyncBadge status={row.accountingStatus} compact />
+                                )}
                               </td>
                             </tr>
                           ))

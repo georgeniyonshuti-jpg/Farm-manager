@@ -8,6 +8,7 @@ import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
+import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
 
 type Flock = { id: string; label: string };
 type Slaughter = {
@@ -18,6 +19,7 @@ type Slaughter = {
   avgLiveWeightKg: number;
   avgCarcassWeightKg: number | null;
   notes: string;
+  accountingStatus?: string | null;
 };
 type PerformanceSummary = {
   feedToDateKg: number;
@@ -161,7 +163,7 @@ export function FarmSlaughterPage() {
         }
         throw new Error(payload.error ?? "Save failed");
       }
-      showToast("success", "Slaughter record saved.");
+      showToast("success", "Slaughter record saved. A manager must confirm fair value in Accounting Approvals to send to Odoo.");
       setForm((v) => ({ ...v, birdsSlaughtered: "", avgLiveWeightKg: "", avgCarcassWeightKg: "", notes: "" }));
       setShowRecordSlaughter(false);
       await load();
@@ -180,6 +182,14 @@ export function FarmSlaughterPage() {
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
       {!loading && !error ? (
         <>
+          <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-900">
+            Slaughter events are saved as <strong>pending accounting review</strong>. A manager must open{" "}
+            <Link className="font-semibold underline" to="/farm/accounting-approvals">
+              Accounting Approvals
+            </Link>{" "}
+            to confirm the fair value and send the journal entry to Odoo.
+          </div>
+
           {eligibility && !eligibility.eligibleForSlaughter ? (
             <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
               <p className="font-semibold">⛔ Slaughter blocked</p>
@@ -288,6 +298,7 @@ export function FarmSlaughterPage() {
                     <th className="tbl-num">Avg live wt (kg)</th>
                     <th className="tbl-num">Avg carcass wt (kg)</th>
                     <th>Notes</th>
+                    <th>Odoo</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -299,11 +310,12 @@ export function FarmSlaughterPage() {
                       <td className="tbl-num">{r.avgLiveWeightKg}</td>
                       <td className="tbl-num">{r.avgCarcassWeightKg != null ? r.avgCarcassWeightKg : "—"}</td>
                       <td style={{ maxWidth: "14rem" }}>{r.notes || "—"}</td>
+                      <td><OdooSyncBadge status={r.accountingStatus} compact /></td>
                     </tr>
                   ))}
                   {!rows.length ? (
                     <tr>
-                      <td colSpan={6} className="py-6 text-center text-neutral-500">No slaughter records yet.</td>
+                      <td colSpan={7} className="py-6 text-center text-neutral-500">No slaughter records yet.</td>
                     </tr>
                   ) : null}
                 </tbody>

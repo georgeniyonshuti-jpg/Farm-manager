@@ -9,6 +9,7 @@ import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import type { FieldPerformanceSummary } from "../../hooks/useFlockFieldContext";
 import type { CheckinStatus } from "./checkinStatusTypes";
+import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
 
 type Flock = { id: string; label: string; code?: string | null; initialCount?: number };
 type Medicine = {
@@ -89,6 +90,20 @@ const FALLBACK_ADMIN_ROUTES = [
   { value: "topical", label: "topical" },
 ];
 
+type MedicineLot = {
+  id: string | number;
+  medicineId: string;
+  medicineName: string;
+  lotNumber: string | null;
+  receivedAt: string;
+  expiryDate: string | null;
+  quantityReceived: number;
+  quantityRemaining: number;
+  supplier: string | null;
+  unitCostRwf: number | null;
+  accountingStatus: string | null;
+};
+
 type MedTab = "treatments" | "rounds" | "inventory";
 
 function treatmentReasonLabel(row: Treatment, reasons: { value: string; label: string }[]): string {
@@ -150,6 +165,17 @@ export function FarmTreatmentPage() {
   const [showTreatmentForm, setShowTreatmentForm] = useState(false);
   const [showRoundForm, setShowRoundForm] = useState(false);
   const [showMedicineForm, setShowMedicineForm] = useState(false);
+  const [showLotForm, setShowLotForm] = useState(false);
+  const [lots, setLots] = useState<MedicineLot[]>([]);
+  const [lotForm, setLotForm] = useState({
+    medicineId: "",
+    lotNumber: "",
+    quantityReceived: "",
+    unitCostRwf: "",
+    supplier: "",
+    expiryDate: "",
+    receivedAt: new Date().toISOString().slice(0, 10),
+  });
   const [flockStrip, setFlockStrip] = useState<CheckinStatus | null>(null);
   const [flockPerformance, setFlockPerformance] = useState<FieldPerformanceSummary | null>(null);
 
@@ -407,6 +433,52 @@ export function FarmTreatmentPage() {
     }
   }
 
+  const loadLots = useCallback(async () => {
+    if (!token) return;
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/medicine/lots`, { headers: readAuthHeaders(token) });
+      const d = await r.json().catch(() => ({ lots: [] }));
+      if (r.ok) setLots((d as { lots: MedicineLot[] }).lots ?? []);
+    } catch { /* non-critical */ }
+  }, [token]);
+
+  useEffect(() => { void loadLots(); }, [loadLots]);
+
+  async function submitLot(e: React.FormEvent) {
+    e.preventDefault();
+    const qty = Number(lotForm.quantityReceived);
+    if (!lotForm.medicineId) { showToast("error", "Select a medicine."); return; }
+    if (!Number.isFinite(qty) || qty <= 0) { showToast("error", "Enter a valid quantity."); return; }
+    setBusy(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/medicine/lots`, {
+        method: "POST",
+        headers: jsonAuthHeaders(token),
+        body: JSON.stringify({
+          medicineId: lotForm.medicineId,
+          lotNumber: lotForm.lotNumber.trim() || null,
+          quantityReceived: qty,
+          unitCostRwf: lotForm.unitCostRwf ? Number(lotForm.unitCostRwf) : undefined,
+          supplier: lotForm.supplier.trim() || null,
+          expiryDate: lotForm.expiryDate || null,
+          receivedAt: lotForm.receivedAt ? new Date(lotForm.receivedAt).toISOString() : undefined,
+          medicineName: medicines.find((m) => m.id === lotForm.medicineId)?.name ?? "Medicine",
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Save failed");
+      const costMsg = lotForm.unitCostRwf ? " Draft bill queued for Odoo." : "";
+      showToast("success", `Lot received (${qty} units).${costMsg}`);
+      setLotForm((v) => ({ ...v, lotNumber: "", quantityReceived: "", unitCostRwf: "", supplier: "", expiryDate: "" }));
+      setShowLotForm(false);
+      await Promise.all([load(), loadLots()]);
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function tabClass(active: boolean) {
     return [
       "rounded-lg px-3 py-2 text-sm font-semibold transition-colors",
@@ -651,79 +723,234 @@ export function FarmTreatmentPage() {
           ) : null}
 
           {tab === "inventory" ? (
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <p className="mb-3 text-sm font-semibold text-neutral-800">Stock forecast (30 days)</p>
-              <div className="mb-6 grid gap-2 sm:grid-cols-2">
-                {forecastRows.slice(0, 6).map((f) => (
-                  <div key={f.id} className="rounded-lg border border-neutral-200 p-2 text-xs">
-                    <p className="font-medium text-neutral-900">{f.name}</p>
-                    <p className="text-neutral-700">
-                      Cover: {f.daysOfCover != null ? `${f.daysOfCover} days` : "insufficient usage data"} · Avg/day {Number(f.avgDailyUse).toFixed(2)} {f.unit}
-                    </p>
-                    {f.stockoutRisk7d ? <p className="font-semibold text-red-700">Risk: stockout within 7 days</p> : null}
-                  </div>
-                ))}
-                {!forecastRows.length ? <p className="text-sm text-neutral-500">No forecast data yet.</p> : null}
-              </div>
-
-              <p className="mb-3 text-sm font-semibold text-neutral-800">On-hand inventory</p>
-              <div className="mb-4 grid gap-3 sm:grid-cols-2">
-                {medicines.map((m) => {
-                  const low = Number(m.quantity) < Number(m.lowStockThreshold ?? 10);
-                  return (
-                    <div key={m.id} className="rounded-lg border border-neutral-200 p-3 text-sm">
-                      <p className="font-medium">{m.name}</p>
-                      <p className="text-neutral-600">{m.category} · withdrawal {m.withdrawalDays} day(s)</p>
-                      <p className={low ? "font-semibold text-red-700" : "font-semibold text-neutral-800"}>
-                        Stock: {m.quantity} {m.unit}{low ? " (LOW)" : ""}
+            <div className="space-y-6">
+              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                <p className="mb-3 text-sm font-semibold text-neutral-800">Stock forecast (30 days)</p>
+                <div className="mb-6 grid gap-2 sm:grid-cols-2">
+                  {forecastRows.slice(0, 6).map((f) => (
+                    <div key={f.id} className="rounded-lg border border-neutral-200 p-2 text-xs">
+                      <p className="font-medium text-neutral-900">{f.name}</p>
+                      <p className="text-neutral-700">
+                        Cover: {f.daysOfCover != null ? `${f.daysOfCover} days` : "insufficient usage data"} · Avg/day {Number(f.avgDailyUse).toFixed(2)} {f.unit}
                       </p>
+                      {f.stockoutRisk7d ? <p className="font-semibold text-red-700">Risk: stockout within 7 days</p> : null}
                     </div>
-                  );
-                })}
-                {!medicines.length ? <p className="text-sm text-neutral-500">No medicines in stock yet.</p> : null}
+                  ))}
+                  {!forecastRows.length ? <p className="text-sm text-neutral-500">No forecast data yet.</p> : null}
+                </div>
+
+                <p className="mb-3 text-sm font-semibold text-neutral-800">On-hand inventory</p>
+                <div className="mb-4 grid gap-3 sm:grid-cols-2">
+                  {medicines.map((m) => {
+                    const low = Number(m.quantity) < Number(m.lowStockThreshold ?? 10);
+                    return (
+                      <div key={m.id} className="rounded-lg border border-neutral-200 p-3 text-sm">
+                        <p className="font-medium">{m.name}</p>
+                        <p className="text-neutral-600">{m.category} · withdrawal {m.withdrawalDays} day(s)</p>
+                        <p className={low ? "font-semibold text-red-700" : "font-semibold text-neutral-800"}>
+                          Stock: {m.quantity} {m.unit}{low ? " (LOW)" : ""}
+                        </p>
+                      </div>
+                    );
+                  })}
+                  {!medicines.length ? <p className="text-sm text-neutral-500">No medicines in stock yet.</p> : null}
+                </div>
+
+                {!showMedicineForm ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowMedicineForm(true)}
+                    className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
+                  >
+                    Add catalog item
+                  </button>
+                ) : (
+                  <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-neutral-800">New catalog item</p>
+                      <button type="button" onClick={() => setShowMedicineForm(false)} className="text-sm font-medium text-neutral-600 underline">
+                        Cancel
+                      </button>
+                    </div>
+                    <form onSubmit={submitMedicine} className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
+                      <input className="rounded-lg border border-neutral-300 px-3 py-2 lg:col-span-2" placeholder="Medicine name" value={medForm.name} onChange={(e) => setMedForm((v) => ({ ...v, name: e.target.value }))} />
+                      <select className="rounded-lg border border-neutral-300 px-3 py-2" value={medForm.category} onChange={(e) => setMedForm((v) => ({ ...v, category: e.target.value }))}>
+                        {medCategoryOptions.map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      <select className="rounded-lg border border-neutral-300 px-3 py-2" value={medForm.unit} onChange={(e) => setMedForm((v) => ({ ...v, unit: e.target.value }))} title="Stock unit (database-enforced)">
+                        {medStockOptions.map((u) => (
+                          <option key={u.value} value={u.value}>
+                            {u.label}
+                          </option>
+                        ))}
+                      </select>
+                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Opening qty" inputMode="decimal" value={medForm.quantity} onChange={(e) => setMedForm((v) => ({ ...v, quantity: e.target.value }))} />
+                      <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">
+                        Add item
+                      </button>
+                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Withdrawal days" inputMode="numeric" value={medForm.withdrawalDays} onChange={(e) => setMedForm((v) => ({ ...v, withdrawalDays: e.target.value }))} />
+                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Low-stock alert at" inputMode="numeric" value={medForm.lowStockThreshold} onChange={(e) => setMedForm((v) => ({ ...v, lowStockThreshold: e.target.value }))} />
+                    </form>
+                  </div>
+                )}
               </div>
 
-              {!showMedicineForm ? (
-                <button
-                  type="button"
-                  onClick={() => setShowMedicineForm(true)}
-                  className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
-                >
-                  Add catalog item
-                </button>
-              ) : (
-                <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-neutral-800">New catalog item</p>
-                    <button type="button" onClick={() => setShowMedicineForm(false)} className="text-sm font-medium text-neutral-600 underline">
-                      Cancel
-                    </button>
-                  </div>
-                  <form onSubmit={submitMedicine} className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
-                    <input className="rounded-lg border border-neutral-300 px-3 py-2 lg:col-span-2" placeholder="Medicine name" value={medForm.name} onChange={(e) => setMedForm((v) => ({ ...v, name: e.target.value }))} />
-                    <select className="rounded-lg border border-neutral-300 px-3 py-2" value={medForm.category} onChange={(e) => setMedForm((v) => ({ ...v, category: e.target.value }))}>
-                      {medCategoryOptions.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                    <select className="rounded-lg border border-neutral-300 px-3 py-2" value={medForm.unit} onChange={(e) => setMedForm((v) => ({ ...v, unit: e.target.value }))} title="Stock unit (database-enforced)">
-                      {medStockOptions.map((u) => (
-                        <option key={u.value} value={u.value}>
-                          {u.label}
-                        </option>
-                      ))}
-                    </select>
-                    <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Opening qty" inputMode="decimal" value={medForm.quantity} onChange={(e) => setMedForm((v) => ({ ...v, quantity: e.target.value }))} />
-                    <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">
-                      Add item
-                    </button>
-                    <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Withdrawal days" inputMode="numeric" value={medForm.withdrawalDays} onChange={(e) => setMedForm((v) => ({ ...v, withdrawalDays: e.target.value }))} />
-                    <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Low-stock alert at" inputMode="numeric" value={medForm.lowStockThreshold} onChange={(e) => setMedForm((v) => ({ ...v, lowStockThreshold: e.target.value }))} />
-                  </form>
+              {/* ── Medicine lot receipts ── */}
+              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-neutral-800">Medicine lot receipts</p>
+                  <span className="text-xs text-neutral-500">Received batches — add unit cost to generate a draft vendor bill in Odoo</span>
                 </div>
-              )}
+
+                {lots.length > 0 && (
+                  <div className="mb-4 overflow-x-auto">
+                    <table className="institutional-table w-full text-xs">
+                      <thead>
+                        <tr>
+                          <th>Medicine</th>
+                          <th>Lot #</th>
+                          <th>Received</th>
+                          <th className="tbl-num">Qty received</th>
+                          <th className="tbl-num">Remaining</th>
+                          <th className="tbl-num">Unit cost (RWF)</th>
+                          <th>Supplier</th>
+                          <th>Odoo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {lots.map((l) => (
+                          <tr key={String(l.id)}>
+                            <td className="font-medium">{l.medicineName}</td>
+                            <td className="tbl-mono">{l.lotNumber ?? "—"}</td>
+                            <td className="tbl-mono whitespace-nowrap">
+                              {new Date(l.receivedAt).toLocaleDateString(undefined, { timeZone: "Africa/Kigali" })}
+                            </td>
+                            <td className="tbl-num">{l.quantityReceived}</td>
+                            <td className="tbl-num">{l.quantityRemaining}</td>
+                            <td className="tbl-num">{l.unitCostRwf != null ? l.unitCostRwf.toLocaleString() : "—"}</td>
+                            <td>{l.supplier ?? "—"}</td>
+                            <td><OdooSyncBadge status={l.accountingStatus} compact /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {!lots.length && (
+                  <p className="mb-4 text-sm text-neutral-500">No lots received yet.</p>
+                )}
+
+                {!showLotForm ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLotForm((v) => ({ ...v, medicineId: v.medicineId || medicines[0]?.id || "" }));
+                      setShowLotForm(true);
+                    }}
+                    className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
+                  >
+                    Receive medicine lot
+                  </button>
+                ) : (
+                  <form onSubmit={submitLot} className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-neutral-800">Receive lot — adds to inventory &amp; queues Odoo bill if cost is set</p>
+                      <button type="button" onClick={() => setShowLotForm(false)} className="text-sm font-medium text-neutral-600 underline">Cancel</button>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-neutral-600">Medicine</label>
+                        <select
+                          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                          value={lotForm.medicineId}
+                          onChange={(e) => setLotForm((v) => ({ ...v, medicineId: e.target.value }))}
+                          required
+                        >
+                          <option value="">Select medicine…</option>
+                          {medicines.map((m) => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-neutral-600">Quantity received</label>
+                        <input
+                          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                          placeholder="e.g. 500"
+                          inputMode="decimal"
+                          value={lotForm.quantityReceived}
+                          onChange={(e) => setLotForm((v) => ({ ...v, quantityReceived: e.target.value }))}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-neutral-600">Unit cost (RWF) — enables Odoo bill</label>
+                        <input
+                          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                          placeholder="e.g. 1200"
+                          inputMode="decimal"
+                          value={lotForm.unitCostRwf}
+                          onChange={(e) => setLotForm((v) => ({ ...v, unitCostRwf: e.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-neutral-600">Supplier</label>
+                        <input
+                          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                          placeholder="Optional"
+                          value={lotForm.supplier}
+                          onChange={(e) => setLotForm((v) => ({ ...v, supplier: e.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-neutral-600">Lot number</label>
+                        <input
+                          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                          placeholder="Optional"
+                          value={lotForm.lotNumber}
+                          onChange={(e) => setLotForm((v) => ({ ...v, lotNumber: e.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-neutral-600">Received date</label>
+                        <input
+                          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                          type="date"
+                          value={lotForm.receivedAt}
+                          onChange={(e) => setLotForm((v) => ({ ...v, receivedAt: e.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-neutral-600">Expiry date</label>
+                        <input
+                          className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                          type="date"
+                          value={lotForm.expiryDate}
+                          onChange={(e) => setLotForm((v) => ({ ...v, expiryDate: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    {lotForm.unitCostRwf && (
+                      <p className="mt-2 text-xs text-emerald-700">
+                        A draft vendor bill will be queued for Odoo on save.
+                      </p>
+                    )}
+                    <div className="mt-3">
+                      <button
+                        disabled={busy || !lotForm.medicineId || !lotForm.quantityReceived}
+                        className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                        type="submit"
+                      >
+                        {busy ? "Saving…" : "Save lot receipt"}
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </div>
             </div>
           ) : null}
         </>

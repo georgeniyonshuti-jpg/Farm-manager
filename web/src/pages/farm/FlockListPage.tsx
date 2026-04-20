@@ -80,6 +80,10 @@ export function FlockListPage() {
     initialCount: "",
     breedCode: "generic_broiler",
     targetWeightKg: "",
+    purchaseCostRwf: "",
+    costPerChickRwf: "",
+    purchaseSupplier: "",
+    purchaseDate: "",
   });
 
   const load = useCallback(async () => {
@@ -245,6 +249,10 @@ export function FlockListPage() {
           breedCode: createForm.breedCode.trim().toLowerCase(),
           targetWeightKg: createForm.targetWeightKg ? Number(createForm.targetWeightKg) : null,
           status: "active",
+          purchaseCostRwf: createForm.purchaseCostRwf ? Number(createForm.purchaseCostRwf) : undefined,
+          costPerChickRwf: createForm.costPerChickRwf ? Number(createForm.costPerChickRwf) : undefined,
+          purchaseSupplier: createForm.purchaseSupplier.trim() || undefined,
+          purchaseDate: createForm.purchaseDate || undefined,
         }),
       });
       const d = await r.json().catch(() => ({}));
@@ -255,8 +263,11 @@ export function FlockListPage() {
       }
       const created = d as { flock?: { label?: string; code?: string | null } };
       const name = created.flock?.label ?? created.flock?.code ?? "Flock";
-      showToast("success", `Flock ${name} added`);
-      setCreateForm((prev) => ({ ...prev, initialCount: "", targetWeightKg: "" }));
+      const costMsg = (createForm.purchaseCostRwf || createForm.costPerChickRwf)
+        ? " Biological asset purchase queued for accounting review."
+        : "";
+      showToast("success", `Flock ${name} added.${costMsg}`);
+      setCreateForm((prev) => ({ ...prev, initialCount: "", targetWeightKg: "", purchaseCostRwf: "", costPerChickRwf: "", purchaseSupplier: "", purchaseDate: "" }));
       setShowCreateFlock(false);
       await load();
     } catch (e2) {
@@ -368,6 +379,37 @@ export function FlockListPage() {
               inputMode="decimal"
               value={createForm.targetWeightKg}
               onChange={(e) => setCreateForm((v) => ({ ...v, targetWeightKg: e.target.value }))}
+            />
+          </div>
+          <p className="mt-4 text-xs font-semibold text-neutral-700">Biological asset cost (IAS 41 — optional)</p>
+          <p className="text-xs text-neutral-500">If provided, a draft vendor bill will be queued for manager approval in Accounting Approvals.</p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-4">
+            <input
+              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              placeholder="Total purchase cost (RWF)"
+              inputMode="decimal"
+              value={createForm.purchaseCostRwf}
+              onChange={(e) => setCreateForm((v) => ({ ...v, purchaseCostRwf: e.target.value }))}
+            />
+            <input
+              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              placeholder="Cost per chick (RWF)"
+              inputMode="decimal"
+              value={createForm.costPerChickRwf}
+              onChange={(e) => setCreateForm((v) => ({ ...v, costPerChickRwf: e.target.value }))}
+            />
+            <input
+              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              placeholder="Supplier / hatchery"
+              value={createForm.purchaseSupplier}
+              onChange={(e) => setCreateForm((v) => ({ ...v, purchaseSupplier: e.target.value }))}
+            />
+            <input
+              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              type="date"
+              title="Purchase date"
+              value={createForm.purchaseDate}
+              onChange={(e) => setCreateForm((v) => ({ ...v, purchaseDate: e.target.value }))}
             />
           </div>
           <div className="mt-3 flex justify-end">

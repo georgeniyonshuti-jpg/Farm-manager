@@ -106,7 +106,32 @@ type ValuationSnapshot = {
   approvedAt: string | null;
 };
 
-type Tab = "feed" | "medicine" | "slaughter" | "sales" | "valuation" | "outbox";
+type MortalityRow = {
+  id: string;
+  flockId: string;
+  flockCode: string | null;
+  at: string;
+  count: number;
+  cause: string | null;
+  notes: string | null;
+  impairmentValueRwf: number | null;
+  accountingStatus: string;
+};
+
+type PayrollClosure = {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  totalCreditsRwf: number;
+  totalDeductionsRwf: number;
+  netPayrollRwf: number;
+  workerCount: number;
+  accountingStatus: string;
+  odooMoveName: string | null;
+  approvedAt: string;
+};
+
+type Tab = "feed" | "medicine" | "slaughter" | "sales" | "mortality" | "payroll" | "valuation" | "outbox";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -159,6 +184,17 @@ export function AccountingApprovalsPage() {
   const [newSale, setNewSale] = useState({ flockId: "", orderDate: "", numberOfBirds: "", totalWeightKg: "", pricePerKg: "", buyerName: "", buyerEmail: "" });
   const [saleSubmitting, setSaleSubmitting] = useState(false);
 
+  // Mortality
+  const [mortalityRows, setMortalityRows] = useState<MortalityRow[]>([]);
+  const [mortalityLoading, setMortalityLoading] = useState(false);
+  const [mortalityImpairmentForm, setMortalityImpairmentForm] = useState<Record<string, string>>({});
+
+  // Payroll closures
+  const [payrollClosures, setPayrollClosures] = useState<PayrollClosure[]>([]);
+  const [payrollLoading, setPayrollLoading] = useState(false);
+  const [newClosure, setNewClosure] = useState({ periodStart: "", periodEnd: "", notes: "" });
+  const [closureSubmitting, setClosureSubmitting] = useState(false);
+
   // Valuation
   const [valuationSnapshots, setValuationSnapshots] = useState<ValuationSnapshot[]>([]);
   const [valuationLoading, setValuationLoading] = useState(false);
@@ -210,6 +246,26 @@ export function AccountingApprovalsPage() {
     setSaleLoading(false);
   }, [token]);
 
+  const loadMortality = useCallback(async () => {
+    setMortalityLoading(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/accounting-approvals/mortality-events/pending`, { headers: readAuthHeaders(token) });
+      const d = await r.json();
+      setMortalityRows(d.rows ?? []);
+    } catch { /* */ }
+    setMortalityLoading(false);
+  }, [token]);
+
+  const loadPayrollClosures = useCallback(async () => {
+    setPayrollLoading(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/accounting-approvals/payroll-closures`, { headers: readAuthHeaders(token) });
+      const d = await r.json();
+      setPayrollClosures(d.closures ?? []);
+    } catch { /* */ }
+    setPayrollLoading(false);
+  }, [token]);
+
   const loadValuation = useCallback(async () => {
     setValuationLoading(true);
     try {
@@ -236,9 +292,11 @@ export function AccountingApprovalsPage() {
     else if (tab === "medicine") loadMed();
     else if (tab === "slaughter") loadSlaughter();
     else if (tab === "sales") loadSales();
+    else if (tab === "mortality") loadMortality();
+    else if (tab === "payroll") loadPayrollClosures();
     else if (tab === "valuation") loadValuation();
     else if (tab === "outbox") loadOutbox();
-  }, [tab, isManager, loadFeed, loadMed, loadSlaughter, loadSales, loadOutbox]);
+  }, [tab, isManager, loadFeed, loadMed, loadSlaughter, loadSales, loadMortality, loadPayrollClosures, loadValuation, loadOutbox]);
 
   // ── Actions ──
   async function approveFeed(id: string) {
@@ -314,6 +372,40 @@ export function AccountingApprovalsPage() {
     loadSales();
   }
 
+  async function approveMortality(id: string) {
+    const impairmentValueRwf = Number(mortalityImpairmentForm[id] ?? "0");
+    if (!Number.isFinite(impairmentValueRwf) || impairmentValueRwf < 0) {
+      showToast("error", "Enter a valid impairment value (RWF) before approving.");
+      return;
+    }
+    const r = await fetch(`${API_BASE_URL}/api/accounting-approvals/mortality-events/${id}/approve`, {
+      method: "PATCH",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({ impairmentValueRwf }),
+    });
+    const d = await r.json();
+    if (!r.ok) { showToast("error", d.error ?? "Approval failed."); return; }
+    showToast("success", "Mortality impairment sent to Odoo as draft journal entry.");
+    loadMortality();
+  }
+
+  async function submitPayrollClosure(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newClosure.periodStart || !newClosure.periodEnd) { showToast("error", "Period start and end are required."); return; }
+    setClosureSubmitting(true);
+    const r = await fetch(`${API_BASE_URL}/api/accounting-approvals/payroll-closures`, {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify(newClosure),
+    });
+    const d = await r.json();
+    setClosureSubmitting(false);
+    if (!r.ok) { showToast("error", d.error ?? "Payroll closure failed."); return; }
+    showToast("success", `Payroll period closed. Net: ${fmt(d.netPayrollRwf, 0)} RWF for ${d.workerCount} workers. Sent to Odoo.`);
+    setNewClosure({ periodStart: "", periodEnd: "", notes: "" });
+    loadPayrollClosures();
+  }
+
   async function submitValuation(e: React.FormEvent) {
     e.preventDefault();
     const marketPrice = Number(newValuation.marketPricePerKgRwf);
@@ -373,6 +465,8 @@ export function AccountingApprovalsPage() {
     { id: "medicine", label: "Medicine purchases" },
     { id: "slaughter", label: "Slaughter conversion" },
     { id: "sales", label: "Meat sales" },
+    { id: "mortality", label: "Mortality losses" },
+    { id: "payroll", label: "Payroll expense" },
     { id: "valuation", label: "Flock valuation (IAS 41)" },
     { id: "outbox", label: "Odoo sync log" },
   ];
@@ -596,6 +690,100 @@ export function AccountingApprovalsPage() {
                 </div>
               ))}
               {!saleLoading && saleOrders.length === 0 && <p className="text-sm text-gray-400">No sales recorded yet.</p>}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Mortality Impairment */}
+      {tab === "mortality" && (
+        <section>
+          <p className="text-sm text-gray-500 mb-3">
+            When 5 or more birds die, IAS 41 requires recognising the value loss as an impairment expense.
+            Enter the estimated fair value of the dead birds, then approve to create a draft journal entry in Odoo.
+          </p>
+          {mortalityLoading ? <p className="text-sm text-gray-400">Loading…</p> : null}
+          {!mortalityLoading && mortalityRows.length === 0 && <p className="text-sm text-gray-400">No mortality events pending accounting review.</p>}
+          <div className="space-y-3">
+            {mortalityRows.map(row => (
+              <div key={row.id} className="border border-gray-200 rounded-lg p-4 space-y-3">
+                <div className="flex items-start justify-between">
+                  <div className="text-sm space-y-0.5">
+                    <div className="font-medium">Flock {row.flockCode ?? row.flockId} — {fmtDate(row.at)}</div>
+                    <div className="text-red-600 font-medium">{fmt(row.count)} birds dead{row.cause ? ` — ${row.cause}` : ""}</div>
+                    {row.notes && <div className="text-gray-400 text-xs">{row.notes}</div>}
+                  </div>
+                  <OdooSyncBadge status={row.accountingStatus} />
+                </div>
+                <div className="flex items-end gap-3">
+                  <div className="flex-1">
+                    <label className="block text-xs text-gray-500 mb-1">Estimated fair value of dead birds (RWF) — fair value per kg × avg weight × count</label>
+                    <input
+                      type="number"
+                      placeholder="e.g. 85000"
+                      value={mortalityImpairmentForm[row.id] ?? ""}
+                      onChange={e => setMortalityImpairmentForm(p => ({ ...p, [row.id]: e.target.value }))}
+                      className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+                    />
+                  </div>
+                  <button
+                    onClick={() => approveMortality(row.id)}
+                    className="shrink-0 bg-emerald-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-emerald-700"
+                  >
+                    Record loss in Odoo
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Payroll Period Closure */}
+      {tab === "payroll" && (
+        <section className="space-y-6">
+          <p className="text-sm text-gray-500">
+            Close a payroll period to sum all approved laborer credits/deductions and create a single wage expense journal entry in Odoo.
+            Go to the <strong>Payroll</strong> page first to approve individual lines.
+          </p>
+
+          <div>
+            <h3 className="text-sm font-medium text-gray-700 mb-3">Close a payroll period</h3>
+            <form onSubmit={submitPayrollClosure} className="border border-gray-200 rounded-lg p-4 grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Period start</label>
+                <input type="date" value={newClosure.periodStart} onChange={e => setNewClosure(p => ({ ...p, periodStart: e.target.value }))} className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" required />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Period end</label>
+                <input type="date" value={newClosure.periodEnd} onChange={e => setNewClosure(p => ({ ...p, periodEnd: e.target.value }))} className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" required />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs text-gray-500 mb-1">Notes (optional)</label>
+                <input value={newClosure.notes} onChange={e => setNewClosure(p => ({ ...p, notes: e.target.value }))} className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" placeholder="e.g. April 2026 wages" />
+              </div>
+              <div className="col-span-2 flex justify-end">
+                <button type="submit" disabled={closureSubmitting} className="bg-emerald-600 text-white text-sm px-5 py-2 rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-colors">
+                  {closureSubmitting ? "Processing…" : "Close period & send to Odoo"}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-medium text-gray-700 mb-2">Payroll closures history</h3>
+            {payrollLoading ? <p className="text-sm text-gray-400">Loading…</p> : null}
+            <div className="space-y-2">
+              {payrollClosures.map(c => (
+                <div key={c.id} className="border border-gray-200 rounded-lg p-3 flex items-start justify-between gap-3">
+                  <div className="text-sm space-y-0.5">
+                    <div className="font-medium">{fmtDate(c.periodStart)} → {fmtDate(c.periodEnd)}</div>
+                    <div className="text-gray-500">{fmt(c.workerCount)} workers · credits +{fmt(c.totalCreditsRwf, 0)} · deductions −{fmt(c.totalDeductionsRwf, 0)} · <span className="font-medium">net {fmt(c.netPayrollRwf, 0)} RWF</span></div>
+                  </div>
+                  <OdooSyncBadge status={c.accountingStatus} odooMoveName={c.odooMoveName} />
+                </div>
+              ))}
+              {!payrollLoading && payrollClosures.length === 0 && <p className="text-sm text-gray-400">No payroll periods closed yet.</p>}
             </div>
           </div>
         </section>

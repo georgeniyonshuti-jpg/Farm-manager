@@ -9,6 +9,7 @@ import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
+import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
 
 type MortalityRow = {
   id: string;
@@ -20,6 +21,7 @@ type MortalityRow = {
   linkedCheckinId: string | null;
   submissionStatus?: string;
   affectsLiveCount?: boolean;
+  accountingStatus?: string | null;
 };
 
 function MortStatusBadge({ status }: { status?: string }) {
@@ -223,6 +225,7 @@ export function FarmMortalityPage() {
                     <th>{tStatus}</th>
                     <th>{tLive}</th>
                     <th>{tNotes}</th>
+                    <th>Odoo</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -242,6 +245,11 @@ export function FarmMortalityPage() {
                       <td className="tbl-badge"><MortStatusBadge status={r.submissionStatus} /></td>
                       <td className="tbl-badge">{r.affectsLiveCount !== false ? "Yes" : "No"}</td>
                       <td style={{ maxWidth: "14rem" }}>{r.notes || "—"}</td>
+                      <td>
+                        {r.count >= 5 && (
+                          <OdooSyncBadge status={r.accountingStatus} compact />
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

@@ -184,6 +184,21 @@ async function markSourceSentToOdoo(sourceTable, sourceId) {
       field: "status",
       value: "posted",
     },
+    payroll_period_closures: {
+      pk: "id",
+      cast: "::uuid",
+      field: "accounting_status",
+    },
+    poultry_flocks: {
+      pk: "id",
+      cast: "::uuid",
+      field: "bio_asset_accounting_status",
+    },
+    flock_mortality_events: {
+      pk: "id",
+      cast: "::uuid",
+      field: "accounting_status",
+    },
   };
 
   const meta = tableMap[sourceTable];

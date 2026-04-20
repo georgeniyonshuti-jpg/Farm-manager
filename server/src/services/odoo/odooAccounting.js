@@ -352,9 +352,17 @@ export async function dispatchFarmAccountingEvent(eventType, mappedPayload, { dr
     }
     case "slaughter_conversion":
     case "fcr_fair_value_adjustment":
-    case "payroll_expense": {
+    case "payroll_expense":
+    case "payroll_wages":
+    case "mortality_impairment":
+    case "feed_inventory_writeoff":
+    case "bio_asset_closing": {
       const result = await createJournalEntry(mappedPayload, { draft });
       return { odooMoveId: result.id, odooMoveName: result.entryName, state: result.state };
+    }
+    case "bio_asset_opening": {
+      const result = await createVendorBill(mappedPayload, { draft });
+      return { odooMoveId: result.id, odooMoveName: result.billNumber, state: result.state };
     }
     default:
       throw new Error(`Unknown farm accounting event type: ${eventType}`);

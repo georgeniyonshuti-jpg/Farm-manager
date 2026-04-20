@@ -137,6 +137,136 @@ export function mapSaleOrderToInvoice(order) {
 }
 
 /**
+ * Maps a payroll period closure to a wage expense journal entry.
+ * Journal (simplified):
+ *   DR  Wage Expense (P&L)         = net_payroll_rwf
+ *   CR  Wages Payable (liability)  = net_payroll_rwf
+ *
+ * @param {{ id: string, periodStart: string, periodEnd: string, netPayrollRwf: number, totalCreditsRwf: number, totalDeductionsRwf: number, workerCount: number }} closure
+ */
+export function mapPayrollClosureToJournalEntry(closure) {
+  const net = Math.abs(Number(closure.netPayrollRwf ?? 0));
+  if (net < 0.01) return null;
+  const ref = `FM-PAY-${closure.id}`;
+  const date = String(closure.periodEnd ?? "").slice(0, 10);
+  const label = `Field laborer wages — period ${closure.periodStart} to ${closure.periodEnd} (${closure.workerCount} workers)`;
+
+  return {
+    ref,
+    date,
+    externalRef: ref,
+    lines: [
+      {
+        accountCode: null, // Wage Expense — resolved at runtime
+        label,
+        debit: net,
+        credit: 0,
+      },
+      {
+        accountCode: null, // Wages Payable — resolved at runtime
+        label: `Wages payable — ${closure.periodStart} to ${closure.periodEnd}`,
+        debit: 0,
+        credit: net,
+      },
+    ],
+  };
+}
+
+/**
+ * Maps a flock opening (chick purchase) to a vendor bill (biological asset recognition).
+ * @param {{ id: string, code: string|null, purchaseCostRwf: number, initialCount: number, purchaseSupplier: string|null, purchaseDate: string|null, createdAt: string }} flock
+ */
+export function mapFlockOpeningToBill(flock) {
+  const totalCost = Number(flock.purchaseCostRwf ?? 0);
+  const costPerChick = flock.initialCount > 0 ? totalCost / flock.initialCount : 0;
+  const date = String(flock.purchaseDate ?? flock.createdAt ?? "").slice(0, 10);
+  const ref = `FM-FOPEN-${flock.id}`;
+  return {
+    vendorName: flock.purchaseSupplier || "Chick Supplier",
+    vendorEmail: null,
+    date,
+    externalRef: ref,
+    lines: [
+      {
+        description: `Live chick purchase — Flock ${flock.code || flock.id} (${flock.initialCount} birds @ ${costPerChick.toFixed(0)} RWF each)`,
+        quantity: Number(flock.initialCount ?? 1),
+        unitPrice: costPerChick,
+        accountCode: null, // Biological Assets account — resolved at runtime
+      },
+    ],
+  };
+}
+
+/**
+ * Maps a mortality event to an IAS 41 impairment loss journal entry.
+ * Journal:
+ *   DR  Impairment Loss on Biological Assets (P&L)
+ *   CR  Biological Assets — Live Birds
+ *
+ * @param {{ id: string, flockId: string, flockCode: string|null, impairmentValueRwf: number, count: number, at: string }} event
+ */
+export function mapMortalityToImpairmentEntry(event) {
+  const loss = Math.abs(Number(event.impairmentValueRwf ?? 0));
+  if (loss < 0.01) return null;
+  const ref = `FM-MORT-${event.id}`;
+  const date = String(event.at ?? "").slice(0, 10);
+  const flockLabel = event.flockCode || event.flockId;
+
+  return {
+    ref,
+    date,
+    externalRef: ref,
+    lines: [
+      {
+        accountCode: null, // Impairment Loss — resolved at runtime
+        label: `Mortality impairment — ${flockLabel} (${event.count} birds, IAS 41)`,
+        debit: loss,
+        credit: 0,
+      },
+      {
+        accountCode: null, // Biological Assets — resolved at runtime
+        label: `Derecognise dead birds — ${flockLabel}`,
+        debit: 0,
+        credit: loss,
+      },
+    ],
+  };
+}
+
+/**
+ * Maps a feed write-off (damage/loss adjustment) to a P&L expense entry.
+ * @param {{ id: string, deltaKg: number, unitCostRwfPerKg: number|null, reason: string, at: string }} row
+ */
+export function mapFeedWriteOffToJournalEntry(row) {
+  const lossKg = Math.abs(Number(row.deltaKg ?? 0));
+  const costPerKg = Number(row.unitCostRwfPerKg ?? 0);
+  const totalLoss = lossKg * costPerKg;
+  if (totalLoss < 0.01) return null;
+  const ref = `FM-WOFF-${row.id}`;
+  const date = String(row.at ?? "").slice(0, 10);
+
+  return {
+    ref,
+    date,
+    externalRef: ref,
+    lines: [
+      {
+        accountCode: null, // Feed Write-off Expense
+        label: `Feed write-off — ${row.reason || "damage/loss"} (${lossKg.toFixed(0)} kg)`,
+        debit: totalLoss,
+        credit: 0,
+      },
+      {
+        accountCode: null, // Feed Inventory Asset
+        label: `Feed inventory reduction — ${row.reason || "write-off"}`,
+        debit: 0,
+        credit: totalLoss,
+      },
+    ],
+  };
+}
+
+/**
  * Maps a flock valuation snapshot to a fair-value adjustment journal entry (IAS 41).
  * Journal:
  *   If fair value increased:
