@@ -2673,8 +2673,32 @@ app.get("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_f
       console.error("[ERROR]", "[db] GET /api/flocks:", e instanceof Error ? e.message : e);
     }
   }
+  const includeDepleted = String(req.query.includeDepleted ?? "").toLowerCase() === "true";
+  const birdsLiveEstimateForFlock = (flock) => {
+    const fid = String(flock.id);
+    const mortalityFromEvents = mortalityEvents
+      .filter((m) => sameFlockId(m.flockId, fid) && shouldCountMortalityForLiveEstimate(m))
+      .reduce((sum, m) => sum + (Number(m.count) || 0), 0);
+    const mortalityFromDaily = dailyLogs
+      .filter((log) => sameFlockId(log.flockId, fid) && shouldCountDailyLogMortality(log))
+      .reduce((sum, log) => sum + Math.max(0, Number(log.mortality) || 0), 0);
+    const slaughterToDate = slaughterEvents
+      .filter((s) => sameFlockId(s.flockId, fid))
+      .reduce((sum, s) => sum + (Number(s.birdsSlaughtered) || 0), 0);
+    const computed = Math.max(0, (Number(flock.initialCount) || 0) - mortalityFromEvents - mortalityFromDaily - slaughterToDate);
+    if (flock.verifiedLiveCount != null && Number.isFinite(Number(flock.verifiedLiveCount))) {
+      return Math.max(0, Math.floor(Number(flock.verifiedLiveCount)));
+    }
+    return computed;
+  };
   // FIX: embed check-in urgency per flock for list + detail views
-  const flocks = [...flocksById.values()].map((f) => {
+  const flocks = [...flocksById.values()]
+    .map((f) => {
+      const birdsLiveEstimate = birdsLiveEstimateForFlock(f);
+      return { ...f, birdsLiveEstimate };
+    })
+    .filter((f) => includeDepleted || Number(f.birdsLiveEstimate ?? 0) > 0)
+    .map((f) => {
     const st = checkinStatusPayload(f, req.authUser?.role ?? null);
     return {
       ...f,

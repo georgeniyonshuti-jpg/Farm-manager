@@ -10,7 +10,7 @@
  * Plain language only — no accounting jargon for non-accountant managers.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
 import { roleAtLeast } from "../../auth/permissions";
@@ -131,6 +131,7 @@ type PayrollClosure = {
   odooMoveName: string | null;
   approvedAt: string;
 };
+type FlockOption = { id: string; label: string };
 
 type Tab = "action" | "feed" | "medicine" | "slaughter" | "sales" | "mortality" | "payroll" | "valuation" | "outbox";
 
@@ -233,6 +234,7 @@ export function AccountingApprovalsPage() {
   const [saleLoading, setSaleLoading] = useState(false);
   const [newSale, setNewSale] = useState({ flockId: "", orderDate: "", numberOfBirds: "", totalWeightKg: "", pricePerKg: "", buyerName: "", buyerEmail: "" });
   const [saleSubmitting, setSaleSubmitting] = useState(false);
+  const [financeFlocks, setFinanceFlocks] = useState<FlockOption[]>([]);
 
   // Mortality
   const [mortalityRows, setMortalityRows] = useState<MortalityRow[]>([]);
@@ -254,6 +256,7 @@ export function AccountingApprovalsPage() {
   // Action queue
   const [actionQueue, setActionQueue] = useState<ActionQueueItem[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
+  const [actionSearch, setActionSearch] = useState("");
   const [editForms, setEditForms] = useState<Record<string, Record<string, string>>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
@@ -326,6 +329,20 @@ export function AccountingApprovalsPage() {
     setSaleLoading(false);
   }, [token]);
 
+  const loadFinanceFlocks = useCallback(async () => {
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/flocks?includeDepleted=true`, { headers: readAuthHeaders(token) });
+      const d = await r.json();
+      const rows = Array.isArray(d.flocks) ? d.flocks : [];
+      setFinanceFlocks(rows.map((f: { id: string; label?: string; code?: string | null }) => ({
+        id: String(f.id),
+        label: String(f.label ?? f.code ?? f.id),
+      })));
+    } catch {
+      setFinanceFlocks([]);
+    }
+  }, [token]);
+
   const loadMortality = useCallback(async () => {
     setMortalityLoading(true);
     try {
@@ -368,6 +385,7 @@ export function AccountingApprovalsPage() {
 
   useEffect(() => {
     if (!isManager) return;
+    loadFinanceFlocks();
     if (tab === "action") loadActionQueue();
     else if (tab === "feed") loadFeed();
     else if (tab === "medicine") loadMed();
@@ -377,7 +395,7 @@ export function AccountingApprovalsPage() {
     else if (tab === "payroll") loadPayrollClosures();
     else if (tab === "valuation") loadValuation();
     else if (tab === "outbox") loadOutbox();
-  }, [tab, isManager, loadActionQueue, loadFeed, loadMed, loadSlaughter, loadSales, loadMortality, loadPayrollClosures, loadValuation, loadOutbox]);
+  }, [tab, isManager, loadActionQueue, loadFeed, loadMed, loadSlaughter, loadSales, loadMortality, loadPayrollClosures, loadValuation, loadOutbox, loadFinanceFlocks]);
 
   // ── Actions ──
   async function approveFeed(id: string) {
@@ -597,6 +615,23 @@ export function AccountingApprovalsPage() {
     );
   }
 
+  const filteredActionQueue = useMemo(() => {
+    const q = actionSearch.trim().toLowerCase();
+    if (!q) return actionQueue;
+    return actionQueue.filter((item) => {
+      const hay = [
+        eventTypeLabel(item.eventType),
+        item.sourceId,
+        item.summary.label,
+        item.summary.detail,
+        item.userError?.message ?? "",
+      ].join(" ").toLowerCase();
+      return hay.includes(q);
+    });
+  }, [actionQueue, actionSearch]);
+  const failedItems = filteredActionQueue.filter(i => i.outboxStatus === "failed");
+  const pendingApprovalItems = filteredActionQueue.filter(i => i.sourceStatus === "pending_approval" && i.outboxStatus !== "failed");
+  const notQueuedItems = filteredActionQueue.filter(i => i.outboxStatus === "not_queued" && i.sourceStatus !== "pending_approval");
   const needsActionCount = actionQueue.filter(i => i.outboxStatus === "failed" || i.outboxStatus === "not_queued").length;
 
   const tabs: { id: Tab; label: string; badge?: number }[] = [
@@ -640,27 +675,69 @@ export function AccountingApprovalsPage() {
       {tab === "action" && (
         <section className="space-y-4">
           <p className="text-sm text-gray-500">
-            All financial records that have not yet reached Odoo — failed syncs, missing data, or awaiting your approval.
-            Fix any issues inline and press <strong>Send to Odoo</strong>.
+            All financial records that have not yet reached Odoo: failed syncs, missing values, or items waiting for approval.
+            Use search, fix fields inline, and send directly from this page.
           </p>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+              <p className="text-xs uppercase tracking-wide text-red-600">Failed</p>
+              <p className="text-2xl font-semibold text-red-700">{failedItems.length}</p>
+            </div>
+            <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+              <p className="text-xs uppercase tracking-wide text-blue-600">Awaiting approval</p>
+              <p className="text-2xl font-semibold text-blue-700">{pendingApprovalItems.length}</p>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <p className="text-xs uppercase tracking-wide text-amber-600">Not yet queued</p>
+              <p className="text-2xl font-semibold text-amber-700">{notQueuedItems.length}</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
+            <input
+              type="text"
+              value={actionSearch}
+              onChange={(e) => setActionSearch(e.target.value)}
+              placeholder="Search by event, flock, supplier, ID, or error message…"
+              className="min-w-[16rem] flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+            {actionSearch ? (
+              <button
+                onClick={() => setActionSearch("")}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-600 hover:bg-gray-50"
+              >
+                Clear
+              </button>
+            ) : null}
+            <button
+              onClick={loadActionQueue}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+            >
+              Refresh
+            </button>
+          </div>
 
           {actionLoading && <p className="text-sm text-gray-400 animate-pulse">Loading…</p>}
 
-          {!actionLoading && actionQueue.length === 0 && (
+          {!actionLoading && filteredActionQueue.length === 0 && (
             <div className="border border-emerald-200 bg-emerald-50 rounded-xl p-6 text-center text-sm text-emerald-700">
-              All caught up — no records need attention right now.
+              {actionQueue.length === 0
+                ? "All caught up — no records need attention right now."
+                : "No records match your search."}
             </div>
           )}
 
           {/* Failed group */}
-          {actionQueue.filter(i => i.outboxStatus === "failed").length > 0 && (
+          {failedItems.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-red-700 flex items-center gap-2 mb-2">
                 <span className="w-2 h-2 bg-red-500 rounded-full inline-block" />
                 Failed — Odoo rejected or connection error
+                <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">{failedItems.length}</span>
               </h3>
               <div className="space-y-3">
-                {actionQueue.filter(i => i.outboxStatus === "failed").map(item => (
+                {failedItems.map(item => (
                   <ActionQueueCard
                     key={item.sourceId}
                     item={item}
@@ -680,14 +757,15 @@ export function AccountingApprovalsPage() {
           )}
 
           {/* Needs approval group */}
-          {actionQueue.filter(i => i.sourceStatus === "pending_approval" && i.outboxStatus !== "failed").length > 0 && (
+          {pendingApprovalItems.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-blue-700 flex items-center gap-2 mb-2">
                 <span className="w-2 h-2 bg-blue-500 rounded-full inline-block" />
                 Awaiting your approval before sending to Odoo
+                <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">{pendingApprovalItems.length}</span>
               </h3>
               <div className="space-y-3">
-                {actionQueue.filter(i => i.sourceStatus === "pending_approval" && i.outboxStatus !== "failed").map(item => (
+                {pendingApprovalItems.map(item => (
                   <ActionQueueCard
                     key={item.sourceId}
                     item={item}
@@ -707,14 +785,15 @@ export function AccountingApprovalsPage() {
           )}
 
           {/* Not queued / missing data group */}
-          {actionQueue.filter(i => i.outboxStatus === "not_queued" && i.sourceStatus !== "pending_approval").length > 0 && (
+          {notQueuedItems.length > 0 && (
             <div>
               <h3 className="text-sm font-semibold text-amber-700 flex items-center gap-2 mb-2">
                 <span className="w-2 h-2 bg-amber-400 rounded-full inline-block" />
                 Not yet sent — complete details to send
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-700">{notQueuedItems.length}</span>
               </h3>
               <div className="space-y-3">
-                {actionQueue.filter(i => i.outboxStatus === "not_queued" && i.sourceStatus !== "pending_approval").map(item => (
+                {notQueuedItems.map(item => (
                   <ActionQueueCard
                     key={item.sourceId}
                     item={item}
@@ -731,15 +810,6 @@ export function AccountingApprovalsPage() {
                 ))}
               </div>
             </div>
-          )}
-
-          {!actionLoading && actionQueue.length > 0 && (
-            <button
-              onClick={loadActionQueue}
-              className="text-xs text-gray-400 hover:text-gray-600 underline"
-            >
-              Refresh list
-            </button>
           )}
         </section>
       )}
@@ -871,13 +941,17 @@ export function AccountingApprovalsPage() {
             <form onSubmit={submitNewSale} className="border border-gray-200 rounded-lg p-4 grid grid-cols-2 gap-3">
               <div className="col-span-2 sm:col-span-1">
                 <label className="block text-xs text-gray-500 mb-1">Flock ID</label>
-                <input
-                  placeholder="Flock ID"
+                <select
                   value={newSale.flockId}
                   onChange={e => setNewSale(p => ({ ...p, flockId: e.target.value }))}
-                  className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm"
+                  className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm bg-white"
                   required
-                />
+                >
+                  <option value="">Select flock</option>
+                  {financeFlocks.map(f => (
+                    <option key={f.id} value={f.id}>{f.label}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Sale date</label>
@@ -1055,7 +1129,17 @@ export function AccountingApprovalsPage() {
             <form onSubmit={submitValuation} className="border border-gray-200 rounded-lg p-4 grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Flock ID</label>
-                <input placeholder="Flock ID" value={newValuation.flockId} onChange={e => setNewValuation(p => ({ ...p, flockId: e.target.value }))} className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm" required />
+                <select
+                  value={newValuation.flockId}
+                  onChange={e => setNewValuation(p => ({ ...p, flockId: e.target.value }))}
+                  className="w-full border border-gray-300 rounded px-3 py-1.5 text-sm bg-white"
+                  required
+                >
+                  <option value="">Select flock</option>
+                  {financeFlocks.map(f => (
+                    <option key={f.id} value={f.id}>{f.label}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Valuation date</label>
@@ -1188,9 +1272,10 @@ type ActionQueueCardProps = {
 
 function ActionQueueCard({ item, editForm, onFieldChange, isSaving, isResending, onSave, onResend, borderClass }: ActionQueueCardProps) {
   const canResendWithoutChanges = item.outboxId != null && item.outboxStatus === "failed";
+  const traceHref = `${API_BASE_URL}/api/accounting-approvals/trace?sourceTable=${encodeURIComponent(item.sourceTable)}&sourceId=${encodeURIComponent(item.sourceId)}`;
 
   return (
-    <div className={`border rounded-xl p-4 space-y-3 ${borderClass}`}>
+    <div className={`border rounded-xl p-4 space-y-3 shadow-sm ${borderClass}`}>
       {/* Header row */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="space-y-0.5">
@@ -1210,6 +1295,19 @@ function ActionQueueCard({ item, editForm, onFieldChange, isSaving, isResending,
               {item.lastAttemptedAt ? ` · last tried ${new Date(item.lastAttemptedAt).toLocaleString()}` : ""}
             </div>
           )}
+          <div className="text-[11px] text-gray-400 font-mono">
+            {item.sourceTable}:{item.sourceId}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <a
+            href={traceHref}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-lg border border-gray-300 bg-white px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-50"
+          >
+            Trace
+          </a>
         </div>
       </div>
 
