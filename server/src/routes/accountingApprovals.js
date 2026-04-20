@@ -88,7 +88,7 @@ router.get("/feed-procurements/pending", async (req, res) => {
          FROM farm_inventory_transactions t
          LEFT JOIN users u ON u.id::text = t.actor_user_id::text
         WHERE t.transaction_type = 'procurement_receipt'
-          AND t.accounting_status = 'pending_approval'
+          AND COALESCE(t.accounting_status, 'pending_approval') = 'pending_approval'
         ORDER BY t.recorded_at DESC LIMIT 200`
     );
     res.json({ rows: r.rows });
@@ -159,7 +159,7 @@ router.get("/medicine-lots/pending", async (req, res) => {
               m.name AS "medicineName"
          FROM medicine_lots l
          JOIN medicine_inventory m ON m.id = l.medicine_id
-        WHERE l.accounting_status = 'pending_approval'
+        WHERE COALESCE(l.accounting_status, 'pending_approval') = 'pending_approval'
         ORDER BY l.received_at DESC LIMIT 200`
     );
     res.json({ rows: r.rows });
@@ -233,7 +233,7 @@ router.get("/slaughter-events/pending", async (req, res) => {
               f.code AS "flockCode"
          FROM flock_slaughter_events s
          LEFT JOIN poultry_flocks f ON f.id::text = s.flock_id
-        WHERE s.accounting_status = 'pending_approval'
+        WHERE COALESCE(s.accounting_status, 'pending_approval') = 'pending_approval'
         ORDER BY s.at DESC LIMIT 200`
     );
     res.json({ rows: r.rows });
@@ -683,8 +683,8 @@ router.get("/mortality-events/pending", async (req, res) => {
               m.accounting_status AS "accountingStatus"
          FROM flock_mortality_events m
          LEFT JOIN poultry_flocks f ON f.id::text = m.flock_id::text
-        WHERE m.accounting_status = 'pending_approval'
-          AND m.count >= 5
+        WHERE COALESCE(m.accounting_status, 'pending_approval') = 'pending_approval'
+          AND m.count > 0
         ORDER BY m.at DESC LIMIT 200`
     );
     res.json({ rows: r.rows });
@@ -865,7 +865,7 @@ router.get("/action-queue", async (req, res) => {
       dbQuery(
         `SELECT 'feed_purchase' AS event_type, 'farm_inventory_transactions' AS source_table,
                 t.id::text AS source_id, t.recorded_at AS event_at,
-                t.accounting_status AS source_status,
+                COALESCE(t.accounting_status, 'pending_approval') AS source_status,
                 COALESCE(o.status, 'not_queued') AS outbox_status,
                 o.id::text AS outbox_id, o.last_error, o.attempts, o.last_attempted_at, o.next_retry_at,
                 jsonb_build_object(
@@ -882,14 +882,14 @@ router.get("/action-queue", async (req, res) => {
            FROM farm_inventory_transactions t
            LEFT JOIN odoo_sync_outbox o ON o.source_table = 'farm_inventory_transactions' AND o.source_id = t.id::text
           WHERE t.transaction_type = 'procurement_receipt'
-            AND t.accounting_status NOT IN ('sent_to_odoo', 'not_applicable')
+            AND COALESCE(t.accounting_status, 'pending_approval') NOT IN ('sent_to_odoo', 'not_applicable')
             AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
           ORDER BY t.recorded_at DESC LIMIT 100`
       ),
       dbQuery(
         `SELECT 'medicine_purchase' AS event_type, 'medicine_lots' AS source_table,
                 l.id::text AS source_id, l.received_at AS event_at,
-                l.accounting_status AS source_status,
+                COALESCE(l.accounting_status, 'pending_approval') AS source_status,
                 COALESCE(o.status, 'not_queued') AS outbox_status,
                 o.id::text AS outbox_id, o.last_error, o.attempts, o.last_attempted_at, o.next_retry_at,
                 jsonb_build_object(
@@ -906,14 +906,14 @@ router.get("/action-queue", async (req, res) => {
            FROM medicine_lots l
            JOIN medicine_inventory m ON m.id = l.medicine_id
            LEFT JOIN odoo_sync_outbox o ON o.source_table = 'medicine_lots' AND o.source_id = l.id::text
-          WHERE l.accounting_status NOT IN ('sent_to_odoo', 'not_applicable')
+          WHERE COALESCE(l.accounting_status, 'pending_approval') NOT IN ('sent_to_odoo', 'not_applicable')
             AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
           ORDER BY l.received_at DESC LIMIT 100`
       ),
       dbQuery(
         `SELECT 'slaughter_conversion' AS event_type, 'flock_slaughter_events' AS source_table,
                 s.id::text AS source_id, s.at AS event_at,
-                s.accounting_status AS source_status,
+                COALESCE(s.accounting_status, 'pending_approval') AS source_status,
                 COALESCE(o.status, 'not_queued') AS outbox_status,
                 o.id::text AS outbox_id, o.last_error, o.attempts, o.last_attempted_at, o.next_retry_at,
                 jsonb_build_object(
@@ -930,14 +930,14 @@ router.get("/action-queue", async (req, res) => {
            FROM flock_slaughter_events s
            LEFT JOIN poultry_flocks f ON f.id::text = s.flock_id
            LEFT JOIN odoo_sync_outbox o ON o.source_table = 'flock_slaughter_events' AND o.source_id = s.id::text
-          WHERE s.accounting_status NOT IN ('sent_to_odoo', 'not_applicable')
+          WHERE COALESCE(s.accounting_status, 'pending_approval') NOT IN ('sent_to_odoo', 'not_applicable')
             AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
           ORDER BY s.at DESC LIMIT 100`
       ),
       dbQuery(
         `SELECT 'meat_sale' AS event_type, 'poultry_sales_orders' AS source_table,
                 s.id::text AS source_id, s.order_date::timestamptz AS event_at,
-                s.accounting_status AS source_status,
+                COALESCE(s.accounting_status, 'pending_approval') AS source_status,
                 COALESCE(o.status, 'not_queued') AS outbox_status,
                 o.id::text AS outbox_id, o.last_error, o.attempts, o.last_attempted_at, o.next_retry_at,
                 jsonb_build_object(
@@ -955,7 +955,7 @@ router.get("/action-queue", async (req, res) => {
            FROM poultry_sales_orders s
            LEFT JOIN poultry_flocks f ON f.id = s.flock_id
            LEFT JOIN odoo_sync_outbox o ON o.source_table = 'poultry_sales_orders' AND o.source_id = s.id::text
-          WHERE s.accounting_status NOT IN ('sent_to_odoo', 'not_applicable')
+          WHERE COALESCE(s.accounting_status, 'pending_approval') NOT IN ('sent_to_odoo', 'not_applicable')
             AND s.submission_status != 'rejected'
             AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
           ORDER BY s.order_date DESC LIMIT 100`
@@ -963,7 +963,7 @@ router.get("/action-queue", async (req, res) => {
       dbQuery(
         `SELECT 'mortality_impairment' AS event_type, 'flock_mortality_events' AS source_table,
                 m.id::text AS source_id, m.at AS event_at,
-                m.accounting_status AS source_status,
+                COALESCE(m.accounting_status, 'pending_approval') AS source_status,
                 COALESCE(o.status, 'not_queued') AS outbox_status,
                 o.id::text AS outbox_id, o.last_error, o.attempts, o.last_attempted_at, o.next_retry_at,
                 jsonb_build_object(
@@ -980,8 +980,8 @@ router.get("/action-queue", async (req, res) => {
            FROM flock_mortality_events m
            LEFT JOIN poultry_flocks f ON f.id::text = m.flock_id::text
            LEFT JOIN odoo_sync_outbox o ON o.source_table = 'flock_mortality_events' AND o.source_id = m.id::text
-          WHERE m.accounting_status NOT IN ('sent_to_odoo', 'not_applicable')
-            AND m.count >= 5
+          WHERE COALESCE(m.accounting_status, 'pending_approval') NOT IN ('sent_to_odoo', 'not_applicable')
+            AND m.count > 0
             AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
           ORDER BY m.at DESC LIMIT 100`
       ),
@@ -1047,7 +1047,7 @@ router.get("/action-queue", async (req, res) => {
     ].map(normalizeQueueRow);
 
     // Sort: failed first, then pending_approval, then not_queued, by recency
-    const statusPriority = { failed: 0, pending: 1, not_queued: 2 };
+    const statusPriority = { failed: 0, pending_approval: 1, not_queued: 2 };
     all.sort((a, b) => {
       const pa = statusPriority[a.outboxStatus] ?? 3;
       const pb = statusPriority[b.outboxStatus] ?? 3;

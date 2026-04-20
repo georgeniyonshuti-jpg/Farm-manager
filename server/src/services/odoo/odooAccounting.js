@@ -182,7 +182,7 @@ async function resolveDefaultExpenseAccountId() {
   const ids = await withRetry(
     () => execute("account.account", "search", [[
       ["account_type", "=", "expense"],
-      ["deprecated", "=", false],
+      ["active", "=", true],
     ]], { limit: 1 }),
     "account.account.search(expense-default)"
   );
@@ -375,12 +375,12 @@ export async function createJournalEntry(data, { draft = true } = {}) {
  */
 export async function getAccountList() {
   const ids = await withRetry(
-    () => execute("account.account", "search", [[]], { limit: 5000 }),
+    () => execute("account.account", "search", [[["active", "=", true]]], { limit: 5000 }),
     "account.account.search"
   );
   if (!Array.isArray(ids) || ids.length === 0) return [];
   const rows = await withRetry(
-    () => execute("account.account", "read", [ids, ["id", "code", "name", "account_type", "deprecated"]]),
+    () => execute("account.account", "read", [ids, ["id", "code", "name", "account_type", "active"]]),
     "account.account.read"
   );
   return Array.isArray(rows) ? rows : [];

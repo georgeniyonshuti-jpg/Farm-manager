@@ -3087,6 +3087,12 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
       }
     }
     if (linkedMortalitySavedToDb) {
+      if (hasDb() && mid && mortalityAtCheckin > 0) {
+        dbQuery(
+          `UPDATE flock_mortality_events SET accounting_status = 'pending_approval' WHERE id::text = $1`,
+          [mid]
+        ).catch((e) => console.error("[ERROR]", "[accounting] check-in mortality accounting_status:", e instanceof Error ? e.message : e));
+      }
       try {
         await syncMortalityEventsFromDb();
       } catch (syncErr) {
@@ -3328,8 +3334,8 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
     submissionStatus,
   });
 
-  // Accounting: significant mortality (≥5 birds) → pending accounting approval for impairment
-  if (hasDb() && mortalitySavedToDb && id && count >= 5) {
+  // Accounting: any recorded mortality can impact biological assets and should be reviewable.
+  if (hasDb() && mortalitySavedToDb && id && count > 0) {
     dbQuery(
       `UPDATE flock_mortality_events SET accounting_status = 'pending_approval' WHERE id::text = $1`,
       [id]
@@ -6867,12 +6873,20 @@ app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requirePageAccess
     if (medLotId) {
       const medAcctStatus = medIsManager ? "approved" : "pending_approval";
       const unitCostRwf = body.unitCostRwf == null ? null : Number(body.unitCostRwf);
-      await client.query(
-        `UPDATE medicine_lots SET accounting_status = $1, unit_cost_rwf = $2 WHERE id::text = $3`,
-        [medAcctStatus, unitCostRwf ?? null, medLotId]
-      ).catch(() => {});
+      try {
+        await dbQuery(
+          `UPDATE medicine_lots
+              SET accounting_status = $1,
+                  unit_cost_rwf = $2,
+                  updated_at = now()
+            WHERE id::text = $3`,
+          [medAcctStatus, unitCostRwf ?? null, medLotId]
+        );
+      } catch (e) {
+        console.error("[ERROR]", "[accounting] set medicine lot accounting_status:", e instanceof Error ? e.message : e);
+      }
       if (medIsManager && unitCostRwf != null) {
-        const medName = String(body.medicineName ?? "Medicine");
+        const medName = String(ins.rows[0]?.medicineName ?? body.medicineName ?? "Medicine");
         const medPayload = mapMedicineLotToBill({
           id: medLotId,
           medicineName: medName,

@@ -337,7 +337,7 @@ export async function getOdooSummary() {
     withRetry(() => execute("account.move", "search_count", [[["move_type", "=", "in_invoice"]]]), "count.bills"),
     withRetry(() => execute("account.move", "search_count", [[["move_type", "=", "entry"]]]), "count.entries"),
     withRetry(() => execute("product.product", "search_count", [[[]]]), "count.products"),
-    withRetry(() => execute("account.account", "search_count", [[["deprecated", "=", false]]]), "count.accounts"),
+    withRetry(() => execute("account.account", "search_count", [[["active", "=", true]]]), "count.accounts"),
   ]);
 
   const [customers, vendors, invoices, bills, journalEntries, products, accounts] = counts.map(r =>
@@ -390,7 +390,7 @@ export async function listOdooPartners({ type = "all", search = "", limit = 50 }
  * @param {{ search?: string, limit?: number }} opts
  */
 export async function listOdooAccounts({ search = "", limit = 200 } = {}) {
-  const domain = [["deprecated", "=", false]];
+  const domain = [["active", "=", true]];
   if (search) domain.push("|", ["code", "ilike", search], ["name", "ilike", search]);
 
   return withRetry(
