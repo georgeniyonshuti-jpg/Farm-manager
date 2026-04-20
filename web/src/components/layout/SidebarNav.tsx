@@ -189,7 +189,15 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
       ),
     ];
     const workforce = farmNav.filter((i) =>
-      ["/farm/batch-schedule", "/farm/schedule-settings", "/farm/checkin-review", "/farm/payroll", "/laborer/earnings"].includes(i.to)
+      [
+        "/farm/batch-schedule",
+        "/farm/schedule-settings",
+        "/farm/checkin-review",
+        "/farm/payroll",
+        "/laborer/earnings",
+        "/farm/accounting-approvals",
+        "/farm/odoo-setup",
+      ].includes(i.to)
     );
     return { core: coreOps, clinical: clinicalReport, workforce };
   }, [farmCore, farmNav]);
