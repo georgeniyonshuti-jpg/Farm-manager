@@ -35,11 +35,8 @@ const ACC = {
  * @param {{ id: string, feedType: string|null, quantityKg: number, unitCostRwfPerKg: number|null, supplierName: string|null, at: string }} row
  */
 export function mapFeedProcurementToBill(row) {
-  const description = [
-    "Feed delivery",
-    row.feedType ? `(${String(row.feedType).replace(/_/g, " ")} feed)` : "",
-    `for ${Number(row.quantityKg).toFixed(1)} kg`,
-  ].filter(Boolean).join(" ");
+  const feedLabel = row.feedType ? String(row.feedType).replace(/_/g, " ") : "feed";
+  const description = `${Number(row.quantityKg).toFixed(0)} kg ${feedLabel} purchase`;
 
   return {
     vendorName: row.supplierName || "Feed Supplier",
@@ -62,6 +59,7 @@ export function mapFeedProcurementToBill(row) {
  * @param {{ id: string, medicineName: string, lotNumber: string, quantityReceived: number, unitCostRwf: number|null, supplier: string|null, receivedAt: string }} lot
  */
 export function mapMedicineLotToBill(lot) {
+  const medicineName = lot.medicineName || "Veterinary medicine";
   return {
     vendorName: lot.supplier || "Veterinary Supplier",
     vendorEmail: null,
@@ -69,7 +67,7 @@ export function mapMedicineLotToBill(lot) {
     externalRef: `FM-MED-${lot.id}`,
     lines: [
       {
-        description: `${lot.medicineName || "Medicine"} lot ${lot.lotNumber || "unknown"} received (${Number(lot.quantityReceived)} units)`,
+        description: `${medicineName} — ${Number(lot.quantityReceived)} units received (lot ${lot.lotNumber || "—"})`,
         quantity: Number(lot.quantityReceived),
         unitPrice: Number(lot.unitCostRwf ?? 0),
         accountCode: ACC.medicine_expense,
@@ -104,13 +102,13 @@ export function mapSlaughterToJournalEntry(event, opts = {}) {
   const lines = [
     {
       accountCode: ACC.meat_inventory,
-      label: `Recognize meat stock from ${event.birdsSlaughtered} slaughtered birds (${flockLabel})`,
+      label: `Processed meat stock — ${event.birdsSlaughtered} birds harvested from ${flockLabel}`,
       debit: fairValue,
       credit: 0,
     },
     {
       accountCode: ACC.bio_assets,
-      label: `Remove live-bird asset for slaughter batch (${flockLabel})`,
+      label: `Live bird asset derecognised at harvest — ${flockLabel} (IAS 41)`,
       debit: 0,
       credit: carryingValue,
     },
@@ -120,14 +118,14 @@ export function mapSlaughterToJournalEntry(event, opts = {}) {
     if (harvestGainLoss > 0) {
       lines.push({
         accountCode: ACC.harvest_gain,
-        label: `Harvest gain from flock ${flockLabel}`,
+        label: `Harvest valuation gain — market value exceeds book cost (${flockLabel})`,
         debit: 0,
         credit: harvestGainLoss,
       });
     } else {
       lines.push({
         accountCode: ACC.harvest_loss,
-        label: `Harvest loss from flock ${flockLabel}`,
+        label: `Harvest valuation loss — market value below book cost (${flockLabel})`,
         debit: Math.abs(harvestGainLoss),
         credit: 0,
       });
@@ -173,7 +171,7 @@ export function mapPayrollClosureToJournalEntry(closure) {
   if (net < 0.01) return null;
   const ref = `FM-PAY-${closure.id}`;
   const date = String(closure.periodEnd ?? "").slice(0, 10);
-  const label = `Field laborer wages — period ${closure.periodStart} to ${closure.periodEnd} (${closure.workerCount} workers)`;
+  const workerText = closure.workerCount > 0 ? ` for ${closure.workerCount} worker${closure.workerCount !== 1 ? "s" : ""}` : "";
 
   return {
     ref,
@@ -182,13 +180,13 @@ export function mapPayrollClosureToJournalEntry(closure) {
     lines: [
       {
         accountCode: ACC.wage_expense,
-        label,
+        label: `Farm labourer wages${workerText} — pay period ${closure.periodStart} to ${closure.periodEnd}`,
         debit: net,
         credit: 0,
       },
       {
         accountCode: ACC.wages_payable,
-        label: `Wages payable — ${closure.periodStart} to ${closure.periodEnd}`,
+        label: `Wages outstanding${workerText} — to be settled for ${closure.periodStart} to ${closure.periodEnd}`,
         debit: 0,
         credit: net,
       },
@@ -202,9 +200,11 @@ export function mapPayrollClosureToJournalEntry(closure) {
  */
 export function mapFlockOpeningToBill(flock) {
   const totalCost = Number(flock.purchaseCostRwf ?? 0);
-  const costPerChick = flock.initialCount > 0 ? totalCost / flock.initialCount : 0;
+  const count = Number(flock.initialCount ?? 1);
+  const costPerChick = count > 0 ? totalCost / count : 0;
   const date = String(flock.purchaseDate ?? flock.createdAt ?? "").slice(0, 10);
   const ref = `FM-FOPEN-${flock.id}`;
+  const flockLabel = flock.code || flock.id;
   return {
     vendorName: flock.purchaseSupplier || "Chick Supplier",
     vendorEmail: null,
@@ -212,8 +212,8 @@ export function mapFlockOpeningToBill(flock) {
     externalRef: ref,
     lines: [
       {
-        description: `Initial chick purchase for flock ${flock.code || flock.id} (${flock.initialCount} chicks at ${costPerChick.toFixed(0)} RWF each)`,
-        quantity: Number(flock.initialCount ?? 1),
+        description: `Day-old chick purchase — ${count.toLocaleString()} birds for flock ${flockLabel} at ${costPerChick.toFixed(0)} RWF/chick (IAS 41 initial recognition)`,
+        quantity: count,
         unitPrice: costPerChick,
         accountCode: ACC.bio_assets,
       },
@@ -243,13 +243,13 @@ export function mapMortalityToImpairmentEntry(event) {
     lines: [
       {
         accountCode: ACC.mortality_loss,
-        label: `Mortality loss for ${event.count} birds in flock ${flockLabel} (IAS 41)`,
+        label: `Bird mortality — ${event.count} dead bird${event.count !== 1 ? "s" : ""} written off from flock ${flockLabel} (IAS 41 impairment)`,
         debit: loss,
         credit: 0,
       },
       {
         accountCode: ACC.bio_assets,
-        label: `Remove dead birds from biological assets (${flockLabel})`,
+        label: `Biological asset reduced by mortality — flock ${flockLabel}`,
         debit: 0,
         credit: loss,
       },
@@ -268,6 +268,7 @@ export function mapFeedWriteOffToJournalEntry(row) {
   if (totalLoss < 0.01) return null;
   const ref = `FM-WOFF-${row.id}`;
   const date = String(row.at ?? "").slice(0, 10);
+  const reason = row.reason || "damage or loss";
 
   return {
     ref,
@@ -276,13 +277,13 @@ export function mapFeedWriteOffToJournalEntry(row) {
     lines: [
       {
         accountCode: ACC.feed_expense,
-        label: `Feed write-off — ${row.reason || "damage/loss"} (${lossKg.toFixed(0)} kg)`,
+        label: `Feed write-off (${reason}) — ${lossKg.toFixed(0)} kg at ${costPerKg.toFixed(0)} RWF/kg`,
         debit: totalLoss,
         credit: 0,
       },
       {
         accountCode: ACC.feed_inventory,
-        label: `Feed inventory reduction — ${row.reason || "write-off"}`,
+        label: `Feed stock reduced by ${lossKg.toFixed(0)} kg written off — ${reason}`,
         debit: 0,
         credit: totalLoss,
       },
@@ -315,13 +316,13 @@ export function mapValuationSnapshotToJournalEntry(snapshot) {
     lines = [
       {
         accountCode: ACC.bio_assets,
-        label: `Fair value increase — ${flockLabel}`,
+        label: `Live bird asset fair value increase — flock ${flockLabel} (IAS 41 revaluation)`,
         debit: change,
         credit: 0,
       },
       {
         accountCode: ACC.bio_asset_gain,
-        label: `Gain on biological asset revaluation — ${flockLabel}`,
+        label: `Gain on change in fair value of biological assets — flock ${flockLabel}`,
         debit: 0,
         credit: change,
       },
@@ -331,13 +332,13 @@ export function mapValuationSnapshotToJournalEntry(snapshot) {
     lines = [
       {
         accountCode: ACC.bio_asset_loss,
-        label: `Loss on biological asset revaluation — ${flockLabel}`,
+        label: `Loss on change in fair value of biological assets — flock ${flockLabel} (IAS 41 revaluation)`,
         debit: absChange,
         credit: 0,
       },
       {
         accountCode: ACC.bio_assets,
-        label: `Fair value decrease — ${flockLabel}`,
+        label: `Live bird asset fair value decrease — flock ${flockLabel}`,
         debit: 0,
         credit: absChange,
       },

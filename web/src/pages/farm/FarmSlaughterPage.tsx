@@ -10,7 +10,7 @@ import { useToast } from "../../components/Toast";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
 
-type Flock = { id: string; label: string };
+type Flock = { id: string; label: string; birdsLiveEstimate?: number | null };
 type Slaughter = {
   id: string;
   at: string;
@@ -96,6 +96,7 @@ export function FarmSlaughterPage() {
       const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
       const fd = await fr.json();
       if (!fr.ok) throw new Error(fd.error ?? "Failed to load flocks");
+      // Attach live estimates from performance summaries loaded lazily on demand.
       const f = (fd.flocks as Flock[]) ?? [];
       setFlocks(f);
       const selected = flockId || f[0]?.id || "";
@@ -116,8 +117,15 @@ export function FarmSlaughterPage() {
       if (!sr.ok) throw new Error(sd.error ?? "Failed to load slaughter events");
       if (!pr.ok) throw new Error(pd.error ?? "Failed to load summary");
       setRows((sd.slaughterEvents as Slaughter[]) ?? []);
-      setSummary(pd as PerformanceSummary);
+      const perf = pd as PerformanceSummary;
+      setSummary(perf);
       setEligibility(ed as Eligibility);
+      // Attach live estimate to flock list entry so the form can hint max birds.
+      setFlocks((prev) =>
+        prev.map((fl) =>
+          fl.id === selected ? { ...fl, birdsLiveEstimate: perf.birdsLiveEstimate } : fl
+        )
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
     } finally {
@@ -167,7 +175,10 @@ export function FarmSlaughterPage() {
         }
         throw new Error(payload.error ?? "Save failed");
       }
-      showToast("success", "Slaughter recorded. Bird counts were updated and accounting entry is being sent to Odoo.");
+      const savedData = d as { birdsLive?: number | null; performance?: { birdsLiveEstimate?: number } };
+      const updatedLive = savedData.birdsLive ?? savedData.performance?.birdsLiveEstimate ?? null;
+      const liveMsg = updatedLive != null ? ` ${updatedLive} birds remaining in flock.` : "";
+      showToast("success", `Slaughter recorded.${liveMsg} Accounting entry sent to Odoo.`);
       setForm((v) => ({ ...v, birdsSlaughtered: "", avgLiveWeightKg: "", avgCarcassWeightKg: "", pricePerKgRwf: "", fairValueRwf: "", notes: "" }));
       setShowRecordSlaughter(false);
       await load();
@@ -187,8 +198,10 @@ export function FarmSlaughterPage() {
       {!loading && !error ? (
         <>
           <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-900">
-            Record slaughter against the selected flock to update live-bird counts immediately. Add market price/kg or fair value
-            so the IAS 41 conversion entry can post to Odoo right away.
+            Select the flock from the dropdown below, then click <strong>Record new slaughter</strong>. The bird count for that flock
+            is reduced immediately. Enter a market price per kg or a total fair value so the IAS 41 biological-asset conversion
+            (live birds → meat stock) posts to Odoo right away. Without a price, the record goes to{" "}
+            <strong>Accounting Approvals → Needs Action</strong> for manual follow-up.
           </div>
 
           {eligibility && !eligibility.eligibleForSlaughter ? (
@@ -344,20 +357,44 @@ export function FarmSlaughterPage() {
                     Cancel
                   </button>
                   <form onSubmit={submit} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-                    <p className="mb-3 text-sm font-semibold text-neutral-800">New slaughter record</p>
+                    <p className="mb-1 text-sm font-semibold text-neutral-800">New slaughter record</p>
+                    {(() => {
+                      const selectedFlock = flocks.find((f) => f.id === flockId);
+                      const live = selectedFlock?.birdsLiveEstimate ?? summary?.birdsLiveEstimate ?? null;
+                      return (
+                        <p className="mb-3 text-xs text-neutral-500">
+                          Flock: <strong className="text-neutral-800">{selectedFlock?.label ?? flockId}</strong>
+                          {live != null ? <> · <strong className="text-emerald-700">{live}</strong> birds estimated live</> : null}
+                        </p>
+                      );
+                    })()}
                     <div className="grid gap-3 sm:grid-cols-2">
                       <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.reasonCode} onChange={(e) => setForm((v) => ({ ...v, reasonCode: e.target.value }))}>
                         {slaughterReasonOptions.map((o) => (
                           <option key={o.value} value={o.value}>{o.label}</option>
                         ))}
                       </select>
-                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Birds slaughtered" inputMode="numeric" value={form.birdsSlaughtered} onChange={(e) => setForm((v) => ({ ...v, birdsSlaughtered: e.target.value }))} />
-                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Avg live weight (kg)" inputMode="decimal" value={form.avgLiveWeightKg} onChange={(e) => setForm((v) => ({ ...v, avgLiveWeightKg: e.target.value }))} />
-                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Avg carcass weight (kg, optional)" inputMode="decimal" value={form.avgCarcassWeightKg} onChange={(e) => setForm((v) => ({ ...v, avgCarcassWeightKg: e.target.value }))} />
-                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Market price per kg (RWF, optional)" inputMode="decimal" value={form.pricePerKgRwf} onChange={(e) => setForm((v) => ({ ...v, pricePerKgRwf: e.target.value }))} />
-                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Fair value total (RWF, optional override)" inputMode="decimal" value={form.fairValueRwf} onChange={(e) => setForm((v) => ({ ...v, fairValueRwf: e.target.value }))} />
+                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Birds slaughtered *" inputMode="numeric" value={form.birdsSlaughtered} onChange={(e) => setForm((v) => ({ ...v, birdsSlaughtered: e.target.value }))} required />
+                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Avg live weight per bird (kg) *" inputMode="decimal" value={form.avgLiveWeightKg} onChange={(e) => setForm((v) => ({ ...v, avgLiveWeightKg: e.target.value }))} required />
+                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Avg carcass weight per bird (kg, optional)" inputMode="decimal" value={form.avgCarcassWeightKg} onChange={(e) => setForm((v) => ({ ...v, avgCarcassWeightKg: e.target.value }))} />
+                      <div>
+                        <input className="w-full rounded-lg border border-neutral-300 px-3 py-2" placeholder="Market price per kg (RWF)" inputMode="decimal" value={form.pricePerKgRwf} onChange={(e) => setForm((v) => ({ ...v, pricePerKgRwf: e.target.value }))} />
+                        {form.pricePerKgRwf && form.birdsSlaughtered && form.avgCarcassWeightKg ? (
+                          <p className="mt-1 text-xs text-neutral-500">
+                            Est. fair value: <strong>{(Number(form.pricePerKgRwf) * Number(form.birdsSlaughtered) * Number(form.avgCarcassWeightKg)).toLocaleString()}</strong> RWF
+                          </p>
+                        ) : form.pricePerKgRwf && form.birdsSlaughtered && form.avgLiveWeightKg ? (
+                          <p className="mt-1 text-xs text-neutral-500">
+                            Est. fair value: <strong>{(Number(form.pricePerKgRwf) * Number(form.birdsSlaughtered) * Number(form.avgLiveWeightKg)).toLocaleString()}</strong> RWF (using live weight)
+                          </p>
+                        ) : null}
+                      </div>
+                      <div>
+                        <input className="w-full rounded-lg border border-neutral-300 px-3 py-2" placeholder="Total fair value (RWF, override)" inputMode="decimal" value={form.fairValueRwf} onChange={(e) => setForm((v) => ({ ...v, fairValueRwf: e.target.value }))} />
+                        <p className="mt-1 text-xs text-neutral-400">Enter price/kg or total fair value so the IAS 41 entry posts to Odoo immediately.</p>
+                      </div>
                     </div>
-                    <textarea className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} placeholder="Notes (optional)" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
+                    <textarea className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={2} placeholder="Notes (optional)" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
                     <div className="mt-3 flex justify-end">
                       <button disabled={busy || (eligibility != null && !eligibility.eligibleForSlaughter)} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">{busy ? "Saving..." : "Save slaughter"}</button>
                     </div>
