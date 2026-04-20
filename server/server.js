@@ -46,7 +46,13 @@ import ias41Router, { initIas41Service } from "./src/routes/ias41Routes.js";
 import reconciliationRouter, { initReconciliationRouter } from "./src/routes/accountingReconciliation.js";
 import odooSetupRouter from "./src/routes/odooSetupRoute.js";
 import { initOdooSyncWorker, processOdooSyncOutbox, enqueueOdooSync } from "./src/services/odoo/odooSyncWorker.js";
-import { mapFeedProcurementToBill, mapMedicineLotToBill, mapSlaughterToJournalEntry } from "./src/services/odoo/odooFarmMappers.js";
+import {
+  mapFeedProcurementToBill,
+  mapMedicineLotToBill,
+  mapSlaughterToJournalEntry,
+  mapFlockOpeningToBill,
+  mapMortalityToImpairmentEntry,
+} from "./src/services/odoo/odooFarmMappers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -1227,6 +1233,31 @@ async function handleMortalityLog({ flockId, mortalityId, submissionStatus, role
     birdsLiveEstimate: performance?.birdsLiveEstimate ?? null,
   });
   return { status, performance };
+}
+
+async function estimateBirdValueRwfForFlock(flockId) {
+  if (!hasDb() || !isPersistableUuid(flockId)) return null;
+  try {
+    const r = await dbQuery(
+      `SELECT initial_count AS "initialCount",
+              purchase_cost_rwf AS "purchaseCostRwf",
+              cost_per_chick_rwf AS "costPerChickRwf"
+         FROM poultry_flocks
+        WHERE id::text = $1
+        LIMIT 1`,
+      [flockId]
+    );
+    const row = r.rows?.[0];
+    if (!row) return null;
+    const explicitPerBird = Number(row.costPerChickRwf ?? 0);
+    if (Number.isFinite(explicitPerBird) && explicitPerBird > 0) return explicitPerBird;
+    const total = Number(row.purchaseCostRwf ?? 0);
+    const count = Number(row.initialCount ?? 0);
+    if (Number.isFinite(total) && total > 0 && Number.isFinite(count) && count > 0) {
+      return total / count;
+    }
+  } catch {}
+  return null;
 }
 
 function canLogTreatments(user) {
@@ -2668,8 +2699,8 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
   const targetWeightKgRaw = body.targetWeightKg;
   const targetWeightKg =
     targetWeightKgRaw == null || targetWeightKgRaw === "" ? null : Number(targetWeightKgRaw);
-  const purchaseCostRwf = body.purchaseCostRwf == null || body.purchaseCostRwf === "" ? null : Number(body.purchaseCostRwf);
-  const costPerChickRwf = body.costPerChickRwf == null || body.costPerChickRwf === "" ? null : Number(body.costPerChickRwf);
+  let purchaseCostRwf = body.purchaseCostRwf == null || body.purchaseCostRwf === "" ? null : Number(body.purchaseCostRwf);
+  let costPerChickRwf = body.costPerChickRwf == null || body.costPerChickRwf === "" ? null : Number(body.costPerChickRwf);
   const purchaseSupplier = String(body.purchaseSupplier ?? "").trim() || null;
   const purchaseDateRaw = String(body.purchaseDate ?? "").trim();
   const purchaseDate = /^\d{4}-\d{2}-\d{2}$/.test(purchaseDateRaw) ? purchaseDateRaw : null;
@@ -2685,6 +2716,20 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
   if (targetWeightKg != null && (!Number.isFinite(targetWeightKg) || targetWeightKg <= 0)) {
     res.status(400).json({ error: "targetWeightKg must be a positive number when provided" });
     return;
+  }
+  if (purchaseCostRwf != null && (!Number.isFinite(purchaseCostRwf) || purchaseCostRwf <= 0)) {
+    res.status(400).json({ error: "purchaseCostRwf must be a positive number when provided" });
+    return;
+  }
+  if (costPerChickRwf != null && (!Number.isFinite(costPerChickRwf) || costPerChickRwf <= 0)) {
+    res.status(400).json({ error: "costPerChickRwf must be a positive number when provided" });
+    return;
+  }
+  // Allow user to provide either total cost OR per-chick cost and compute the other.
+  if (purchaseCostRwf == null && costPerChickRwf != null) {
+    purchaseCostRwf = Number(costPerChickRwf) * Math.floor(initialCount);
+  } else if (purchaseCostRwf != null && costPerChickRwf == null) {
+    costPerChickRwf = Math.floor(initialCount) > 0 ? Number(purchaseCostRwf) / Math.floor(initialCount) : null;
   }
   const status = statusInput === "planned" ? "planned" : "active";
 
@@ -2712,9 +2757,32 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
       createdLabel = String(inserted.rows[0]?.label ?? createdCode);
       if (purchaseCostRwf != null || costPerChickRwf != null) {
         dbQuery(
-          `UPDATE poultry_flocks SET bio_asset_accounting_status = 'pending_approval' WHERE id::text = $1`,
-          [createdId]
+          `UPDATE poultry_flocks
+              SET bio_asset_accounting_status = 'approved',
+                  purchase_cost_rwf = COALESCE(purchase_cost_rwf, $2::numeric),
+                  cost_per_chick_rwf = COALESCE(cost_per_chick_rwf, $3::numeric),
+                  updated_at = now()
+            WHERE id::text = $1`,
+          [createdId, purchaseCostRwf, costPerChickRwf]
         ).catch((e) => console.error("[ERROR]", "[accounting] flock bio_asset_accounting_status:", e instanceof Error ? e.message : e));
+
+        const payload = mapFlockOpeningToBill({
+          id: createdId,
+          code: createdCode,
+          initialCount: Math.floor(initialCount),
+          purchaseCostRwf: Number(purchaseCostRwf ?? 0),
+          purchaseSupplier,
+          purchaseDate,
+          createdAt: new Date().toISOString(),
+        });
+        enqueueOdooSync({
+          sourceTable: "poultry_flocks",
+          sourceId: createdId,
+          eventType: "bio_asset_opening",
+          payload,
+          triggeredByUserId: req.authUser.id,
+          triggeredByRole: req.authUser.role,
+        }).then(() => processOdooSyncOutbox(3)).catch(() => {});
       }
     }
     const flockRow = {
@@ -3089,9 +3157,38 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
     if (linkedMortalitySavedToDb) {
       if (hasDb() && mid && mortalityAtCheckin > 0) {
         dbQuery(
-          `UPDATE flock_mortality_events SET accounting_status = 'pending_approval' WHERE id::text = $1`,
+          `UPDATE flock_mortality_events SET accounting_status = 'approved', updated_at = now() WHERE id::text = $1`,
           [mid]
         ).catch((e) => console.error("[ERROR]", "[accounting] check-in mortality accounting_status:", e instanceof Error ? e.message : e));
+
+        const perBirdValue = await estimateBirdValueRwfForFlock(f.id);
+        const impairmentValueRwf =
+          perBirdValue != null && perBirdValue > 0 ? Number(perBirdValue) * Number(mortalityAtCheckin) : 0;
+        if (impairmentValueRwf > 0) {
+          const payload = mapMortalityToImpairmentEntry({
+            id: mid,
+            flockId: f.id,
+            flockCode: f.code ?? f.label ?? f.id,
+            impairmentValueRwf,
+            count: mortalityAtCheckin,
+            at,
+          });
+          if (payload) {
+            enqueueOdooSync({
+              sourceTable: "flock_mortality_events",
+              sourceId: mid,
+              eventType: "mortality_impairment",
+              payload,
+              triggeredByUserId: req.authUser.id,
+              triggeredByRole: req.authUser.role,
+            }).then(() => processOdooSyncOutbox(3)).catch(() => {});
+          }
+        } else {
+          dbQuery(
+            `UPDATE flock_mortality_events SET accounting_status = 'pending_approval', updated_at = now() WHERE id::text = $1`,
+            [mid]
+          ).catch(() => {});
+        }
       }
       try {
         await syncMortalityEventsFromDb();
@@ -3334,12 +3431,45 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
     submissionStatus,
   });
 
-  // Accounting: any recorded mortality can impact biological assets and should be reviewable.
+  // Accounting: post mortality impairment directly when we can derive a value.
   if (hasDb() && mortalitySavedToDb && id && count > 0) {
-    dbQuery(
-      `UPDATE flock_mortality_events SET accounting_status = 'pending_approval' WHERE id::text = $1`,
-      [id]
-    ).catch((e) => console.error("[ERROR]", "[accounting] mortality accounting_status:", e instanceof Error ? e.message : e));
+    const perBirdValue = await estimateBirdValueRwfForFlock(f.id);
+    const impairmentValueRwf =
+      perBirdValue != null && perBirdValue > 0 ? Number(perBirdValue) * Number(count) : 0;
+    if (impairmentValueRwf > 0) {
+      dbQuery(
+        `UPDATE flock_mortality_events
+            SET accounting_status = 'approved',
+                impairment_value_rwf = $2,
+                updated_at = now()
+          WHERE id::text = $1`,
+        [id, impairmentValueRwf]
+      ).catch((e) => console.error("[ERROR]", "[accounting] mortality accounting_status:", e instanceof Error ? e.message : e));
+
+      const payload = mapMortalityToImpairmentEntry({
+        id,
+        flockId: f.id,
+        flockCode: f.code ?? f.label ?? f.id,
+        impairmentValueRwf,
+        count,
+        at: row.at,
+      });
+      if (payload) {
+        enqueueOdooSync({
+          sourceTable: "flock_mortality_events",
+          sourceId: id,
+          eventType: "mortality_impairment",
+          payload,
+          triggeredByUserId: req.authUser.id,
+          triggeredByRole: req.authUser.role,
+        }).then(() => processOdooSyncOutbox(3)).catch(() => {});
+      }
+    } else {
+      dbQuery(
+        `UPDATE flock_mortality_events SET accounting_status = 'pending_approval', updated_at = now() WHERE id::text = $1`,
+        [id]
+      ).catch((e) => console.error("[ERROR]", "[accounting] mortality accounting_status:", e instanceof Error ? e.message : e));
+    }
   }
 
   const processed = await handleMortalityLog({
@@ -4397,11 +4527,32 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
     return;
   }
   const notes = String(body.notes ?? reasonCode).slice(0, 4000);
+  const fairValueRwfInput =
+    body.fairValueRwf == null || body.fairValueRwf === "" ? null : Number(body.fairValueRwf);
+  const pricePerKgRwfInput =
+    body.pricePerKgRwf == null || body.pricePerKgRwf === "" ? null : Number(body.pricePerKgRwf);
   if (!Number.isFinite(birdsSlaughtered) || birdsSlaughtered <= 0 || !Number.isFinite(avgLiveWeightKg) || avgLiveWeightKg <= 0) {
     res.status(400).json({ error: "birdsSlaughtered and avgLiveWeightKg are required and must be > 0" });
     return;
   }
+  if (fairValueRwfInput != null && (!Number.isFinite(fairValueRwfInput) || fairValueRwfInput <= 0)) {
+    res.status(400).json({ error: "fairValueRwf must be a positive number when provided." });
+    return;
+  }
+  if (pricePerKgRwfInput != null && (!Number.isFinite(pricePerKgRwfInput) || pricePerKgRwfInput <= 0)) {
+    res.status(400).json({ error: "pricePerKgRwf must be a positive number when provided." });
+    return;
+  }
   const at = new Date().toISOString();
+  let prePerf = null;
+  try {
+    prePerf = await buildFlockPerformanceSummary(f.id, at);
+  } catch {}
+  const preLive = Number(prePerf?.birdsLiveEstimate ?? 0);
+  if (preLive > 0 && birdsSlaughtered > preLive) {
+    res.status(400).json({ error: `Cannot slaughter ${birdsSlaughtered} birds. Only ${preLive} birds are estimated live in this flock.` });
+    return;
+  }
   let treatments = [];
   try {
     treatments = await listTreatmentsForFlock(f.id);
@@ -4460,12 +4611,62 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
   }
   appendAudit(req.authUser.id, req.authUser.role, "flock.slaughter.create", "flock", f.id, { slaughterId: row.id });
 
-  // Accounting: always pending_approval for slaughter (manager must confirm fair value)
+  // Accounting: auto-post slaughter conversion to Odoo.
   if (hasDb()) {
+    const carcassKg = Number((row.avgCarcassWeightKg ?? row.avgLiveWeightKg) || 0) * Number(row.birdsSlaughtered || 0);
+    const fairValueRwf =
+      fairValueRwfInput != null
+        ? fairValueRwfInput
+        : (pricePerKgRwfInput != null ? pricePerKgRwfInput * carcassKg : 0);
+    let carryingValueRwf = fairValueRwf;
+    const perBirdValue = await estimateBirdValueRwfForFlock(f.id);
+    if (perBirdValue != null && perBirdValue > 0) {
+      carryingValueRwf = Number(perBirdValue) * Number(row.birdsSlaughtered || 0);
+    }
+
     dbQuery(
-      `UPDATE flock_slaughter_events SET accounting_status = 'pending_approval' WHERE id = $1`,
-      [row.id]
+      `UPDATE flock_slaughter_events
+          SET accounting_status = 'approved',
+              fair_value_rwf = CASE WHEN COALESCE($2::numeric, 0) > 0 THEN $2::numeric ELSE fair_value_rwf END,
+              fair_value_basis = CASE
+                                  WHEN COALESCE($3::numeric, 0) > 0 THEN 'price_per_kg'
+                                  WHEN COALESCE($2::numeric, 0) > 0 THEN 'entered_directly'
+                                  ELSE fair_value_basis
+                                END,
+              updated_at = now()
+        WHERE id = $1`,
+      [row.id, fairValueRwf > 0 ? fairValueRwf : null, pricePerKgRwfInput]
     ).catch((e) => console.error("[ERROR]", "[accounting] slaughter accounting_status:", e instanceof Error ? e.message : e));
+
+    if (fairValueRwf > 0) {
+      const payload = mapSlaughterToJournalEntry(
+        {
+          id: row.id,
+          flockId: row.flockId,
+          flockCode: f.code ?? f.label ?? f.id,
+          birdsSlaughtered: row.birdsSlaughtered,
+          avgLiveWeightKg: row.avgLiveWeightKg,
+          avgCarcassWeightKg: row.avgCarcassWeightKg,
+          fairValueRwf,
+          at: row.at,
+        },
+        { carryingValueRwf }
+      );
+      enqueueOdooSync({
+        sourceTable: "flock_slaughter_events",
+        sourceId: row.id,
+        eventType: "slaughter_conversion",
+        payload,
+        triggeredByUserId: req.authUser.id,
+        triggeredByRole: req.authUser.role,
+      }).then(() => processOdooSyncOutbox(3)).catch(() => {});
+    } else {
+      // keep visible in approvals for correction if we couldn't derive fair value
+      dbQuery(
+        `UPDATE flock_slaughter_events SET accounting_status = 'pending_approval', updated_at = now() WHERE id = $1`,
+        [row.id]
+      ).catch(() => {});
+    }
   }
 
   res.status(201).json({ slaughter: row, fcr: perf?.fcr ?? null, performance: perf });
@@ -5069,11 +5270,9 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     quantityKg,
   });
 
-  // Accounting: auto-approve + enqueue Odoo sync if manager+; otherwise set pending_approval
-  const feedProcRole = ROLE_RANK[req.authUser.role] ?? -1;
-  const isManagerLevel = feedProcRole >= ROLE_RANK["manager"];
+  // Accounting: post procurement directly to Odoo when cost is available.
   if (hasDb() && procurementSavedToDb && row.id) {
-    const acctStatus = isManagerLevel ? "approved" : "pending_approval";
+    const acctStatus = "approved";
     try {
       await dbQuery(
         `UPDATE farm_inventory_transactions
@@ -5084,7 +5283,7 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     } catch (e) {
       console.error("[ERROR]", "[accounting] set feed proc accounting_status:", e instanceof Error ? e.message : e);
     }
-    if (isManagerLevel && unitCostRwfPerKg != null) {
+    if (unitCostRwfPerKg != null) {
       const payload = mapFeedProcurementToBill({
         ...row,
         at: row.at,
@@ -6866,12 +7065,10 @@ app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requirePageAccess
       quantityReceived,
     });
 
-    // Accounting: manager+ auto-approves + enqueues; lower roles => pending_approval
-    const medLotRole = ROLE_RANK[req.authUser.role] ?? -1;
-    const medIsManager = medLotRole >= ROLE_RANK["manager"];
+    // Accounting: post medicine purchases directly to Odoo when cost is available.
     const medLotId = ins.rows[0]?.id?.toString?.() ?? null;
     if (medLotId) {
-      const medAcctStatus = medIsManager ? "approved" : "pending_approval";
+      const medAcctStatus = "approved";
       const unitCostRwf = body.unitCostRwf == null ? null : Number(body.unitCostRwf);
       try {
         await dbQuery(
@@ -6885,7 +7082,7 @@ app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requirePageAccess
       } catch (e) {
         console.error("[ERROR]", "[accounting] set medicine lot accounting_status:", e instanceof Error ? e.message : e);
       }
-      if (medIsManager && unitCostRwf != null) {
+      if (unitCostRwf != null) {
         const medName = String(ins.rows[0]?.medicineName ?? body.medicineName ?? "Medicine");
         const medPayload = mapMedicineLotToBill({
           id: medLotId,

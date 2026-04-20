@@ -36,9 +36,9 @@ const ACC = {
  */
 export function mapFeedProcurementToBill(row) {
   const description = [
-    "Feed purchase",
-    row.feedType ? `— ${String(row.feedType).replace(/_/g, " ")}` : "",
-    `(${Number(row.quantityKg).toFixed(1)} kg)`,
+    "Feed delivery",
+    row.feedType ? `(${String(row.feedType).replace(/_/g, " ")} feed)` : "",
+    `for ${Number(row.quantityKg).toFixed(1)} kg`,
   ].filter(Boolean).join(" ");
 
   return {
@@ -69,7 +69,7 @@ export function mapMedicineLotToBill(lot) {
     externalRef: `FM-MED-${lot.id}`,
     lines: [
       {
-        description: `${lot.medicineName || "Medicine"} — Lot ${lot.lotNumber || "unknown"} (${Number(lot.quantityReceived)} units)`,
+        description: `${lot.medicineName || "Medicine"} lot ${lot.lotNumber || "unknown"} received (${Number(lot.quantityReceived)} units)`,
         quantity: Number(lot.quantityReceived),
         unitPrice: Number(lot.unitCostRwf ?? 0),
         accountCode: ACC.medicine_expense,
@@ -104,13 +104,13 @@ export function mapSlaughterToJournalEntry(event, opts = {}) {
   const lines = [
     {
       accountCode: ACC.meat_inventory,
-      label: `Meat stock from slaughter — ${flockLabel} (${event.birdsSlaughtered} birds)`,
+      label: `Recognize meat stock from ${event.birdsSlaughtered} slaughtered birds (${flockLabel})`,
       debit: fairValue,
       credit: 0,
     },
     {
       accountCode: ACC.bio_assets,
-      label: `Derecognise live birds — ${flockLabel}`,
+      label: `Remove live-bird asset for slaughter batch (${flockLabel})`,
       debit: 0,
       credit: carryingValue,
     },
@@ -120,14 +120,14 @@ export function mapSlaughterToJournalEntry(event, opts = {}) {
     if (harvestGainLoss > 0) {
       lines.push({
         accountCode: ACC.harvest_gain,
-        label: `Gain on harvest — ${flockLabel}`,
+        label: `Harvest gain from flock ${flockLabel}`,
         debit: 0,
         credit: harvestGainLoss,
       });
     } else {
       lines.push({
         accountCode: ACC.harvest_loss,
-        label: `Loss on harvest — ${flockLabel}`,
+        label: `Harvest loss from flock ${flockLabel}`,
         debit: Math.abs(harvestGainLoss),
         credit: 0,
       });
@@ -212,7 +212,7 @@ export function mapFlockOpeningToBill(flock) {
     externalRef: ref,
     lines: [
       {
-        description: `Live chick purchase — Flock ${flock.code || flock.id} (${flock.initialCount} birds @ ${costPerChick.toFixed(0)} RWF each)`,
+        description: `Initial chick purchase for flock ${flock.code || flock.id} (${flock.initialCount} chicks at ${costPerChick.toFixed(0)} RWF each)`,
         quantity: Number(flock.initialCount ?? 1),
         unitPrice: costPerChick,
         accountCode: ACC.bio_assets,
@@ -243,13 +243,13 @@ export function mapMortalityToImpairmentEntry(event) {
     lines: [
       {
         accountCode: ACC.mortality_loss,
-        label: `Mortality impairment — ${flockLabel} (${event.count} birds, IAS 41)`,
+        label: `Mortality loss for ${event.count} birds in flock ${flockLabel} (IAS 41)`,
         debit: loss,
         credit: 0,
       },
       {
         accountCode: ACC.bio_assets,
-        label: `Derecognise dead birds — ${flockLabel}`,
+        label: `Remove dead birds from biological assets (${flockLabel})`,
         debit: 0,
         credit: loss,
       },

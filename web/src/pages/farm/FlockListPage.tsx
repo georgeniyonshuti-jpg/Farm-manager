@@ -81,7 +81,6 @@ export function FlockListPage() {
     breedCode: "generic_broiler",
     targetWeightKg: "",
     purchaseCostRwf: "",
-    costPerChickRwf: "",
     purchaseSupplier: "",
     purchaseDate: "",
   });
@@ -250,7 +249,6 @@ export function FlockListPage() {
           targetWeightKg: createForm.targetWeightKg ? Number(createForm.targetWeightKg) : null,
           status: "active",
           purchaseCostRwf: createForm.purchaseCostRwf ? Number(createForm.purchaseCostRwf) : undefined,
-          costPerChickRwf: createForm.costPerChickRwf ? Number(createForm.costPerChickRwf) : undefined,
           purchaseSupplier: createForm.purchaseSupplier.trim() || undefined,
           purchaseDate: createForm.purchaseDate || undefined,
         }),
@@ -263,11 +261,11 @@ export function FlockListPage() {
       }
       const created = d as { flock?: { label?: string; code?: string | null } };
       const name = created.flock?.label ?? created.flock?.code ?? "Flock";
-      const costMsg = (createForm.purchaseCostRwf || createForm.costPerChickRwf)
-        ? " Biological asset purchase queued for accounting review."
+      const costMsg = createForm.purchaseCostRwf
+        ? " Biological asset opening is being posted to Odoo under IAS 41."
         : "";
       showToast("success", `Flock ${name} added.${costMsg}`);
-      setCreateForm((prev) => ({ ...prev, initialCount: "", targetWeightKg: "", purchaseCostRwf: "", costPerChickRwf: "", purchaseSupplier: "", purchaseDate: "" }));
+      setCreateForm((prev) => ({ ...prev, initialCount: "", targetWeightKg: "", purchaseCostRwf: "", purchaseSupplier: "", purchaseDate: "" }));
       setShowCreateFlock(false);
       await load();
     } catch (e2) {
@@ -382,7 +380,7 @@ export function FlockListPage() {
             />
           </div>
           <p className="mt-4 text-xs font-semibold text-neutral-700">Biological asset cost (IAS 41 — optional)</p>
-          <p className="text-xs text-neutral-500">If provided, a draft vendor bill will be queued for manager approval in Accounting Approvals.</p>
+          <p className="text-xs text-neutral-500">Enter total purchase cost only. Cost per chick is computed automatically and posted to Odoo.</p>
           <div className="mt-2 grid gap-2 sm:grid-cols-4">
             <input
               className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
@@ -390,13 +388,6 @@ export function FlockListPage() {
               inputMode="decimal"
               value={createForm.purchaseCostRwf}
               onChange={(e) => setCreateForm((v) => ({ ...v, purchaseCostRwf: e.target.value }))}
-            />
-            <input
-              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-              placeholder="Cost per chick (RWF)"
-              inputMode="decimal"
-              value={createForm.costPerChickRwf}
-              onChange={(e) => setCreateForm((v) => ({ ...v, costPerChickRwf: e.target.value }))}
             />
             <input
               className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
@@ -412,6 +403,17 @@ export function FlockListPage() {
               onChange={(e) => setCreateForm((v) => ({ ...v, purchaseDate: e.target.value }))}
             />
           </div>
+          {createForm.purchaseCostRwf && createForm.initialCount ? (
+            <p className="mt-2 text-xs text-neutral-600">
+              Estimated cost per chick:{" "}
+              <strong>
+                {(Number(createForm.purchaseCostRwf) / Math.max(1, Number(createForm.initialCount))).toLocaleString(undefined, {
+                  maximumFractionDigits: 2,
+                })}{" "}
+                RWF
+              </strong>
+            </p>
+          ) : null}
           <div className="mt-3 flex justify-end">
             <button
               type="submit"

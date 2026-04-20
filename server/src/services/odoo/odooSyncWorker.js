@@ -106,7 +106,8 @@ export async function processOdooSyncOutbox(limit = 20) {
     }
 
     try {
-      const result = await dispatchFarmAccountingEvent(row.eventType, row.payload ?? {}, { draft: true });
+      // Post directly to Odoo (not draft) so accounting-impact events are reflected immediately.
+      const result = await dispatchFarmAccountingEvent(row.eventType, row.payload ?? {}, { draft: false });
       // Success
       await dbQuery(
         `UPDATE odoo_sync_outbox

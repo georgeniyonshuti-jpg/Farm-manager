@@ -64,6 +64,8 @@ export function FarmSlaughterPage() {
     birdsSlaughtered: "",
     avgLiveWeightKg: "",
     avgCarcassWeightKg: "",
+    pricePerKgRwf: "",
+    fairValueRwf: "",
     notes: "",
   });
   const [showRecordSlaughter, setShowRecordSlaughter] = useState(false);
@@ -149,6 +151,8 @@ export function FarmSlaughterPage() {
           birdsSlaughtered: Number(form.birdsSlaughtered),
           avgLiveWeightKg: Number(form.avgLiveWeightKg),
           avgCarcassWeightKg: form.avgCarcassWeightKg ? Number(form.avgCarcassWeightKg) : null,
+          pricePerKgRwf: form.pricePerKgRwf ? Number(form.pricePerKgRwf) : null,
+          fairValueRwf: form.fairValueRwf ? Number(form.fairValueRwf) : null,
         }),
       });
       const d = await r.json().catch(() => ({}));
@@ -163,8 +167,8 @@ export function FarmSlaughterPage() {
         }
         throw new Error(payload.error ?? "Save failed");
       }
-      showToast("success", "Slaughter record saved. A manager must confirm fair value in Accounting Approvals to send to Odoo.");
-      setForm((v) => ({ ...v, birdsSlaughtered: "", avgLiveWeightKg: "", avgCarcassWeightKg: "", notes: "" }));
+      showToast("success", "Slaughter recorded. Bird counts were updated and accounting entry is being sent to Odoo.");
+      setForm((v) => ({ ...v, birdsSlaughtered: "", avgLiveWeightKg: "", avgCarcassWeightKg: "", pricePerKgRwf: "", fairValueRwf: "", notes: "" }));
       setShowRecordSlaughter(false);
       await load();
     } catch (e) {
@@ -183,11 +187,8 @@ export function FarmSlaughterPage() {
       {!loading && !error ? (
         <>
           <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-900">
-            Slaughter events are saved as <strong>pending accounting review</strong>. A manager must open{" "}
-            <Link className="font-semibold underline" to="/farm/accounting-approvals">
-              Accounting Approvals
-            </Link>{" "}
-            to confirm the fair value and send the journal entry to Odoo.
+            Record slaughter against the selected flock to update live-bird counts immediately. Add market price/kg or fair value
+            so the IAS 41 conversion entry can post to Odoo right away.
           </div>
 
           {eligibility && !eligibility.eligibleForSlaughter ? (
@@ -353,6 +354,8 @@ export function FarmSlaughterPage() {
                       <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Birds slaughtered" inputMode="numeric" value={form.birdsSlaughtered} onChange={(e) => setForm((v) => ({ ...v, birdsSlaughtered: e.target.value }))} />
                       <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Avg live weight (kg)" inputMode="decimal" value={form.avgLiveWeightKg} onChange={(e) => setForm((v) => ({ ...v, avgLiveWeightKg: e.target.value }))} />
                       <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Avg carcass weight (kg, optional)" inputMode="decimal" value={form.avgCarcassWeightKg} onChange={(e) => setForm((v) => ({ ...v, avgCarcassWeightKg: e.target.value }))} />
+                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Market price per kg (RWF, optional)" inputMode="decimal" value={form.pricePerKgRwf} onChange={(e) => setForm((v) => ({ ...v, pricePerKgRwf: e.target.value }))} />
+                      <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Fair value total (RWF, optional override)" inputMode="decimal" value={form.fairValueRwf} onChange={(e) => setForm((v) => ({ ...v, fairValueRwf: e.target.value }))} />
                     </div>
                     <textarea className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} placeholder="Notes (optional)" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
                     <div className="mt-3 flex justify-end">
