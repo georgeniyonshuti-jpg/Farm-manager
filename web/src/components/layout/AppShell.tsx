@@ -45,12 +45,12 @@ export function AppShell() {
             <button
               type="button"
               onClick={() => setSidebarOpen((v) => !v)}
-              className="bounce-tap mx-4 mb-2 mt-2 inline-flex min-h-[44px] items-center justify-center rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-sm font-semibold text-[var(--text-primary)] md:hidden"
+              className="bounce-tap mx-4 mb-2 mt-2 inline-flex min-h-[44px] items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)] md:hidden"
             >
               ☰ Menu
             </button>
             <div
-              className={`fixed bottom-0 left-0 top-[var(--app-header-h,4rem)] z-50 w-[19rem] transform overflow-y-auto border-r border-[var(--border-color)] bg-[var(--surface-elevated)] pb-20 transition-transform [-webkit-overflow-scrolling:touch] md:bottom-0 md:top-[var(--app-header-h,4rem)] md:z-[90] md:h-auto md:translate-x-0 md:pb-0 ${desktopSidebarWidthClass} ${
+              className={`fixed bottom-0 left-0 top-[var(--app-header-h,4rem)] z-50 w-[19rem] transform overflow-y-auto border-r border-[var(--border-color)] bg-[var(--surface-elevated)] pb-20 transition-transform duration-300 [-webkit-overflow-scrolling:touch] md:bottom-0 md:top-[var(--app-header-h,4rem)] md:z-[90] md:h-auto md:translate-x-0 md:pb-0 ${desktopSidebarWidthClass} ${
                 compactFieldView ? "md:hidden" : "md:fixed"
               } ${sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
             >
@@ -58,7 +58,7 @@ export function AppShell() {
                 type="button"
                 aria-label="Close navigation"
                 onClick={() => setSidebarOpen(false)}
-                className="bounce-tap sticky top-0 ml-auto flex h-11 w-11 items-center justify-center bg-[var(--surface-elevated)] text-lg font-semibold text-neutral-700 md:hidden"
+                className="bounce-tap sticky top-0 ml-auto flex h-11 w-11 items-center justify-center bg-[var(--surface-elevated)] text-lg font-semibold text-[var(--text-secondary)] md:hidden"
               >
                 ×
               </button>

@@ -2504,6 +2504,59 @@ app.put("/api/admin/system-config", requireAuth, requireLeadVetUp, requirePageAc
   }
 });
 
+// ─── Dashboard widget visibility config ────────────────────────────────────
+const DASHBOARD_WIDGETS_KEY = "dashboard_widgets_visible";
+const DASHBOARD_WIDGETS_DEFAULT = [
+  "exec_kpis","health_score","risk_intel","ops_trends","blockers","flock_table","finance",
+];
+
+app.get("/api/admin/dashboard-widgets", requireAuth, requireManagerOrSuperuser, async (_req, res) => {
+  try {
+    if (hasDb) {
+      const r = await dbQuery(
+        "SELECT setting_value FROM app_settings WHERE setting_key = $1",
+        [DASHBOARD_WIDGETS_KEY],
+      );
+      if (r.rows.length > 0) {
+        let parsed;
+        try { parsed = JSON.parse(r.rows[0].setting_value); } catch { parsed = null; }
+        if (Array.isArray(parsed)) {
+          res.json({ widgets: parsed });
+          return;
+        }
+      }
+    }
+    res.json({ widgets: DASHBOARD_WIDGETS_DEFAULT });
+  } catch (e) {
+    console.error("[ERROR] GET /api/admin/dashboard-widgets:", e?.message);
+    res.json({ widgets: DASHBOARD_WIDGETS_DEFAULT });
+  }
+});
+
+app.put("/api/admin/dashboard-widgets", requireAuth, requireSuperuser, async (req, res) => {
+  try {
+    const { widgets } = req.body ?? {};
+    if (!Array.isArray(widgets)) {
+      res.status(400).json({ error: "widgets must be an array." });
+      return;
+    }
+    const safe = widgets.filter(w => typeof w === "string");
+    if (hasDb) {
+      await dbQuery(
+        `INSERT INTO app_settings (setting_key, setting_value)
+         VALUES ($1, $2)
+         ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value`,
+        [DASHBOARD_WIDGETS_KEY, JSON.stringify(safe)],
+      );
+    }
+    res.json({ ok: true, widgets: safe });
+  } catch (e) {
+    console.error("[ERROR] PUT /api/admin/dashboard-widgets:", e?.message);
+    res.status(500).json({ error: "Failed to save widget config." });
+  }
+});
+// ───────────────────────────────────────────────────────────────────────────
+
 app.get("/api/admin/field-payroll-rates", requireAuth, requireFarmAccess, requireManagerOrSuperuser, (_req, res) => {
   const r = systemConfig.getFieldPayrollRates();
   res.json({

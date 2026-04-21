@@ -6,6 +6,7 @@ import { canAccessWorkspace } from "../../auth/permissions";
 import { isLaborerLocaleUser, useLaborerT } from "../../i18n/laborerI18n";
 import { LaborerLanguageToggle } from "../LaborerLanguageToggle";
 import { BrandLogo } from "../BrandLogo";
+import { useTheme } from "../../context/ThemeContext";
 
 const ROLE_LABEL_EN: Record<UserRole, string> = {
   superuser: "Superuser",
@@ -121,7 +122,7 @@ function UserMenuChip({ user, roleBadge, onLogout }: UserMenuProps) {
       </button>
       {open ? (
         <div
-          className="absolute right-0 top-full z-50 mt-1 min-w-[10rem] rounded-lg border border-[var(--border-color)] bg-white py-1 shadow-lg"
+          className="absolute right-0 top-full z-50 mt-1 min-w-[10rem] rounded-lg border border-[var(--border-color)] bg-[var(--surface-color)] py-1 shadow-elevated"
           role="menu"
         >
           <button
@@ -146,6 +147,30 @@ type GlobalHeaderProps = {
   desktopSidebarCollapsed?: boolean;
   onToggleDesktopSidebar?: () => void;
 };
+
+function ThemeToggle() {
+  const { theme, toggleTheme } = useTheme();
+  return (
+    <button
+      type="button"
+      onClick={toggleTheme}
+      title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+      aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+      className="bounce-tap inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border-color)] bg-[var(--surface-color)] text-[var(--text-secondary)] hover:bg-[var(--primary-color-soft)] hover:text-[var(--primary-color)] transition-colors"
+    >
+      {theme === "dark" ? (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+        </svg>
+      ) : (
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+      )}
+    </button>
+  );
+}
 
 export function GlobalHeader({
   showDesktopSidebarToggle = false,
@@ -257,7 +282,10 @@ export function GlobalHeader({
               </span>
               <span className="truncate text-base font-semibold text-[var(--text-primary)]">{appName}</span>
             </Link>
-            <UserMenuChip user={user} roleBadge={roleBadge} onLogout={logout} />
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              <UserMenuChip user={user} roleBadge={roleBadge} onLogout={logout} />
+            </div>
           </div>
           {hasActionBar ? (
             <div className="flex flex-wrap items-center gap-2 px-3 py-2">
@@ -303,6 +331,7 @@ export function GlobalHeader({
                 {actionCluster}
               </div>
             ) : null}
+            <ThemeToggle />
             <UserMenuChip user={user} roleBadge={roleBadge} onLogout={logout} />
           </div>
         </div>

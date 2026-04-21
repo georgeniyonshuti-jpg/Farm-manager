@@ -210,11 +210,11 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
     if (!items.length) return null;
     const isOpen = openGroups[id];
     return (
-      <section className="rounded-lg border border-neutral-200 bg-white/70">
+      <section className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)]/60">
         <button
           type="button"
           onClick={() => toggleGroup(id)}
-          className="bounce-tap flex w-full items-center justify-between px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500"
+          className="bounce-tap flex w-full items-center justify-between px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]"
         >
           <span>{title}</span>
           <span aria-hidden>{isOpen ? "−" : "+"}</span>
@@ -232,7 +232,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
                     "bounce-tap flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-medium",
                     isActive
                       ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
-                      : "border-l-transparent text-neutral-800 hover:bg-[var(--primary-color-soft)]",
+                      : "border-l-transparent text-[var(--text-secondary)] hover:bg-[var(--primary-color-soft)] hover:text-[var(--text-primary)]",
                   ].join(" ")
                 }
               >
@@ -272,7 +272,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
     return (
       <span
         aria-hidden
-        className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-neutral-300 bg-white text-[10px] font-semibold text-neutral-700"
+        className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--border-color)] bg-[var(--surface-card)] text-[10px] font-semibold text-[var(--text-muted)]"
       >
         {glyph}
       </span>
@@ -280,15 +280,15 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
   }
 
   return (
-    <aside className="w-full border-b border-neutral-200 bg-neutral-50 md:h-full md:border-b-0 md:border-r">
+    <aside className="w-full border-b border-[var(--border-color)] bg-[var(--surface-elevated)] md:h-full md:border-b-0 md:border-r">
       <div className="p-4 md:p-5">
         {!collapsed ? (
-          <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-500">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
             {activeWorkspace === "farm" ? farmSectionTitle : clevaSectionTitle}
           </p>
         ) : null}
         <nav className="mt-4 flex flex-col gap-2.5 pb-20 md:pb-0">
-          {collapsed
+          {          collapsed
             ? compactItems.map((item) => (
                 <NavLink
                   key={item.to}
@@ -301,7 +301,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
                       "bounce-tap flex h-10 items-center justify-center rounded-lg border-l-[3px]",
                       isActive
                         ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
-                        : "border-l-transparent text-neutral-800 hover:bg-[var(--primary-color-soft)]",
+                        : "border-l-transparent text-[var(--text-muted)] hover:bg-[var(--primary-color-soft)]",
                     ].join(" ")
                   }
                 >
@@ -318,10 +318,10 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
               onClick={onNavigate}
               className={({ isActive }) =>
                 [
-                  "flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-medium",
+                  "flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-semibold",
                   isActive
                     ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
-                    : "border-l-transparent text-neutral-800 hover:bg-neutral-200/80",
+                    : "border-l-transparent text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)]",
                 ].join(" ")
               }
             >
@@ -346,7 +346,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
                     "bounce-tap flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-medium",
                     isActive
                       ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
-                      : "border-l-transparent text-neutral-800 hover:bg-[var(--primary-color-soft)]",
+                      : "border-l-transparent text-[var(--text-secondary)] hover:bg-[var(--primary-color-soft)] hover:text-[var(--text-primary)]",
                   ].join(" ")
                 }
               >
@@ -362,8 +362,8 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
                 [
                   "mt-2 flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-medium",
                   isActive
-                    ? "border-l-neutral-900 bg-neutral-900 text-white"
-                    : "border border-dashed border-neutral-300 border-l-transparent text-neutral-800 hover:bg-neutral-200/80",
+                    ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
+                    : "border border-dashed border-[var(--border-color)] border-l-transparent text-[var(--text-secondary)] hover:bg-[var(--surface-card)] hover:text-[var(--text-primary)]",
                 ].join(" ")
               }
             >
@@ -379,7 +379,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
                   "flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-medium",
                   isActive
                     ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
-                    : "border-l-transparent text-neutral-800 hover:bg-[var(--primary-color-soft)]",
+                    : "border-l-transparent text-[var(--text-secondary)] hover:bg-[var(--primary-color-soft)] hover:text-[var(--text-primary)]",
                 ].join(" ")
               }
             >

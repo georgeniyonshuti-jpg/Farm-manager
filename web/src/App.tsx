@@ -45,6 +45,7 @@ import { OdooSetupPage } from "./pages/farm/OdooSetupPage";
 import { FARM_FIELD_OPS_ROLES } from "./auth/permissions";
 import { useAuth } from "./auth/AuthContext";
 import { AppLoadingScreen } from "./components/AppLoadingScreen";
+import { ThemeProvider } from "./context/ThemeContext";
 
 function AppRoutes() {
   const { bootstrapped } = useAuth();
@@ -290,17 +291,19 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <LaborerI18nProvider>
-        <ToastProvider>
-        <AppRoutes />
-        <VersionBadge />
-        <SystemStatus />
-        <InstallPromptBanner />
-        </ToastProvider>
-        </LaborerI18nProvider>
-      </AuthProvider>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter>
+        <AuthProvider>
+          <LaborerI18nProvider>
+            <ToastProvider>
+              <AppRoutes />
+              <VersionBadge />
+              <SystemStatus />
+              <InstallPromptBanner />
+            </ToastProvider>
+          </LaborerI18nProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </ThemeProvider>
   );
 }
