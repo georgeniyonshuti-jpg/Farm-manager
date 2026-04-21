@@ -81,11 +81,22 @@ router.use((req, res, next) => {
   if (!isManagerOrAbove(req.authUser)) {
     return res.status(403).json({ error: "Manager or superuser required." });
   }
+  return next();
+});
+
+function requireOdooSendAccess(req, res, next) {
   if (!hasOdooSendAccess(req.authUser)) {
     return res.status(403).json({ error: "You do not have permission to send data to Odoo. Ask superuser to grant 'Can send to Odoo' in Page visibility matrix." });
   }
   return next();
-});
+}
+
+function canResendOutboxByOwnership(user, outboxRow) {
+  if (!user || !outboxRow) return false;
+  if (user.role === "superuser") return true;
+  if (hasOdooSendAccess(user)) return true;
+  return String(outboxRow.triggered_by_user_id ?? "") === String(user.id ?? "");
+}
 
 // ─────────────────────────────────────────────────────────────
 // 1. Feed Procurement — accounting approval
@@ -121,7 +132,7 @@ router.get("/feed-procurements/pending", async (req, res) => {
  * PATCH /api/accounting-approvals/feed-procurements/:id/approve
  * Approve a feed procurement for Odoo sync.
  */
-router.patch("/feed-procurements/:id/approve", async (req, res) => {
+router.patch("/feed-procurements/:id/approve", requireOdooSendAccess, async (req, res) => {
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const id = req.params.id;
@@ -191,7 +202,7 @@ router.get("/medicine-lots/pending", async (req, res) => {
 /**
  * PATCH /api/accounting-approvals/medicine-lots/:id/approve
  */
-router.patch("/medicine-lots/:id/approve", async (req, res) => {
+router.patch("/medicine-lots/:id/approve", requireOdooSendAccess, async (req, res) => {
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const id = req.params.id;
@@ -266,7 +277,7 @@ router.get("/slaughter-events/pending", async (req, res) => {
  * PATCH /api/accounting-approvals/slaughter-events/:id/approve
  * Body: { fairValueRwf, carryingValueRwf }
  */
-router.patch("/slaughter-events/:id/approve", async (req, res) => {
+router.patch("/slaughter-events/:id/approve", requireOdooSendAccess, async (req, res) => {
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const id = req.params.id;
@@ -344,7 +355,7 @@ router.post("/sales-orders", async (req, res) => {
     return res.status(400).json({ error: "flockId, orderDate, numberOfBirds, totalWeightKg, pricePerKg are required." });
   }
 
-  const autoApproved = isManagerOrAbove(req.authUser);
+  const autoApproved = hasOdooSendAccess(req.authUser);
   const submissionStatus = autoApproved ? "approved" : "pending_review";
   const accountingStatus = autoApproved ? "approved" : "pending_approval";
 
@@ -417,7 +428,7 @@ router.get("/sales-orders", async (req, res) => {
  * PATCH /api/accounting-approvals/sales-orders/:id/review
  * Body: { action: 'approve'|'reject', reviewNotes?: string }
  */
-router.patch("/sales-orders/:id/review", async (req, res) => {
+router.patch("/sales-orders/:id/review", requireOdooSendAccess, async (req, res) => {
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const id = req.params.id;
@@ -498,6 +509,21 @@ router.post("/odoo-outbox/:id/retry", async (req, res) => {
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   try {
+    const outbox = await dbQuery(
+      `SELECT id::text AS id, status, triggered_by_user_id
+         FROM odoo_sync_outbox
+        WHERE id::text = $1
+        LIMIT 1`,
+      [req.params.id]
+    );
+    const row = outbox.rows[0] ?? null;
+    if (!row) return res.status(404).json({ error: "Outbox row not found." });
+    if (!canResendOutboxByOwnership(req.authUser, row)) {
+      return res.status(403).json({ error: "Only superuser, users with Odoo send access, or the original approver can resend this item." });
+    }
+    if (!["failed", "pending"].includes(String(row.status ?? ""))) {
+      return res.status(400).json({ error: "Only pending or failed items can be resent." });
+    }
     const result = await retryOutboxRow(req.params.id);
     res.json({ ok: true, ...result });
   } catch (e) {
@@ -536,7 +562,7 @@ import { mapPayrollClosureToJournalEntry } from "../services/odoo/odooFarmMapper
  * creates a payroll_period_closures record, and enqueues the Odoo journal entry.
  * Body: { periodStart, periodEnd, notes? }
  */
-router.post("/payroll-closures", async (req, res) => {
+router.post("/payroll-closures", requireOdooSendAccess, async (req, res) => {
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const body = req.body ?? {};
@@ -639,7 +665,7 @@ import { mapFlockOpeningToBill } from "../services/odoo/odooFarmMappers.js";
  * Manager sends the initial chick purchase bill to Odoo.
  * The flock must have purchase_cost_rwf set.
  */
-router.post("/flock-openings/:flockId/send-to-odoo", async (req, res) => {
+router.post("/flock-openings/:flockId/send-to-odoo", requireOdooSendAccess, async (req, res) => {
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const { flockId } = req.params;
@@ -717,7 +743,7 @@ router.get("/mortality-events/pending", async (req, res) => {
  * PATCH /api/accounting-approvals/mortality-events/:id/approve
  * Body: { impairmentValueRwf }
  */
-router.patch("/mortality-events/:id/approve", async (req, res) => {
+router.patch("/mortality-events/:id/approve", requireOdooSendAccess, async (req, res) => {
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const { id } = req.params;
@@ -1314,6 +1340,21 @@ router.post("/action-queue/:outboxId/resend-now", async (req, res) => {
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const { outboxId } = req.params;
   try {
+    const lookup = await dbQuery(
+      `SELECT id::text AS id, status, triggered_by_user_id
+         FROM odoo_sync_outbox
+        WHERE id::text = $1
+        LIMIT 1`,
+      [outboxId]
+    );
+    const outboxRow = lookup.rows[0] ?? null;
+    if (!outboxRow) return res.status(404).json({ error: "Outbox row not found." });
+    if (!canResendOutboxByOwnership(req.authUser, outboxRow)) {
+      return res.status(403).json({ error: "Only superuser, users with Odoo send access, or the original approver can resend this item." });
+    }
+    if (!["failed", "pending"].includes(String(outboxRow.status ?? ""))) {
+      return res.status(400).json({ error: "Only pending or failed items can be resent." });
+    }
     await dbQuery(
       `UPDATE odoo_sync_outbox
           SET status = 'pending', next_retry_at = now(), last_error = NULL, attempts = 0, updated_at = now()
@@ -1339,7 +1380,7 @@ router.post("/action-queue/:outboxId/resend-now", async (req, res) => {
  * Update feed procurement fields, approve, re-map and (re)queue for Odoo.
  * Body: { unitCostRwfPerKg?, supplierName? }
  */
-router.patch("/action-queue/feed/:id", async (req, res) => {
+router.patch("/action-queue/feed/:id", requireOdooSendAccess, async (req, res) => {
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const { id } = req.params;
@@ -1377,7 +1418,7 @@ router.patch("/action-queue/feed/:id", async (req, res) => {
  * PATCH /api/accounting-approvals/action-queue/medicine-lot/:id
  * Body: { unitCostRwf?, supplier? }
  */
-router.patch("/action-queue/medicine-lot/:id", async (req, res) => {
+router.patch("/action-queue/medicine-lot/:id", requireOdooSendAccess, async (req, res) => {
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const { id } = req.params;
@@ -1420,7 +1461,7 @@ router.patch("/action-queue/medicine-lot/:id", async (req, res) => {
  * PATCH /api/accounting-approvals/action-queue/slaughter/:id
  * Body: { fairValueRwf, carryingValueRwf? }
  */
-router.patch("/action-queue/slaughter/:id", async (req, res) => {
+router.patch("/action-queue/slaughter/:id", requireOdooSendAccess, async (req, res) => {
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const { id } = req.params;
@@ -1463,7 +1504,7 @@ router.patch("/action-queue/slaughter/:id", async (req, res) => {
  * PATCH /api/accounting-approvals/action-queue/sale/:id
  * Body: { pricePerKg?, buyerName?, buyerEmail? }
  */
-router.patch("/action-queue/sale/:id", async (req, res) => {
+router.patch("/action-queue/sale/:id", requireOdooSendAccess, async (req, res) => {
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const { id } = req.params;
@@ -1503,7 +1544,7 @@ router.patch("/action-queue/sale/:id", async (req, res) => {
  * PATCH /api/accounting-approvals/action-queue/mortality/:id
  * Body: { impairmentValueRwf }
  */
-router.patch("/action-queue/mortality/:id", async (req, res) => {
+router.patch("/action-queue/mortality/:id", requireOdooSendAccess, async (req, res) => {
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const { id } = req.params;
@@ -1543,7 +1584,7 @@ router.patch("/action-queue/mortality/:id", async (req, res) => {
  * PATCH /api/accounting-approvals/action-queue/flock-opening/:id
  * Body: { purchaseCostRwf?, costPerChickRwf?, purchaseSupplier?, purchaseDate? }
  */
-router.patch("/action-queue/flock-opening/:id", async (req, res) => {
+router.patch("/action-queue/flock-opening/:id", requireOdooSendAccess, async (req, res) => {
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const { id } = req.params;
@@ -1585,7 +1626,7 @@ router.patch("/action-queue/flock-opening/:id", async (req, res) => {
  * PATCH /api/accounting-approvals/action-queue/payroll-closure/:id
  * Body: { notes? } — re-sends the payroll closure with updated notes.
  */
-router.patch("/action-queue/payroll-closure/:id", async (req, res) => {
+router.patch("/action-queue/payroll-closure/:id", requireOdooSendAccess, async (req, res) => {
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const { id } = req.params;

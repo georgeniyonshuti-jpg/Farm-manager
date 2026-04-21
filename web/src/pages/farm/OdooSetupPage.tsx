@@ -92,6 +92,7 @@ type OdooProduct = {
 };
 
 type Tab = "overview" | "accounts" | "partners" | "documents" | "products";
+type ActionQueueLite = { outboxStatus: string; sourceStatus: string };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -173,6 +174,12 @@ export function OdooSetupPage() {
   const [products, setProducts] = useState<OdooProduct[]>([]);
   const [productsLoading, setProductsLoading] = useState(false);
   const [productSearch, setProductSearch] = useState("");
+  const [actionSummary, setActionSummary] = useState<{ failed: number; pendingApproval: number; notQueued: number }>({
+    failed: 0,
+    pendingApproval: 0,
+    notQueued: 0,
+  });
+  const [actionSummaryLoading, setActionSummaryLoading] = useState(false);
 
   // ── Loaders ──
 
@@ -240,14 +247,30 @@ export function OdooSetupPage() {
     setProductsLoading(false);
   }, [token, productSearch]);
 
+  const loadActionSummary = useCallback(async () => {
+    setActionSummaryLoading(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/accounting-approvals/action-queue`, { headers: readAuthHeaders(token) });
+      const d = await r.json();
+      const items: ActionQueueLite[] = Array.isArray(d.items) ? d.items : [];
+      const failed = items.filter(i => i.outboxStatus === "failed").length;
+      const pendingApproval = items.filter(i => i.sourceStatus === "pending_approval" && i.outboxStatus !== "failed").length;
+      const notQueued = items.filter(i => i.outboxStatus === "not_queued" && i.sourceStatus !== "pending_approval").length;
+      setActionSummary({ failed, pendingApproval, notQueued });
+    } catch {
+      setActionSummary({ failed: 0, pendingApproval: 0, notQueued: 0 });
+    }
+    setActionSummaryLoading(false);
+  }, [token]);
+
   useEffect(() => {
     if (!isManager) return;
-    if (tab === "overview") { loadStatus(); loadFarmAccounts(); }
+    if (tab === "overview") { loadStatus(); loadFarmAccounts(); loadActionSummary(); }
     else if (tab === "accounts") loadAllAccounts();
     else if (tab === "partners") loadPartners();
     else if (tab === "documents") loadDocuments();
     else if (tab === "products") loadProducts();
-  }, [tab, isManager, loadStatus, loadFarmAccounts, loadAllAccounts, loadPartners, loadDocuments, loadProducts]);
+  }, [tab, isManager, loadStatus, loadFarmAccounts, loadAllAccounts, loadPartners, loadDocuments, loadProducts, loadActionSummary]);
 
   // ── Actions ──
 
@@ -293,10 +316,10 @@ export function OdooSetupPage() {
   }
 
   const tabs: { id: Tab; label: string }[] = [
-    { id: "overview", label: "Overview" },
-    { id: "accounts", label: "Chart of Accounts" },
-    { id: "partners", label: "Customers & Vendors" },
-    { id: "documents", label: "Recent Documents" },
+    { id: "overview", label: "Home" },
+    { id: "accounts", label: "Accounts" },
+    { id: "partners", label: "Contacts" },
+    { id: "documents", label: "Sync history" },
     { id: "products", label: "Products" },
   ];
 
@@ -327,6 +350,30 @@ export function OdooSetupPage() {
       {/* ─── Overview ───────────────────────────────────────────────────── */}
       {tab === "overview" && (
         <section className="space-y-6">
+          <div className="rounded-xl border border-gray-200 bg-white p-4">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="text-sm font-semibold text-gray-800">Needs attention first</h2>
+              <button onClick={loadActionSummary} className="text-xs text-gray-500 hover:text-gray-700 underline">Refresh</button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
+                <div className="text-xs text-red-700">Failed</div>
+                <div className="text-lg font-semibold text-red-700">{actionSummaryLoading ? "…" : actionSummary.failed}</div>
+              </div>
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+                <div className="text-xs text-blue-700">Awaiting approval</div>
+                <div className="text-lg font-semibold text-blue-700">{actionSummaryLoading ? "…" : actionSummary.pendingApproval}</div>
+              </div>
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                <div className="text-xs text-amber-700">Not queued</div>
+                <div className="text-lg font-semibold text-amber-700">{actionSummaryLoading ? "…" : actionSummary.notQueued}</div>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Go to Accounting Approvals to fix and resend pending items.
+            </p>
+          </div>
+
           {/* Connection status */}
           <div className={`rounded-xl p-5 border ${status?.connected ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"}`}>
             <div className="flex items-center gap-3 mb-3">

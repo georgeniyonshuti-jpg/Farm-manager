@@ -632,7 +632,10 @@ export function AccountingApprovalsPage() {
   const failedItems = filteredActionQueue.filter(i => i.outboxStatus === "failed");
   const pendingApprovalItems = filteredActionQueue.filter(i => i.sourceStatus === "pending_approval" && i.outboxStatus !== "failed");
   const notQueuedItems = filteredActionQueue.filter(i => i.outboxStatus === "not_queued" && i.sourceStatus !== "pending_approval");
-  const needsActionCount = actionQueue.filter(i => i.outboxStatus === "failed" || i.outboxStatus === "not_queued").length;
+  const totalFailedCount = actionQueue.filter(i => i.outboxStatus === "failed").length;
+  const totalPendingApprovalCount = actionQueue.filter(i => i.sourceStatus === "pending_approval" && i.outboxStatus !== "failed").length;
+  const totalNotQueuedCount = actionQueue.filter(i => i.outboxStatus === "not_queued" && i.sourceStatus !== "pending_approval").length;
+  const needsActionCount = totalFailedCount + totalNotQueuedCount + totalPendingApprovalCount;
 
   const tabs: { id: Tab; label: string; badge?: number }[] = [
     { id: "action", label: "Needs Action", badge: needsActionCount || undefined },
@@ -682,17 +685,22 @@ export function AccountingApprovalsPage() {
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3">
               <p className="text-xs uppercase tracking-wide text-red-600">Failed</p>
-              <p className="text-2xl font-semibold text-red-700">{failedItems.length}</p>
+              <p className="text-2xl font-semibold text-red-700">{totalFailedCount}</p>
             </div>
             <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
               <p className="text-xs uppercase tracking-wide text-blue-600">Awaiting approval</p>
-              <p className="text-2xl font-semibold text-blue-700">{pendingApprovalItems.length}</p>
+              <p className="text-2xl font-semibold text-blue-700">{totalPendingApprovalCount}</p>
             </div>
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
               <p className="text-xs uppercase tracking-wide text-amber-600">Not yet queued</p>
-              <p className="text-2xl font-semibold text-amber-700">{notQueuedItems.length}</p>
+              <p className="text-2xl font-semibold text-amber-700">{totalNotQueuedCount}</p>
             </div>
           </div>
+          {actionSearch && (
+            <p className="text-xs text-gray-500">
+              Showing {filteredActionQueue.length} filtered item(s) out of {actionQueue.length} total.
+            </p>
+          )}
 
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
             <input
@@ -1233,8 +1241,10 @@ export function AccountingApprovalsPage() {
                     <td className="py-2 pr-3 text-center">{row.attempts}</td>
                     <td className="py-2 pr-3 text-gray-400">{row.lastAttemptedAt ? fmtDate(row.lastAttemptedAt) : "—"}</td>
                     <td className="py-2">
-                      {row.status === "failed" && (
-                        <button onClick={() => retryOutbox(row.id)} className="text-xs text-blue-600 hover:underline">Retry</button>
+                      {(row.status === "failed" || row.status === "pending") && (
+                        <button onClick={() => retryOutbox(row.id)} className="text-xs text-blue-600 hover:underline">
+                          {row.status === "pending" ? "Resend" : "Retry"}
+                        </button>
                       )}
                       {row.lastError && (
                         <details className="mt-1">
