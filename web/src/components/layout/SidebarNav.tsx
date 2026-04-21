@@ -12,6 +12,7 @@ function NavText({ text }: { text: string }) {
 
 type NavItem = { to: string; label: string; end?: boolean };
 type Props = { onNavigate?: () => void; collapsed?: boolean };
+type GroupId = "overview" | "operations" | "flocks_health" | "planning_workforce" | "integrations_admin";
 
 const CLEVA_NAV: NavItem[] = [
   { to: "/cleva/portfolio", label: "Portfolio analytics", end: true },
@@ -28,10 +29,12 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
 
   if (!user || !activeWorkspace) return null;
 
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    core: true,
-    clinical: true,
-    workforce: true,
+  const [openGroups, setOpenGroups] = useState<Record<GroupId, boolean>>({
+    overview: true,
+    operations: true,
+    flocks_health: true,
+    planning_workforce: true,
+    integrations_admin: true,
   });
 
   const clevaNav = CLEVA_NAV.filter((item) => {
@@ -177,36 +180,45 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
       : null;
 
   const groupedFarmNav = useMemo(() => {
-    const coreOps = farmCore.filter((i) =>
-      ["/farm/checkin", "/farm/feed", "/farm/mortality-log", "/farm/inventory"].includes(i.to)
-    );
-    const clinicalReport = [
-      ...farmCore.filter((i) =>
-        ["/farm/mortality", "/farm/vet-logs"].includes(i.to)
-      ),
-      ...farmNav.filter((i) =>
-        ["/farm/flocks", "/farm/treatments", "/farm/slaughter", "/farm/fcr"].includes(i.to)
-      ),
-    ];
-    const workforce = farmNav.filter((i) =>
-      [
+    const byPath = new Map(farmNav.map((item) => [item.to, item]));
+    const pick = (paths: string[]) => paths.map((p) => byPath.get(p)).filter(Boolean) as NavItem[];
+
+    return {
+      overview: effectiveDashLink ? [effectiveDashLink] : [],
+      operations: pick([
+        "/farm/checkin",
+        "/farm/feed",
+        "/farm/mortality-log",
+        "/farm/daily-log",
+        "/farm/inventory",
+      ]),
+      flocks_health: pick([
+        "/farm/flocks",
+        "/farm/mortality",
+        "/farm/vet-logs",
+        "/farm/treatments",
+        "/farm/slaughter",
+        "/farm/fcr",
+      ]),
+      planning_workforce: pick([
         "/farm/batch-schedule",
-        "/farm/schedule-settings",
         "/farm/checkin-review",
+        "/farm/schedule-settings",
         "/farm/payroll",
         "/laborer/earnings",
+      ]),
+      integrations_admin: pick([
         "/farm/accounting-approvals",
         "/farm/odoo-setup",
-      ].includes(i.to)
-    );
-    return { core: coreOps, clinical: clinicalReport, workforce };
-  }, [farmCore, farmNav]);
+      ]),
+    };
+  }, [farmNav, effectiveDashLink]);
 
-  function toggleGroup(id: "core" | "clinical" | "workforce") {
+  function toggleGroup(id: GroupId) {
     setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
   }
 
-  function GroupSection({ id, title, items }: { id: "core" | "clinical" | "workforce"; title: string; items: NavItem[] }) {
+  function GroupSection({ id, title, items, icon }: { id: GroupId; title: string; items: NavItem[]; icon: string }) {
     if (!items.length) return null;
     const isOpen = openGroups[id];
     return (
@@ -214,10 +226,13 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
         <button
           type="button"
           onClick={() => toggleGroup(id)}
-          className="bounce-tap flex w-full items-center justify-between px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]"
+          className="bounce-tap flex w-full items-center justify-between px-3 py-2 text-[11px] font-semibold text-[var(--text-muted)]"
         >
-          <span>{title}</span>
-          <span aria-hidden>{isOpen ? "−" : "+"}</span>
+          <span className="inline-flex items-center gap-2">
+            <span aria-hidden className="text-sm">{icon}</span>
+            <span>{title}</span>
+          </span>
+          <span aria-hidden className="text-sm">{isOpen ? "▾" : "▸"}</span>
         </button>
         {isOpen ? (
           <div className="flex flex-col gap-1 px-2 pb-2">
@@ -247,9 +262,14 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
 
   const compactItems = (() => {
     const base = [
-      effectiveDashLink,
       ...(activeWorkspace === "farm"
-        ? [...groupedFarmNav.core, ...groupedFarmNav.clinical, ...groupedFarmNav.workforce]
+        ? [
+            ...groupedFarmNav.overview,
+            ...groupedFarmNav.operations,
+            ...groupedFarmNav.flocks_health,
+            ...groupedFarmNav.planning_workforce,
+            ...groupedFarmNav.integrations_admin,
+          ]
         : nav),
       adminLink,
       typeLink,
@@ -312,27 +332,13 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
             : null}
           {!collapsed ? (
             <>
-          {effectiveDashLink ? (
-            <NavLink
-              to={effectiveDashLink.to}
-              onClick={onNavigate}
-              className={({ isActive }) =>
-                [
-                  "flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-semibold",
-                  isActive
-                    ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
-                    : "border-l-transparent text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)]",
-                ].join(" ")
-              }
-            >
-              <NavText text={effectiveDashLink.label} />
-            </NavLink>
-          ) : null}
           {activeWorkspace === "farm" ? (
             <>
-              <GroupSection id="core" title="Core operations" items={groupedFarmNav.core} />
-              <GroupSection id="clinical" title="Clinical & flock control" items={groupedFarmNav.clinical} />
-              <GroupSection id="workforce" title="Workforce & admin" items={groupedFarmNav.workforce} />
+              <GroupSection id="overview" title="Overview" icon="⌂" items={groupedFarmNav.overview} />
+              <GroupSection id="operations" title="Daily operations" icon="☀" items={groupedFarmNav.operations} />
+              <GroupSection id="flocks_health" title="Flocks & health" icon="◉" items={groupedFarmNav.flocks_health} />
+              <GroupSection id="planning_workforce" title="Planning & workforce" icon="☰" items={groupedFarmNav.planning_workforce} />
+              <GroupSection id="integrations_admin" title="Integrations & admin" icon="⚙" items={groupedFarmNav.integrations_admin} />
             </>
           ) : (
             nav.map((item) => (

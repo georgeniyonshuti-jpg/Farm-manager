@@ -15,7 +15,7 @@ export function CheckinUrgencyBadge({ badge, className = "" }: Props) {
   if (badge === "overdue") {
     return (
       <span
-        className={`inline-flex rounded-md bg-red-100 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-red-900 ${className}`}
+        className={`inline-flex rounded-md border border-red-500/30 bg-red-500/12 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-red-400 ${className}`}
       >
         {overdue}
       </span>
@@ -24,7 +24,7 @@ export function CheckinUrgencyBadge({ badge, className = "" }: Props) {
   if (badge === "upcoming") {
     return (
       <span
-        className={`inline-flex rounded-md bg-amber-100 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-amber-900 ${className}`}
+        className={`inline-flex rounded-md border border-amber-500/30 bg-amber-500/12 px-2 py-0.5 text-xs font-bold uppercase tracking-wide text-amber-400 ${className}`}
       >
         {upcoming}
       </span>
@@ -32,7 +32,7 @@ export function CheckinUrgencyBadge({ badge, className = "" }: Props) {
   }
   return (
     <span
-      className={`inline-flex rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-emerald-900 ${className}`}
+      className={`inline-flex rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-emerald-400 ${className}`}
     >
       {ok}
     </span>

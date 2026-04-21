@@ -53,42 +53,42 @@ export function FlockContextStrip({
 
   return (
     <section
-      className={`rounded-xl border border-neutral-200 bg-neutral-50/90 px-4 py-3 text-sm text-neutral-800 ${className}`}
+      className={`rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)]/90 px-4 py-3 text-sm text-[var(--text-secondary)] ${className}`}
       aria-label="Flock context"
     >
-      <p className="font-semibold text-neutral-900">{titled}</p>
-      <p className="mt-1 text-neutral-600">
-        Placement <span className="font-mono text-neutral-800">{placementDate}</span>
+      <p className="font-semibold text-[var(--text-primary)]">{titled}</p>
+      <p className="mt-1 text-[var(--text-secondary)]">
+        Placement <span className="font-mono text-[var(--text-primary)]">{placementDate}</span>
         {" · "}
-        Day <span className="tabular-nums font-semibold text-neutral-900">{ageDays}</span>
+        Day <span className="tabular-nums font-semibold text-[var(--text-primary)]">{ageDays}</span>
         {" · "}
-        Feed to date <span className="tabular-nums font-semibold text-emerald-900">{feed}</span>
+        Feed to date <span className="tabular-nums font-semibold text-emerald-400">{feed}</span>
       </p>
       {showFlockStats ? (
-        <ul className="mt-2 space-y-0.5 text-xs text-neutral-700">
+        <ul className="mt-2 space-y-0.5 text-xs text-[var(--text-secondary)]">
           {placed != null ? (
             <li>
-              Initial placed: <span className="font-semibold tabular-nums text-neutral-900">{placed}</span>
+              Initial placed: <span className="font-semibold tabular-nums text-[var(--text-primary)]">{placed}</span>
             </li>
           ) : null}
           {live != null ? (
             <li>
-              Live birds (est.): <span className="font-semibold tabular-nums text-neutral-900">{live}</span>
+              Live birds (est.): <span className="font-semibold tabular-nums text-[var(--text-primary)]">{live}</span>
             </li>
           ) : null}
           {verified != null ? (
             <li>
-              Verified count: <span className="font-semibold tabular-nums text-emerald-900">{verified}</span>
+              Verified count: <span className="font-semibold tabular-nums text-emerald-400">{verified}</span>
             </li>
           ) : null}
           {mort != null ? (
             <li>
-              Mortality to date: <span className="font-semibold tabular-nums text-neutral-900">{mort}</span>
+              Mortality to date: <span className="font-semibold tabular-nums text-[var(--text-primary)]">{mort}</span>
             </li>
           ) : null}
         </ul>
       ) : null}
-      <p className="mt-1 text-xs text-neutral-500">
+      <p className="mt-1 text-xs text-[var(--text-muted)]">
         Feed total includes round check-ins and entries from the feed log (used for cycle FCR).
       </p>
       {footer ? <div className="mt-2">{footer}</div> : null}

@@ -28,7 +28,7 @@ function formatDurationMs(ms: number): string {
 
 function TranslatedFlockName({ name }: { name: string }) {
   const t = useLaborerT(name);
-  return <p className="text-sm font-semibold text-neutral-900">{t}</p>;
+  return <p className="text-sm font-semibold text-[var(--text-primary)]">{t}</p>;
 }
 
 export function CheckinStatusBlock({
@@ -56,31 +56,31 @@ export function CheckinStatusBlock({
   const nextDueMs = new Date(status.nextDueAt).getTime();
   const remainingMs = Math.max(0, nextDueMs - Date.now());
   return (
-    <section className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+    <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-sm)]">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <TranslatedFlockName name={status.label} />
         <CheckinUrgencyBadge badge={status.checkinBadge} />
       </div>
       {otherOverdueCount > 0 ? (
-        <p className="mt-2 text-xs font-medium text-amber-900">
+        <p className="mt-2 text-xs font-medium text-amber-400">
           +{otherOverdueCount} <TranslatedText text={otherFlocksOverdue} />
         </p>
       ) : null}
-      <p className="mt-1 text-xs text-neutral-600">{onSiteLine}</p>
-      <p className="mt-2 text-sm text-neutral-800">{policyLine}</p>
+      <p className="mt-1 text-xs text-[var(--text-muted)]">{onSiteLine}</p>
+      <p className="mt-2 text-sm text-[var(--text-secondary)]">{policyLine}</p>
       <p className="mt-1 text-sm">
         {nextDueLbl}{" "}
-        <time className="font-mono text-neutral-900" dateTime={status.nextDueAt}>
+        <time className="font-mono text-[var(--text-primary)]" dateTime={status.nextDueAt}>
           {new Date(status.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
         </time>
       </p>
       {showWarning ? (
         status.isOverdue ? (
-          <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-900">
+          <p className="mt-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm font-medium text-red-400">
             {overdueMsg} ({formatDurationMs(status.overdueMs)})
           </p>
         ) : (
-          <p className="mt-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-900">
+          <p className="mt-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-400">
             {onTrackMsg} ({formatDurationMs(remainingMs)} remaining)
           </p>
         )
@@ -269,10 +269,10 @@ export function FarmCheckinPage() {
       ) : null}
 
       {!pageLoading && !loadError && flocks.length > 0 ? (
-        <label className="block text-sm font-medium text-neutral-700">
+        <label className="block text-sm font-medium text-[var(--text-secondary)]">
           {lblFlock}
           <select
-            className="mt-1 w-full min-h-[48px] rounded-xl border border-neutral-300 px-3 text-base"
+            className="mt-1 w-full min-h-[48px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-3 text-base text-[var(--text-primary)]"
             value={flockId}
             onChange={(e) => setFlockId(e.target.value)}
           >
@@ -291,8 +291,8 @@ export function FarmCheckinPage() {
         <div
           className={
             status.fcrCheckinHint.severity === "warning"
-              ? "rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-950"
-              : "rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+              ? "rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300"
+              : "rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-300"
           }
           role="status"
         >
@@ -302,14 +302,14 @@ export function FarmCheckinPage() {
               {flockId ? (
                 <Link
                   to={`/farm/flocks/${encodeURIComponent(flockId)}/fcr`}
-                  className="shrink-0 rounded-lg bg-white/80 px-2 py-1 text-xs font-semibold text-emerald-900 underline"
+                  className="shrink-0 rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-1 text-xs font-semibold text-emerald-400 underline"
                 >
                   FCR
                 </Link>
               ) : null}
               <button
                 type="button"
-                className="shrink-0 text-xs font-semibold text-neutral-600 underline"
+                className="shrink-0 text-xs font-semibold text-[var(--text-muted)] underline"
                 onClick={() => setFcrHintDismissed(true)}
               >
                 Dismiss
@@ -333,7 +333,7 @@ export function FarmCheckinPage() {
           footer={
             <Link
               to="/farm/feed"
-              className="text-xs font-semibold text-emerald-800 underline hover:text-emerald-950"
+              className="text-xs font-semibold text-emerald-400 underline hover:text-emerald-300"
             >
               Log feed only (no photos)
             </Link>
@@ -346,7 +346,7 @@ export function FarmCheckinPage() {
       {!pageLoading && !loadError && status ? (
       <form
         onSubmit={(e) => void handleSubmit(e)}
-        className="space-y-5 rounded-2xl border border-[var(--border-color)] bg-white p-4 shadow-sm sm:p-5"
+        className="space-y-5 rounded-2xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-sm)] sm:p-5"
       >
         <CheckinPhotoBlock
           minCount={status?.photosRequiredPerRound ?? 1}
@@ -354,62 +354,62 @@ export function FarmCheckinPage() {
           onPhotos={setPhotos}
         />
 
-        <label className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm font-medium text-neutral-800 cursor-pointer select-none">
+        <label className="flex items-center gap-3 rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] px-4 py-3 text-sm font-medium text-[var(--text-secondary)] cursor-pointer select-none">
           <input
             type="checkbox"
             checked={feedAvailable}
             onChange={(e) => setFeedAvailable(e.target.checked)}
-            className="h-5 w-5 rounded border-neutral-300 text-emerald-600 focus:ring-emerald-500"
+            className="h-5 w-5 rounded border-[var(--border-input)] text-emerald-500 focus:ring-emerald-500"
           />
           {lblFeedAvail}
         </label>
-        <label className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 text-sm font-medium text-neutral-800 cursor-pointer select-none">
+        <label className="flex items-center gap-3 rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] px-4 py-3 text-sm font-medium text-[var(--text-secondary)] cursor-pointer select-none">
           <input
             type="checkbox"
             checked={waterAvailable}
             onChange={(e) => setWaterAvailable(e.target.checked)}
-            className="h-5 w-5 rounded border-neutral-300 text-emerald-600 focus:ring-emerald-500"
+            className="h-5 w-5 rounded border-[var(--border-input)] text-emerald-500 focus:ring-emerald-500"
           />
           {lblWaterAvail}
         </label>
         <div>
-          <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="mort">
+          <label className="mb-1 block text-sm font-medium text-[var(--text-secondary)]" htmlFor="mort">
             {lblMort}
           </label>
           <input
             id="mort"
             inputMode="numeric"
-            className="w-full min-h-[48px] rounded-xl border border-neutral-300 px-4 text-lg"
+            className="w-full min-h-[48px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 text-lg text-[var(--text-primary)]"
             value={mortalityAtCheckin}
             placeholder={phZero}
             onChange={(e) => setMortalityAtCheckin(e.target.value)}
           />
         </div>
         {mortalityAtCheckin && Number(mortalityAtCheckin) > 0 ? (
-          <label className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900 cursor-pointer select-none">
+          <label className="flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-300 cursor-pointer select-none">
             <input
               type="checkbox"
               checked={mortalityReportedInMortalityLog}
               onChange={(e) => setMortalityReportedInMortalityLog(e.target.checked)}
-              className="h-5 w-5 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+              className="h-5 w-5 rounded border-amber-500/30 text-amber-400 focus:ring-amber-500"
             />
             {lblMortLogged}
           </label>
         ) : null}
         <div>
-          <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="notes">
+          <label className="mb-1 block text-sm font-medium text-[var(--text-secondary)]" htmlFor="notes">
             {lblNotes}
           </label>
           <textarea
             id="notes"
             rows={3}
-            className="w-full rounded-xl border border-neutral-300 px-4 py-3 text-sm"
+            className="w-full rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 py-3 text-sm text-[var(--text-primary)]"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
           />
         </div>
         {submitError && (
-          <p className="text-sm text-red-800" role="alert">
+          <p className="text-sm text-red-400" role="alert">
             <TranslatedText text={submitError} />
           </p>
         )}
@@ -424,14 +424,14 @@ export function FarmCheckinPage() {
       ) : null}
 
       {!pageLoading && !loadError && status ? (
-        <details className="rounded-xl border border-neutral-100 bg-neutral-50 p-4 text-sm text-neutral-700">
-          <summary className="cursor-pointer font-medium text-neutral-900">{detailsTitle}</summary>
+        <details className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] p-4 text-sm text-[var(--text-secondary)]">
+          <summary className="cursor-pointer font-medium text-[var(--text-primary)]">{detailsTitle}</summary>
           <ul className="mt-2 space-y-1 pl-4">
             {status.bands.map((b) => (
               <CheckinBandLine key={`${b.untilDay}-${b.intervalHours}`} untilDay={b.untilDay} hours={b.intervalHours} />
             ))}
           </ul>
-          <p className="mt-2 text-xs text-neutral-500">{detailsFoot}</p>
+          <p className="mt-2 text-xs text-[var(--text-muted)]">{detailsFoot}</p>
         </details>
       ) : null}
     </div>

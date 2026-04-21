@@ -15,7 +15,7 @@ export function LoginPage() {
 
   if (!bootstrapped) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-neutral-100 text-neutral-600">
+      <div className="flex min-h-screen items-center justify-center bg-[var(--background-color)] text-[var(--text-secondary)]">
         Loading…
       </div>
     );
@@ -45,18 +45,18 @@ export function LoginPage() {
 
   return (
     <div className="flex min-h-screen flex-col justify-center bg-[var(--background-color)] px-4 py-8">
-      <div className="mx-auto w-full max-w-3xl rounded-2xl border border-[var(--border-color)] bg-white p-8 shadow-sm lg:p-10">
+      <div className="mx-auto w-full max-w-3xl rounded-2xl border border-[var(--border-color)] bg-[var(--surface-card)] p-8 shadow-[var(--shadow-card)] lg:p-10">
         <div className="mb-2 flex justify-center">
-          <BrandLogo size={66} />
+          <BrandLogo size={78} className="drop-shadow-[0_2px_8px_rgba(0,0,0,0.15)]" />
         </div>
-        <h1 className="text-center text-xl font-semibold tracking-tight text-neutral-900">
+        <h1 className="text-center text-xl font-semibold tracking-tight text-[var(--text-primary)]">
           Clevafarm
         </h1>
-        <p className="mt-1 text-center text-sm text-neutral-500">Secure sign-in</p>
+        <p className="mt-1 text-center text-sm text-[var(--text-muted)]">Secure sign-in</p>
 
         <form onSubmit={(e) => void handleSubmit(e)} className="mt-8 space-y-4">
           <div>
-            <label htmlFor="email" className="mb-1 block text-sm font-medium text-neutral-700">
+            <label htmlFor="email" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
               Email
             </label>
             <input
@@ -67,11 +67,11 @@ export function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-xl border border-neutral-300 px-4 py-3 text-neutral-900 shadow-sm focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
+              className="w-full rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 py-3 text-[var(--text-primary)] shadow-sm focus:border-[var(--primary-color)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]/30"
             />
           </div>
           <div>
-            <label htmlFor="password" className="mb-1 block text-sm font-medium text-neutral-700">
+            <label htmlFor="password" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">
               Password
             </label>
             <input
@@ -82,12 +82,12 @@ export function LoginPage() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-xl border border-neutral-300 px-4 py-3 text-neutral-900 shadow-sm focus:border-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
+              className="w-full rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 py-3 text-[var(--text-primary)] shadow-sm focus:border-[var(--primary-color)] focus:outline-none focus:ring-2 focus:ring-[var(--primary-color)]/30"
             />
           </div>
-          <p className="text-xs text-neutral-500">Credentials are sent over POST only.</p>
+          <p className="text-xs text-[var(--text-muted)]">Credentials are sent over POST only.</p>
           {error && (
-            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+            <p className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-400" role="alert">
               {error}
             </p>
           )}

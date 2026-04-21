@@ -34,7 +34,7 @@ export function PhotoCaptureInput({
     <div className="space-y-2">
       <label
         htmlFor={id}
-        className="flex min-h-[52px] cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-emerald-700/50 bg-emerald-50/50 px-4 py-3 text-center text-sm font-semibold text-emerald-900 hover:bg-emerald-50"
+        className="flex min-h-[52px] cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-emerald-500/45 bg-emerald-500/10 px-4 py-3 text-center text-sm font-semibold text-emerald-400 hover:bg-emerald-500/15"
       >
         {pickerLabel ?? defaultPicker}
       </label>
@@ -71,14 +71,14 @@ export function PhotoCaptureInput({
       {preview.length > 0 && (
         <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4">
           {preview.map((src, i) => (
-            <li key={i} className="overflow-hidden rounded-lg border border-neutral-200 bg-neutral-100">
+            <li key={i} className="overflow-hidden rounded-lg border border-[var(--border-color)] bg-[var(--surface-subtle)]">
               <img src={src} alt="" className="h-24 w-full object-cover" />
             </li>
           ))}
         </ul>
       )}
       {error && (
-        <p className="text-sm text-red-800" role="alert">
+        <p className="text-sm text-red-400" role="alert">
           <TranslatedText text={error} />
         </p>
       )}

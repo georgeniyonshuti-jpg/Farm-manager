@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.svg", "logo.svg", "apple-touch-icon.png", "pwa-192.png", "pwa-512.png"],
+      includeAssets: ["favicon.svg", "icon-192.svg", "icon-512.svg", "apple-touch-icon.png", "pwa-192.png", "pwa-512.png", "pwa-maskable-512.png"],
       manifest: {
         id: "/",
         name: "Clevafarm",
@@ -32,7 +32,7 @@ export default defineConfig({
             purpose: "any",
           },
           {
-            src: "pwa-512.png",
+            src: "pwa-maskable-512.png",
             sizes: "512x512",
             type: "image/png",
             purpose: "maskable",

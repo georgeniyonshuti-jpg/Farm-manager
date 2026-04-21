@@ -74,7 +74,7 @@ export function FarmCheckinReviewPage() {
         action={
           <Link
             to="/farm/payroll"
-            className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+            className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
           >
             Payroll
           </Link>
@@ -85,32 +85,32 @@ export function FarmCheckinReviewPage() {
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
 
       {!loading && !error && checkins.length === 0 ? (
-        <p className="text-sm text-neutral-600">No check-ins pending review.</p>
+        <p className="text-sm text-[var(--text-muted)]">No check-ins pending review.</p>
       ) : null}
 
       {!loading && !error && checkins.length > 0 ? (
         <ul className="space-y-3">
           {checkins.map((c) => (
-            <li key={c.id} className="rounded-xl border border-neutral-200 bg-white p-4 text-sm shadow-sm">
+            <li key={c.id} className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 text-sm shadow-[var(--shadow-sm)]">
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
-                  <p className="font-semibold text-neutral-900">
+                  <p className="font-semibold text-[var(--text-primary)]">
                     {c.flockCode ?? c.flockId.slice(0, 8)} · {c.laborerName ?? c.laborerId.slice(0, 8)}
                   </p>
-                  <p className="mt-1 font-mono text-xs text-neutral-600">
+                  <p className="mt-1 font-mono text-xs text-[var(--text-muted)]">
                     {new Date(c.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
                   </p>
-                  <p className="mt-2 text-neutral-700">
+                  <p className="mt-2 text-[var(--text-secondary)]">
                     Feed: {c.feedAvailable ? "Yes" : "No"} · Water: {c.waterAvailable ? "Yes" : "No"}
                   </p>
-                  {c.notes ? <p className="mt-1 text-neutral-600">{c.notes}</p> : null}
+                  {c.notes ? <p className="mt-1 text-[var(--text-muted)]">{c.notes}</p> : null}
                 </div>
                 <div className="flex shrink-0 gap-2">
                   <button
                     type="button"
                     disabled={busyId === c.id}
                     onClick={() => void review(c.id, "approve")}
-                    className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50 hover:bg-emerald-500"
                   >
                     Approve
                   </button>
@@ -118,7 +118,7 @@ export function FarmCheckinReviewPage() {
                     type="button"
                     disabled={busyId === c.id}
                     onClick={() => void review(c.id, "reject")}
-                    className="rounded-lg bg-red-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                    className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50 hover:bg-red-500"
                   >
                     Reject
                   </button>

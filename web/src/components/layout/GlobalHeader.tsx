@@ -46,7 +46,7 @@ function avatarClasses(role: UserRole): string {
     case "manager":
       return `${base} bg-[#185FA5]`;
     default:
-      return `${base} bg-neutral-500`;
+      return `${base} bg-slate-500`;
   }
 }
 
@@ -62,7 +62,7 @@ function rolePillClasses(role: UserRole): string {
     case "manager":
       return `${base} bg-[#E6F1FB] text-[#185FA5]`;
     default:
-      return `${base} bg-neutral-100 text-neutral-700`;
+      return `${base} bg-[var(--surface-subtle)] text-[var(--text-secondary)]`;
   }
 }
 
@@ -80,9 +80,10 @@ type UserMenuProps = {
   user: SessionUser;
   roleBadge: string;
   onLogout: () => void;
+  compactOnMobile?: boolean;
 };
 
-function UserMenuChip({ user, roleBadge, onLogout }: UserMenuProps) {
+function UserMenuChip({ user, roleBadge, onLogout, compactOnMobile = false }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const initials = useMemo(() => initialsFromDisplayName(user.displayName), [user.displayName]);
@@ -104,19 +105,19 @@ function UserMenuChip({ user, roleBadge, onLogout }: UserMenuProps) {
     <div className="relative min-w-0" ref={wrapRef}>
       <button
         type="button"
-        className="bounce-tap flex max-w-full min-h-[44px] items-center gap-2 rounded-xl border border-transparent px-1 py-1 text-left hover:bg-black/[0.03] md:min-h-0 md:px-2 md:py-1.5"
+        className="bounce-tap flex max-w-full min-h-[40px] items-center gap-2 rounded-xl border border-transparent px-1 py-1 text-left hover:bg-black/[0.03] md:min-h-0 md:px-2 md:py-1.5"
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={() => setOpen((o) => !o)}
       >
         <span className={avatarClasses(user.role)}>{initials}</span>
-        <div className="min-w-0 flex-1 text-left">
+        <div className={`min-w-0 flex-1 text-left ${compactOnMobile ? "hidden md:block" : ""}`}>
           <p className="truncate text-[13px] font-medium text-[var(--text-primary)]">{user.displayName}</p>
           <p className="mt-0.5">
             <span className={rolePillClasses(user.role)}>{roleBadge}</span>
           </p>
         </div>
-        <span className="hidden text-neutral-400 md:inline" aria-hidden>
+        <span className="hidden text-[var(--text-muted)] md:inline" aria-hidden>
           ▾
         </span>
       </button>
@@ -146,6 +147,8 @@ type GlobalHeaderProps = {
   showDesktopSidebarToggle?: boolean;
   desktopSidebarCollapsed?: boolean;
   onToggleDesktopSidebar?: () => void;
+  showMobileSidebarToggle?: boolean;
+  onToggleMobileSidebar?: () => void;
 };
 
 function ThemeToggle() {
@@ -176,6 +179,8 @@ export function GlobalHeader({
   showDesktopSidebarToggle = false,
   desktopSidebarCollapsed = false,
   onToggleDesktopSidebar,
+  showMobileSidebarToggle = false,
+  onToggleMobileSidebar,
 }: GlobalHeaderProps) {
   const headerRef = useRef<HTMLElement>(null);
   const { user, logout, activeWorkspace, setActiveWorkspace } = useAuth();
@@ -222,10 +227,12 @@ export function GlobalHeader({
 
   const hasActionBar =
     showSwitcher || showLang || showActionCenter || showVetHubActions;
+  const nonLaborerMobile =
+    user.role !== "laborer" && user.role !== "dispatcher";
 
   const workspaceSelect = showSwitcher ? (
     <select
-      className="bounce-tap min-h-[44px] max-w-[14rem] rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-sm font-medium text-[var(--text-primary)] shadow-sm md:max-w-[18rem]"
+      className="bounce-tap min-h-[36px] max-w-[14rem] rounded-xl border border-[var(--border-color)] bg-[var(--surface-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] shadow-sm md:min-h-[44px] md:py-2 md:text-sm md:max-w-[18rem]"
       value={activeWorkspace ?? "farm"}
       onChange={(e) => setActiveWorkspace(e.target.value as ActiveWorkspace)}
       aria-label={switchWorkspaceAria}
@@ -243,7 +250,7 @@ export function GlobalHeader({
       {showActionCenter ? (
         <Link
           to="/dashboard/laborer"
-          className="bounce-tap inline-flex min-h-[44px] items-center justify-center rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)]"
+          className="bounce-tap inline-flex min-h-[36px] items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--surface-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)] md:min-h-[44px] md:py-2 md:text-sm"
         >
           {homeLabel}
         </Link>
@@ -252,13 +259,13 @@ export function GlobalHeader({
         <>
           <Link
             to="/laborer/earnings"
-            className="bounce-tap inline-flex min-h-[44px] items-center justify-center rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)]"
+            className="bounce-tap inline-flex min-h-[36px] items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--surface-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)] md:min-h-[44px] md:py-2 md:text-sm"
           >
             {linkEarnings}
           </Link>
           <Link
             to="/farm/batch-schedule"
-            className="bounce-tap inline-flex min-h-[44px] items-center justify-center rounded-xl border border-[var(--border-color)] bg-white px-3 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)]"
+            className="bounce-tap inline-flex min-h-[36px] items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--surface-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)] md:min-h-[44px] md:py-2 md:text-sm"
           >
             {batchCta}
           </Link>
@@ -275,20 +282,39 @@ export function GlobalHeader({
       <div className="w-full">
         {/* Mobile */}
         <div className="md:hidden">
-          <div className="flex min-h-[52px] items-center justify-between gap-2 border-b border-[var(--border-color)] px-3 py-2">
+          <div className="flex min-h-[48px] items-center justify-between gap-2 border-b border-[var(--border-color)] px-2.5 py-1.5">
             <Link to="/" className="flex min-w-0 items-center gap-2">
-              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--primary-color-soft)]">
-                <BrandLogo size={36} />
+              <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--primary-color-soft)]">
+                <BrandLogo size={34} />
               </span>
-              <span className="truncate text-base font-semibold text-[var(--text-primary)]">{appName}</span>
+              <span className="truncate text-[15px] font-semibold text-[var(--text-primary)]">{appName}</span>
             </Link>
             <div className="flex items-center gap-2">
+              {showMobileSidebarToggle ? (
+                <button
+                  type="button"
+                  onClick={onToggleMobileSidebar}
+                  className="bounce-tap inline-flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--border-color)] bg-[var(--surface-color)] text-base text-[var(--text-primary)]"
+                  aria-label="Open side menu"
+                  title="Open side menu"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M4 7h16M4 12h16M4 17h16" />
+                  </svg>
+                </button>
+              ) : null}
               <ThemeToggle />
-              <UserMenuChip user={user} roleBadge={roleBadge} onLogout={logout} />
+              <UserMenuChip user={user} roleBadge={roleBadge} onLogout={logout} compactOnMobile />
             </div>
           </div>
           {hasActionBar ? (
-            <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+            <div
+              className={`flex items-center gap-2 px-2.5 py-1.5 ${
+                nonLaborerMobile
+                  ? "overflow-x-auto whitespace-nowrap"
+                  : "flex-wrap"
+              }`}
+            >
               {workspaceSelect}
               {showLang ? <LaborerLanguageToggle /> : null}
               {actionCluster}
@@ -303,11 +329,19 @@ export function GlobalHeader({
               <button
                 type="button"
                 onClick={onToggleDesktopSidebar}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--border-color)] bg-white text-lg text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)]"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-[var(--border-color)] bg-[var(--surface-color)] text-lg text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)]"
                 aria-label={desktopSidebarCollapsed ? "Show side menu" : "Hide side menu"}
                 title={desktopSidebarCollapsed ? "Show side menu" : "Hide side menu"}
               >
-                {desktopSidebarCollapsed ? "☰" : "⟨"}
+                {desktopSidebarCollapsed ? (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                    <path d="M4 7h16M4 12h16M4 17h16" />
+                  </svg>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m15 6-6 6 6 6" />
+                  </svg>
+                )}
               </button>
             ) : null}
             <Link to="/" className="flex min-w-0 shrink-0 items-center gap-3">

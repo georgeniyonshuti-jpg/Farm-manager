@@ -6,11 +6,11 @@ type Props = {
 export function BrandLogo({ size = 36, className = "" }: Props) {
   return (
     <img
-      src="/logo.svg"
+      src="/icon-512.svg"
       alt="Clevafarm logo"
       width={size}
       height={size}
-      className={className}
+      className={["object-contain", className].join(" ").trim()}
       loading="eager"
       decoding="async"
     />

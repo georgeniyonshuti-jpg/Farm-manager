@@ -198,6 +198,10 @@ const RW_DICTIONARY: Record<string, string> = {
   "Farm Manager": "Umuyobozi w'isambu",
   "Loading your workspace...": "Turimo gufungura aho ukorera...",
   "Financial access restricted. Contact your admin.": "Amakuru y'imari ntiwemerewe kuyareba. Vugana n'umuyobozi wawe.",
+  "Financial notice": "Amakuru y'imari",
+  "Show notice": "Garagaza amakuru",
+  "Hide notice": "Guhisha amakuru",
+  "Dismiss notice": "Funga amakuru",
 };
 
 export function lookupRw(english: string): string | undefined {
