@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, NavLink } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { readAuthHeaders } from "../../lib/authHeaders";
 import { CheckinStatusBlock, type CheckinStatus } from "../farm/FarmCheckinPage";
@@ -11,13 +11,7 @@ import { API_BASE_URL } from "../../api/config";
 import { fetchJsonWithNetworkRetry } from "../../lib/apiFetch";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { useHubAggregatePoll } from "../../hooks/useHubAggregatePoll";
-import type { ReactNode } from "react";
-
-type TabItem = { to: string; label: string; end?: boolean; icon: ReactNode };
-
-function tabIconClass(isActive: boolean): string {
-  return isActive ? "text-[var(--primary-color)]" : "text-neutral-500";
-}
+import { MobileFieldBottomNav, type MobileFieldNavItem } from "../../components/layout/MobileFieldBottomNav";
 
 export function LaborerHome() {
   const { token, user } = useAuth();
@@ -182,7 +176,7 @@ export function LaborerHome() {
 
   const otherOverdueCount =
     status && bannerSummary?.anyOverdue ? Math.max(0, bannerSummary.overdueCount - 1) : 0;
-  const bottomNav: TabItem[] = [
+  const bottomNav: MobileFieldNavItem[] = [
     {
       to: "/dashboard/laborer",
       label: tabHome,
@@ -264,13 +258,13 @@ export function LaborerHome() {
           </Link>
           <Link
             to="/farm/mortality-log"
-            className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border-2 border-red-200 bg-red-50/80 px-4 text-lg font-semibold text-red-900 hover:bg-red-50"
+            className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border-2 border-red-500/35 bg-red-500/10 px-4 text-lg font-semibold text-red-300 hover:bg-red-500/15"
           >
             {linkMort}
           </Link>
           <Link
             to="/farm/feed"
-            className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-white px-4 text-lg font-medium text-neutral-900 hover:bg-[var(--primary-color-soft)]"
+            className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border border-[var(--border-color)] bg-[var(--surface-card)] px-4 text-lg font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)]"
           >
             {linkFeed}
           </Link>
@@ -285,33 +279,7 @@ export function LaborerHome() {
         </div>
       </div>
 
-      <nav
-        className="fixed inset-x-0 bottom-0 z-40 flex h-14 flex-col justify-center border-t border-[var(--border-color)] bg-white/95 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur sm:hidden"
-        aria-label="Primary"
-      >
-        <div className="grid h-full grid-cols-7 gap-0 px-1">
-          {bottomNav.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                [
-                  "bounce-tap flex min-h-[44px] flex-col items-center justify-center gap-0.5 rounded-lg px-0.5 text-center",
-                  isActive ? "text-[var(--primary-color)]" : "text-neutral-600",
-                ].join(" ")
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <span className={tabIconClass(isActive)}>{item.icon}</span>
-                  <span className="text-[10px] font-semibold leading-tight">{item.label}</span>
-                </>
-              )}
-            </NavLink>
-          ))}
-        </div>
-      </nav>
+      <MobileFieldBottomNav items={bottomNav} />
     </div>
   );
 }

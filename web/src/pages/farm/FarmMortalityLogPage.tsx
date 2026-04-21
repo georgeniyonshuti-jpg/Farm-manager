@@ -157,7 +157,7 @@ export function FarmMortalityLogPage() {
         title={title}
         subtitle={subtitle}
         action={
-          <Link to="/farm/mortality" className="text-sm font-medium text-emerald-800 hover:underline">
+          <Link to="/farm/mortality" className="text-sm font-medium text-[var(--primary-color-dark)] hover:underline">
             {linkHist}
           </Link>
         }
@@ -180,10 +180,10 @@ export function FarmMortalityLogPage() {
       ) : null}
 
       {!flockLoading && !ctxError && flocks.length > 0 ? (
-        <label className="block text-sm font-medium text-neutral-700">
+        <label className="block text-sm font-medium text-[var(--text-secondary)]">
           {lblFlock}
           <select
-            className="mt-1 w-full min-h-[48px] rounded-xl border border-neutral-300 px-3 text-base"
+            className="mt-1 w-full min-h-[48px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-3 text-base text-[var(--text-primary)]"
             value={flockId}
             onChange={(e) => setFlockId(e.target.value)}
           >
@@ -215,52 +215,52 @@ export function FarmMortalityLogPage() {
       {!flockLoading && !ctxError && flockId && status ? (
         <form
           onSubmit={(e) => void handleSubmit(e)}
-          className="space-y-5 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"
+          className="space-y-5 rounded-2xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-sm)]"
         >
           <MortalityPhotoBlock busy={busy} onPhotos={setPhotos} />
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="cnt">
+            <label className="mb-1 block text-sm font-medium text-[var(--text-secondary)]" htmlFor="cnt">
               {lblCount}
             </label>
             <input
               id="cnt"
               inputMode="numeric"
               required
-              className="w-full min-h-[48px] rounded-xl border border-neutral-300 px-4 text-lg"
+              className="w-full min-h-[48px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 text-lg text-[var(--text-primary)]"
               value={count}
               onChange={(e) => setCount(e.target.value)}
             />
           </div>
 
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-red-200 bg-red-50/50 p-4">
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-red-500/25 bg-red-500/10 p-4">
             <input
               type="checkbox"
-              className="mt-1 h-5 w-5 rounded border-red-300 text-red-700"
+              className="mt-1 h-5 w-5 rounded border-red-500/40 bg-[var(--surface-input)] text-red-500"
               checked={isEmergency}
               onChange={(e) => setIsEmergency(e.target.checked)}
             />
             <span>
-              <span className="block text-sm font-semibold text-red-900">{emergTitle}</span>
-              <span className="text-xs text-red-800/90">{emergHint}</span>
+              <span className="block text-sm font-semibold text-red-300">{emergTitle}</span>
+              <span className="text-xs text-red-300/90">{emergHint}</span>
             </span>
           </label>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="mnotes">
+            <label className="mb-1 block text-sm font-medium text-[var(--text-secondary)]" htmlFor="mnotes">
               {lblNotes}
             </label>
             <textarea
               id="mnotes"
               rows={3}
-              className="w-full rounded-xl border border-neutral-300 px-4 py-3 text-sm"
+              className="w-full rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 py-3 text-sm text-[var(--text-primary)]"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
           </div>
 
           {error ? (
-            <p className="text-sm text-red-800" role="alert">
+            <p className="text-sm text-red-400" role="alert">
               <TranslatedText text={error} />
             </p>
           ) : null}
@@ -268,7 +268,7 @@ export function FarmMortalityLogPage() {
           <button
             type="submit"
             disabled={busy || !flockId || submitCooldown}
-            className="w-full min-h-[52px] rounded-xl bg-neutral-900 text-lg font-semibold text-white hover:bg-black disabled:opacity-50"
+            className="w-full min-h-[52px] rounded-xl bg-[var(--primary-color)] text-lg font-semibold text-white hover:bg-[var(--primary-color-dark)] disabled:opacity-50"
           >
             {busy ? btnSaving : btnSubmit}
           </button>

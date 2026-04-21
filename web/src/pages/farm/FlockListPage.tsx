@@ -315,7 +315,7 @@ export function FlockListPage() {
         action={
           <a
             href={`${API_BASE_URL}/api/reports/flocks.csv`}
-            className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+            className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
             download
           >
             Export CSV
@@ -323,9 +323,9 @@ export function FlockListPage() {
         }
       />
       {farmHealthScore != null ? (
-        <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm shadow-sm">
-          <p className="font-semibold text-neutral-900">Farm health score: {farmHealthScore}/100</p>
-          {!!insights.length ? <p className="mt-1 text-neutral-700">{insights[0]}</p> : null}
+        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 text-sm shadow-[var(--shadow-sm)]">
+          <p className="font-semibold text-[var(--text-primary)]">Farm health score: {farmHealthScore}/100</p>
+          {!!insights.length ? <p className="mt-1 text-[var(--text-secondary)]">{insights[0]}</p> : null}
         </div>
       ) : null}
       {canCreateFlock ? (
@@ -333,7 +333,7 @@ export function FlockListPage() {
           <button
             type="button"
             onClick={() => setShowCreateFlock((v) => !v)}
-            className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
+            className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)]"
           >
             {showCreateFlock ? "Close" : "Create new flock"}
           </button>
@@ -341,19 +341,19 @@ export function FlockListPage() {
       ) : null}
 
       {canCreateFlock && showCreateFlock ? (
-        <form onSubmit={(e) => void submitCreateFlock(e)} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <p className="text-sm font-semibold text-neutral-900">Add purchased flock</p>
-          <p className="mt-1 text-xs text-neutral-600">The system assigns a unique flock name (e.g. FL-000042).</p>
+        <form onSubmit={(e) => void submitCreateFlock(e)} className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-sm)]">
+          <p className="text-sm font-semibold text-[var(--text-primary)]">Add purchased flock</p>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">The system assigns a unique flock name (e.g. FL-000042).</p>
           <div className="mt-3 grid gap-2 sm:grid-cols-4">
             <input
-              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              className="rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
               type="date"
               value={createForm.placementDate}
               onChange={(e) => setCreateForm((v) => ({ ...v, placementDate: e.target.value }))}
               required
             />
             <input
-              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              className="rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
               placeholder="Initial birds"
               inputMode="numeric"
               value={createForm.initialCount}
@@ -361,7 +361,7 @@ export function FlockListPage() {
               required
             />
             <select
-              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              className="rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
               value={createForm.breedCode}
               onChange={(e) => setCreateForm((v) => ({ ...v, breedCode: e.target.value }))}
             >
@@ -372,31 +372,31 @@ export function FlockListPage() {
               ))}
             </select>
             <input
-              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              className="rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
               placeholder="Target kg (optional)"
               inputMode="decimal"
               value={createForm.targetWeightKg}
               onChange={(e) => setCreateForm((v) => ({ ...v, targetWeightKg: e.target.value }))}
             />
           </div>
-          <p className="mt-4 text-xs font-semibold text-neutral-700">Biological asset cost (IAS 41 — optional)</p>
-          <p className="text-xs text-neutral-500">Enter total purchase cost only. Cost per chick is computed automatically and posted to Odoo.</p>
+          <p className="mt-4 text-xs font-semibold text-[var(--text-secondary)]">Biological asset cost (IAS 41 — optional)</p>
+          <p className="text-xs text-[var(--text-muted)]">Enter total purchase cost only. Cost per chick is computed automatically and posted to Odoo.</p>
           <div className="mt-2 grid gap-2 sm:grid-cols-4">
             <input
-              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              className="rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
               placeholder="Total purchase cost (RWF)"
               inputMode="decimal"
               value={createForm.purchaseCostRwf}
               onChange={(e) => setCreateForm((v) => ({ ...v, purchaseCostRwf: e.target.value }))}
             />
             <input
-              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              className="rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
               placeholder="Supplier / hatchery"
               value={createForm.purchaseSupplier}
               onChange={(e) => setCreateForm((v) => ({ ...v, purchaseSupplier: e.target.value }))}
             />
             <input
-              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+              className="rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
               type="date"
               title="Purchase date"
               value={createForm.purchaseDate}
@@ -404,7 +404,7 @@ export function FlockListPage() {
             />
           </div>
           {createForm.purchaseCostRwf && createForm.initialCount ? (
-            <p className="mt-2 text-xs text-neutral-600">
+            <p className="mt-2 text-xs text-[var(--text-muted)]">
               Estimated cost per chick:{" "}
               <strong>
                 {(Number(createForm.purchaseCostRwf) / Math.max(1, Number(createForm.initialCount))).toLocaleString(undefined, {
@@ -418,7 +418,7 @@ export function FlockListPage() {
             <button
               type="submit"
               disabled={createBusy || !createForm.placementDate || !createForm.initialCount}
-              className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              className="rounded-lg bg-[var(--primary-color)] px-3 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)] disabled:opacity-60"
             >
               {createBusy ? "Saving..." : "Add flock"}
             </button>
@@ -442,18 +442,18 @@ export function FlockListPage() {
           {!!barns.length ? (
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {barns.map((b) => (
-                <div key={b.barn} className="rounded-xl border border-neutral-200 bg-white p-3 shadow-sm text-xs">
-                  <p className="font-semibold text-sm text-neutral-900">{b.barn}</p>
-                  <p className="text-neutral-500">{b.flockCount} active flock(s)</p>
+                <div key={b.barn} className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-sm)] text-xs">
+                  <p className="font-semibold text-sm text-[var(--text-primary)]">{b.barn}</p>
+                  <p className="text-[var(--text-muted)]">{b.flockCount} active flock(s)</p>
                   <div className="mt-2 grid grid-cols-2 gap-1">
-                    <span className="text-neutral-500">Avg FCR</span>
+                    <span className="text-[var(--text-muted)]">Avg FCR</span>
                     <span className="font-semibold text-right tabular-nums">{b.avgFcr != null ? b.avgFcr.toFixed(2) : "—"}</span>
-                    <span className="text-neutral-500">Blocked</span>
-                    <span className={["font-semibold text-right", b.blockedFlocks > 0 ? "text-red-700" : ""].join(" ")}>{b.blockedFlocks}</span>
-                    <span className="text-neutral-500">Overdue rounds</span>
-                    <span className={["font-semibold text-right", b.overdueRounds > 0 ? "text-amber-700" : ""].join(" ")}>{b.overdueRounds}</span>
-                    <span className="text-neutral-500">Mortality 7d</span>
-                    <span className={["font-semibold text-right", b.mortality7d > 0 ? "text-amber-700" : ""].join(" ")}>{b.mortality7d}</span>
+                    <span className="text-[var(--text-muted)]">Blocked</span>
+                    <span className={["font-semibold text-right", b.blockedFlocks > 0 ? "text-red-400" : ""].join(" ")}>{b.blockedFlocks}</span>
+                    <span className="text-[var(--text-muted)]">Overdue rounds</span>
+                    <span className={["font-semibold text-right", b.overdueRounds > 0 ? "text-amber-400" : ""].join(" ")}>{b.overdueRounds}</span>
+                    <span className="text-[var(--text-muted)]">Mortality 7d</span>
+                    <span className={["font-semibold text-right", b.mortality7d > 0 ? "text-amber-400" : ""].join(" ")}>{b.mortality7d}</span>
                   </div>
                 </div>
               ))}
@@ -467,7 +467,9 @@ export function FlockListPage() {
                 onClick={() => setFocusMode((v) => !v)}
                 className={[
                   "rounded border px-2.5 py-1.5 text-xs font-semibold",
-                  focusMode ? "border-red-600 bg-red-50 text-red-900" : "border-neutral-300 bg-white text-neutral-700",
+                  focusMode
+                    ? "border-red-500/40 bg-red-500/10 text-red-300"
+                    : "border-[var(--border-color)] bg-[var(--surface-input)] text-[var(--text-secondary)]",
                 ].join(" ")}
               >
                 Focus Mode {focusMode ? "ON" : "OFF"}
@@ -487,22 +489,22 @@ export function FlockListPage() {
                   className={[
                     "rounded border px-2.5 py-1.5 text-xs font-semibold",
                     riskFilter === id
-                      ? "border-emerald-600 bg-emerald-50 text-emerald-900"
-                      : "border-neutral-300 bg-white text-neutral-700",
+                      ? "border-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--primary-color-dark)]"
+                      : "border-[var(--border-color)] bg-[var(--surface-input)] text-[var(--text-secondary)]",
                   ].join(" ")}
                 >
                   {label}
                 </button>
               ))}
               <span className="ml-auto flex items-center gap-2">
-                <span className="text-xs text-neutral-500">{visibleFlocks.length} flocks</span>
+                <span className="text-xs text-[var(--text-muted)]">{visibleFlocks.length} flocks</span>
                 <button
                   type="button"
                   onClick={() => {
                     const highest = [...visibleFlocks].sort((a, b) => Number(b.riskScore ?? 0) - Number(a.riskScore ?? 0))[0];
                     if (highest) window.location.href = `/farm/flocks/${highest.id}`;
                   }}
-                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-neutral-700"
+                  className="rounded border border-[var(--border-color)] bg-[var(--surface-input)] px-2.5 py-1.5 text-xs font-semibold text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
                 >
                   Jump to highest risk
                 </button>
@@ -538,28 +540,28 @@ export function FlockListPage() {
                       <td className="tbl-num">{f.ageDays ?? "—"}</td>
                       <td className="tbl-num">{f.intervalHours ?? "—"}</td>
                       <td className="tbl-num">{f.latestFcr != null ? f.latestFcr.toFixed(2) : "—"}</td>
-                      <td className={["tbl-num", f.fcrDeviation != null && f.fcrDeviation > 0.2 ? "text-red-700 font-semibold" : ""].join(" ")}>
+                      <td className={["tbl-num", f.fcrDeviation != null && f.fcrDeviation > 0.2 ? "text-red-400 font-semibold" : ""].join(" ")}>
                         {f.fcrDeviation != null ? `${f.fcrDeviation >= 0 ? "+" : ""}${f.fcrDeviation.toFixed(2)}` : "—"}
                       </td>
-                      <td className={["tbl-num font-semibold", Number(f.riskScore ?? 0) > 60 ? "text-red-700" : Number(f.riskScore ?? 0) > 30 ? "text-amber-700" : "text-emerald-700"].join(" ")}>
+                      <td className={["tbl-num font-semibold", Number(f.riskScore ?? 0) > 60 ? "text-red-400" : Number(f.riskScore ?? 0) > 30 ? "text-amber-400" : "text-emerald-400"].join(" ")}>
                         {f.riskScore ?? 0}
                       </td>
                       <td className="tbl-num">{f.latestWeightKg != null ? f.latestWeightKg.toFixed(2) : "—"}</td>
-                      <td className={["tbl-num", (f.weightDeviationPct ?? 0) < -5 ? "text-red-700 font-semibold" : ""].join(" ")}>
+                      <td className={["tbl-num", (f.weightDeviationPct ?? 0) < -5 ? "text-red-400 font-semibold" : ""].join(" ")}>
                         {f.weightDeviationPct != null ? `${(f.weightDeviationPct >= 0 ? "+" : "")}${f.weightDeviationPct.toFixed(1)}%` : "—"}
                       </td>
-                      <td className={["tbl-num", (f.mortality7d ?? 0) > 0 ? "text-amber-700 font-semibold" : ""].join(" ")}>
+                      <td className={["tbl-num", (f.mortality7d ?? 0) > 0 ? "text-amber-400 font-semibold" : ""].join(" ")}>
                         {f.mortality7d ?? 0}
                       </td>
                       <td className="tbl-badge">
-                        {f.checkinBadge ? <CheckinUrgencyBadge badge={f.checkinBadge} /> : <span className="text-neutral-400">—</span>}
+                        {f.checkinBadge ? <CheckinUrgencyBadge badge={f.checkinBadge} /> : <span className="text-[var(--text-muted)]">—</span>}
                       </td>
                       <td>
                         <div className="flex flex-wrap gap-1">
-                          {f.withdrawalActive ? <span className="inline-flex rounded-full border border-red-200 bg-red-50 px-1.5 py-0.5 text-[10px] font-semibold text-red-800">Withdrawal</span> : null}
+                          {f.withdrawalActive ? <span className="inline-flex rounded-full border border-red-500/30 bg-red-500/12 px-1.5 py-0.5 text-[10px] font-semibold text-red-300">Withdrawal</span> : null}
                           {(f.overdueRounds ?? 0) > 0 ? <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">Overdue ×{f.overdueRounds}</span> : null}
                           {(f.alerts?.length ?? 0) > 0 ? <span className="text-[10px] text-amber-800">{f.alerts?.[0]}</span> : null}
-                          {!f.withdrawalActive && !(f.overdueRounds) && !(f.alerts?.length) ? <span className="text-neutral-400">—</span> : null}
+                          {!f.withdrawalActive && !(f.overdueRounds) && !(f.alerts?.length) ? <span className="text-[var(--text-muted)]">—</span> : null}
                         </div>
                       </td>
                       <td className="tbl-actions">
@@ -579,7 +581,7 @@ export function FlockListPage() {
                               type="button"
                               disabled={purgeBusyId === f.id}
                               onClick={() => void purgeFlock(f.id, f.label)}
-                              className="rounded border border-red-300 px-1.5 py-0.5 text-[10px] text-red-800 hover:bg-red-50 disabled:opacity-60"
+                              className="rounded border border-red-500/35 px-1.5 py-0.5 text-[10px] text-red-300 hover:bg-red-500/10 disabled:opacity-60"
                             >
                               {purgeBusyId === f.id ? "…" : "Purge"}
                             </button>
@@ -587,7 +589,7 @@ export function FlockListPage() {
                           {flockActionPresentation(user, "treatment.execute").mode !== "enabled" &&
                           flockActionPresentation(user, "slaughter.schedule").mode !== "enabled" &&
                           user?.role !== "superuser" ? (
-                            <span className="text-neutral-400">—</span>
+                            <span className="text-[var(--text-muted)]">—</span>
                           ) : null}
                         </div>
                       </td>

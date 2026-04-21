@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, NavLink } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { readAuthHeaders } from "../../lib/authHeaders";
 import { CheckinStatusBlock, type CheckinStatus } from "../farm/FarmCheckinPage";
@@ -19,13 +19,7 @@ import {
   topRiskSeries,
 } from "../../lib/dashboardAdapters";
 import { BlockersStacked, FcrTargetBars, MortalityTrendLine, SimpleCategoryBars, TopRiskBars } from "../../components/dashboard/charts/OpsCharts";
-import type { ReactNode } from "react";
-
-type TabItem = { to: string; label: string; end?: boolean; icon: ReactNode };
-
-function tabIconClass(isActive: boolean): string {
-  return isActive ? "text-[var(--primary-color)]" : "text-neutral-500";
-}
+import { MobileFieldBottomNav, type MobileFieldNavItem } from "../../components/layout/MobileFieldBottomNav";
 
 export function VetHome() {
   const { token } = useAuth();
@@ -197,7 +191,7 @@ export function VetHome() {
   const otherOverdueCount =
     status && bannerSummary?.anyOverdue ? Math.max(0, bannerSummary.overdueCount - 1) : 0;
 
-  const bottomNav: TabItem[] = [
+  const bottomNav: MobileFieldNavItem[] = [
     {
       to: "/dashboard/vet",
       label: tabHome,
@@ -402,33 +396,7 @@ export function VetHome() {
         </div>
       </div>
 
-      <nav
-        className="fixed inset-x-0 bottom-0 z-40 flex h-14 flex-col justify-center border-t border-[var(--border-color)] bg-white/95 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur sm:hidden"
-        aria-label="Primary"
-      >
-        <div className="grid h-full grid-cols-7 gap-0 px-1">
-          {bottomNav.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                [
-                  "bounce-tap flex min-h-[44px] flex-col items-center justify-center gap-0.5 rounded-lg px-0.5 text-center",
-                  isActive ? "text-[var(--primary-color)]" : "text-neutral-600",
-                ].join(" ")
-              }
-            >
-              {({ isActive }) => (
-                <>
-                  <span className={tabIconClass(isActive)}>{item.icon}</span>
-                  <span className="text-[10px] font-semibold leading-tight">{item.label}</span>
-                </>
-              )}
-            </NavLink>
-          ))}
-        </div>
-      </nav>
+      <MobileFieldBottomNav items={bottomNav} />
     </div>
   );
 }

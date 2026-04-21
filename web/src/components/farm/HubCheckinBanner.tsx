@@ -17,7 +17,7 @@ function StatusIcon({ variant }: { variant: HubCheckinBannerVariant }) {
   }
   if (variant === "error") {
     return (
-      <span className={`${iconWrap} rounded-full bg-red-100 text-red-700`} aria-hidden>
+      <span className={`${iconWrap} rounded-full border border-red-500/30 bg-red-500/12 text-red-400`} aria-hidden>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <circle cx="12" cy="12" r="10" />
           <path d="M12 8v4M12 16h.01" strokeLinecap="round" />
@@ -27,7 +27,7 @@ function StatusIcon({ variant }: { variant: HubCheckinBannerVariant }) {
   }
   if (variant === "warn") {
     return (
-      <span className={`${iconWrap} rounded-full bg-amber-100 text-amber-800`} aria-hidden>
+      <span className={`${iconWrap} rounded-full border border-amber-500/30 bg-amber-500/12 text-amber-400`} aria-hidden>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <circle cx="12" cy="12" r="10" />
           <path d="M12 6v6l4 2" strokeLinecap="round" strokeLinejoin="round" />
@@ -36,7 +36,10 @@ function StatusIcon({ variant }: { variant: HubCheckinBannerVariant }) {
     );
   }
   return (
-    <span className={`${iconWrap} rounded-full bg-emerald-100 text-emerald-800`} aria-hidden>
+    <span
+      className={`${iconWrap} rounded-full border border-emerald-500/30 bg-emerald-500/12 text-emerald-400`}
+      aria-hidden
+    >
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
         <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
@@ -53,9 +56,9 @@ function borderClass(v: HubCheckinBannerVariant): string {
     case "warn":
       return "border-l-amber-500";
     case "ok":
-      return "border-l-[#1D9E75]";
+      return "border-l-[var(--primary-color)]";
     default:
-      return "border-l-neutral-300";
+      return "border-l-[var(--border-color)]";
   }
 }
 
@@ -65,7 +68,7 @@ export function HubCheckinBanner({ variant, message }: Props) {
 
   return (
     <div
-      className={`w-full rounded-lg border border-neutral-200/90 bg-white p-3 shadow-sm border-l-4 ${b}`}
+      className={`w-full rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-sm)] border-l-4 ${b}`}
       role="status"
       aria-live="polite"
     >
@@ -81,7 +84,7 @@ export function HubCheckinBanner({ variant, message }: Props) {
               </div>
             </>
           ) : (
-            <p className="text-sm font-medium leading-snug text-neutral-900">{message}</p>
+            <p className="text-sm font-medium leading-snug text-[var(--text-primary)]">{message}</p>
           )}
         </div>
       </div>

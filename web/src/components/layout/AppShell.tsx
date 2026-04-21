@@ -66,7 +66,9 @@ export function AppShell() {
         ) : null}
         <main
           className={`app-page-enter flex-1 overflow-auto px-4 pt-4 md:min-h-0 md:px-10 md:pt-8 ${desktopMainOffsetClass} ${
-            compactFieldView ? "pb-24 md:pb-8" : "pb-[72px] md:pb-8"
+            compactFieldView
+              ? "pb-[calc(3.5rem+env(safe-area-inset-bottom,0px))] md:pb-8"
+              : "pb-[72px] md:pb-8"
           }`}
         >
           <div className="w-full">

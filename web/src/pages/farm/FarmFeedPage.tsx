@@ -24,8 +24,8 @@ function StatusBadge({ status }: { status?: string }) {
   if (!status || status === "approved") return null;
   const cls =
     status === "pending_review"
-      ? "bg-amber-100 text-amber-800"
-      : "bg-red-100 text-red-800";
+      ? "border border-amber-500/25 bg-amber-500/12 text-amber-300"
+      : "border border-red-500/25 bg-red-500/12 text-red-300";
   const label = status === "pending_review" ? "Pending review" : "Rejected";
   return <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${cls}`}><TranslatedText text={label} /></span>;
 }
@@ -188,7 +188,7 @@ export function FarmFeedPage() {
         action={
           <Link
             to="/dashboard/laborer"
-            className="text-sm font-medium text-emerald-800 hover:underline"
+            className="text-sm font-medium text-[var(--primary-color-dark)] hover:underline"
           >
             {tHome}
           </Link>
@@ -209,10 +209,10 @@ export function FarmFeedPage() {
 
       {!loading && !ctxError ? (
         <>
-          <label className="block text-sm font-medium text-neutral-700">
+          <label className="block text-sm font-medium text-[var(--text-secondary)]">
             {tFlock}
             <select
-              className="mt-1 w-full min-h-[48px] rounded-xl border border-neutral-300 px-3 text-base"
+              className="mt-1 w-full min-h-[48px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-3 text-base text-[var(--text-primary)]"
               value={flockId}
               onChange={(e) => setFlockId(e.target.value)}
             >
@@ -237,27 +237,27 @@ export function FarmFeedPage() {
               mortalityToDate={performance?.mortalityToDate}
             />
           ) : flockId && detailLoading ? (
-            <p className="text-sm text-neutral-500">{tLoadingCtx}</p>
+            <p className="text-sm text-[var(--text-muted)]">{tLoadingCtx}</p>
           ) : !flockId ? (
-            <p className="text-sm text-amber-800">{tNoFlocks}</p>
+            <p className="text-sm text-amber-400">{tNoFlocks}</p>
           ) : null}
 
           {inventoryBalanceKg != null ? (
-            <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
-              <span className="font-semibold text-emerald-900">{tFeedStock}</span>
-              <span className="font-mono tabular-nums text-emerald-800">{inventoryBalanceKg.toFixed(2)} kg</span>
-              <span className="ml-auto text-[10px] font-medium text-emerald-700 opacity-70">
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-4 py-3 text-sm">
+              <span className="font-semibold text-emerald-400">{tFeedStock}</span>
+              <span className="font-mono tabular-nums text-emerald-300">{inventoryBalanceKg.toFixed(2)} kg</span>
+              <span className="ml-auto text-[10px] font-medium text-emerald-400/80">
                 {feedType ? feedTypeOptions.find((o) => o.value === feedType)?.label ?? feedType : "all types"}
               </span>
             </div>
           ) : null}
 
-          <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-2 text-xs text-blue-700">
+          <div className="rounded-xl border border-sky-500/25 bg-sky-500/10 px-4 py-2 text-xs text-sky-300">
             <TranslatedText text="Stock is deducted automatically when your feed log is approved by a manager." />
           </div>
 
           {entriesError ? (
-            <p className="text-sm text-amber-800" role="status">
+            <p className="text-sm text-amber-400" role="status">
               {tCouldNotLoad}{" "}
               <button
                 type="button"
@@ -269,28 +269,28 @@ export function FarmFeedPage() {
             </p>
           ) : null}
 
-          <section className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
-            <p className="mb-2 font-semibold text-neutral-800">{tRecentEntries}</p>
+          <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 text-sm shadow-[var(--shadow-sm)]">
+            <p className="mb-2 font-semibold text-[var(--text-primary)]">{tRecentEntries}</p>
             {entries.length > 0 ? (
               <ul className="space-y-2">
                 {entries.map((en) => (
                   <li
                     key={en.id}
-                    className="flex flex-wrap justify-between gap-2 border-b border-neutral-100 pb-2 last:border-0"
+                    className="flex flex-wrap justify-between gap-2 border-b border-[var(--border-color)] pb-2 last:border-0"
                   >
-                    <span className="font-mono text-xs text-neutral-600">
+                    <span className="font-mono text-xs text-[var(--text-muted)]">
                       {new Date(en.recordedAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
                     </span>
                     <span className="flex items-center gap-2">
-                      <span className="font-semibold tabular-nums text-emerald-900">{en.feedKg} kg</span>
+                      <span className="font-semibold tabular-nums text-emerald-400">{en.feedKg} kg</span>
                       <StatusBadge status={en.submissionStatus} />
                     </span>
-                    {en.notes ? <span className="w-full text-xs text-neutral-600">{en.notes}</span> : null}
+                    {en.notes ? <span className="w-full text-xs text-[var(--text-muted)]">{en.notes}</span> : null}
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-neutral-500">{tNoEntries}</p>
+              <p className="text-sm text-[var(--text-muted)]">{tNoEntries}</p>
             )}
           </section>
 
@@ -298,7 +298,7 @@ export function FarmFeedPage() {
             <button
               type="button"
               onClick={() => setShowFeedForm((v) => !v)}
-              className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
+              className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)]"
             >
               {showFeedForm ? tClose : tLogNew}
             </button>
@@ -307,22 +307,22 @@ export function FarmFeedPage() {
           {showFeedForm ? (
             <form
               onSubmit={(ev) => void submit(ev)}
-              className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm"
+              className="space-y-4 rounded-2xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-sm)]"
             >
-              <label className="block text-sm font-medium text-neutral-700">
+              <label className="block text-sm font-medium text-[var(--text-secondary)]">
                 {tFeedKg}
                 <input
                   inputMode="decimal"
-                  className="mt-1 w-full min-h-[52px] rounded-xl border border-neutral-300 px-4 text-lg"
+                  className="mt-1 w-full min-h-[52px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 text-lg text-[var(--text-primary)]"
                   value={feedKg}
                   onChange={(e) => setFeedKg(e.target.value)}
                   placeholder="0"
                 />
               </label>
-              <label className="block text-sm font-medium text-neutral-700">
+              <label className="block text-sm font-medium text-[var(--text-secondary)]">
                 {tFeedType}
                 <select
-                  className="mt-1 w-full min-h-[52px] rounded-xl border border-neutral-300 px-4 text-base"
+                  className="mt-1 w-full min-h-[52px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 text-base text-[var(--text-primary)]"
                   value={feedType}
                   onChange={(e) => setFeedType(e.target.value)}
                 >
@@ -333,10 +333,10 @@ export function FarmFeedPage() {
                   ))}
                 </select>
               </label>
-              <label className="block text-sm font-medium text-neutral-700">
+              <label className="block text-sm font-medium text-[var(--text-secondary)]">
                 {tNotesOpt}
                 <textarea
-                  className="mt-1 w-full rounded-xl border border-neutral-300 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
                   rows={2}
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
@@ -345,15 +345,15 @@ export function FarmFeedPage() {
               <button
                 type="submit"
                 disabled={busy || !flockId || !status}
-                className="w-full rounded-xl bg-emerald-700 py-3 text-lg font-semibold text-white disabled:opacity-50"
+                className="w-full rounded-xl bg-[var(--primary-color)] py-3 text-lg font-semibold text-white hover:bg-[var(--primary-color-dark)] disabled:opacity-50"
               >
                 {busy ? tSaving : tSaveEntry}
               </button>
             </form>
           ) : null}
 
-          <p className="text-xs text-neutral-500">
-            <Link className="font-medium text-emerald-800 underline" to="/farm/checkin">
+          <p className="text-xs text-[var(--text-muted)]">
+            <Link className="font-medium text-[var(--primary-color-dark)] underline" to="/farm/checkin">
               {tRoundCheckin}
             </Link>{" "}
             {tStillCaptures}

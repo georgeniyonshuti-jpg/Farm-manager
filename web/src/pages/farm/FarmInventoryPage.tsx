@@ -67,9 +67,9 @@ function txLabel(type: LedgerRow["type"]): string {
 }
 
 function txBadgeClass(type: LedgerRow["type"]): string {
-  if (type === "procurement_receipt") return "bg-emerald-100 text-emerald-800";
-  if (type === "feed_consumption") return "bg-amber-100 text-amber-800";
-  return "bg-blue-100 text-blue-800";
+  if (type === "procurement_receipt") return "border border-emerald-500/25 bg-emerald-500/12 text-emerald-300";
+  if (type === "feed_consumption") return "border border-amber-500/25 bg-amber-500/12 text-amber-300";
+  return "border border-sky-500/25 bg-sky-500/12 text-sky-300";
 }
 
 function feedTypeLabel(ft: string | null): string {
@@ -304,13 +304,13 @@ export function FarmInventoryPage() {
       {!loading && !error && (
         <>
           {/* ── Stock summary by feed type ── */}
-          <section className="rounded-xl border border-neutral-200 bg-white shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 px-4 py-3">
-              <h2 className="text-sm font-semibold text-neutral-900">
+          <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-sm)]">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-color)] px-4 py-3">
+              <h2 className="text-sm font-semibold text-[var(--text-primary)]">
                 Stock summary
-                <span className="ml-2 font-normal text-neutral-500">— all feed types</span>
+                <span className="ml-2 font-normal text-[var(--text-muted)]">— all feed types</span>
               </h2>
-              <span className="text-sm font-semibold text-emerald-800">
+              <span className="text-sm font-semibold text-emerald-400">
                 Total: {totalBalance.toFixed(1)} kg
               </span>
             </div>
@@ -329,7 +329,7 @@ export function FarmInventoryPage() {
                   <tbody>
                     {summary.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="py-6 text-center text-sm text-neutral-500">
+                        <td colSpan={5} className="py-6 text-center text-sm text-[var(--text-muted)]">
                           No stock movements recorded yet.
                         </td>
                       </tr>
@@ -337,15 +337,15 @@ export function FarmInventoryPage() {
                       summary.map((row) => (
                         <tr
                           key={row.feedType ?? "unspecified"}
-                          className={row.balanceKg < 0 ? "bg-red-50" : ""}
+                          className={row.balanceKg < 0 ? "bg-red-500/10" : ""}
                         >
                           <td className="font-medium">{feedTypeLabel(row.feedType)}</td>
-                          <td className="tbl-num text-emerald-700">+{row.purchasedKg.toFixed(1)}</td>
-                          <td className="tbl-num text-amber-700">−{row.usedKg.toFixed(1)}</td>
-                          <td className={`tbl-num ${row.adjustmentsKg < 0 ? "text-red-700" : "text-blue-700"}`}>
+                          <td className="tbl-num text-emerald-400">+{row.purchasedKg.toFixed(1)}</td>
+                          <td className="tbl-num text-amber-400">−{row.usedKg.toFixed(1)}</td>
+                          <td className={`tbl-num ${row.adjustmentsKg < 0 ? "text-red-400" : "text-sky-400"}`}>
                             {row.adjustmentsKg >= 0 ? "+" : ""}{row.adjustmentsKg.toFixed(1)}
                           </td>
-                          <td className={`tbl-num font-semibold ${row.balanceKg < 0 ? "text-red-700" : "text-neutral-900"}`}>
+                          <td className={`tbl-num font-semibold ${row.balanceKg < 0 ? "text-red-400" : "text-[var(--text-primary)]"}`}>
                             {row.balanceKg.toFixed(1)}
                           </td>
                         </tr>
@@ -355,7 +355,7 @@ export function FarmInventoryPage() {
                 </table>
               </div>
             </div>
-            <p className="px-4 py-2 text-xs text-neutral-400">
+            <p className="px-4 py-2 text-xs text-[var(--text-muted)]">
               "Used" counts only approved feed logs and manual consumption entries. Pending feed logs are not deducted until approved.
             </p>
           </section>
@@ -371,7 +371,7 @@ export function FarmInventoryPage() {
                     if (canProcure) setActiveTab("procurement");
                     else setActiveTab("adjustment");
                   }}
-                  className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
+                  className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)]"
                 >
                   New transaction
                 </button>
@@ -379,7 +379,7 @@ export function FarmInventoryPage() {
                 <button
                   type="button"
                   onClick={() => setShowEntryPanel(false)}
-                  className="rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+                  className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
                 >
                   Close form
                 </button>
@@ -389,12 +389,12 @@ export function FarmInventoryPage() {
 
           {/* ── Entry panel ── */}
           {showEntryPanel && canRecordAny && (
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <div className="flex flex-wrap gap-2 border-b border-neutral-100 pb-3">
+            <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-sm)]">
+              <div className="flex flex-wrap gap-2 border-b border-[var(--border-color)] pb-3">
                 {canProcure && (
                   <button
                     type="button"
-                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "procurement" ? "border-emerald-700 bg-emerald-50 text-emerald-900" : "border-neutral-300 text-neutral-700"}`}
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "procurement" ? "border-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--primary-color-dark)]" : "border-[var(--border-color)] text-[var(--text-secondary)]"}`}
                     onClick={() => setActiveTab("procurement")}
                   >
                     Receive stock
@@ -403,7 +403,7 @@ export function FarmInventoryPage() {
                 {canAdjust && (
                   <button
                     type="button"
-                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "adjustment" ? "border-emerald-700 bg-emerald-50 text-emerald-900" : "border-neutral-300 text-neutral-700"}`}
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${activeTab === "adjustment" ? "border-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--primary-color-dark)]" : "border-[var(--border-color)] text-[var(--text-secondary)]"}`}
                     onClick={() => setActiveTab("adjustment")}
                   >
                     Adjust stock
@@ -413,12 +413,12 @@ export function FarmInventoryPage() {
 
               {canProcure && activeTab === "procurement" && (
                 <div className="mt-4 space-y-3">
-                  <h3 className="text-sm font-semibold text-neutral-800">Receive stock</h3>
+                  <h3 className="text-sm font-semibold text-[var(--text-primary)]">Receive stock</h3>
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-neutral-600">Feed type</label>
+                      <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">Feed type</label>
                       <select
-                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
                         value={procFeedType}
                         onChange={(e) => setProcFeedType(e.target.value)}
                       >
@@ -428,9 +428,9 @@ export function FarmInventoryPage() {
                       </select>
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-neutral-600">Quantity (kg)</label>
+                      <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">Quantity (kg)</label>
                       <input
-                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
                         placeholder="e.g. 500"
                         inputMode="decimal"
                         value={procQty}
@@ -438,9 +438,9 @@ export function FarmInventoryPage() {
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-neutral-600">Reason</label>
+                      <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">Reason</label>
                       <select
-                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
                         value={procReasonCode}
                         onChange={(e) => setProcReasonCode(e.target.value)}
                       >
@@ -450,18 +450,18 @@ export function FarmInventoryPage() {
                       </select>
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-neutral-600">Reference (GRN / invoice)</label>
+                      <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">Reference (GRN / invoice)</label>
                       <input
-                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
                         placeholder="Optional"
                         value={procRef}
                         onChange={(e) => setProcRef(e.target.value)}
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-neutral-600">Unit cost (RWF/kg, optional)</label>
+                      <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">Unit cost (RWF/kg, optional)</label>
                       <input
-                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
                         placeholder="e.g. 450"
                         inputMode="decimal"
                         value={procUnitCost}
@@ -469,9 +469,9 @@ export function FarmInventoryPage() {
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-neutral-600">Supplier</label>
+                      <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">Supplier</label>
                       <select
-                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
                         value={procSupplierMode === "new" ? "__new__" : procSupplierExisting}
                         onChange={(e) => {
                           if (e.target.value === "__new__") {
@@ -491,7 +491,7 @@ export function FarmInventoryPage() {
                       </select>
                       {procSupplierMode === "new" && (
                         <input
-                          className="mt-2 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                          className="mt-2 w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
                           placeholder="Enter new supplier name"
                           value={procSupplierNew}
                           onChange={(e) => setProcSupplierNew(e.target.value)}
@@ -500,17 +500,17 @@ export function FarmInventoryPage() {
                     </div>
                   </div>
                   {procUnitCost && (
-                    <p className="text-xs text-emerald-700">
+                    <p className="text-xs text-emerald-400">
                       If you have Odoo send access this can go now; otherwise it waits for your selected approver to push to Odoo.
                     </p>
                   )}
                   {!canSendToOdoo && (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                      <label className="mb-1 block text-xs font-medium text-amber-800">
+                    <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-3">
+                      <label className="mb-1 block text-xs font-medium text-amber-300">
                         Send approval request to
                       </label>
                       <select
-                        className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm"
+                        className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
                         value={requestedApproverUserId}
                         onChange={(e) => setRequestedApproverUserId(e.target.value)}
                       >
@@ -521,7 +521,7 @@ export function FarmInventoryPage() {
                           </option>
                         ))}
                       </select>
-                      <p className="mt-1 text-[11px] text-amber-700">
+                      <p className="mt-1 text-[11px] text-amber-300/90">
                         You can submit now, but it will only reach Odoo after this approver reviews it in Accounting Approvals.
                       </p>
                     </div>
@@ -530,7 +530,7 @@ export function FarmInventoryPage() {
                     type="button"
                     disabled={busy || !procQty || (!canSendToOdoo && !requestedApproverUserId)}
                     onClick={() => void postProcurement()}
-                    className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)] disabled:opacity-60"
                   >
                     {busy ? "Saving…" : "Save receipt"}
                   </button>
@@ -539,13 +539,13 @@ export function FarmInventoryPage() {
 
               {canAdjust && activeTab === "adjustment" && (
                 <div className="mt-4 space-y-3">
-                  <h3 className="text-sm font-semibold text-neutral-800">Manual adjustment</h3>
-                  <p className="text-xs text-neutral-500">Use negative values for losses (damage, expiry, count corrections).</p>
+                  <h3 className="text-sm font-semibold text-[var(--text-primary)]">Manual adjustment</h3>
+                  <p className="text-xs text-[var(--text-muted)]">Use negative values for losses (damage, expiry, count corrections).</p>
                   <div className="grid gap-3 sm:grid-cols-3">
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-neutral-600">Feed type</label>
+                      <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">Feed type</label>
                       <select
-                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
                         value={adjFeedType}
                         onChange={(e) => setAdjFeedType(e.target.value)}
                       >
@@ -555,9 +555,9 @@ export function FarmInventoryPage() {
                       </select>
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-neutral-600">Delta kg (+/-)</label>
+                      <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">Delta kg (+/-)</label>
                       <input
-                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
                         placeholder="e.g. -20 or +50"
                         inputMode="decimal"
                         value={adjDelta}
@@ -565,9 +565,9 @@ export function FarmInventoryPage() {
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-neutral-600">Reason</label>
+                      <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">Reason</label>
                       <select
-                        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                        className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
                         value={adjReasonCode}
                         onChange={(e) => setAdjReasonCode(e.target.value)}
                       >
@@ -581,7 +581,7 @@ export function FarmInventoryPage() {
                     type="button"
                     disabled={busy || !adjDelta}
                     onClick={() => void postAdjustment()}
-                    className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)] disabled:opacity-60"
                   >
                     {busy ? "Saving…" : "Save adjustment"}
                   </button>
@@ -591,12 +591,12 @@ export function FarmInventoryPage() {
           )}
 
           {/* ── Ledger ── */}
-          <section className="rounded-xl border border-neutral-200 bg-white shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 px-4 py-3">
-              <h2 className="text-sm font-semibold text-neutral-900">Transaction ledger</h2>
+          <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-sm)]">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-color)] px-4 py-3">
+              <h2 className="text-sm font-semibold text-[var(--text-primary)]">Transaction ledger</h2>
               <div className="flex flex-wrap items-center gap-2">
                 <select
-                  className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs"
+                  className="rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-1.5 text-xs text-[var(--text-primary)]"
                   value={feedTypeFilter}
                   onChange={(e) => setFeedTypeFilter(e.target.value)}
                 >
@@ -607,7 +607,7 @@ export function FarmInventoryPage() {
                 </select>
                 <a
                   href={`${API_BASE_URL}/api/reports/feed-inventory.csv${feedTypeFilter ? `?feed_type=${encodeURIComponent(feedTypeFilter)}` : ""}`}
-                  className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+                  className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
                   download
                 >
                   Export CSV
@@ -637,7 +637,7 @@ export function FarmInventoryPage() {
                       <tbody>
                         {ledger.length === 0 ? (
                           <tr>
-                            <td colSpan={8} className="py-6 text-center text-sm text-neutral-500">
+                            <td colSpan={8} className="py-6 text-center text-sm text-[var(--text-muted)]">
                               No transactions found.
                             </td>
                           </tr>
@@ -652,18 +652,18 @@ export function FarmInventoryPage() {
                                   {txLabel(row.type)}
                                 </span>
                                 {row.feedEntryId && (
-                                  <span className="ml-1 inline-block rounded-full bg-neutral-100 px-1.5 py-0.5 text-[9px] font-medium text-neutral-500">
+                                  <span className="ml-1 inline-block rounded-full border border-[var(--border-color)] bg-[var(--surface-subtle)] px-1.5 py-0.5 text-[9px] font-medium text-[var(--text-muted)]">
                                     auto
                                   </span>
                                 )}
                               </td>
                               <td>{feedTypeLabel(row.feedType)}</td>
                               <td className="tbl-num">{row.quantityKg.toFixed(1)}</td>
-                              <td className={`tbl-num font-semibold ${row.deltaKg >= 0 ? "text-emerald-700" : "text-amber-700"}`}>
+                              <td className={`tbl-num font-semibold ${row.deltaKg >= 0 ? "text-emerald-400" : "text-amber-400"}`}>
                                 {row.deltaKg >= 0 ? "+" : ""}{row.deltaKg.toFixed(1)}
                               </td>
-                              <td className="text-neutral-600">{row.reason || "—"}</td>
-                              <td className="tbl-mono text-neutral-500">
+                              <td className="text-[var(--text-secondary)]">{row.reason || "—"}</td>
+                              <td className="tbl-mono text-[var(--text-muted)]">
                                 {row.flockLabel ?? row.reference ?? "—"}
                               </td>
                               <td>
@@ -680,8 +680,8 @@ export function FarmInventoryPage() {
                 </div>
 
                 {totalPages > 1 && (
-                  <div className="flex items-center justify-between border-t border-neutral-100 px-4 py-3">
-                    <span className="text-xs text-neutral-500">
+                  <div className="flex items-center justify-between border-t border-[var(--border-color)] px-4 py-3">
+                    <span className="text-xs text-[var(--text-muted)]">
                       Page {ledgerPage} of {totalPages} ({ledgerTotal} total)
                     </span>
                     <div className="flex gap-2">
@@ -689,7 +689,7 @@ export function FarmInventoryPage() {
                         type="button"
                         disabled={ledgerPage <= 1}
                         onClick={() => void loadLedger(ledgerPage - 1)}
-                        className="rounded border border-neutral-300 px-2 py-1 text-xs disabled:opacity-40"
+                        className="rounded border border-[var(--border-color)] bg-[var(--surface-input)] px-2 py-1 text-xs text-[var(--text-primary)] disabled:opacity-40"
                       >
                         ← Prev
                       </button>
@@ -697,7 +697,7 @@ export function FarmInventoryPage() {
                         type="button"
                         disabled={ledgerPage >= totalPages}
                         onClick={() => void loadLedger(ledgerPage + 1)}
-                        className="rounded border border-neutral-300 px-2 py-1 text-xs disabled:opacity-40"
+                        className="rounded border border-[var(--border-color)] bg-[var(--surface-input)] px-2 py-1 text-xs text-[var(--text-primary)] disabled:opacity-40"
                       >
                         Next →
                       </button>
