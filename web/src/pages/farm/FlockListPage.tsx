@@ -21,6 +21,7 @@ type FlockRow = {
   id: string;
   label: string;
   placementDate: string;
+  status?: string;
   checkinBadge?: CheckinBadge;
   nextDueAt?: string;
   ageDays?: number;
@@ -75,6 +76,7 @@ export function FlockListPage() {
   const [createBusy, setCreateBusy] = useState(false);
   const [showCreateFlock, setShowCreateFlock] = useState(false);
   const [purgeBusyId, setPurgeBusyId] = useState<string | null>(null);
+  const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState({
     placementDate: new Date().toISOString().slice(0, 10),
     initialCount: "",
@@ -89,8 +91,11 @@ export function FlockListPage() {
     setError(null);
     setLoading(true);
     try {
-      // ENV: moved to environment variable
-      const r = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
+      const listQ =
+        user?.role === "superuser" || user?.role === "manager" || user?.role === "vet_manager"
+          ? "?includeArchived=true"
+          : "";
+      const r = await fetch(`${API_BASE_URL}/api/flocks${listQ}`, { headers: readAuthHeaders(token) });
       const d = await r.json();
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Load failed");
       const base = (d.flocks as FlockRow[]) ?? [];
@@ -228,7 +233,7 @@ export function FlockListPage() {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, user?.role]);
 
   useEffect(() => {
     void load();
@@ -272,6 +277,26 @@ export function FlockListPage() {
       showToast("error", e2 instanceof Error ? e2.message : "Failed to create flock");
     } finally {
       setCreateBusy(false);
+    }
+  }
+
+  async function archiveFlock(flockId: string, label: string) {
+    if (user?.role !== "superuser") return;
+    if (!window.confirm(`Archive flock ${label}? It will be hidden from field staff selectors.`)) return;
+    setArchiveBusyId(flockId);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/archive`, {
+        method: "PATCH",
+        headers: jsonAuthHeaders(token),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Archive failed");
+      showToast("success", `${label} archived`);
+      await load();
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Archive failed");
+    } finally {
+      setArchiveBusyId(null);
     }
   }
 
@@ -558,10 +583,17 @@ export function FlockListPage() {
                       </td>
                       <td>
                         <div className="flex flex-wrap gap-1">
+                          {f.status === "archived" ? (
+                            <span className="inline-flex rounded-full border border-zinc-500/40 bg-zinc-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-400">
+                              Archived
+                            </span>
+                          ) : null}
                           {f.withdrawalActive ? <span className="inline-flex rounded-full border border-red-500/30 bg-red-500/12 px-1.5 py-0.5 text-[10px] font-semibold text-red-300">Withdrawal</span> : null}
                           {(f.overdueRounds ?? 0) > 0 ? <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">Overdue ×{f.overdueRounds}</span> : null}
                           {(f.alerts?.length ?? 0) > 0 ? <span className="text-[10px] text-amber-800">{f.alerts?.[0]}</span> : null}
-                          {!f.withdrawalActive && !(f.overdueRounds) && !(f.alerts?.length) ? <span className="text-[var(--text-muted)]">—</span> : null}
+                          {!f.withdrawalActive && !(f.overdueRounds) && !(f.alerts?.length) && f.status !== "archived" ? (
+                            <span className="text-[var(--text-muted)]">—</span>
+                          ) : null}
                         </div>
                       </td>
                       <td className="tbl-actions">
@@ -575,6 +607,16 @@ export function FlockListPage() {
                             <Link to="/farm/slaughter" className="text-xs font-medium text-emerald-800 hover:underline">
                               Slaughter
                             </Link>
+                          ) : null}
+                          {user?.role === "superuser" && f.status !== "archived" ? (
+                            <button
+                              type="button"
+                              disabled={archiveBusyId === f.id}
+                              onClick={() => void archiveFlock(f.id, f.label)}
+                              className="rounded border border-amber-500/35 px-1.5 py-0.5 text-[10px] text-amber-200 hover:bg-amber-500/10 disabled:opacity-60"
+                            >
+                              {archiveBusyId === f.id ? "…" : "Archive"}
+                            </button>
                           ) : null}
                           {user?.role === "superuser" ? (
                             <button

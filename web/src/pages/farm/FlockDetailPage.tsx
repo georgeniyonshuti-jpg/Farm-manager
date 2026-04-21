@@ -86,7 +86,11 @@ export function FlockDetailPage() {
     setError(null);
     setLoading(true);
     try {
-      const fr = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
+      const listQ =
+        user?.role === "superuser" || user?.role === "manager" || user?.role === "vet_manager"
+          ? "?includeArchived=true"
+          : "";
+      const fr = await fetch(`${API_BASE_URL}/api/flocks${listQ}`, { headers: readAuthHeaders(token) });
       const fd = await fr.json();
       if (!fr.ok) throw new Error((fd as { error?: string }).error);
       const list = (fd.flocks as { id: string; label: string; placementDate: string }[]) ?? [];
@@ -116,7 +120,7 @@ export function FlockDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [id, token]);
+  }, [id, token, user?.role]);
 
   useEffect(() => {
     void load();

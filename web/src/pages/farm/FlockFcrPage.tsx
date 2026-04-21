@@ -32,7 +32,7 @@ function statusBadgeClass(status: string) {
 
 export function FlockFcrPage() {
   const { id } = useParams<{ id: string }>();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [label, setLabel] = useState<string | null>(null);
   const [flockCode, setFlockCode] = useState<string | null>(null);
   const [placementDate, setPlacementDate] = useState<string | null>(null);
@@ -45,8 +45,12 @@ export function FlockFcrPage() {
     setError(null);
     setLoading(true);
     try {
+      const listQ =
+        user?.role === "superuser" || user?.role === "manager" || user?.role === "vet_manager"
+          ? "?includeArchived=true"
+          : "";
       const [fr, sr] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) }),
+        fetch(`${API_BASE_URL}/api/flocks${listQ}`, { headers: readAuthHeaders(token) }),
         fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(id)}/fcr-snapshot`, { headers: readAuthHeaders(token) }),
       ]);
       const fd = await fr.json();
@@ -65,7 +69,7 @@ export function FlockFcrPage() {
     } finally {
       setLoading(false);
     }
-  }, [id, token]);
+  }, [id, token, user?.role]);
 
   useEffect(() => {
     void load();
