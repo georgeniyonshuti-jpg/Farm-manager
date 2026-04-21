@@ -32,6 +32,13 @@ type LedgerRow = {
   accountingStatus: string | null;
 };
 
+type OdooApprover = {
+  id: string;
+  displayName: string;
+  role: string;
+  email: string;
+};
+
 const FEED_TYPE_OPTIONS = [
   { value: "starter", label: "Starter" },
   { value: "grower", label: "Grower" },
@@ -102,6 +109,8 @@ export function FarmInventoryPage() {
   const [procSupplierMode, setProcSupplierMode] = useState<"existing" | "new">("existing");
   const [procSupplierExisting, setProcSupplierExisting] = useState("");
   const [procSupplierNew, setProcSupplierNew] = useState("");
+  const [approvers, setApprovers] = useState<OdooApprover[]>([]);
+  const [requestedApproverUserId, setRequestedApproverUserId] = useState("");
 
   // Adjustment form
   const [adjDelta, setAdjDelta] = useState("");
@@ -115,6 +124,8 @@ export function FarmInventoryPage() {
     user?.role === "superuser";
   const canAdjust = user?.role === "manager" || user?.role === "superuser";
   const canRecordAny = canProcure || canAdjust;
+  const canSendToOdoo =
+    user?.role === "superuser" || (user?.role === "manager" && Array.isArray(user?.pageAccess) && user.pageAccess.includes("odoo_send"));
 
   const loadStock = useCallback(async () => {
     setLoadingStock(true);
@@ -167,16 +178,36 @@ export function FarmInventoryPage() {
     }
   }, [token]);
 
+  const loadApprovers = useCallback(async () => {
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/users/odoo-approvers`, { headers: readAuthHeaders(token) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return;
+      const list = Array.isArray((d as { approvers?: OdooApprover[] }).approvers) ? (d as { approvers: OdooApprover[] }).approvers : [];
+      setApprovers(list);
+      if (!requestedApproverUserId && list.length > 0) {
+        setRequestedApproverUserId(list[0].id);
+      }
+    } catch {
+      setApprovers([]);
+    }
+  }, [token, requestedApproverUserId]);
+
   useEffect(() => {
     void loadStock();
     void loadLedger(1);
     void loadSuppliers();
-  }, [loadStock, loadLedger, loadSuppliers]);
+    if (!canSendToOdoo) void loadApprovers();
+  }, [loadStock, loadLedger, loadSuppliers, loadApprovers, canSendToOdoo]);
 
   async function postProcurement() {
     const qty = Number(procQty);
     if (!Number.isFinite(qty) || qty <= 0) {
       showToast("error", "Enter a valid quantity in kg.");
+      return;
+    }
+    if (!canSendToOdoo && !requestedApproverUserId) {
+      showToast("error", "Select who should approve and send this to Odoo.");
       return;
     }
     setBusy(true);
@@ -195,6 +226,7 @@ export function FarmInventoryPage() {
             procSupplierMode === "new"
               ? (procSupplierNew.trim() || undefined)
               : (procSupplierExisting.trim() || undefined),
+          requestedApproverUserId: !canSendToOdoo ? requestedApproverUserId : undefined,
         }),
       });
       const d = await r.json().catch(() => ({}));
@@ -202,7 +234,7 @@ export function FarmInventoryPage() {
       const acctStatus = (d as { row?: { accountingStatus?: string | null } }).row?.accountingStatus ?? null;
       const acctMsg = acctStatus === "approved"
         ? " Sent to Odoo."
-        : " Waiting for manager/superuser approval before sending to Odoo.";
+        : " Waiting for selected approver to push to Odoo.";
       showToast("success", `Received ${qty} kg of ${feedTypeLabel(procFeedType)}.${acctMsg}`);
       setProcQty("");
       setProcRef("");
@@ -469,12 +501,34 @@ export function FarmInventoryPage() {
                   </div>
                   {procUnitCost && (
                     <p className="text-xs text-emerald-700">
-                      If you are manager/superuser this sends to Odoo now; otherwise it waits in Accounting Approvals for manager push.
+                      If you have Odoo send access this can go now; otherwise it waits for your selected approver to push to Odoo.
                     </p>
+                  )}
+                  {!canSendToOdoo && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                      <label className="mb-1 block text-xs font-medium text-amber-800">
+                        Send approval request to
+                      </label>
+                      <select
+                        className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm"
+                        value={requestedApproverUserId}
+                        onChange={(e) => setRequestedApproverUserId(e.target.value)}
+                      >
+                        <option value="">Select approver</option>
+                        {approvers.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.displayName} ({a.role})
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1 text-[11px] text-amber-700">
+                        You can submit now, but it will only reach Odoo after this approver reviews it in Accounting Approvals.
+                      </p>
+                    </div>
                   )}
                   <button
                     type="button"
-                    disabled={busy || !procQty}
+                    disabled={busy || !procQty || (!canSendToOdoo && !requestedApproverUserId)}
                     onClick={() => void postProcurement()}
                     className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
                   >

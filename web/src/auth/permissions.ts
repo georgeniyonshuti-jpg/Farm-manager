@@ -132,6 +132,7 @@ export const PAGE_ACCESS_DEFS: Array<{ key: string; label: string; prefixes: str
   { key: "cleva_credit_scoring", label: "Credit scoring", prefixes: ["/cleva/credit-scoring"] },
   { key: "admin_system_config", label: "Type settings", prefixes: ["/admin/system-config"] },
   { key: "admin_users", label: "User management", prefixes: ["/admin/users"] },
+  { key: "odoo_send", label: "Can send data to Odoo", prefixes: [] },
 ];
 const PAGE_KEYS = new Set(PAGE_ACCESS_DEFS.map((d) => d.key));
 

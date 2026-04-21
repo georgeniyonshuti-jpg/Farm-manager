@@ -226,6 +226,7 @@ const PAGE_ACCESS_KEYS = [
   "cleva_credit_scoring",
   "admin_system_config",
   "admin_users",
+  "odoo_send",
 ];
 const PAGE_ACCESS_KEY_SET = new Set(PAGE_ACCESS_KEYS);
 
@@ -245,7 +246,11 @@ function hasUserPageAccess(user, key) {
   if (user.role === "superuser") return true;
   if (!PAGE_ACCESS_KEY_SET.has(String(key))) return true;
   const access = Array.isArray(user.pageAccess) ? user.pageAccess.map(String) : [];
-  if (access.length === 0) return true;
+  if (access.length === 0) {
+    // New sensitive capability: require explicit tick in the matrix.
+    if (String(key) === "odoo_send") return false;
+    return true;
+  }
   return access.includes(String(key));
 }
 
@@ -775,7 +780,9 @@ function needsApproval(user) {
 
 function canDirectPostAccountingToOdoo(user) {
   if (!user) return false;
-  return user.role === "manager" || user.role === "superuser";
+  if (user.role === "superuser") return true;
+  if (user.role !== "manager") return false;
+  return hasUserPageAccess(user, "odoo_send");
 }
 
 function isVetOrAbove(user) {
@@ -2171,6 +2178,27 @@ app.get("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_us
     }
   }
   res.json({ users: [...usersById.values()].map(sanitizeUser) });
+});
+
+app.get("/api/users/odoo-approvers", requireAuth, requireFarmAccess, async (_req, res) => {
+  if (hasDb()) {
+    try {
+      await syncUsersFromDbToMemory();
+      if (DEMO_USERS_ENABLED) ensureDemoUsersForNonProd();
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET /api/users/odoo-approvers sync:", e instanceof Error ? e.message : e);
+    }
+  }
+  const approvers = [...usersById.values()]
+    .filter((u) => canDirectPostAccountingToOdoo(u))
+    .map((u) => ({
+      id: u.id,
+      displayName: u.displayName,
+      role: u.role,
+      email: u.email,
+    }))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  res.json({ approvers });
 });
 
 app.post("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_users"), async (req, res) => {
@@ -5247,6 +5275,19 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
   const reason = String(body.reason ?? reasonCode).slice(0, 400);
   const reference = String(body.reference ?? "").slice(0, 200);
   const supplierName = String(body.supplierName ?? "").trim() || null;
+  const requestedApproverUserId = String(body.requestedApproverUserId ?? "").trim() || null;
+  const canDirectPost = canDirectPostAccountingToOdoo(req.authUser);
+  if (!canDirectPost && !requestedApproverUserId) {
+    res.status(400).json({ error: "Select an approver who can send to Odoo." });
+    return;
+  }
+  if (!canDirectPost && requestedApproverUserId) {
+    const targetApprover = usersById.get(requestedApproverUserId);
+    if (!targetApprover || !canDirectPostAccountingToOdoo(targetApprover)) {
+      res.status(400).json({ error: "Selected approver does not have Odoo send access." });
+      return;
+    }
+  }
   if (flockId && !flocksById.has(flockId)) {
     res.status(400).json({ error: "Invalid flockId" });
     return;
@@ -5337,11 +5378,11 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     flockId,
     feedType,
     quantityKg,
+    requestedApproverUserId,
   });
 
   // Accounting: post procurement directly to Odoo when cost is available.
   if (hasDb() && procurementSavedToDb && row.id) {
-    const canDirectPost = canDirectPostAccountingToOdoo(req.authUser);
     const acctStatus = canDirectPost && unitCostRwfPerKg != null ? "approved" : "pending_approval";
     row.accountingStatus = acctStatus;
     try {

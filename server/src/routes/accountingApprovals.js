@@ -46,7 +46,17 @@ function roleAtLeast(user, minRole) {
   return rank >= min;
 }
 
-function isManagerOrAbove(user) { return roleAtLeast(user, "manager"); }
+function isManagerOrAbove(user) {
+  return user?.role === "manager" || user?.role === "superuser";
+}
+
+function hasOdooSendAccess(user) {
+  if (!user) return false;
+  if (user.role === "superuser") return true;
+  if (user.role !== "manager") return false;
+  const access = Array.isArray(user.pageAccess) ? user.pageAccess.map(String) : [];
+  return access.includes("odoo_send");
+}
 
 // ─────────────────────────────────────────────────────────────
 // Helpers injected at router init time
@@ -66,6 +76,16 @@ function dbQuery(...args) {
 }
 
 function hasDb() { return typeof _hasDb === "function" ? _hasDb() : false; }
+
+router.use((req, res, next) => {
+  if (!isManagerOrAbove(req.authUser)) {
+    return res.status(403).json({ error: "Manager or superuser required." });
+  }
+  if (!hasOdooSendAccess(req.authUser)) {
+    return res.status(403).json({ error: "You do not have permission to send data to Odoo. Ask superuser to grant 'Can send to Odoo' in Page visibility matrix." });
+  }
+  return next();
+});
 
 // ─────────────────────────────────────────────────────────────
 // 1. Feed Procurement — accounting approval
