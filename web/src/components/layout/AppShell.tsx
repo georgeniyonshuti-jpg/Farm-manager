@@ -22,6 +22,7 @@ export function AppShell() {
     : desktopSidebarCollapsed
       ? "md:ml-[84px]"
       : "md:ml-[220px]";
+
   return (
     <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[var(--background-color)]">
       <GlobalHeader
