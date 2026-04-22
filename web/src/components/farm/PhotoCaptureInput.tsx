@@ -6,6 +6,7 @@ type Props = {
   /** Minimum photos user must add before submit (set by batch policy) */
   minCount: number;
   maxCount?: number;
+  allowMultiple?: boolean;
   /** When set (e.g. laborer Kinyarwanda), replaces the default English picker label */
   pickerLabel?: string;
   onChangeDataUrls: (urls: string[]) => void;
@@ -19,6 +20,7 @@ type Props = {
 export function PhotoCaptureInput({
   minCount,
   maxCount = 6,
+  allowMultiple = true,
   pickerLabel,
   onChangeDataUrls,
   disabled,
@@ -43,7 +45,7 @@ export function PhotoCaptureInput({
         type="file"
         accept="image/*"
         // FIX: round check-ins — images only (no PDF/other uploads)
-        multiple
+        multiple={allowMultiple}
         capture="environment"
         disabled={disabled}
         className="sr-only"

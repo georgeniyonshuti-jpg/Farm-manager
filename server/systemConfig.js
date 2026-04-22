@@ -207,21 +207,20 @@ export function getAppSettingNumber(key, defaultValue) {
  * The legacy checkin_commission_* keys are now ignored (check-in always uses checkInRwf).
  */
 export function getFieldPayrollRates() {
-  // If checkin_commission_on_time_rwf was previously set to something non-default,
-  // honour it as the initial checkInRwf so existing production data isn't disrupted.
-  const legacyCommission = getAppSettingNumber("checkin_commission_on_time_rwf", 0);
-  const fieldCheckIn = getAppSettingNumber("field_payroll_check_in_rwf", 500);
-  // Prefer the explicitly-set field rate; fall back to commission rate if field rate is still at old default (100).
-  const checkInRwf = fieldCheckIn !== 100 ? fieldCheckIn : (legacyCommission > 0 ? legacyCommission : fieldCheckIn);
+  const hasFieldCheckInConfigured = memAppSettings.field_payroll_check_in_rwf != null && memAppSettings.field_payroll_check_in_rwf !== "";
+  const legacyCommission = getAppSettingNumber("checkin_commission_on_time_rwf", Number(DEFAULT_APP_SETTINGS.checkin_commission_on_time_rwf));
+  const fieldCheckIn = hasFieldCheckInConfigured
+    ? getAppSettingNumber("field_payroll_check_in_rwf", Number(DEFAULT_APP_SETTINGS.field_payroll_check_in_rwf))
+    : legacyCommission;
 
   return {
-    checkInRwf: Math.max(0, Math.floor(checkInRwf)),
-    feedRwf: Math.max(0, Math.floor(getAppSettingNumber("field_payroll_feed_rwf", 300))),
-    missedCheckInRwf: Math.max(0, Math.floor(getAppSettingNumber("field_payroll_missed_check_in_rwf", 200))),
-    missedFeedRwf: Math.max(0, Math.floor(getAppSettingNumber("field_payroll_missed_feed_rwf", 200))),
+    checkInRwf: Math.max(0, Math.floor(fieldCheckIn)),
+    feedRwf: Math.max(0, Math.floor(getAppSettingNumber("field_payroll_feed_rwf", Number(DEFAULT_APP_SETTINGS.field_payroll_feed_rwf)))),
+    missedCheckInRwf: Math.max(0, Math.floor(getAppSettingNumber("field_payroll_missed_check_in_rwf", Number(DEFAULT_APP_SETTINGS.field_payroll_missed_check_in_rwf)))),
+    missedFeedRwf: Math.max(0, Math.floor(getAppSettingNumber("field_payroll_missed_feed_rwf", Number(DEFAULT_APP_SETTINGS.field_payroll_missed_feed_rwf)))),
     lateDeductionRwf: Math.max(0, Math.floor(
       getAppSettingNumber("field_payroll_late_deduction_rwf",
-        getAppSettingNumber("checkin_deduction_late_rwf", 300))
+        getAppSettingNumber("checkin_deduction_late_rwf", Number(DEFAULT_APP_SETTINGS.checkin_deduction_late_rwf)))
     )),
     missedCheckInDeductionRwf: Math.max(0, Math.floor(
       getAppSettingNumber("field_payroll_missed_check_in_rwf",

@@ -619,6 +619,15 @@ function requireLeadVetUp(req, res, next) {
   res.status(403).json({ error: "Forbidden" });
 }
 
+function requireVetUp(req, res, next) {
+  const r = req.authUser?.role;
+  if (r === "vet" || r === "vet_manager" || r === "manager" || r === "superuser") {
+    next();
+    return;
+  }
+  res.status(403).json({ error: "Forbidden" });
+}
+
 function requireLaborer(req, res, next) {
   const r = req.authUser?.role;
   if (r !== "laborer" && r !== "dispatcher") {
@@ -829,6 +838,14 @@ function requireLogScheduleEditor(req, res, next) {
 function requirePayrollApprover(req, res, next) {
   if (!canManageLogScheduleAndPayroll(req.authUser)) {
     res.status(403).json({ error: "Only manager, vet manager, or superuser can approve payroll" });
+    return;
+  }
+  next();
+}
+
+function requirePayrollPaymentDecisionAccess(req, res, next) {
+  if (!canDirectPostAccountingToOdoo(req.authUser)) {
+    res.status(403).json({ error: "Only users with Odoo send access can make payroll payment decisions." });
     return;
   }
   next();
@@ -1722,6 +1739,7 @@ async function syncCheckInsFromDb() {
             at AS at,
             photo_url AS "photoUrl",
             photo_urls AS "photoUrls",
+            coop_temperature_c AS "coopTemperatureC",
             feed_kg AS "feedKg",
             water_l AS "waterL",
             COALESCE(notes, '') AS notes,
@@ -1738,11 +1756,22 @@ async function syncCheckInsFromDb() {
   );
   roundCheckins.length = 0;
   for (const row of r.rows) {
-    let photos = [];
     const urls = row.photoUrls;
-    if (Array.isArray(urls)) photos = urls.map(String);
-    else if (urls && typeof urls === "object") photos = Object.values(urls).map(String);
-    if (!photos.length && row.photoUrl) photos = [String(row.photoUrl)];
+    const toStringArray = (v) => (Array.isArray(v) ? v.map(String).filter((x) => x.length > 20) : []);
+    let photosFlockSign = [];
+    let photosThermometer = [];
+    let photosFeed = [];
+    let photosWater = [];
+    if (Array.isArray(urls)) {
+      photosFlockSign = toStringArray(urls);
+    } else if (urls && typeof urls === "object") {
+      photosFlockSign = toStringArray(urls.flockSign ?? urls.photos);
+      photosThermometer = toStringArray(urls.thermometer);
+      photosFeed = toStringArray(urls.feed);
+      photosWater = toStringArray(urls.water);
+    }
+    if (!photosFlockSign.length && row.photoUrl) photosFlockSign = [String(row.photoUrl)];
+    const photos = [...photosFlockSign, ...photosThermometer, ...photosFeed, ...photosWater];
     const ra = row.at;
     roundCheckins.push({
       id: String(row.id),
@@ -1750,7 +1779,12 @@ async function syncCheckInsFromDb() {
       laborerId: String(row.laborerId),
       at: ra instanceof Date ? ra.toISOString() : String(ra),
       photos,
-      photoUrl: row.photoUrl != null ? String(row.photoUrl) : photos[0] ?? null,
+      photosFlockSign,
+      photosThermometer,
+      photosFeed,
+      photosWater,
+      photoUrl: row.photoUrl != null ? String(row.photoUrl) : photosFlockSign[0] ?? photos[0] ?? null,
+      coopTemperatureC: row.coopTemperatureC == null ? null : Number(row.coopTemperatureC),
       feedKg: Number(row.feedKg) || 0,
       waterL: Number(row.waterL) || 0,
       notes: String(row.notes ?? ""),
@@ -3223,25 +3257,59 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
     return;
   }
   const body = checkinParsed.data;
-  const photos = Array.isArray(body.photos) ? body.photos.filter((p) => typeof p === "string" && p.length > 40) : [];
-  const uploadError = validateImageDataUrls(photos);
+  const sanitizePhotos = (arr) =>
+    Array.isArray(arr) ? arr.filter((p) => typeof p === "string" && p.length > 40) : [];
+  const legacyPhotos = sanitizePhotos(body.photos);
+  const photosFlockSign = sanitizePhotos(body.photosFlockSign ?? legacyPhotos);
+  const photosThermometer = sanitizePhotos(body.photosThermometer);
+  const photosFeed = sanitizePhotos(body.photosFeed);
+  const photosWater = sanitizePhotos(body.photosWater);
+  const uploadError =
+    validateImageDataUrls(photosFlockSign)
+    || validateImageDataUrls(photosThermometer)
+    || validateImageDataUrls(photosFeed)
+    || validateImageDataUrls(photosWater);
   if (uploadError) {
     res.status(400).json({ error: uploadError });
     return;
   }
   const minPhotos = f.photosRequiredPerRound ?? 1;
-  if (photos.length < minPhotos) {
-    res.status(400).json({ error: `At least ${minPhotos} photo(s) required for this check-in` });
-    return;
-  }
   const feedKg = Number(body.feedKg);
   const waterL = Number(body.waterL);
   const feedAvailable = Boolean(body.feedAvailable);
   const waterAvailable = Boolean(body.waterAvailable);
+  const coopTemperatureC = body.coopTemperatureC == null ? null : Number(body.coopTemperatureC);
+  if (!Number.isFinite(coopTemperatureC)) {
+    res.status(400).json({ error: "coopTemperatureC is required." });
+    return;
+  }
+  if (photosFlockSign.length < minPhotos) {
+    res.status(400).json({ error: `At least ${minPhotos} flock sign photo(s) required for this check-in` });
+    return;
+  }
+  if (photosThermometer.length < 1) {
+    res.status(400).json({ error: "At least one thermometer photo is required." });
+    return;
+  }
+  if (feedAvailable && photosFeed.length < 1) {
+    res.status(400).json({ error: "At least one feed photo is required when feed is available." });
+    return;
+  }
+  if (waterAvailable && photosWater.length < 1) {
+    res.status(400).json({ error: "At least one water photo is required when water is available." });
+    return;
+  }
   const notes = String(body.notes ?? "").slice(0, 4000);
   const mortalityAtCheckin = body.mortalityAtCheckin != null ? Math.max(0, Number(body.mortalityAtCheckin)) : 0;
   const mortalityReportedInMortalityLog = Boolean(body.mortalityReportedInMortalityLog);
   const submissionStatus = needsFieldCheckinApproval(req.authUser) ? "pending_review" : "approved";
+  const photos = [...photosFlockSign, ...photosThermometer, ...photosFeed, ...photosWater];
+  const photoSlots = {
+    flockSign: photosFlockSign,
+    thermometer: photosThermometer,
+    feed: photosFeed,
+    water: photosWater,
+  };
 
   let id = `chk_${crypto.randomBytes(8).toString("hex")}`;
   const at = new Date().toISOString();
@@ -3251,7 +3319,12 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
     laborerId: req.authUser.id,
     at,
     photos,
-    photoUrl: photos[0] ?? null,
+    photosFlockSign,
+    photosThermometer,
+    photosFeed,
+    photosWater,
+    photoUrl: photosFlockSign[0] ?? photos[0] ?? null,
+    coopTemperatureC: Number(coopTemperatureC.toFixed(2)),
     feedKg: Number.isFinite(feedKg) ? feedKg : 0,
     waterL: Number.isFinite(waterL) ? waterL : 0,
     feedAvailable,
@@ -3264,15 +3337,16 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
   if (hasDb() && isPersistableUuid(f.id) && isPersistableUuid(req.authUser.id)) {
     try {
       const ins = await dbQuery(
-        `INSERT INTO check_ins (flock_id, laborer_id, at, photo_url, photo_urls, feed_kg, water_l, notes, mortality_at_checkin, feed_available, water_available, mortality_reported_in_mortality_log, submission_status)
-         VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4, $5::jsonb, $6::numeric, $7::numeric, $8, $9, $10, $11, $12, $13)
+        `INSERT INTO check_ins (flock_id, laborer_id, at, photo_url, photo_urls, coop_temperature_c, feed_kg, water_l, notes, mortality_at_checkin, feed_available, water_available, mortality_reported_in_mortality_log, submission_status)
+         VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4, $5::jsonb, $6::numeric, $7::numeric, $8::numeric, $9, $10, $11, $12, $13, $14)
          RETURNING id::text AS id`,
         [
           f.id,
           req.authUser.id,
           at,
-          photos[0] ?? null,
-          JSON.stringify(photos),
+          photosFlockSign[0] ?? photos[0] ?? null,
+          JSON.stringify(photoSlots),
+          row.coopTemperatureC,
           row.feedKg,
           row.waterL,
           notes && notes.trim() ? notes.slice(0, 4000) : null,
@@ -3722,18 +3796,28 @@ app.get("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requir
   res.json({ checkins: list });
 });
 
-app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireLeadVetUp, async (req, res) => {
+app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireVetUp, async (req, res) => {
   const flockId = req.query.flockId ? String(req.query.flockId) : null;
   const memPending = roundCheckins.filter((c) => (c.submissionStatus ?? "approved") === "pending_review");
   if (hasDb()) {
     try {
       let sql = `SELECT c.id::text AS id, c.flock_id::text AS "flockId", c.laborer_id::text AS "laborerId",
                         c.at, c.submission_status AS "submissionStatus",
+                        c.photo_url AS "photoUrl",
+                        c.photo_urls AS "photoUrls",
+                        c.coop_temperature_c AS "coopTemperatureC",
+                        COALESCE(c.feed_kg, 0) AS "feedKg",
+                        COALESCE(c.water_l, 0) AS "waterL",
+                        COALESCE(c.mortality_at_checkin, 0) AS "mortalityAtCheckin",
+                        COALESCE(c.mortality_reported_in_mortality_log, false) AS "mortalityReportedInMortalityLog",
                         COALESCE(c.feed_available, false) AS "feedAvailable",
                         COALESCE(c.water_available, false) AS "waterAvailable",
                         COALESCE(c.notes, '') AS notes,
                         COALESCE(u.full_name, u.email, '') AS "laborerName",
-                        f.code AS "flockCode"
+                        f.code AS "flockCode",
+                        c.reviewed_by_user_id::text AS "reviewedByUserId",
+                        c.reviewed_at AS "reviewedAt",
+                        c.review_notes AS "reviewNotes"
                    FROM check_ins c
                    LEFT JOIN users u ON u.id = c.laborer_id
                    LEFT JOIN poultry_flocks f ON f.id = c.flock_id
@@ -3762,7 +3846,7 @@ app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAcc
   });
 });
 
-app.patch("/api/check-ins/:id/review", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireLeadVetUp, async (req, res) => {
+app.patch("/api/check-ins/:id/review", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireVetUp, async (req, res) => {
   const checkinId = String(req.params.id);
   const action = String(req.body?.action ?? "");
   if (action !== "approve" && action !== "reject") {
@@ -7008,6 +7092,7 @@ app.get(
                 p.submitted_at AS "submittedAt",
                 p.on_time AS "onTime",
                 p.flock_id::text AS "flockId",
+                COALESCE(p.accounting_status, 'not_applicable') AS "accountingStatus",
                 COALESCE(u.full_name, u.email, p.user_id::text) AS "workerName",
                 COALESCE(u.role, '') AS "workerRole"
            FROM payroll_impact p
@@ -7032,6 +7117,7 @@ app.get(
         submittedAt: r.submittedAt instanceof Date ? r.submittedAt.toISOString() : r.submittedAt != null ? String(r.submittedAt) : null,
         onTime: r.onTime == null ? null : Boolean(r.onTime),
         flockId: r.flockId != null ? String(r.flockId) : null,
+        accountingStatus: String(r.accountingStatus ?? "not_applicable"),
         workerName: String(r.workerName ?? ""),
         workerRole: String(r.workerRole ?? ""),
       }));
@@ -7047,6 +7133,7 @@ app.get(
           return true;
         }).map((p) => ({
           ...p,
+          accountingStatus: p.accountingStatus ?? "not_applicable",
           workerName: usersById.get(p.userId)?.displayName ?? p.userId,
           workerRole: usersById.get(p.userId)?.role ?? "",
         }));
@@ -7082,6 +7169,7 @@ app.get(
     const u = usersById.get(p.userId);
     return {
       ...p,
+      accountingStatus: p.accountingStatus ?? "not_applicable",
       workerName: u?.displayName ?? p.userId,
       workerRole: u?.role ?? "",
     };
@@ -7104,7 +7192,7 @@ app.get(
   res.json({ entries: enriched, totals });
 });
 
-app.patch("/api/payroll-impact/:id/approve", requireAuth, requireFarmAccess, requirePageAccess("farm_payroll"), requirePayrollApprover, async (req, res) => {
+app.patch("/api/payroll-impact/:id/approve", requireAuth, requireFarmAccess, requirePageAccess("farm_payroll"), requirePayrollPaymentDecisionAccess, async (req, res) => {
   const id = String(req.params.id);
   if (hasDb() && isPersistableUuid(id) && isPersistableUuid(req.authUser.id)) {
     try {
@@ -7145,7 +7233,7 @@ app.patch("/api/payroll-impact/:id/approve", requireAuth, requireFarmAccess, req
   res.json({ entry: p });
 });
 
-app.post("/api/payroll-impact/bulk-approve", requireAuth, requireFarmAccess, requirePageAccess("farm_payroll"), requirePayrollApprover, async (req, res) => {
+app.post("/api/payroll-impact/bulk-approve", requireAuth, requireFarmAccess, requirePageAccess("farm_payroll"), requirePayrollPaymentDecisionAccess, async (req, res) => {
   const body = req.body ?? {};
   const ids = Array.isArray(body.ids) ? body.ids.map(String) : null;
   if (hasDb() && isPersistableUuid(req.authUser.id)) {

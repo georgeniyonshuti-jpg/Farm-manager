@@ -24,6 +24,7 @@ type PayrollRow = {
   onTime: boolean | null;
   workerName: string;
   workerRole: string;
+  accountingStatus?: string;
 };
 
 function monthRange(): { from: string; to: string } {
@@ -48,6 +49,9 @@ export function PayrollImpactPage() {
   const { token, user } = useAuth();
   const { showToast } = useToast();
   const canEditFieldRates = user?.role === "manager" || user?.role === "superuser";
+  const canDecidePayments =
+    user?.role === "superuser"
+    || (user?.role === "manager" && Array.isArray(user.pageAccess) && user.pageAccess.includes("odoo_send"));
   const initial = useMemo(() => monthRange(), []);
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
@@ -239,7 +243,7 @@ export function PayrollImpactPage() {
     <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
         title="Payroll impact"
-        subtitle="Bonuses and deductions from log timing. Approve before payroll closes."
+        subtitle="Bonuses and deductions from log timing. Payment decisions are restricted to Odoo send access."
         action={
           <Link
             to="/farm/checkin-review"
@@ -376,7 +380,7 @@ export function PayrollImpactPage() {
         </button>
         <button
           type="button"
-          disabled={busyId != null || summary.pending === 0}
+          disabled={busyId != null || summary.pending === 0 || !canDecidePayments}
           onClick={() => void approveAllPending()}
           className="rounded bg-emerald-800 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
         >
@@ -434,6 +438,7 @@ export function PayrollImpactPage() {
                   <th className="tbl-num">RWF delta</th>
                   <th>Reason</th>
                   <th>Approved</th>
+                  <th>Accounting</th>
                   <th className="tbl-actions">Action</th>
                 </tr>
               </thead>
@@ -460,8 +465,9 @@ export function PayrollImpactPage() {
                         : <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-800">Pending</span>
                       }
                     </td>
+                    <td className="tbl-badge">{e.accountingStatus ?? "not_applicable"}</td>
                     <td className="tbl-actions">
-                      {e.approvedAt == null ? (
+                      {e.approvedAt == null && canDecidePayments ? (
                         <button
                           type="button"
                           disabled={busyId != null}
@@ -471,7 +477,7 @@ export function PayrollImpactPage() {
                           Approve
                         </button>
                       ) : (
-                        <span className="text-neutral-400">—</span>
+                        <span className="text-neutral-400">{canDecidePayments ? "—" : "Read only"}</span>
                       )}
                     </td>
                   </tr>

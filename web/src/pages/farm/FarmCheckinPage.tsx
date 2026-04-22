@@ -91,14 +91,20 @@ export function CheckinStatusBlock({
 
 function CheckinPhotoBlock({
   minCount,
+  maxCount = 6,
+  allowMultiple = true,
   busy,
+  pickerLabel,
   onPhotos,
 }: {
   minCount: number;
+  maxCount?: number;
+  allowMultiple?: boolean;
   busy: boolean;
+  pickerLabel?: string;
   onPhotos: (urls: string[]) => void;
 }) {
-  const pickerLabel = useLaborerT(
+  const defaultLabel = useLaborerT(
     minCount === 1
       ? "Tap to add photos (1+ required, up to 6)"
       : `Tap to add photos (${minCount}+ required, up to 6)`
@@ -106,8 +112,9 @@ function CheckinPhotoBlock({
   return (
     <PhotoCaptureInput
       minCount={minCount}
-      maxCount={6}
-      pickerLabel={pickerLabel}
+      maxCount={maxCount}
+      allowMultiple={allowMultiple}
+      pickerLabel={pickerLabel ?? defaultLabel}
       onChangeDataUrls={onPhotos}
       disabled={busy}
     />
@@ -125,6 +132,11 @@ export function FarmCheckinPage() {
   const linkAction = useLaborerT("Action center");
   const lblFeedAvail = useLaborerT("Feed is available");
   const lblWaterAvail = useLaborerT("Water is available");
+  const lblCoopTemp = useLaborerT("Coop temperature (°C)");
+  const lblFlockSignPhoto = useLaborerT("Take photo(s) of flock number sign");
+  const lblThermometerPhoto = useLaborerT("Take photo of thermometer");
+  const lblFeedPhoto = useLaborerT("Take photo of available feed");
+  const lblWaterPhoto = useLaborerT("Take photo of available water");
   const lblMort = useLaborerT("Birds lost at this check-in (optional)");
   const lblMortLogged = useLaborerT("Also file in mortality log (affects live count)");
   const lblNotes = useLaborerT("Notes");
@@ -152,7 +164,11 @@ export function FarmCheckinPage() {
     loadDetails,
     loadFlocks,
   } = useFlockFieldContext(token);
-  const [photos, setPhotos] = useState<string[]>([]);
+  const [photosFlockSign, setPhotosFlockSign] = useState<string[]>([]);
+  const [photosThermometer, setPhotosThermometer] = useState<string[]>([]);
+  const [photosFeed, setPhotosFeed] = useState<string[]>([]);
+  const [photosWater, setPhotosWater] = useState<string[]>([]);
+  const [coopTemperatureC, setCoopTemperatureC] = useState("");
   const [feedAvailable, setFeedAvailable] = useState(false);
   const [waterAvailable, setWaterAvailable] = useState(false);
   const [mortalityAtCheckin, setMortalityAtCheckin] = useState("");
@@ -173,8 +189,24 @@ export function FarmCheckinPage() {
     e.preventDefault();
     if (!flockId) return;
     const minP = status?.photosRequiredPerRound ?? 1;
-    if (photos.length < minP) {
-      setSubmitError(`Add at least ${minP} photo(s).`);
+    if (!Number.isFinite(Number(coopTemperatureC))) {
+      setSubmitError("Coop temperature is required.");
+      return;
+    }
+    if (photosFlockSign.length < minP) {
+      setSubmitError(`Add at least ${minP} flock sign photo(s).`);
+      return;
+    }
+    if (photosThermometer.length < 1) {
+      setSubmitError("Add at least one thermometer photo.");
+      return;
+    }
+    if (feedAvailable && photosFeed.length < 1) {
+      setSubmitError("Add at least one feed photo when feed is available.");
+      return;
+    }
+    if (waterAvailable && photosWater.length < 1) {
+      setSubmitError("Add at least one water photo when water is available.");
       return;
     }
     setSubmitError(null);
@@ -186,7 +218,11 @@ export function FarmCheckinPage() {
         method: "POST",
         headers: jsonAuthHeaders(token),
         body: JSON.stringify({
-          photos,
+          photosFlockSign,
+          photosThermometer,
+          photosFeed,
+          photosWater,
+          coopTemperatureC: Number(coopTemperatureC),
           feedAvailable,
           waterAvailable,
           feedKg: 0,
@@ -202,7 +238,11 @@ export function FarmCheckinPage() {
         const msg = (data as { error?: string }).error ?? `Save failed (${res.status})`;
         throw new Error(msg);
       }
-      setPhotos([]);
+      setPhotosFlockSign([]);
+      setPhotosThermometer([]);
+      setPhotosFeed([]);
+      setPhotosWater([]);
+      setCoopTemperatureC("");
       setFeedAvailable(false);
       setWaterAvailable(false);
       setMortalityAtCheckin("");
@@ -348,10 +388,37 @@ export function FarmCheckinPage() {
         onSubmit={(e) => void handleSubmit(e)}
         className="space-y-5 rounded-2xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-sm)] sm:p-5"
       >
+        <div>
+          <label className="mb-1 block text-sm font-medium text-[var(--text-secondary)]" htmlFor="coop-temperature">
+            {lblCoopTemp}
+          </label>
+          <input
+            id="coop-temperature"
+            inputMode="decimal"
+            className="w-full min-h-[48px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 text-lg text-[var(--text-primary)]"
+            value={coopTemperatureC}
+            placeholder="0"
+            onChange={(e) => setCoopTemperatureC(e.target.value)}
+            required
+          />
+        </div>
+
         <CheckinPhotoBlock
           minCount={status?.photosRequiredPerRound ?? 1}
+          maxCount={6}
+          allowMultiple
           busy={busy}
-          onPhotos={setPhotos}
+          pickerLabel={lblFlockSignPhoto}
+          onPhotos={setPhotosFlockSign}
+        />
+
+        <CheckinPhotoBlock
+          minCount={1}
+          maxCount={1}
+          allowMultiple={false}
+          busy={busy}
+          pickerLabel={lblThermometerPhoto}
+          onPhotos={setPhotosThermometer}
         />
 
         <label className="flex items-center gap-3 rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] px-4 py-3 text-sm font-medium text-[var(--text-secondary)] cursor-pointer select-none">
@@ -363,6 +430,16 @@ export function FarmCheckinPage() {
           />
           {lblFeedAvail}
         </label>
+        {feedAvailable ? (
+          <CheckinPhotoBlock
+            minCount={1}
+            maxCount={1}
+            allowMultiple={false}
+            busy={busy}
+            pickerLabel={lblFeedPhoto}
+            onPhotos={setPhotosFeed}
+          />
+        ) : null}
         <label className="flex items-center gap-3 rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] px-4 py-3 text-sm font-medium text-[var(--text-secondary)] cursor-pointer select-none">
           <input
             type="checkbox"
@@ -372,6 +449,16 @@ export function FarmCheckinPage() {
           />
           {lblWaterAvail}
         </label>
+        {waterAvailable ? (
+          <CheckinPhotoBlock
+            minCount={1}
+            maxCount={1}
+            allowMultiple={false}
+            busy={busy}
+            pickerLabel={lblWaterPhoto}
+            onPhotos={setPhotosWater}
+          />
+        ) : null}
         <div>
           <label className="mb-1 block text-sm font-medium text-[var(--text-secondary)]" htmlFor="mort">
             {lblMort}

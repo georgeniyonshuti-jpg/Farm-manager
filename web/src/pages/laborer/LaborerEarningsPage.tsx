@@ -18,6 +18,7 @@ type PayrollRow = {
   submittedAt: string;
   onTime: boolean | null;
   approvedAt: string | null;
+  accountingStatus?: string;
 };
 
 /** Calendar month bounds in Africa/Kigali (matches server payroll days). */
@@ -71,12 +72,14 @@ export function LaborerEarningsPage() {
   const pendingTotalLbl = useLaborerT("Pending approval");
 
   const initial = useMemo(() => kigaliMonthRange(), []);
+  const [from, setFrom] = useState(initial.from);
+  const [to, setTo] = useState(initial.to);
+  const [typeFilter, setTypeFilter] = useState<"all" | "check_in" | "feed_entry">("all");
+  const [approvalFilter, setApprovalFilter] = useState<"all" | "approved" | "pending">("all");
   const [entries, setEntries] = useState<PayrollRow[]>([]);
   const [totals, setTotals] = useState<PayrollTotals | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const approvedRows = useMemo(() => entries.filter((e) => e.approvedAt != null), [entries]);
-  const pendingRows = useMemo(() => entries.filter((e) => e.approvedAt == null), [entries]);
 
   const backHref = useMemo(() => {
     if (user?.role === "vet") return "/dashboard/vet";
@@ -92,8 +95,8 @@ export function LaborerEarningsPage() {
     setLoading(true);
     try {
       const qs = new URLSearchParams({
-        period_start: initial.from,
-        period_end: initial.to,
+        period_start: from,
+        period_end: to,
       });
       const r = await fetch(`${API_BASE_URL}/api/payroll-impact?${qs}`, { headers: readAuthHeaders(token) });
       const d = await r.json();
@@ -106,7 +109,7 @@ export function LaborerEarningsPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, user?.id, initial.from, initial.to]);
+  }, [token, user?.id, from, to]);
 
   useEffect(() => {
     void load();
@@ -118,23 +121,56 @@ export function LaborerEarningsPage() {
     return () => window.removeEventListener("farm:checkin-submitted", onSubmitted);
   }, [load]);
 
+  const filteredEntries = useMemo(() => {
+    return entries.filter((e) => {
+      if (typeFilter !== "all" && e.logType !== typeFilter) return false;
+      if (approvalFilter === "approved" && e.approvedAt == null) return false;
+      if (approvalFilter === "pending" && e.approvedAt != null) return false;
+      return true;
+    });
+  }, [entries, typeFilter, approvalFilter]);
+
   const fallbackTotals = useMemo((): PayrollTotals => {
     let netApproved = 0;
     let netPending = 0;
-    for (const e of entries) {
+    for (const e of filteredEntries) {
       if (e.approvedAt != null) netApproved += e.rwfDelta;
       else netPending += e.rwfDelta;
     }
     return { netAll: netApproved + netPending, netApproved, netPending };
-  }, [entries]);
+  }, [filteredEntries]);
 
-  const displayTotals = totals ?? fallbackTotals;
+  const hasFiltersApplied = typeFilter !== "all" || approvalFilter !== "all";
+  const displayTotals = hasFiltersApplied ? fallbackTotals : (totals ?? fallbackTotals);
+
+  function exportCsv() {
+    const headers = ["id", "logType", "amount", "submittedAt", "approvedAt", "onTime", "accountingStatus", "reason"];
+    const lines = [
+      headers.join(","),
+      ...filteredEntries.map((e) => [
+        e.id,
+        e.logType,
+        String(e.rwfDelta),
+        e.submittedAt,
+        e.approvedAt ?? "",
+        e.onTime == null ? "" : String(e.onTime),
+        e.accountingStatus ?? "",
+        e.reason ?? "",
+      ].map((x) => JSON.stringify(String(x))).join(",")),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `my-earnings-${from}-to-${to}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
 
   return (
     <div className="mx-auto max-w-lg space-y-6">
       <PageHeader
         title={title}
-        subtitle={subtitle}
+        subtitle={`${subtitle} (${from} to ${to})`}
         action={
           <Link to={backHref} className="text-sm font-medium text-emerald-800 hover:underline">
             {back}
@@ -156,18 +192,47 @@ export function LaborerEarningsPage() {
               <TranslatedText text={pendingTotalLbl} />: {formatRwf(displayTotals.netPending)}
             </p>
             <p className="mt-1 text-xs text-emerald-900/80">
-              {approvedRows.length} approved · {pendingRows.length} pending
+              {filteredEntries.filter((e) => e.approvedAt != null).length} approved · {filteredEntries.filter((e) => e.approvedAt == null).length} pending
             </p>
           </div>
         </div>
       ) : null}
 
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="text-xs font-medium text-neutral-600">
+          From
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="mt-1 block rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs" />
+        </label>
+        <label className="text-xs font-medium text-neutral-600">
+          To
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="mt-1 block rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs" />
+        </label>
+        <label className="text-xs font-medium text-neutral-600">
+          Type
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)} className="mt-1 block rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs">
+            <option value="all">All</option>
+            <option value="check_in">Round check-in</option>
+            <option value="feed_entry">Feed entry</option>
+          </select>
+        </label>
+        <label className="text-xs font-medium text-neutral-600">
+          Approval
+          <select value={approvalFilter} onChange={(e) => setApprovalFilter(e.target.value as typeof approvalFilter)} className="mt-1 block rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs">
+            <option value="all">All</option>
+            <option value="approved">Approved</option>
+            <option value="pending">Pending</option>
+          </select>
+        </label>
+        <button type="button" onClick={() => void load()} className="rounded border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium">Apply</button>
+        <button type="button" onClick={exportCsv} className="rounded border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium">Export CSV</button>
+      </div>
+
       {loading && <SkeletonList rows={4} />}
       {error && <ErrorState message={error} onRetry={() => void load()} />}
 
-      {!loading && !error && entries.length === 0 ? <EmptyState title={emptyMsg} /> : null}
+      {!loading && !error && filteredEntries.length === 0 ? <EmptyState title={emptyMsg} /> : null}
 
-      {!loading && !error && entries.length > 0 ? (
+      {!loading && !error && filteredEntries.length > 0 ? (
         <>
           <div className="institutional-table-wrapper overflow-x-auto">
             <table className="institutional-table min-w-[36rem] text-sm">
@@ -178,11 +243,12 @@ export function LaborerEarningsPage() {
                   <th>{colWhen}</th>
                   <th>{colStatus}</th>
                   <th>{colApproved}</th>
+                  <th>Accounting</th>
                   <th>{colReason}</th>
                 </tr>
               </thead>
               <tbody>
-                {[...approvedRows, ...pendingRows].map((e) => (
+                {[...filteredEntries.filter((e) => e.approvedAt != null), ...filteredEntries.filter((e) => e.approvedAt == null)].map((e) => (
                   <tr key={e.id}>
                     <td>{e.logType}</td>
                     <td className={e.rwfDelta >= 0 ? "text-emerald-800" : "text-red-800"}>
@@ -191,6 +257,7 @@ export function LaborerEarningsPage() {
                     <td className="font-mono text-xs">{e.submittedAt}</td>
                     <td>{e.onTime == null ? "—" : e.onTime ? yes : no}</td>
                     <td>{e.approvedAt ? yes : pending}</td>
+                    <td>{e.accountingStatus ?? "not_applicable"}</td>
                     <td className="max-w-[14rem] truncate">{e.reason}</td>
                   </tr>
                 ))}

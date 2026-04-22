@@ -150,7 +150,7 @@ export function LogScheduleSettingsPage() {
     <div className="relative mx-auto max-w-5xl space-y-6">
       <PageHeader
         title="Log schedule (payroll windows)"
-        subtitle="On-time submissions inside the window earn +500 RWF; outside window −300 RWF (demo rates)."
+        subtitle="On-time and late earnings are applied using the current payroll rates set by management."
         action={
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
             <span className="font-semibold">Server time (Kigali): </span>

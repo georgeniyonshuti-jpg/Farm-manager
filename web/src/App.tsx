@@ -226,7 +226,7 @@ function AppRoutes() {
             <Route
               path="checkin-review"
               element={
-                <ProtectedRoute roles={["manager", "vet_manager", "superuser"]}>
+                <ProtectedRoute roles={["vet", "manager", "vet_manager", "superuser"]}>
                   <FarmCheckinReviewPage />
                 </ProtectedRoute>
               }
