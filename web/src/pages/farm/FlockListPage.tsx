@@ -60,6 +60,12 @@ type BarnSummary = {
   mortality7d: number;
   avgFcr: number | null;
 };
+type FlockRecoveryOverview = {
+  failedFlocks: Array<{ id: string; label: string; status?: string; failedReason?: string; failedAt?: string }>;
+  unexpectedStatusFlocks: Array<{ id: string; label: string; status?: string }>;
+  orphanReferences: Array<{ source: string; count: number; sampleIds: string[] }>;
+  summary?: { failedCount?: number; unexpectedStatusCount?: number; orphanReferenceCount?: number };
+};
 
 export function FlockListPage() {
   const { token, user } = useAuth();
@@ -80,6 +86,8 @@ export function FlockListPage() {
   const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null);
   const [retryBusyId, setRetryBusyId] = useState<string | null>(null);
   const [deleteFailedBusyId, setDeleteFailedBusyId] = useState<string | null>(null);
+  const [recoveryOverview, setRecoveryOverview] = useState<FlockRecoveryOverview | null>(null);
+  const [recoveryLoading, setRecoveryLoading] = useState(false);
   const [createForm, setCreateForm] = useState({
     placementDate: new Date().toISOString().slice(0, 10),
     initialCount: "",
@@ -125,6 +133,30 @@ export function FlockListPage() {
         })
       );
       setFlocks(enriched);
+      if (user?.role === "superuser") {
+        setRecoveryLoading(true);
+        try {
+          const rr = await fetch(`${API_BASE_URL}/api/flocks/recovery-overview`, { headers: readAuthHeaders(token) });
+          const rd = await rr.json().catch(() => ({}));
+          if (rr.ok) {
+            setRecoveryOverview({
+              failedFlocks: (rd as { failedFlocks?: FlockRecoveryOverview["failedFlocks"] }).failedFlocks ?? [],
+              unexpectedStatusFlocks:
+                (rd as { unexpectedStatusFlocks?: FlockRecoveryOverview["unexpectedStatusFlocks"] }).unexpectedStatusFlocks ?? [],
+              orphanReferences: (rd as { orphanReferences?: FlockRecoveryOverview["orphanReferences"] }).orphanReferences ?? [],
+              summary: (rd as { summary?: FlockRecoveryOverview["summary"] }).summary,
+            });
+          } else {
+            setRecoveryOverview(null);
+          }
+        } catch {
+          setRecoveryOverview(null);
+        } finally {
+          setRecoveryLoading(false);
+        }
+      } else {
+        setRecoveryOverview(null);
+      }
       try {
         const br = await fetch(`${API_BASE_URL}/api/farm/ops-board`, { headers: readAuthHeaders(token) });
         const bd = await br.json().catch(() => ({ barns: [], flocks: [], insights: [] }));
@@ -395,6 +427,49 @@ export function FlockListPage() {
           <p className="font-semibold text-[var(--text-primary)]">Farm health score: {farmHealthScore}/100</p>
           {!!insights.length ? <p className="mt-1 text-[var(--text-secondary)]">{insights[0]}</p> : null}
         </div>
+      ) : null}
+      {user?.role === "superuser" ? (
+        <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 text-sm shadow-[var(--shadow-sm)]">
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-semibold text-[var(--text-primary)]">Data repair</p>
+            <button
+              type="button"
+              onClick={() => void load()}
+              className="rounded border border-[var(--border-color)] bg-[var(--surface-input)] px-2 py-1 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
+            >
+              Refresh
+            </button>
+          </div>
+          {recoveryLoading ? (
+            <p className="mt-2 text-xs text-[var(--text-muted)]">Loading recovery signals…</p>
+          ) : recoveryOverview ? (
+            <div className="mt-2 space-y-2 text-xs">
+              <p className="text-[var(--text-secondary)]">
+                Failed: <strong>{recoveryOverview.summary?.failedCount ?? recoveryOverview.failedFlocks.length}</strong> ·
+                Unexpected statuses: <strong>{recoveryOverview.summary?.unexpectedStatusCount ?? recoveryOverview.unexpectedStatusFlocks.length}</strong> ·
+                Orphan refs: <strong>{recoveryOverview.summary?.orphanReferenceCount ?? 0}</strong>
+              </p>
+              {recoveryOverview.orphanReferences.length > 0 ? (
+                <ul className="space-y-1">
+                  {recoveryOverview.orphanReferences.map((r) => (
+                    <li key={r.source} className="text-amber-300">
+                      {r.source}: {r.count} orphan refs {r.sampleIds.length ? `(${r.sampleIds.slice(0, 3).join(", ")})` : ""}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-emerald-400">No orphan references detected.</p>
+              )}
+              {recoveryOverview.unexpectedStatusFlocks.length > 0 ? (
+                <p className="text-amber-300">
+                  Unexpected status flocks: {recoveryOverview.unexpectedStatusFlocks.slice(0, 5).map((f) => `${f.label}(${f.status})`).join(", ")}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-[var(--text-muted)]">Recovery overview unavailable.</p>
+          )}
+        </section>
       ) : null}
       {canCreateFlock ? (
         <div className="flex flex-wrap items-center gap-2">
