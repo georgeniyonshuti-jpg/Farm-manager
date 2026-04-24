@@ -2877,7 +2877,9 @@ app.get("/api/flocks", requireAuth, requireFarmAccess, requireAnyPageAccess(["fa
   }
   const includeDepleted = String(req.query.includeDepleted ?? "").toLowerCase() === "true";
   const includeArchived = String(req.query.includeArchived ?? "").toLowerCase() === "true";
+  const includeFailed = String(req.query.includeFailed ?? "").toLowerCase() === "true";
   const canArch = canViewArchivedFlocks(req.authUser);
+  const canSeeFailed = req.authUser?.role === "superuser";
   // FIX: embed check-in urgency per flock for list + detail views
   const flocks = [...flocksById.values()]
     .map((f) => {
@@ -2887,7 +2889,9 @@ app.get("/api/flocks", requireAuth, requireFarmAccess, requireAnyPageAccess(["fa
     .filter((f) => {
       const isActive = String(f.status) === "active";
       const isArchived = String(f.status) === "archived";
+      const isFailed = String(f.status) === "failed";
       if (isActive) return true;
+      if (isFailed) return canSeeFailed && includeFailed;
       if (isArchived) {
         if (!canArch) return false;
         return includeArchived || includeDepleted;
@@ -3035,12 +3039,123 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     const pgCode = typeof e === "object" && e && "code" in e ? String(e.code) : "";
+    const failedId = `flk_failed_${crypto.randomBytes(6).toString("hex")}`;
+    const failedRow = {
+      id: failedId,
+      label: `FAILED-${failedId.slice(-6).toUpperCase()}`,
+      code: null,
+      placementDate,
+      initialCount: Math.max(1, Math.floor(Number(initialCount) || 1)),
+      breedCode,
+      initialWeightKg: 0,
+      targetWeightKg,
+      status: "failed",
+      targetSlaughterDayMin: 45,
+      targetSlaughterDayMax: 50,
+      checkinBands: null,
+      photosRequiredPerRound: 1,
+      failedReason: msg,
+      failedAt: new Date().toISOString(),
+      createDraft: {
+        placementDate,
+        initialCount: Math.max(1, Math.floor(Number(initialCount) || 1)),
+        breedCode,
+        targetWeightKg,
+        purchaseCostRwf,
+        costPerChickRwf,
+        purchaseSupplier,
+        purchaseDate,
+      },
+    };
+    flocksById.set(failedId, failedRow);
     console.error("[ERROR]", "[db] POST /api/flocks:", msg, pgCode ? `(pg: ${pgCode})` : "");
     res.status(503).json({
       error: "Unable to create flock right now.",
+      failedFlockId: failedId,
       ...(process.env.NODE_ENV !== "production" ? { detail: msg, pgCode: pgCode || undefined } : {}),
     });
   }
+});
+
+app.post("/api/flocks/:id/retry-create", requireAuth, requireFarmAccess, requireSuperuser, requirePageAccess("farm_flocks"), requireAction("flock.create"), async (req, res) => {
+  const id = String(req.params.id ?? "").trim();
+  const f = flocksById.get(id);
+  if (!f || String(f.status) !== "failed") {
+    res.status(404).json({ error: "Failed flock not found" });
+    return;
+  }
+  const draft = f.createDraft ?? {};
+  const placementDateRaw = String(draft.placementDate ?? "").trim();
+  const placementDate = /^\d{4}-\d{2}-\d{2}$/.test(placementDateRaw) ? placementDateRaw : "";
+  const initialCount = Number(draft.initialCount);
+  const breedCode = String(draft.breedCode ?? "").trim().toLowerCase();
+  const targetWeightKg = draft.targetWeightKg == null || draft.targetWeightKg === "" ? null : Number(draft.targetWeightKg);
+  const purchaseCostRwf = draft.purchaseCostRwf == null || draft.purchaseCostRwf === "" ? null : Number(draft.purchaseCostRwf);
+  const costPerChickRwf = draft.costPerChickRwf == null || draft.costPerChickRwf === "" ? null : Number(draft.costPerChickRwf);
+  const purchaseSupplier = String(draft.purchaseSupplier ?? "").trim() || null;
+  const purchaseDateRaw = String(draft.purchaseDate ?? "").trim();
+  const purchaseDate = /^\d{4}-\d{2}-\d{2}$/.test(purchaseDateRaw) ? purchaseDateRaw : null;
+  if (!placementDate || !Number.isFinite(initialCount) || initialCount <= 0 || !breedCode) {
+    res.status(400).json({ error: "Failed flock draft is incomplete. Delete it and create a fresh flock." });
+    return;
+  }
+  try {
+    if (!hasDb()) {
+      res.status(503).json({ error: "Database unavailable. Retry later." });
+      return;
+    }
+    await ensurePoultryFlockCodeSequence();
+    const inserted = await dbQuery(
+      `INSERT INTO poultry_flocks
+        (breed_code, placement_date, initial_count, target_weight_kg, status, code,
+         purchase_cost_rwf, cost_per_chick_rwf, purchase_supplier, purchase_date)
+       VALUES ($1, $2::date, $3, $4, 'active',
+               'FL-' || lpad(nextval('poultry_flock_code_seq')::text, 6, '0'),
+               $5, $6, $7, $8::date)
+       RETURNING id::text AS id,
+                 COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
+                 code`,
+      [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, purchaseCostRwf, costPerChickRwf, purchaseSupplier, purchaseDate]
+    );
+    const createdId = String(inserted.rows[0]?.id ?? "");
+    const createdCode = inserted.rows[0]?.code != null ? String(inserted.rows[0].code) : null;
+    const createdLabel = String(inserted.rows[0]?.label ?? createdCode ?? createdId);
+    flocksById.delete(id);
+    flocksById.set(createdId, {
+      id: createdId,
+      label: createdLabel,
+      code: createdCode,
+      placementDate,
+      initialCount: Math.floor(initialCount),
+      breedCode,
+      initialWeightKg: 0,
+      targetWeightKg,
+      status: "active",
+      targetSlaughterDayMin: 45,
+      targetSlaughterDayMax: 50,
+      checkinBands: null,
+      photosRequiredPerRound: 1,
+    });
+    appendAudit(req.authUser.id, req.authUser.role, "flock.retry_create", "flock", createdId, {
+      fromFailedFlockId: id,
+    });
+    res.json({ ok: true, flock: flocksById.get(createdId), fromFailedFlockId: id });
+  } catch (e) {
+    console.error("[ERROR]", "[db] POST /api/flocks/:id/retry-create:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Retry create failed. Please try again." });
+  }
+});
+
+app.delete("/api/flocks/:id/failed", requireAuth, requireFarmAccess, requireSuperuser, requirePageAccess("farm_flocks"), async (req, res) => {
+  const id = String(req.params.id ?? "").trim();
+  const f = flocksById.get(id);
+  if (!f || String(f.status) !== "failed") {
+    res.status(404).json({ error: "Failed flock not found" });
+    return;
+  }
+  flocksById.delete(id);
+  appendAudit(req.authUser.id, req.authUser.role, "flock.failed_delete", "flock", id, {});
+  res.json({ ok: true, deletedFailedFlockId: id });
 });
 
 app.delete("/api/flocks/:id/purge", requireAuth, requireFarmAccess, requireSuperuser, requirePageAccess("farm_flocks"), async (req, res) => {

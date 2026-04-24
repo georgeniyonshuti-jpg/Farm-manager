@@ -45,6 +45,7 @@ type FlockRow = {
   timeStatus?: { label: string; severity: "healthy" | "warning" | "critical" | "watch"; overdueHours: number };
   trends?: { mortality: string; weight: string; fcr: string };
   alerts?: string[];
+  failedReason?: string;
   projections?: {
     projectedHarvestWeightKg?: number | null;
     projectedHarvestDeltaPct?: number | null;
@@ -77,6 +78,8 @@ export function FlockListPage() {
   const [showCreateFlock, setShowCreateFlock] = useState(false);
   const [purgeBusyId, setPurgeBusyId] = useState<string | null>(null);
   const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null);
+  const [retryBusyId, setRetryBusyId] = useState<string | null>(null);
+  const [deleteFailedBusyId, setDeleteFailedBusyId] = useState<string | null>(null);
   const [createForm, setCreateForm] = useState({
     placementDate: new Date().toISOString().slice(0, 10),
     initialCount: "",
@@ -93,7 +96,7 @@ export function FlockListPage() {
     try {
       const listQ =
         user?.role === "superuser" || user?.role === "manager" || user?.role === "vet_manager"
-          ? "?includeArchived=true"
+          ? `?includeArchived=true${user?.role === "superuser" ? "&includeFailed=true" : ""}`
           : "";
       const r = await fetch(`${API_BASE_URL}/api/flocks${listQ}`, { headers: readAuthHeaders(token) });
       const d = await r.json();
@@ -318,6 +321,46 @@ export function FlockListPage() {
       showToast("error", e instanceof Error ? e.message : "Purge failed");
     } finally {
       setPurgeBusyId(null);
+    }
+  }
+
+  async function retryFailedFlock(flockId: string, label: string) {
+    if (user?.role !== "superuser") return;
+    setRetryBusyId(flockId);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/retry-create`, {
+        method: "POST",
+        headers: jsonAuthHeaders(token),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Retry create failed");
+      showToast("success", `${label} retried and recreated`);
+      await load();
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Retry create failed");
+    } finally {
+      setRetryBusyId(null);
+    }
+  }
+
+  async function deleteFailedFlock(flockId: string, label: string) {
+    if (user?.role !== "superuser") return;
+    const confirmPhrase = window.prompt(`Type DELETE FAILED to remove ${label}`);
+    if (confirmPhrase !== "DELETE FAILED") return;
+    setDeleteFailedBusyId(flockId);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/failed`, {
+        method: "DELETE",
+        headers: jsonAuthHeaders(token),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Delete failed flock failed");
+      showToast("success", `${label} removed`);
+      await load();
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Delete failed flock failed");
+    } finally {
+      setDeleteFailedBusyId(null);
     }
   }
 
@@ -558,9 +601,15 @@ export function FlockListPage() {
                   {visibleFlocks.map((f) => (
                     <tr key={f.id}>
                       <td className="whitespace-nowrap">
-                        <Link to={`/farm/flocks/${f.id}`} className="font-semibold text-emerald-800 hover:underline">
-                          {f.label}
-                        </Link>
+                        {f.status === "failed" ? (
+                          <span className="font-semibold text-red-300" title={f.failedReason ?? "Creation failed"}>
+                            {f.label}
+                          </span>
+                        ) : (
+                          <Link to={`/farm/flocks/${f.id}`} className="font-semibold text-emerald-800 hover:underline">
+                            {f.label}
+                          </Link>
+                        )}
                       </td>
                       <td className="tbl-num">{f.ageDays ?? "—"}</td>
                       <td className="tbl-num">{f.intervalHours ?? "—"}</td>
@@ -588,10 +637,15 @@ export function FlockListPage() {
                               Archived
                             </span>
                           ) : null}
+                          {f.status === "failed" ? (
+                            <span className="inline-flex rounded-full border border-red-500/35 bg-red-500/12 px-1.5 py-0.5 text-[10px] font-semibold text-red-300">
+                              Failed create
+                            </span>
+                          ) : null}
                           {f.withdrawalActive ? <span className="inline-flex rounded-full border border-red-500/30 bg-red-500/12 px-1.5 py-0.5 text-[10px] font-semibold text-red-300">Withdrawal</span> : null}
                           {(f.overdueRounds ?? 0) > 0 ? <span className="inline-flex rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">Overdue ×{f.overdueRounds}</span> : null}
                           {(f.alerts?.length ?? 0) > 0 ? <span className="text-[10px] text-amber-800">{f.alerts?.[0]}</span> : null}
-                          {!f.withdrawalActive && !(f.overdueRounds) && !(f.alerts?.length) && f.status !== "archived" ? (
+                          {!f.withdrawalActive && !(f.overdueRounds) && !(f.alerts?.length) && f.status !== "archived" && f.status !== "failed" ? (
                             <span className="text-[var(--text-muted)]">—</span>
                           ) : null}
                         </div>
@@ -608,7 +662,7 @@ export function FlockListPage() {
                               Slaughter
                             </Link>
                           ) : null}
-                          {user?.role === "superuser" && f.status !== "archived" ? (
+                          {user?.role === "superuser" && f.status !== "archived" && f.status !== "failed" ? (
                             <button
                               type="button"
                               disabled={archiveBusyId === f.id}
@@ -621,11 +675,31 @@ export function FlockListPage() {
                           {user?.role === "superuser" ? (
                             <button
                               type="button"
-                              disabled={purgeBusyId === f.id}
+                              disabled={purgeBusyId === f.id || f.status === "failed"}
                               onClick={() => void purgeFlock(f.id, f.label)}
                               className="rounded border border-red-500/35 px-1.5 py-0.5 text-[10px] text-red-300 hover:bg-red-500/10 disabled:opacity-60"
                             >
                               {purgeBusyId === f.id ? "…" : "Purge"}
+                            </button>
+                          ) : null}
+                          {user?.role === "superuser" && f.status === "failed" ? (
+                            <button
+                              type="button"
+                              disabled={retryBusyId === f.id}
+                              onClick={() => void retryFailedFlock(f.id, f.label)}
+                              className="rounded border border-emerald-500/35 px-1.5 py-0.5 text-[10px] text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-60"
+                            >
+                              {retryBusyId === f.id ? "…" : "Retry create"}
+                            </button>
+                          ) : null}
+                          {user?.role === "superuser" && f.status === "failed" ? (
+                            <button
+                              type="button"
+                              disabled={deleteFailedBusyId === f.id}
+                              onClick={() => void deleteFailedFlock(f.id, f.label)}
+                              className="rounded border border-red-500/35 px-1.5 py-0.5 text-[10px] text-red-300 hover:bg-red-500/10 disabled:opacity-60"
+                            >
+                              {deleteFailedBusyId === f.id ? "…" : "Delete failed"}
                             </button>
                           ) : null}
                           {flockActionPresentation(user, "treatment.execute").mode !== "enabled" &&
