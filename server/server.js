@@ -2867,7 +2867,7 @@ async function syncFlocksFromDbToMemory() {
   rebuildPayrollMissedKeysFromLoadedPayroll();
 }
 
-app.get("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_flocks"), requireAction("flock.view"), async (req, res) => {
+app.get("/api/flocks", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_flocks", "farm_checkin", "farm_feed"]), requireAction("flock.view"), async (req, res) => {
   if (hasDb()) {
     try {
       await syncFlocksFromDbToMemory();
@@ -2885,7 +2885,9 @@ app.get("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_f
       return { ...f, birdsLiveEstimate };
     })
     .filter((f) => {
+      const isActive = String(f.status) === "active";
       const isArchived = String(f.status) === "archived";
+      if (isActive) return true;
       if (isArchived) {
         if (!canArch) return false;
         return includeArchived || includeDepleted;
@@ -4980,7 +4982,7 @@ app.get("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requ
   }
 });
 
-app.get("/api/flocks/:id/performance-summary", requireAuth, requireFarmAccess, requirePageAccess("farm_flocks"), requireAction("flock.view"), async (req, res) => {
+app.get("/api/flocks/:id/performance-summary", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_flocks", "farm_checkin", "farm_feed"]), requireAction("flock.view"), async (req, res) => {
   const f = getFlockForApi(req, res);
   if (!f) return;
   let summary = null;
