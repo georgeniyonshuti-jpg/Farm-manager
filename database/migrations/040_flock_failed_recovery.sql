@@ -30,5 +30,4 @@ CREATE INDEX IF NOT EXISTS idx_poultry_flocks_failed_at
   WHERE failed_at IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_poultry_flocks_failed_status
-  ON poultry_flocks (status)
-  WHERE status::text = 'failed';
+  ON poultry_flocks (status);
