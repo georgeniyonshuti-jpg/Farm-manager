@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
 import { roleAtLeast } from "../../auth/permissions";
@@ -142,7 +143,13 @@ export function AccountingApprovalsPage() {
   const { token, user } = useAuth();
   const { showToast } = useToast();
   const isManager = roleAtLeast(user, "manager");
+  const [searchParams] = useSearchParams();
   const [tab, setTab] = useState<Tab>("action");
+
+  useEffect(() => {
+    const t = searchParams.get("tab");
+    if (t === "action" || t === "inbox" || t === "sync" || t === "advanced") setTab(t);
+  }, [searchParams]);
 
   // Action queue
   const [actionQueue, setActionQueue] = useState<ActionQueueItem[]>([]);
@@ -703,15 +710,15 @@ export function AccountingApprovalsPage() {
                         </span>
                       </td>
                       <td className="px-4 py-2.5">
-                        <OdooSyncBadge status={row.status === "sent" ? "sent_to_odoo" : row.status === "failed" ? "failed" : "approved"} />
+                        <OdooSyncBadge status="approved" outboxStatus={row.status} />
                       </td>
                       <td className="px-4 py-2.5 font-mono text-xs text-[var(--text-secondary)]">{row.odooMoveName || "—"}</td>
                       <td className="px-4 py-2.5 text-center text-[var(--text-muted)]">{row.attempts}</td>
                       <td className="px-4 py-2.5 text-xs text-[var(--text-muted)]">{row.lastAttemptedAt ? fmtDate(row.lastAttemptedAt) : "—"}</td>
                       <td className="px-4 py-2.5 space-y-1">
-                        {(row.status === "failed" || row.status === "pending") && (
+                        {(row.status === "failed" || row.status === "pending" || row.status === "processing") && (
                           <button onClick={() => retryOutbox(row.id)} className="text-xs text-[var(--primary-color)] hover:underline font-medium">
-                            {row.status === "pending" ? "Resend" : "Retry"}
+                            {row.status === "pending" || row.status === "processing" ? "Resend" : "Retry"}
                           </button>
                         )}
                         {row.lastError && (
@@ -935,7 +942,9 @@ function ActionQueueCard({
   onSave: () => void; onResend: () => void;
   tone: "red" | "blue" | "amber";
 }) {
-  const canResend = item.outboxId != null && item.outboxStatus === "failed";
+  const canResend =
+    item.outboxId != null &&
+    ["failed", "pending", "processing"].includes(item.outboxStatus);
   const traceHref = `${API_BASE_URL}/api/accounting-approvals/trace?sourceTable=${encodeURIComponent(item.sourceTable)}&sourceId=${encodeURIComponent(item.sourceId)}`;
   const borderCls = {
     red: "border-red-500/20 bg-[var(--surface-card)]",
@@ -952,7 +961,11 @@ function ActionQueueCard({
             <span className={["text-[11px] font-semibold border px-2 py-0.5 rounded-full", eventTypeBadgeColor(item.eventType)].join(" ")}>
               {eventTypeLabel(item.eventType)}
             </span>
-            <OdooSyncBadge status={item.outboxStatus === "failed" ? "failed" : item.sourceStatus === "pending_approval" ? "pending_approval" : "approved"} />
+            <OdooSyncBadge
+              status={item.sourceStatus}
+              outboxStatus={item.outboxStatus}
+              approvalsHref="/farm/accounting-approvals"
+            />
           </div>
           <div className="font-medium text-sm text-[var(--text-primary)]">{item.summary.label}</div>
           <div className="text-xs text-[var(--text-muted)]">{item.summary.detail}</div>

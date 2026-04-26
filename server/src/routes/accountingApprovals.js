@@ -521,8 +521,8 @@ router.post("/odoo-outbox/:id/retry", async (req, res) => {
     if (!canResendOutboxByOwnership(req.authUser, row)) {
       return res.status(403).json({ error: "Only superuser, users with Odoo send access, or the original approver can resend this item." });
     }
-    if (!["failed", "pending"].includes(String(row.status ?? ""))) {
-      return res.status(400).json({ error: "Only pending or failed items can be resent." });
+    if (!["failed", "pending", "processing"].includes(String(row.status ?? ""))) {
+      return res.status(400).json({ error: "Only pending, processing, or failed items can be resent." });
     }
     const result = await retryOutboxRow(req.params.id);
     res.json({ ok: true, ...result });
@@ -1149,7 +1149,7 @@ router.get("/action-queue", async (req, res) => {
            LEFT JOIN odoo_sync_outbox o ON o.source_table = 'farm_inventory_transactions' AND o.source_id = t.id::text
           WHERE t.transaction_type = 'procurement_receipt'
             AND COALESCE(t.accounting_status, 'pending_approval') NOT IN ('sent_to_odoo', 'not_applicable')
-            AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
+            AND (o.status IS NULL OR o.status NOT IN ('sent', 'cancelled'))
           ORDER BY t.recorded_at DESC LIMIT 100`
       ),
       dbQuery(
@@ -1173,7 +1173,7 @@ router.get("/action-queue", async (req, res) => {
            JOIN medicine_inventory m ON m.id = l.medicine_id
            LEFT JOIN odoo_sync_outbox o ON o.source_table = 'medicine_lots' AND o.source_id = l.id::text
           WHERE COALESCE(l.accounting_status, 'pending_approval') NOT IN ('sent_to_odoo', 'not_applicable')
-            AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
+            AND (o.status IS NULL OR o.status NOT IN ('sent', 'cancelled'))
           ORDER BY l.received_at DESC LIMIT 100`
       ),
       dbQuery(
@@ -1197,7 +1197,7 @@ router.get("/action-queue", async (req, res) => {
            LEFT JOIN poultry_flocks f ON f.id::text = s.flock_id
            LEFT JOIN odoo_sync_outbox o ON o.source_table = 'flock_slaughter_events' AND o.source_id = s.id::text
           WHERE COALESCE(s.accounting_status, 'pending_approval') NOT IN ('sent_to_odoo', 'not_applicable')
-            AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
+            AND (o.status IS NULL OR o.status NOT IN ('sent', 'cancelled'))
           ORDER BY s.at DESC LIMIT 100`
       ),
       dbQuery(
@@ -1223,7 +1223,7 @@ router.get("/action-queue", async (req, res) => {
            LEFT JOIN odoo_sync_outbox o ON o.source_table = 'poultry_sales_orders' AND o.source_id = s.id::text
           WHERE COALESCE(s.accounting_status, 'pending_approval') NOT IN ('sent_to_odoo', 'not_applicable')
             AND s.submission_status != 'rejected'
-            AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
+            AND (o.status IS NULL OR o.status NOT IN ('sent', 'cancelled'))
           ORDER BY s.order_date DESC LIMIT 100`
       ),
       dbQuery(
@@ -1248,7 +1248,7 @@ router.get("/action-queue", async (req, res) => {
            LEFT JOIN odoo_sync_outbox o ON o.source_table = 'flock_mortality_events' AND o.source_id = m.id::text
           WHERE COALESCE(m.accounting_status, 'pending_approval') NOT IN ('sent_to_odoo', 'not_applicable')
             AND m.count > 0
-            AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
+            AND (o.status IS NULL OR o.status NOT IN ('sent', 'cancelled'))
           ORDER BY m.at DESC LIMIT 100`
       ),
       dbQuery(
@@ -1274,7 +1274,7 @@ router.get("/action-queue", async (req, res) => {
           WHERE f.bio_asset_accounting_status IS NOT NULL
             AND f.bio_asset_accounting_status NOT IN ('sent_to_odoo', 'not_applicable')
             AND (f.purchase_cost_rwf IS NOT NULL OR f.cost_per_chick_rwf IS NOT NULL)
-            AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
+            AND (o.status IS NULL OR o.status NOT IN ('sent', 'cancelled'))
           ORDER BY f.placement_date DESC LIMIT 100`
       ),
       dbQuery(
@@ -1297,7 +1297,7 @@ router.get("/action-queue", async (req, res) => {
            FROM payroll_period_closures p
            LEFT JOIN odoo_sync_outbox o ON o.source_table = 'payroll_period_closures' AND o.source_id = p.id::text
           WHERE p.accounting_status NOT IN ('sent_to_odoo', 'not_applicable')
-            AND (o.status IS NULL OR o.status NOT IN ('sent', 'processing'))
+            AND (o.status IS NULL OR o.status NOT IN ('sent', 'cancelled'))
           ORDER BY p.period_start DESC LIMIT 60`
       ),
     ]);
@@ -1313,7 +1313,7 @@ router.get("/action-queue", async (req, res) => {
     ].map(normalizeQueueRow);
 
     // Sort: failed first, then pending_approval, then not_queued, by recency
-    const statusPriority = { failed: 0, pending_approval: 1, not_queued: 2 };
+    const statusPriority = { failed: 0, processing: 0, pending_approval: 1, not_queued: 2 };
     all.sort((a, b) => {
       const pa = statusPriority[a.outboxStatus] ?? 3;
       const pb = statusPriority[b.outboxStatus] ?? 3;
@@ -1352,8 +1352,8 @@ router.post("/action-queue/:outboxId/resend-now", async (req, res) => {
     if (!canResendOutboxByOwnership(req.authUser, outboxRow)) {
       return res.status(403).json({ error: "Only superuser, users with Odoo send access, or the original approver can resend this item." });
     }
-    if (!["failed", "pending"].includes(String(outboxRow.status ?? ""))) {
-      return res.status(400).json({ error: "Only pending or failed items can be resent." });
+    if (!["failed", "pending", "processing"].includes(String(outboxRow.status ?? ""))) {
+      return res.status(400).json({ error: "Only pending, processing, or failed items can be resent." });
     }
     await dbQuery(
       `UPDATE odoo_sync_outbox

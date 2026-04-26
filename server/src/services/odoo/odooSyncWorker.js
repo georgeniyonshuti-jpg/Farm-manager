@@ -13,10 +13,11 @@
  */
 
 import { dispatchFarmAccountingEvent } from "./odooAccounting.js";
-import { logOdooCall, mapOdooError } from "./odooHelpers.js";
+import { isTransientConnectionError, logOdooCall, mapOdooError } from "./odooHelpers.js";
 
 const MAX_ATTEMPTS = 5;
 const BACKOFF_BASE_MS = 30_000; // 30 s, doubles each attempt
+const TRANSIENT_RETRY_MINUTES = 2;
 
 let _dbQuery = null;
 let _hasDb = null;
@@ -68,6 +69,17 @@ export async function processOdooSyncOutbox(limit = 20) {
   let processed = 0;
   let succeeded = 0;
   let failed = 0;
+
+  try {
+    await dbQuery(
+      `UPDATE odoo_sync_outbox
+          SET status = 'pending', next_retry_at = now(), updated_at = now()
+        WHERE status = 'processing'
+          AND (last_attempted_at IS NULL OR last_attempted_at < now() - interval '15 minutes')`
+    );
+  } catch (e) {
+    console.error("[ERROR]", "[odoo-worker] stale processing reset:", e instanceof Error ? e.message : e);
+  }
 
   let rows;
   try {
@@ -138,6 +150,18 @@ export async function processOdooSyncOutbox(limit = 20) {
       succeeded += 1;
     } catch (err) {
       const errMsg = mapOdooError(err);
+      if (isTransientConnectionError(errMsg)) {
+        // Do not count toward MAX_ATTEMPTS; revert the attempts increment from "mark processing"
+        await dbQuery(
+          `UPDATE odoo_sync_outbox
+              SET status = 'pending', last_error = $2, attempts = $3, next_retry_at = now() + $4::interval, updated_at = now()
+            WHERE id = $1::uuid`,
+          [row.id, errMsg, row.attempts, `${TRANSIENT_RETRY_MINUTES} minutes`]
+        ).catch(() => {});
+        logOdooCall(`worker.transient(${action})`, errMsg, false);
+        failed += 1;
+        continue;
+      }
       const nextAttempt = row.attempts + 1;
       const backoff = BACKOFF_BASE_MS * (2 ** Math.min(nextAttempt - 1, 6));
       await dbQuery(
@@ -224,8 +248,8 @@ export async function retryOutboxRow(outboxId) {
   if (!hasDb()) return;
   await dbQuery(
     `UPDATE odoo_sync_outbox
-        SET status = 'pending', next_retry_at = now(), last_error = NULL, updated_at = now()
-      WHERE id = $1::uuid AND status = 'failed'`,
+        SET status = 'pending', next_retry_at = now(), last_error = NULL, attempts = 0, updated_at = now()
+      WHERE id = $1::uuid AND status IN ('failed', 'pending', 'processing')`,
     [outboxId]
   );
   return processOdooSyncOutbox(1);

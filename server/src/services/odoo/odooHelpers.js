@@ -28,6 +28,29 @@ export function mapOdooError(error) {
 }
 
 /**
+ * True for likely network/availability issues — worker should not burn MAX_ATTEMPTS
+ * the same way as validation/business errors.
+ * @param {string} message Mapped message from mapOdooError (or similar).
+ */
+export function isTransientConnectionError(message) {
+  const m = String(message ?? "").toLowerCase();
+  if (!m) return false;
+  return (
+    m.includes("connection timed out") ||
+    m.includes("socket hang up") ||
+    m.includes("econnreset") ||
+    m.includes("etimedout") ||
+    m.includes("econnrefused") ||
+    m.includes("enotfound") ||
+    m.includes("name or service not known") ||
+    m.includes("unable to resolve odoo host") ||
+    m.includes("getaddrinfo") ||
+    m.includes("network error") ||
+    m.includes("eai_again")
+  );
+}
+
+/**
  * Console logger for Odoo API actions.
  * @param {string} action
  * @param {unknown} result

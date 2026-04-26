@@ -165,14 +165,41 @@ function useWidgetVisibility(token: string | null, _isSuperuser: boolean) {
 
 // ─── Main component ────────────────────────────────────────────────────────────
 
+const SYNC_POLL_MS = 5 * 60 * 1000;
+
 export function ManagementHome() {
   const { token, user } = useAuth();
   const { data, loading, error, reload } = useOpsBoardData(token);
   const isSuperuser = user?.role === "superuser";
   const role = user?.role ?? "manager";
+  const canOpenAccountingApprovals = user?.role === "manager" || user?.role === "superuser";
+  const [outboxNotSentCount, setOutboxNotSentCount] = useState<number | null>(null);
 
   const { visible, configOpen, setConfigOpen, draft, toggle, save, saving } = useWidgetVisibility(token, isSuperuser);
   const show = (id: string) => visible.includes(id);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/accounting-reconciliation/sync-health`, {
+          headers: readAuthHeaders(token),
+        });
+        const d = r.ok ? ((await r.json()) as { notSentToOdoo?: number }) : null;
+        if (cancelled) return;
+        setOutboxNotSentCount(typeof d?.notSentToOdoo === "number" ? d.notSentToOdoo : null);
+      } catch {
+        if (!cancelled) setOutboxNotSentCount(null);
+      }
+    };
+    void run();
+    const id = window.setInterval(() => void run(), SYNC_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [token]);
 
   const flocks = data?.flocks ?? [];
   const insights = data?.insights ?? [];
@@ -215,6 +242,31 @@ export function ManagementHome() {
           )}
         </div>
       </div>
+
+      {outboxNotSentCount != null && outboxNotSentCount > 0 && (
+        <div
+          role="status"
+          className="mb-6 flex flex-col gap-2 rounded-[var(--radius-lg)] border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-[var(--text-primary)] sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p className="min-w-0">
+            <span className="font-semibold text-amber-200">{outboxNotSentCount}</span>
+            {outboxNotSentCount === 1
+              ? " accounting transaction is not yet in Odoo."
+              : " accounting transactions are not yet in Odoo."}
+            {!canOpenAccountingApprovals && (
+              <span className="text-[var(--text-muted)]"> A manager can sync or retry them from Accounting approvals.</span>
+            )}
+          </p>
+          {canOpenAccountingApprovals ? (
+            <Link
+              to="/farm/accounting-approvals?tab=action"
+              className="shrink-0 font-medium text-[var(--primary-color)] underline decoration-[var(--primary-color)]/40 underline-offset-2 hover:decoration-[var(--primary-color)]"
+            >
+              Open Accounting approvals
+            </Link>
+          ) : null}
+        </div>
+      )}
 
       {/* ── Widget config panel ── */}
       {configOpen && isSuperuser && (

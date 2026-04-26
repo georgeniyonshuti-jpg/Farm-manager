@@ -39,6 +39,18 @@ function isManagerOrAbove(user) {
   return user?.role === "manager" || user?.role === "superuser";
 }
 
+/** Same business roles as Command Center — read-only Odoo outbox backlog for sync-health. */
+function canViewCommandCenterOutboxBacklog(user) {
+  if (!user) return false;
+  const r = user.role;
+  return (
+    r === "manager" ||
+    r === "superuser" ||
+    r === "procurement_officer" ||
+    r === "sales_coordinator"
+  );
+}
+
 /**
  * GET /api/accounting-reconciliation/summary
  * Per event type: count of farm records, sum of value, outbox status counts.
@@ -217,7 +229,9 @@ router.get("/failed-outbox", async (req, res) => {
  * One-call health summary for dashboards / alerts.
  */
 router.get("/sync-health", async (req, res) => {
-  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  if (!canViewCommandCenterOutboxBacklog(req.authUser)) {
+    return res.status(403).json({ error: "Not allowed to view sync health." });
+  }
   if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
   try {
     const r = await dbQuery(
@@ -231,6 +245,13 @@ router.get("/sync-health", async (req, res) => {
       return acc;
     }, { pending: 0, processing: 0, sent: 0, failed: 0, cancelled: 0 });
 
+    const notSentR = await dbQuery(
+      `SELECT COUNT(*)::int AS n
+         FROM odoo_sync_outbox
+        WHERE status IN ('pending', 'failed', 'processing')`
+    );
+    const notSentToOdoo = Number(notSentR.rows[0]?.n ?? 0);
+
     const totalPendingApproval = await dbQuery(
       `SELECT (
          SELECT COUNT(*) FROM farm_inventory_transactions WHERE accounting_status = 'pending_approval'
@@ -243,11 +264,20 @@ router.get("/sync-health", async (req, res) => {
        ) AS total`
     );
 
+    const pm = Number(totalPendingApproval.rows[0]?.total ?? 0);
+    const alertLevel =
+      counts.failed > 0
+        ? "error"
+        : notSentToOdoo > 0 || pm > 0
+          ? "warn"
+          : "ok";
+
     res.json({
       outbox: counts,
-      pendingManagerApproval: Number(totalPendingApproval.rows[0]?.total ?? 0),
-      healthy: counts.failed === 0 && Number(totalPendingApproval.rows[0]?.total ?? 0) === 0,
-      alertLevel: counts.failed > 0 ? "error" : Number(totalPendingApproval.rows[0]?.total ?? 0) > 0 ? "warn" : "ok",
+      notSentToOdoo,
+      pendingManagerApproval: pm,
+      healthy: counts.failed === 0 && pm === 0 && notSentToOdoo === 0,
+      alertLevel,
     });
   } catch (e) {
     res.status(503).json({ error: e instanceof Error ? e.message : "Query failed." });
