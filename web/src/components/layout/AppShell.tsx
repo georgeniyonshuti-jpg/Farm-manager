@@ -2,6 +2,7 @@ import { Outlet } from "react-router-dom";
 import { useLocation } from "react-router-dom";
 import { useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
+import { OdooConnectionProvider } from "../../context/OdooConnectionContext";
 import { GlobalHeader } from "./GlobalHeader";
 import { FinancialRestrictedBanner } from "./FinancialRestrictedBanner";
 import { SidebarNav } from "./SidebarNav";
@@ -24,6 +25,7 @@ export function AppShell() {
       : "md:ml-[220px]";
 
   return (
+    <OdooConnectionProvider>
     <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[var(--background-color)]">
       <GlobalHeader
         showDesktopSidebarToggle={!compactFieldView}
@@ -79,5 +81,6 @@ export function AppShell() {
         </div>
       </div>
     </div>
+    </OdooConnectionProvider>
   );
 }

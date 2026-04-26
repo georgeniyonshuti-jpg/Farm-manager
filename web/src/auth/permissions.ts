@@ -88,6 +88,14 @@ export function canViewClevaSensitive(user: SessionUser | null): boolean {
   return user.canViewSensitiveFinancial;
 }
 
+/** Mirrors server: manager / vet_manager / superuser, or Command Center read roles. */
+export function canViewOdooConnectionStatus(user: SessionUser | null): boolean {
+  if (!user) return false;
+  if (user.role === "superuser" || user.role === "manager" || user.role === "vet_manager") return true;
+  if (user.role === "procurement_officer" || user.role === "sales_coordinator") return true;
+  return false;
+}
+
 export function canAccessRouteLaborerBlock(user: SessionUser | null, path: string): boolean {
   if (!user) return false;
   if (user.role === "laborer" || user.role === "dispatcher") {

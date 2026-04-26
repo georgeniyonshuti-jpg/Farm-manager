@@ -35,6 +35,7 @@ import {
 } from "../../lib/dashboardAdapters";
 import { readAuthHeaders } from "../../lib/authHeaders";
 import { API_BASE_URL } from "../../api/config";
+import { useOdooConnection } from "../../context/OdooConnectionContext";
 
 // ─── Widget definitions ────────────────────────────────────────────────────────
 
@@ -88,6 +89,36 @@ function LiveBadge() {
       <span className="live-dot" />
       LIVE
     </span>
+  );
+}
+
+function OdooStatusPill() {
+  const { status, loading } = useOdooConnection();
+  if (loading && !status) {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-color)] bg-[var(--surface-card)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--text-muted)]"
+        title="Checking Odoo connection"
+      >
+        Odoo…
+      </span>
+    );
+  }
+  const ok = status?.connected === true;
+  const err = status?.error?.trim() || null;
+  return (
+    <Link
+      to="/farm/odoo-setup"
+      className={
+        ok
+          ? "inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-400 transition-colors hover:bg-emerald-500/15"
+          : "inline-flex max-w-[min(20rem,55vw)] items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-amber-200 transition-colors hover:bg-amber-500/15"
+      }
+      title={ok ? "Odoo integration is connected" : err || "Odoo is not connected — open settings"}
+    >
+      <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${ok ? "bg-emerald-400" : "bg-amber-400"}`} />
+      <span className="min-w-0 truncate">{ok ? "Odoo connected" : "Odoo not connected"}</span>
+    </Link>
   );
 }
 
@@ -169,7 +200,8 @@ export function ManagementHome() {
             Cross-unit KPIs — Clevafarm operations and finance
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap justify-end">
+          <OdooStatusPill />
           <LiveBadge />
           <button onClick={reload}
             className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] transition-colors">

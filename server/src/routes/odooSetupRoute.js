@@ -8,7 +8,8 @@
  *   - Recent documents (invoices, bills, journal entries)
  *   - Product catalogue
  *
- * All endpoints require manager or above.
+ * Most endpoints require manager or above. GET /status is relaxed for
+ * procurement and sales (Command Center visibility); see canViewOdooConnectionStatus.
  */
 
 import express from "express";
@@ -39,6 +40,13 @@ function isManagerOrAbove(user) {
   return (ROLE_RANK[user?.role] ?? -1) >= (ROLE_RANK["manager"] ?? 999);
 }
 
+/** Read-only status for Command Center + existing manager/VT usage (procurement & sales: dashboard only). */
+function canViewOdooConnectionStatus(user) {
+  if (isManagerOrAbove(user)) return true;
+  const r = user?.role;
+  return r === "procurement_officer" || r === "sales_coordinator";
+}
+
 // ─── Connection & Summary ─────────────────────────────────────────────────────
 
 /**
@@ -46,7 +54,7 @@ function isManagerOrAbove(user) {
  * Tests Odoo connection and returns summary counts.
  */
 router.get("/status", async (req, res) => {
-  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  if (!canViewOdooConnectionStatus(req.authUser)) return res.status(403).json({ error: "Not allowed to view Odoo status." });
   try {
     const uid = await getAuthenticatedUserId();
     const summary = await getOdooSummary();
