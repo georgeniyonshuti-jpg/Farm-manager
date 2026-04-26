@@ -3521,6 +3521,95 @@ app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requ
         ?? (primaryFlock ? checkinStatusPayload(primaryFlock, req.authUser?.role ?? null) : null);
     }
 
+    let opsGlance = null;
+    try {
+      const todayKigali = kigaliYmd(new Date(now));
+      const activeFlocks = flocks.filter((f) => String(f.status) === "active");
+      const activeIds = new Set(activeFlocks.map((f) => String(f.id)));
+      const activeLabels = new Map(activeFlocks.map((f) => [String(f.id), String(f.label ?? f.code ?? f.id)]));
+
+      function updateLatest(map, id, atIso) {
+        const t = new Date(atIso).getTime();
+        if (!Number.isFinite(t)) return;
+        const cur = map.get(id) ?? -Infinity;
+        if (t > cur) map.set(id, t);
+      }
+
+      const lastCheckinByFlock = new Map();
+      for (const c of roundCheckins) {
+        const fid = String(c.flockId ?? "");
+        if (!activeIds.has(fid)) continue;
+        updateLatest(lastCheckinByFlock, fid, c.at);
+      }
+      const lastFeedByFlock = new Map();
+      for (const e of flockFeedEntries) {
+        const fid = String(e.flockId ?? "");
+        if (!activeIds.has(fid)) continue;
+        updateLatest(lastFeedByFlock, fid, e.recordedAt);
+      }
+      const lastVetByFlock = new Map();
+      for (const v of vetLogs) {
+        const fid = String(v.flockId ?? "");
+        if (!activeIds.has(fid)) continue;
+        const atIso = v.createdAt ?? v.logDate;
+        updateLatest(lastVetByFlock, fid, atIso);
+      }
+
+      const recentVetCutoff = now - 3 * 24 * 60 * 60 * 1000;
+      let checkinDoneTodayCount = 0;
+      let feedLoggedTodayCount = 0;
+      let vetLoggedRecentCount = 0;
+      let oldestCheckin = null;
+      let oldestFeed = null;
+      let oldestVet = null;
+
+      for (const f of activeFlocks) {
+        const fid = String(f.id);
+        const checkinMs = lastCheckinByFlock.get(fid) ?? null;
+        const feedMs = lastFeedByFlock.get(fid) ?? null;
+        const vetMs = lastVetByFlock.get(fid) ?? null;
+        if (checkinMs != null && kigaliYmd(new Date(checkinMs)) === todayKigali) checkinDoneTodayCount += 1;
+        if (feedMs != null && kigaliYmd(new Date(feedMs)) === todayKigali) feedLoggedTodayCount += 1;
+        if (vetMs != null && vetMs >= recentVetCutoff) vetLoggedRecentCount += 1;
+
+        const checkinHours = checkinMs == null ? 999999 : Math.max(0, Math.floor((now - checkinMs) / 3600000));
+        const feedHours = feedMs == null ? 999999 : Math.max(0, Math.floor((now - feedMs) / 3600000));
+        const vetDays = vetMs == null ? 999999 : Math.max(0, Math.floor((now - vetMs) / 86400000));
+        if (!oldestCheckin || checkinHours > oldestCheckin.hours) {
+          oldestCheckin = { flockId: fid, label: activeLabels.get(fid) ?? fid, hours: checkinHours };
+        }
+        if (!oldestFeed || feedHours > oldestFeed.hours) {
+          oldestFeed = { flockId: fid, label: activeLabels.get(fid) ?? fid, hours: feedHours };
+        }
+        if (!oldestVet || vetDays > oldestVet.days) {
+          oldestVet = { flockId: fid, label: activeLabels.get(fid) ?? fid, days: vetDays };
+        }
+      }
+
+      const focus = [
+        { key: "checkin", value: oldestCheckin?.hours ?? -1 },
+        { key: "feed", value: oldestFeed?.hours ?? -1 },
+        { key: "vet", value: oldestVet?.days ?? -1 },
+      ].sort((a, b) => b.value - a.value)[0]?.key ?? null;
+
+      opsGlance = {
+        activeFlockCount: activeFlocks.length,
+        checkinDoneTodayCount,
+        feedLoggedTodayCount,
+        vetLoggedRecentCount,
+        vetRecentWindowDays: 3,
+        oldestMissing: {
+          checkin: oldestCheckin,
+          feed: oldestFeed,
+          vet: oldestVet,
+        },
+        focus,
+      };
+    } catch (e) {
+      console.error("[ERROR]", "[api] aggregate-checkin-status opsGlance:", e instanceof Error ? e.message : e);
+      opsGlance = null;
+    }
+
     const summary = {
       anyOverdue,
       overdueCount,
@@ -3531,6 +3620,7 @@ app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requ
       soonestFlockLabel: anyOverdue ? null : soonestFlockLabel,
       soonestFlockId: anyOverdue ? null : soonestFlockId,
       primaryFlockId,
+      opsGlance,
     };
 
     res.json({ summary, primaryFlockId, primaryStatus });

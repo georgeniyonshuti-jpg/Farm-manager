@@ -17,6 +17,19 @@ import type { CheckinStatus } from "./checkinStatusTypes";
 import { SubmissionStageScreen } from "../../components/farm/SubmissionStageScreen";
 
 export type { CheckinBadge, CheckinStatus } from "./checkinStatusTypes";
+export type OpsGlanceSummary = {
+  activeFlockCount: number;
+  checkinDoneTodayCount: number;
+  feedLoggedTodayCount: number;
+  vetLoggedRecentCount: number;
+  vetRecentWindowDays: number;
+  oldestMissing?: {
+    checkin?: { flockId: string; label: string; hours: number } | null;
+    feed?: { flockId: string; label: string; hours: number } | null;
+    vet?: { flockId: string; label: string; days: number } | null;
+  } | null;
+  focus?: "checkin" | "feed" | "vet" | null;
+};
 
 function formatDurationMs(ms: number): string {
   const abs = Math.max(0, Math.floor(ms / 1000));
@@ -35,11 +48,14 @@ export function CheckinStatusBlock({
   status,
   showWarning = true,
   otherOverdueCount = 0,
+  opsGlance = null,
 }: {
   status: CheckinStatus;
   showWarning?: boolean;
   /** Other flocks (besides this card) that are overdue — multi-flock hint only. */
   otherOverdueCount?: number;
+  /** Optional compact operations summary across active flocks. */
+  opsGlance?: OpsGlanceSummary | null;
 }) {
   const onSiteLine = useLaborerT(
     `Day ${status.ageDays} on-site • target harvest ~days ${status.targetSlaughterDays.min}–${status.targetSlaughterDays.max}`
@@ -53,15 +69,54 @@ export function CheckinStatusBlock({
   const overdueMsg = useLaborerT("Overdue — please complete check-in as soon as possible.");
   const onTrackMsg = useLaborerT("You are on track.");
   const otherFlocksOverdue = useLaborerT("other flock(s) are also overdue.");
+  const checkinLbl = useLaborerT("Check-in");
+  const feedLbl = useLaborerT("Feed");
+  const vetLbl = useLaborerT("Vet");
+  const needsAttentionLbl = useLaborerT("Needs attention:");
   const nextDueMs = new Date(status.nextDueAt).getTime();
   const remainingMs = Math.max(0, nextDueMs - Date.now());
+  const focusSummary = (() => {
+    if (!opsGlance?.focus || !opsGlance.oldestMissing) return null;
+    if (opsGlance.focus === "checkin" && opsGlance.oldestMissing.checkin) {
+      const p = opsGlance.oldestMissing.checkin;
+      return `${checkinLbl} (${p.label}, ${p.hours}h)`;
+    }
+    if (opsGlance.focus === "feed" && opsGlance.oldestMissing.feed) {
+      const p = opsGlance.oldestMissing.feed;
+      return `${feedLbl} (${p.label}, ${p.hours}h)`;
+    }
+    if (opsGlance.focus === "vet" && opsGlance.oldestMissing.vet) {
+      const p = opsGlance.oldestMissing.vet;
+      return `${vetLbl} (${p.label}, ${p.days}d)`;
+    }
+    return null;
+  })();
   return (
     <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-sm)]">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <TranslatedFlockName name={status.label} />
         <CheckinUrgencyBadge badge={status.checkinBadge} />
       </div>
-      {otherOverdueCount > 0 ? (
+      {opsGlance && opsGlance.activeFlockCount > 0 ? (
+        <>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
+            <span className="rounded-full border border-[var(--border-color)] px-2 py-0.5 text-[var(--text-secondary)]">
+              {checkinLbl} {opsGlance.checkinDoneTodayCount}/{opsGlance.activeFlockCount}
+            </span>
+            <span className="rounded-full border border-[var(--border-color)] px-2 py-0.5 text-[var(--text-secondary)]">
+              {feedLbl} {opsGlance.feedLoggedTodayCount}/{opsGlance.activeFlockCount}
+            </span>
+            <span className="rounded-full border border-[var(--border-color)] px-2 py-0.5 text-[var(--text-secondary)]">
+              {vetLbl} {opsGlance.vetLoggedRecentCount}/{opsGlance.activeFlockCount}
+            </span>
+          </div>
+          {focusSummary ? (
+            <p className="mt-1 text-xs font-medium text-amber-400">
+              {needsAttentionLbl} {focusSummary}
+            </p>
+          ) : null}
+        </>
+      ) : otherOverdueCount > 0 ? (
         <p className="mt-2 text-xs font-medium text-amber-400">
           +{otherOverdueCount} <TranslatedText text={otherFlocksOverdue} />
         </p>

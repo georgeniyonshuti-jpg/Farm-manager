@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { readAuthHeaders } from "../../lib/authHeaders";
-import { CheckinStatusBlock, type CheckinStatus } from "../farm/FarmCheckinPage";
+import { CheckinStatusBlock, type CheckinStatus, type OpsGlanceSummary } from "../farm/FarmCheckinPage";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { PageHeader } from "../../components/PageHeader";
 import { HubCheckinBanner, type HubCheckinBannerVariant } from "../../components/farm/HubCheckinBanner";
@@ -67,6 +67,7 @@ export function VetHome() {
     minutesUntilSoonestNext: number | null;
     soonestFlockLabel: string | null;
   } | null>(null);
+  const [opsGlance, setOpsGlance] = useState<OpsGlanceSummary | null>(null);
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -82,6 +83,7 @@ export function VetHome() {
           overdueLabels?: string[];
           minutesUntilSoonestNext?: number | null;
           soonestFlockLabel?: string | null;
+          opsGlance?: OpsGlanceSummary | null;
         } | null;
       }>(`${API_BASE_URL}/api/me/aggregate-checkin-status`, { headers: readAuthHeaders(token) });
       const pid = ad.primaryFlockId != null ? String(ad.primaryFlockId) : null;
@@ -102,8 +104,10 @@ export function VetHome() {
           minutesUntilSoonestNext: s.minutesUntilSoonestNext != null ? Number(s.minutesUntilSoonestNext) : null,
           soonestFlockLabel: s.soonestFlockLabel != null ? String(s.soonestFlockLabel) : null,
         });
+        setOpsGlance(s.opsGlance ?? null);
       } else {
         setBannerSummary(null);
+        setOpsGlance(null);
       }
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Could not load schedule");
@@ -292,7 +296,12 @@ export function VetHome() {
         />
       ) : null}
       {!loading && !loadError && status ? (
-        <CheckinStatusBlock status={status} showWarning={false} otherOverdueCount={otherOverdueCount} />
+        <CheckinStatusBlock
+          status={status}
+          showWarning={false}
+          otherOverdueCount={otherOverdueCount}
+          opsGlance={opsGlance}
+        />
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-2">
