@@ -10,7 +10,7 @@ export function mapOdooError(error) {
   const msg = raw.toLowerCase();
 
   if (msg.includes("access denied") || msg.includes("authentication failed")) {
-    return "Odoo authentication failed. Check ODOO_DB, ODOO_USER, and ODOO_API_KEY.";
+    return "Odoo authentication failed. Check ODOO_DB, ODOO_USER, and ODOO_PASSWORD.";
   }
   if (msg.includes("socket hang up") || msg.includes("econnreset") || msg.includes("etimedout")) {
     return "Odoo connection timed out. Please retry shortly.";
@@ -202,7 +202,7 @@ export function mapOdooErrorToUserMessage(errorMsg) {
   if (!raw) return { category: "unknown_error", message: "Unknown error. Try resending." };
 
   if (msg.includes("access denied") || msg.includes("authentication failed") || msg.includes("api key")) {
-    return { category: "auth_error", message: "Odoo authentication failed. Check ODOO_USER and ODOO_API_KEY in server settings." };
+    return { category: "auth_error", message: "Odoo authentication failed. Check ODOO_USER and ODOO_PASSWORD in server settings." };
   }
   if (msg.includes("name or service not known") || msg.includes("enotfound") || msg.includes("odoo_url")) {
     return { category: "config_error", message: "Cannot reach Odoo. Check the ODOO_URL server setting." };
@@ -229,7 +229,7 @@ export function mapOdooErrorToUserMessage(errorMsg) {
     return { category: "config_error", message: "Odoo database name is incorrect. Check the ODOO_DB server setting." };
   }
   if (msg.includes("missing required odoo environment")) {
-    return { category: "config_error", message: "Odoo is not configured on this server. Check ODOO_URL, ODOO_DB, ODOO_USER, and ODOO_API_KEY." };
+    return { category: "config_error", message: "Odoo is not configured on this server. Check ODOO_URL, ODOO_DB, ODOO_USER, and ODOO_PASSWORD." };
   }
   return { category: "unknown_error", message: raw };
 }

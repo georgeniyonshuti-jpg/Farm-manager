@@ -7,12 +7,12 @@ function ensureEnv() {
   const ODOO_URL = process.env.ODOO_URL;
   const ODOO_DB = process.env.ODOO_DB;
   const ODOO_USER = process.env.ODOO_USER;
-  const ODOO_API_KEY = process.env.ODOO_API_KEY;
+  const ODOO_PASSWORD = process.env.ODOO_PASSWORD;
   const missing = [];
   if (!ODOO_URL) missing.push("ODOO_URL");
   if (!ODOO_DB) missing.push("ODOO_DB");
   if (!ODOO_USER) missing.push("ODOO_USER");
-  if (!ODOO_API_KEY) missing.push("ODOO_API_KEY");
+  if (!ODOO_PASSWORD) missing.push("ODOO_PASSWORD");
   if (missing.length) {
     throw new Error(`Missing required Odoo environment variables: ${missing.join(", ")}`);
   }
@@ -43,11 +43,11 @@ async function authenticate() {
   ensureEnv();
   const ODOO_DB = process.env.ODOO_DB;
   const ODOO_USER = process.env.ODOO_USER;
-  const ODOO_API_KEY = process.env.ODOO_API_KEY;
+  const ODOO_PASSWORD = process.env.ODOO_PASSWORD;
   if (cachedUid != null) return cachedUid;
   const commonClient = xmlrpc.createSecureClient({ url: endpoint("/xmlrpc/2/common") });
   try {
-    const uid = await callXmlRpc(commonClient, "authenticate", [ODOO_DB, ODOO_USER, ODOO_API_KEY, {}]);
+    const uid = await callXmlRpc(commonClient, "authenticate", [ODOO_DB, ODOO_USER, ODOO_PASSWORD, {}]);
     if (!uid) {
       throw new Error("Odoo authentication returned an empty uid.");
     }
@@ -69,14 +69,14 @@ async function authenticate() {
 export async function execute(model, method, args = [], kwargs = {}) {
   ensureEnv();
   const ODOO_DB = process.env.ODOO_DB;
-  const ODOO_API_KEY = process.env.ODOO_API_KEY;
+  const ODOO_PASSWORD = process.env.ODOO_PASSWORD;
   const objectClient = xmlrpc.createSecureClient({ url: endpoint("/xmlrpc/2/object") });
   let uid = await authenticate();
   try {
     return await callXmlRpc(objectClient, "execute_kw", [
       ODOO_DB,
       uid,
-      ODOO_API_KEY,
+      ODOO_PASSWORD,
       model,
       method,
       args,
@@ -92,7 +92,7 @@ export async function execute(model, method, args = [], kwargs = {}) {
         return await callXmlRpc(objectClient, "execute_kw", [
           ODOO_DB,
           uid,
-          ODOO_API_KEY,
+          ODOO_PASSWORD,
           model,
           method,
           args,
