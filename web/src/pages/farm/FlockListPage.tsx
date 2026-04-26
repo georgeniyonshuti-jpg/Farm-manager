@@ -10,6 +10,7 @@ import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
 import { useToast } from "../../components/Toast";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
+import { useSuppliers } from "../../hooks/useSuppliers";
 
 const FALLBACK_BREED_OPTIONS = [
   { value: "generic_broiler", label: "generic_broiler" },
@@ -71,6 +72,7 @@ export function FlockListPage() {
   const { token, user } = useAuth();
   const { showToast } = useToast();
   const breedOptions = useReferenceOptions("breed", token, FALLBACK_BREED_OPTIONS);
+  const { suppliers, loadSuppliers, createSupplier } = useSuppliers(token);
   const canCreateFlock = canFlockAction(user, "flock.create");
   const [flocks, setFlocks] = useState<FlockRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -95,6 +97,8 @@ export function FlockListPage() {
     breedCode: "generic_broiler",
     targetWeightKg: "",
     purchaseCostRwf: "",
+    supplierId: "",
+    supplierMode: "existing" as "existing" | "new",
     purchaseSupplier: "",
     purchaseDate: "",
   });
@@ -300,6 +304,9 @@ export function FlockListPage() {
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    void loadSuppliers();
+  }, [loadSuppliers]);
 
   async function submitCreateFlock(e: React.FormEvent) {
     e.preventDefault();
@@ -316,6 +323,7 @@ export function FlockListPage() {
           targetWeightKg: createForm.targetWeightKg ? Number(createForm.targetWeightKg) : null,
           status: "active",
           purchaseCostRwf: createForm.purchaseCostRwf ? Number(createForm.purchaseCostRwf) : undefined,
+          supplierId: createForm.supplierMode === "existing" ? (createForm.supplierId || undefined) : undefined,
           purchaseSupplier: createForm.purchaseSupplier.trim() || undefined,
           purchaseDate: createForm.purchaseDate || undefined,
         }),
@@ -332,7 +340,16 @@ export function FlockListPage() {
         ? " Biological asset opening is being posted to Odoo under IAS 41."
         : "";
       showToast("success", `Flock ${name} added.${costMsg}`);
-      setCreateForm((prev) => ({ ...prev, initialCount: "", targetWeightKg: "", purchaseCostRwf: "", purchaseSupplier: "", purchaseDate: "" }));
+      setCreateForm((prev) => ({
+        ...prev,
+        initialCount: "",
+        targetWeightKg: "",
+        purchaseCostRwf: "",
+        supplierId: "",
+        supplierMode: "existing",
+        purchaseSupplier: "",
+        purchaseDate: "",
+      }));
       setShowCreateFlock(false);
       await load();
     } catch (e2) {
@@ -564,12 +581,57 @@ export function FlockListPage() {
               value={createForm.purchaseCostRwf}
               onChange={(e) => setCreateForm((v) => ({ ...v, purchaseCostRwf: e.target.value }))}
             />
-            <input
-              className="rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
-              placeholder="Supplier / hatchery"
-              value={createForm.purchaseSupplier}
-              onChange={(e) => setCreateForm((v) => ({ ...v, purchaseSupplier: e.target.value }))}
-            />
+            <div className="space-y-2">
+              <select
+                className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                value={createForm.supplierMode === "new" ? "__new__" : createForm.supplierId}
+                onChange={(e) =>
+                  setCreateForm((v) => ({
+                    ...v,
+                    supplierMode: e.target.value === "__new__" ? "new" : "existing",
+                    supplierId: e.target.value === "__new__" ? "" : e.target.value,
+                  }))
+                }
+              >
+                <option value="">Select supplier / hatchery</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+                <option value="__new__">+ Add new supplier</option>
+              </select>
+              {createForm.supplierMode === "new" && (
+                <div className="flex gap-2">
+                  <input
+                    className="min-w-0 flex-1 rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                    placeholder="Supplier / hatchery"
+                    value={createForm.purchaseSupplier}
+                    onChange={(e) => setCreateForm((v) => ({ ...v, purchaseSupplier: e.target.value }))}
+                  />
+                  <button
+                    type="button"
+                    className="rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs font-semibold text-[var(--text-primary)]"
+                    onClick={async () => {
+                      try {
+                        const created = await createSupplier(createForm.purchaseSupplier);
+                        if (created?.id) {
+                          setCreateForm((v) => ({
+                            ...v,
+                            supplierMode: "existing",
+                            supplierId: created.id,
+                            purchaseSupplier: created.name ?? v.purchaseSupplier,
+                          }));
+                          showToast("success", "Supplier saved");
+                        }
+                      } catch (e) {
+                        showToast("error", e instanceof Error ? e.message : "Could not create supplier");
+                      }
+                    }}
+                  >
+                    Save
+                  </button>
+                </div>
+              )}
+            </div>
             <input
               className="rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
               type="date"

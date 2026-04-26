@@ -21,6 +21,28 @@ import {
 import { BlockersStacked, FcrTargetBars, MortalityTrendLine, SimpleCategoryBars, TopRiskBars } from "../../components/dashboard/charts/OpsCharts";
 import { MobileFieldBottomNav, type MobileFieldNavItem } from "../../components/layout/MobileFieldBottomNav";
 
+type VetHubFlockRow = {
+  flockId: string;
+  label: string;
+  isOverdue: boolean;
+  overdueMinutes: number;
+  nextDueAt: string;
+  checkinDoneToday: boolean;
+  feedLoggedToday: boolean;
+  vetLoggedRecent: boolean;
+  lastCheckinAt?: string | null;
+  lastFeedAt?: string | null;
+  lastVetAt?: string | null;
+};
+
+function vetChip(label: string, ok: boolean) {
+  return (
+    <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${ok ? "border-emerald-500/30 text-emerald-300" : "border-amber-500/30 text-amber-300"}`}>
+      {label} {ok ? "done" : "pending"}
+    </span>
+  );
+}
+
 export function VetHome() {
   const { token } = useAuth();
   const vetDash = useVetDashboardData(token);
@@ -51,6 +73,18 @@ export function VetHome() {
   const tUntilNext = useLaborerT("minutes until the next round.");
   const tMultiFlockBanner = useLaborerT("flocks need check-in — details below for the most overdue.");
   const tRetry = useLaborerT("Try again");
+  const tFlockAttentionList = useLaborerT("Flock attention list");
+  const tFlocks = useLaborerT("flocks");
+  const tOverdue = useLaborerT("Overdue");
+  const tNextDue = useLaborerT("Next due");
+  const tShowMore = useLaborerT("Show more");
+  const tShowLess = useLaborerT("Show less");
+  const tCheckin = useLaborerT("Check-in");
+  const tFeed = useLaborerT("Feed");
+  const tVet = useLaborerT("Vet");
+  const tLastCheckin = useLaborerT("Last check-in");
+  const tLastFeedLog = useLaborerT("Last feed log");
+  const tLastVetRecord = useLaborerT("Last vet record");
   const tabHome = useLaborerT("Home");
   const tabRounds = useLaborerT("Rounds");
   const tabMort = useLaborerT("Mortality");
@@ -68,6 +102,8 @@ export function VetHome() {
     soonestFlockLabel: string | null;
   } | null>(null);
   const [opsGlance, setOpsGlance] = useState<OpsGlanceSummary | null>(null);
+  const [flockList, setFlockList] = useState<VetHubFlockRow[]>([]);
+  const [expandedFlocks, setExpandedFlocks] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -84,6 +120,7 @@ export function VetHome() {
           minutesUntilSoonestNext?: number | null;
           soonestFlockLabel?: string | null;
           opsGlance?: OpsGlanceSummary | null;
+          flockList?: VetHubFlockRow[] | null;
         } | null;
       }>(`${API_BASE_URL}/api/me/aggregate-checkin-status`, { headers: readAuthHeaders(token) });
       const pid = ad.primaryFlockId != null ? String(ad.primaryFlockId) : null;
@@ -105,9 +142,11 @@ export function VetHome() {
           soonestFlockLabel: s.soonestFlockLabel != null ? String(s.soonestFlockLabel) : null,
         });
         setOpsGlance(s.opsGlance ?? null);
+        setFlockList(Array.isArray(s.flockList) ? s.flockList : []);
       } else {
         setBannerSummary(null);
         setOpsGlance(null);
+        setFlockList([]);
       }
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Could not load schedule");
@@ -194,6 +233,7 @@ export function VetHome() {
 
   const otherOverdueCount =
     status && bannerSummary?.anyOverdue ? Math.max(0, bannerSummary.overdueCount - 1) : 0;
+  const hasList = flockList.length > 0;
 
   const bottomNav: MobileFieldNavItem[] = [
     {
@@ -295,7 +335,53 @@ export function VetHome() {
           onRetry={() => void load()}
         />
       ) : null}
-      {!loading && !loadError && status ? (
+      {!loading && !loadError && hasList ? (
+        <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-sm)]">
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">{tFlockAttentionList}</h3>
+            <span className="text-xs text-[var(--text-muted)]">{flockList.length} {tFlocks}</span>
+          </div>
+          <div className="space-y-2">
+            {flockList.map((row) => {
+              const expanded = Boolean(expandedFlocks[row.flockId]);
+              return (
+                <article key={row.flockId} className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-subtle)] p-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{row.label}</p>
+                      <p className={`text-xs ${row.isOverdue ? "text-red-400" : "text-[var(--text-muted)]"}`}>
+                        {row.isOverdue
+                          ? `${tOverdue} ${Math.max(1, row.overdueMinutes)}m`
+                          : `${tNextDue} ${new Date(row.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}`}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded-md border border-[var(--border-color)] px-2 py-1 text-[11px] font-semibold text-[var(--text-secondary)]"
+                      onClick={() => setExpandedFlocks((prev) => ({ ...prev, [row.flockId]: !expanded }))}
+                    >
+                      {expanded ? tShowLess : tShowMore}
+                    </button>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {vetChip(tCheckin, row.checkinDoneToday)}
+                    {vetChip(tFeed, row.feedLoggedToday)}
+                    {vetChip(tVet, row.vetLoggedRecent)}
+                  </div>
+                  {expanded ? (
+                    <div className="mt-2 grid gap-1 text-xs text-[var(--text-muted)] sm:grid-cols-2">
+                      <p>{tLastCheckin}: {row.lastCheckinAt ? new Date(row.lastCheckinAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" }) : "—"}</p>
+                      <p>{tLastFeedLog}: {row.lastFeedAt ? new Date(row.lastFeedAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" }) : "—"}</p>
+                      <p>{tLastVetRecord}: {row.lastVetAt ? new Date(row.lastVetAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" }) : "—"}</p>
+                    </div>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+      {!loading && !loadError && !hasList && status ? (
         <CheckinStatusBlock
           status={status}
           showWarning={false}

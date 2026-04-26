@@ -1484,6 +1484,8 @@ const DEFAULT_CHECKIN_BANDS = [
 
 /** @type {Map<string, object>} */
 const flocksById = new Map();
+/** @type {Map<string, { id: string, name: string, normalizedName: string }>} */
+const suppliersByNormalized = new Map();
 
 /** DB enum values used when syncing flocks from PostgreSQL to memory (see migrations on poultry_flock_status). */
 const FLOCK_STATUS_SYNC = Object.freeze(["active", "planned", "archived", "failed"]);
@@ -2119,6 +2121,113 @@ function safeMsToIso(ms) {
   if (!Number.isFinite(n)) return new Date().toISOString();
   const d = new Date(n);
   return Number.isFinite(d.getTime()) ? d.toISOString() : new Date().toISOString();
+}
+
+function normalizeSupplierName(name) {
+  return String(name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * Upsert supplier in master source and return canonical record.
+ * Falls back to in-memory list when DB is unavailable.
+ * @param {string | null | undefined} rawName
+ * @returns {Promise<{ id: string, name: string, normalizedName: string } | null>}
+ */
+async function upsertSupplierByName(rawName) {
+  const cleaned = String(rawName ?? "").trim().replace(/\s+/g, " ");
+  const normalized = normalizeSupplierName(cleaned);
+  if (!cleaned || !normalized) return null;
+  if (hasDb()) {
+    try {
+      const q = await dbQuery(
+        `INSERT INTO farm_suppliers (name, normalized_name, updated_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (normalized_name) DO UPDATE
+           SET name = EXCLUDED.name,
+               updated_at = now()
+         RETURNING id::text AS id, name, normalized_name AS "normalizedName"`,
+        [cleaned, normalized]
+      );
+      const row = q.rows[0];
+      if (row?.id) {
+        const rec = { id: String(row.id), name: String(row.name), normalizedName: String(row.normalizedName) };
+        suppliersByNormalized.set(rec.normalizedName, rec);
+        return rec;
+      }
+    } catch {
+      // During phased rollout, fallback to legacy in-memory behavior if table isn't ready yet.
+    }
+  }
+  const existing = suppliersByNormalized.get(normalized);
+  if (existing) return existing;
+  const rec = { id: `sup_mem_${crypto.randomBytes(6).toString("hex")}`, name: cleaned, normalizedName: normalized };
+  suppliersByNormalized.set(normalized, rec);
+  return rec;
+}
+
+/**
+ * Resolve supplier record from supplierId or supplierName.
+ * @param {string | null} supplierId
+ * @param {string | null} supplierName
+ */
+async function resolveSupplierForWrite(supplierId, supplierName) {
+  const sid = String(supplierId ?? "").trim();
+  if (sid && hasDb()) {
+    try {
+      const q = await dbQuery(
+        `SELECT id::text AS id, name, normalized_name AS "normalizedName"
+           FROM farm_suppliers
+          WHERE id::text = $1
+          LIMIT 1`,
+        [sid]
+      );
+      const row = q.rows[0];
+      if (row?.id) {
+        const rec = { id: String(row.id), name: String(row.name), normalizedName: String(row.normalizedName) };
+        suppliersByNormalized.set(rec.normalizedName, rec);
+        return rec;
+      }
+    } catch {
+      // Fallback to supplierName path below.
+    }
+  }
+  return await upsertSupplierByName(supplierName);
+}
+
+async function listSuppliers() {
+  if (hasDb()) {
+    try {
+      const q = await dbQuery(
+        `SELECT id::text AS id, name, normalized_name AS "normalizedName"
+           FROM farm_suppliers
+          ORDER BY name ASC
+          LIMIT 2000`
+      );
+      return q.rows.map((r) => ({
+        id: String(r.id),
+        name: String(r.name),
+        normalizedName: String(r.normalizedName),
+      }));
+    } catch {
+      const legacy = await dbQuery(
+        `SELECT DISTINCT btrim(name) AS name
+         FROM (
+           SELECT purchase_supplier AS name FROM poultry_flocks
+           UNION ALL
+           SELECT supplier_name AS name FROM farm_inventory_transactions
+         ) src
+         WHERE name IS NOT NULL AND btrim(name) <> ''
+         ORDER BY btrim(name) ASC
+         LIMIT 2000`
+      ).catch(() => ({ rows: [] }));
+      return (legacy.rows ?? []).map((r) => {
+        const name = String(r.name);
+        const normalizedName = normalizeSupplierName(name);
+        return { id: `sup_legacy_${normalizedName}`, name, normalizedName };
+      });
+    }
+  }
+  return [...suppliersByNormalized.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function lastCheckinMs(flockId) {
@@ -3116,9 +3225,18 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
     targetWeightKgRaw == null || targetWeightKgRaw === "" ? null : Number(targetWeightKgRaw);
   let purchaseCostRwf = body.purchaseCostRwf == null || body.purchaseCostRwf === "" ? null : Number(body.purchaseCostRwf);
   let costPerChickRwf = body.costPerChickRwf == null || body.costPerChickRwf === "" ? null : Number(body.costPerChickRwf);
-  const purchaseSupplier = String(body.purchaseSupplier ?? "").trim() || null;
+  const supplierId = String(body.supplierId ?? "").trim() || null;
+  const purchaseSupplierInput = String(body.purchaseSupplier ?? "").trim() || null;
   const purchaseDateRaw = String(body.purchaseDate ?? "").trim();
   const purchaseDate = /^\d{4}-\d{2}-\d{2}$/.test(purchaseDateRaw) ? purchaseDateRaw : null;
+
+  let supplier = null;
+  try {
+    supplier = await resolveSupplierForWrite(supplierId, purchaseSupplierInput);
+  } catch (e) {
+    console.error("[ERROR]", "[db] resolve supplier for flock create:", e instanceof Error ? e.message : e);
+  }
+  const purchaseSupplier = supplier?.name ?? purchaseSupplierInput;
 
   if (!placementDate || !Number.isFinite(initialCount) || initialCount <= 0 || !breedCode) {
     res.status(400).json({ error: "placementDate, initialCount (>0), and breedCode are required" });
@@ -3322,7 +3440,14 @@ app.post("/api/flocks/:id/retry-create", requireAuth, requireFarmAccess, require
   const targetWeightKg = draft.targetWeightKg == null || draft.targetWeightKg === "" ? null : Number(draft.targetWeightKg);
   const purchaseCostRwf = draft.purchaseCostRwf == null || draft.purchaseCostRwf === "" ? null : Number(draft.purchaseCostRwf);
   const costPerChickRwf = draft.costPerChickRwf == null || draft.costPerChickRwf === "" ? null : Number(draft.costPerChickRwf);
-  const purchaseSupplier = String(draft.purchaseSupplier ?? "").trim() || null;
+  const purchaseSupplierInput = String(draft.purchaseSupplier ?? "").trim() || null;
+  let purchaseSupplier = purchaseSupplierInput;
+  try {
+    const s = await resolveSupplierForWrite(null, purchaseSupplierInput);
+    purchaseSupplier = s?.name ?? purchaseSupplierInput;
+  } catch {
+    purchaseSupplier = purchaseSupplierInput;
+  }
   const purchaseDateRaw = String(draft.purchaseDate ?? "").trim();
   const purchaseDate = /^\d{4}-\d{2}-\d{2}$/.test(purchaseDateRaw) ? purchaseDateRaw : null;
   if (!placementDate || !Number.isFinite(initialCount) || initialCount <= 0 || !breedCode) {
@@ -3522,6 +3647,25 @@ app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requ
     }
 
     let opsGlance = null;
+    let flockList = perFlock
+      .map(({ flockId, label, status }) => ({
+        flockId,
+        label: String(label),
+        isOverdue: Boolean(status.isOverdue),
+        overdueMinutes: Math.max(0, Math.floor(Number(status.overdueMs ?? 0) / 60000)),
+        nextDueAt: String(status.nextDueAt),
+        checkinDoneToday: false,
+        feedLoggedToday: false,
+        vetLoggedRecent: false,
+        lastCheckinAt: null,
+        lastFeedAt: null,
+        lastVetAt: null,
+      }))
+      .sort((a, b) => {
+        if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
+        if (a.isOverdue && b.isOverdue) return b.overdueMinutes - a.overdueMinutes;
+        return new Date(a.nextDueAt).getTime() - new Date(b.nextDueAt).getTime();
+      });
     try {
       const todayKigali = kigaliYmd(new Date(now));
       const activeFlocks = flocks.filter((f) => String(f.status) === "active");
@@ -3592,6 +3736,31 @@ app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requ
         { key: "vet", value: oldestVet?.days ?? -1 },
       ].sort((a, b) => b.value - a.value)[0]?.key ?? null;
 
+      flockList = perFlock
+        .map(({ flockId, label, status }) => {
+          const checkinMs = lastCheckinByFlock.get(String(flockId)) ?? null;
+          const feedMs = lastFeedByFlock.get(String(flockId)) ?? null;
+          const vetMs = lastVetByFlock.get(String(flockId)) ?? null;
+          return {
+            flockId: String(flockId),
+            label: String(label),
+            isOverdue: Boolean(status.isOverdue),
+            overdueMinutes: Math.max(0, Math.floor(Number(status.overdueMs ?? 0) / 60000)),
+            nextDueAt: String(status.nextDueAt),
+            checkinDoneToday: checkinMs != null && kigaliYmd(new Date(checkinMs)) === todayKigali,
+            feedLoggedToday: feedMs != null && kigaliYmd(new Date(feedMs)) === todayKigali,
+            vetLoggedRecent: vetMs != null && vetMs >= recentVetCutoff,
+            lastCheckinAt: checkinMs != null ? new Date(checkinMs).toISOString() : null,
+            lastFeedAt: feedMs != null ? new Date(feedMs).toISOString() : null,
+            lastVetAt: vetMs != null ? new Date(vetMs).toISOString() : null,
+          };
+        })
+        .sort((a, b) => {
+          if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
+          if (a.isOverdue && b.isOverdue) return b.overdueMinutes - a.overdueMinutes;
+          return new Date(a.nextDueAt).getTime() - new Date(b.nextDueAt).getTime();
+        });
+
       opsGlance = {
         activeFlockCount: activeFlocks.length,
         checkinDoneTodayCount,
@@ -3621,6 +3790,7 @@ app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requ
       soonestFlockId: anyOverdue ? null : soonestFlockId,
       primaryFlockId,
       opsGlance,
+      flockList,
     };
 
     res.json({ summary, primaryFlockId, primaryStatus });
@@ -5897,23 +6067,49 @@ app.get("/api/inventory/balance", requireAuth, requireFarmAccess, async (req, re
   res.json({ balances: computeInventoryBalances(flockId) });
 });
 
-app.get("/api/inventory/suppliers", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
-  if (!hasDb()) {
-    res.json({ suppliers: [] });
+app.get("/api/suppliers", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_flocks", "farm_inventory"]), async (_req, res) => {
+  try {
+    const suppliers = await listSuppliers();
+    res.json({ suppliers: suppliers.map((s) => ({ id: s.id, name: s.name })) });
+  } catch (e) {
+    console.error("[ERROR]", "[db] GET /api/suppliers:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Supplier list unavailable. Please retry shortly." });
+  }
+});
+
+app.post("/api/suppliers", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_flocks", "farm_inventory"]), async (req, res) => {
+  if (!actionAllowed(req.authUser, "flock.create") && !canCreateProcurement(req.authUser)) {
+    res.status(403).json({ error: "Not allowed to create suppliers." });
+    return;
+  }
+  const name = String(req.body?.name ?? "").trim();
+  if (!name) {
+    res.status(400).json({ error: "name is required." });
     return;
   }
   try {
-    const r = await dbQuery(
-      `SELECT DISTINCT supplier_name AS name
-         FROM farm_inventory_transactions
-        WHERE supplier_name IS NOT NULL
-          AND btrim(supplier_name) <> ''
-        ORDER BY supplier_name ASC
-        LIMIT 500`
-    );
-    res.json({ suppliers: r.rows.map((x) => String(x.name)) });
+    const supplier = await upsertSupplierByName(name);
+    if (!supplier) {
+      res.status(400).json({ error: "Invalid supplier name." });
+      return;
+    }
+    res.status(201).json({ supplier: { id: supplier.id, name: supplier.name } });
+  } catch (e) {
+    console.error("[ERROR]", "[db] POST /api/suppliers:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Could not create supplier." });
+  }
+});
+
+app.get("/api/inventory/suppliers", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (_req, res) => {
+  try {
+    const suppliers = await listSuppliers();
+    res.json({ suppliers: suppliers.map((s) => s.name) });
   } catch (e) {
     console.error("[ERROR]", "[db] GET /api/inventory/suppliers:", e instanceof Error ? e.message : e);
+    if (!hasDb()) {
+      res.json({ suppliers: [...suppliersByNormalized.values()].map((s) => s.name).sort((a, b) => a.localeCompare(b)) });
+      return;
+    }
     res.status(503).json({ error: "Supplier list unavailable. Please retry shortly." });
   }
 });
@@ -5937,7 +6133,8 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
   }
   const reason = String(body.reason ?? reasonCode).slice(0, 400);
   const reference = String(body.reference ?? "").slice(0, 200);
-  const supplierName = String(body.supplierName ?? "").trim() || null;
+  const supplierId = String(body.supplierId ?? "").trim() || null;
+  const supplierNameInput = String(body.supplierName ?? "").trim() || null;
   const requestedApproverUserId = String(body.requestedApproverUserId ?? "").trim() || null;
   const canDirectPost = canDirectPostAccountingToOdoo(req.authUser);
   if (!canDirectPost && !requestedApproverUserId) {
@@ -5963,6 +6160,14 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     res.status(400).json({ error: "unitCostRwfPerKg must be >= 0" });
     return;
   }
+  let supplier = null;
+  try {
+    supplier = await resolveSupplierForWrite(supplierId, supplierNameInput);
+  } catch (e) {
+    console.error("[ERROR]", "[db] resolve supplier for procurement:", e instanceof Error ? e.message : e);
+  }
+  const supplierName = supplier?.name ?? supplierNameInput;
+
   let row = {
     id: `inv_${crypto.randomBytes(6).toString("hex")}`,
     type: "procurement_receipt",

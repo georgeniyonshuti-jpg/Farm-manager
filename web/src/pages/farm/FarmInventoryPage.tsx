@@ -7,6 +7,7 @@ import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
+import { useSuppliers } from "../../hooks/useSuppliers";
 
 type StockRow = {
   feedType: string | null;
@@ -81,6 +82,7 @@ export function FarmInventoryPage() {
   const procurementReasons = useReferenceOptions("inventory_procurement_reason", token, PROCUREMENT_REASON_OPTIONS);
   const adjustReasons = useReferenceOptions("inventory_adjust_reason", token, ADJUST_REASON_OPTIONS);
   const { showToast } = useToast();
+  const { suppliers, loadSuppliers, createSupplier } = useSuppliers(token);
 
   const [loadingStock, setLoadingStock] = useState(true);
   const [loadingLedger, setLoadingLedger] = useState(true);
@@ -105,9 +107,8 @@ export function FarmInventoryPage() {
   const [procReasonCode, setProcReasonCode] = useState("supplier_delivery");
   const [procRef, setProcRef] = useState("");
   const [procUnitCost, setProcUnitCost] = useState("");
-  const [supplierOptions, setSupplierOptions] = useState<string[]>([]);
   const [procSupplierMode, setProcSupplierMode] = useState<"existing" | "new">("existing");
-  const [procSupplierExisting, setProcSupplierExisting] = useState("");
+  const [procSupplierExistingId, setProcSupplierExistingId] = useState("");
   const [procSupplierNew, setProcSupplierNew] = useState("");
   const [approvers, setApprovers] = useState<OdooApprover[]>([]);
   const [requestedApproverUserId, setRequestedApproverUserId] = useState("");
@@ -167,17 +168,6 @@ export function FarmInventoryPage() {
     }
   }, [token, feedTypeFilter]);
 
-  const loadSuppliers = useCallback(async () => {
-    try {
-      const r = await fetch(`${API_BASE_URL}/api/inventory/suppliers`, { headers: readAuthHeaders(token) });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) return;
-      setSupplierOptions(Array.isArray((d as { suppliers?: string[] }).suppliers) ? (d as { suppliers: string[] }).suppliers : []);
-    } catch {
-      setSupplierOptions([]);
-    }
-  }, [token]);
-
   const loadApprovers = useCallback(async () => {
     try {
       const r = await fetch(`${API_BASE_URL}/api/users/odoo-approvers`, { headers: readAuthHeaders(token) });
@@ -222,10 +212,8 @@ export function FarmInventoryPage() {
           reason: procReasonCode,
           reference: procRef,
           unitCostRwfPerKg: procUnitCost ? Number(procUnitCost) : undefined,
-          supplierName:
-            procSupplierMode === "new"
-              ? (procSupplierNew.trim() || undefined)
-              : (procSupplierExisting.trim() || undefined),
+          supplierId: procSupplierMode === "existing" ? (procSupplierExistingId || undefined) : undefined,
+          supplierName: procSupplierMode === "new" ? (procSupplierNew.trim() || undefined) : undefined,
           requestedApproverUserId: !canSendToOdoo ? requestedApproverUserId : undefined,
         }),
       });
@@ -240,7 +228,7 @@ export function FarmInventoryPage() {
       setProcRef("");
       setProcUnitCost("");
       setProcSupplierMode("existing");
-      setProcSupplierExisting("");
+      setProcSupplierExistingId("");
       setProcSupplierNew("");
       setShowEntryPanel(false);
       await Promise.all([loadStock(), loadLedger(1), loadSuppliers()]);
@@ -472,30 +460,51 @@ export function FarmInventoryPage() {
                       <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">Supplier</label>
                       <select
                         className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
-                        value={procSupplierMode === "new" ? "__new__" : procSupplierExisting}
+                        value={procSupplierMode === "new" ? "__new__" : procSupplierExistingId}
                         onChange={(e) => {
                           if (e.target.value === "__new__") {
                             setProcSupplierMode("new");
-                            setProcSupplierExisting("");
+                            setProcSupplierExistingId("");
                           } else {
                             setProcSupplierMode("existing");
-                            setProcSupplierExisting(e.target.value);
+                            setProcSupplierExistingId(e.target.value);
                           }
                         }}
                       >
                         <option value="">Select saved supplier</option>
-                        {supplierOptions.map((s) => (
-                          <option key={s} value={s}>{s}</option>
+                        {suppliers.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
                         ))}
                         <option value="__new__">+ Add new supplier</option>
                       </select>
                       {procSupplierMode === "new" && (
-                        <input
-                          className="mt-2 w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
-                          placeholder="Enter new supplier name"
-                          value={procSupplierNew}
-                          onChange={(e) => setProcSupplierNew(e.target.value)}
-                        />
+                        <div className="mt-2 flex gap-2">
+                          <input
+                            className="min-w-0 flex-1 rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                            placeholder="Enter new supplier name"
+                            value={procSupplierNew}
+                            onChange={(e) => setProcSupplierNew(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            className="rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs font-semibold text-[var(--text-primary)]"
+                            onClick={async () => {
+                              try {
+                                const created = await createSupplier(procSupplierNew);
+                                if (created?.id) {
+                                  setProcSupplierMode("existing");
+                                  setProcSupplierExistingId(created.id);
+                                  setProcSupplierNew(created.name ?? "");
+                                  showToast("success", "Supplier saved");
+                                }
+                              } catch (e) {
+                                showToast("error", e instanceof Error ? e.message : "Could not create supplier");
+                              }
+                            }}
+                          >
+                            Save
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
