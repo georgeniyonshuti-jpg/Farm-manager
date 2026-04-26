@@ -74,6 +74,7 @@ export function FlockListPage() {
   const canCreateFlock = canFlockAction(user, "flock.create");
   const [flocks, setFlocks] = useState<FlockRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [syncWarning, setSyncWarning] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [barns, setBarns] = useState<BarnSummary[]>([]);
   const [riskFilter, setRiskFilter] = useState<"all" | "at_risk" | "blocked" | "needs_vet" | "needs_manager" | "overdue_checkins">("all");
@@ -107,8 +108,34 @@ export function FlockListPage() {
           ? `?includeArchived=true${user?.role === "superuser" ? "&includeFailed=true" : ""}`
           : "";
       const r = await fetch(`${API_BASE_URL}/api/flocks${listQ}`, { headers: readAuthHeaders(token) });
-      const d = await r.json();
-      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Load failed");
+      const d = (await r.json()) as {
+        flocks?: FlockRow[];
+        error?: string;
+        code?: string;
+        flockSync?: { stale?: boolean; syncError?: string | null };
+      };
+      if (r.status === 503) {
+        setSyncWarning(null);
+        setError(
+          d.code === "FLOCK_CACHE_UNAVAILABLE"
+            ? d.error ?? "Flock data is temporarily unavailable. Please try again in a few seconds."
+            : d.error ?? "Could not load flocks."
+        );
+        setFlocks([]);
+        setBarns([]);
+        setInsights([]);
+        setFarmHealthScore(null);
+        setRecoveryOverview(null);
+        return;
+      }
+      if (!r.ok) throw new Error(d.error ?? "Load failed");
+      if (d.flockSync?.stale) {
+        setSyncWarning(
+          "Showing cached flock data — the latest database sync had an issue. Refresh the page or retry if something looks wrong."
+        );
+      } else {
+        setSyncWarning(null);
+      }
       const base = (d.flocks as FlockRow[]) ?? [];
       const enriched = await Promise.all(
         base.map(async (f) => {
@@ -422,6 +449,11 @@ export function FlockListPage() {
           </a>
         }
       />
+      {syncWarning ? (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100" role="status">
+          {syncWarning}
+        </div>
+      ) : null}
       {farmHealthScore != null ? (
         <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 text-sm shadow-[var(--shadow-sm)]">
           <p className="font-semibold text-[var(--text-primary)]">Farm health score: {farmHealthScore}/100</p>

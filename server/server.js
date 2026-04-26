@@ -1485,6 +1485,20 @@ const DEFAULT_CHECKIN_BANDS = [
 /** @type {Map<string, object>} */
 const flocksById = new Map();
 
+/** DB enum values used when syncing flocks from PostgreSQL to memory (see migrations on poultry_flock_status). */
+const FLOCK_STATUS_SYNC = Object.freeze(["active", "planned", "archived", "failed"]);
+const FLOCK_STATUS_RECOVERY_EXPECTED = Object.freeze([
+  "planned",
+  "active",
+  "archived",
+  "failed",
+  "completed",
+  "closed",
+]);
+let lastSuccessfulFlockSyncAt = null;
+let lastFlockSyncError = null;
+let hasEverSyncedFlocks = false;
+
 /** @type {object | null} */
 let breedStandardsFileCache = null;
 function loadBreedStandardsFileOnly() {
@@ -1592,13 +1606,24 @@ function canViewArchivedFlocks(user) {
   return r === "superuser" || r === "manager" || r === "vet_manager";
 }
 
-function getFlockByIdForUser(flockId, user, res) {
+async function getFlockByIdForUser(flockId, user, res) {
   const id = String(flockId ?? "").trim();
   if (!id) {
     res.status(404).json({ error: "Flock not found" });
     return null;
   }
-  const f = flocksById.get(id);
+  const hadCache = flocksById.has(id);
+  let f = flocksById.get(id);
+  if (!f && hasDb() && isPersistableUuid(id)) {
+    try {
+      f = await loadFlockByIdFromDbToMemory(id);
+      if (f && !hadCache) {
+        console.log("[INFO]", "[flock] getFlockByIdForUser hydrated from DB", id);
+      }
+    } catch (e) {
+      console.error("[ERROR]", "[flock] getFlockByIdForUser DB hydrate:", e instanceof Error ? e.message : e);
+    }
+  }
   if (!f) {
     res.status(404).json({ error: "Flock not found" });
     return null;
@@ -1610,8 +1635,8 @@ function getFlockByIdForUser(flockId, user, res) {
   return f;
 }
 
-function getFlockForApi(req, res, paramName = "id") {
-  return getFlockByIdForUser(req.params[paramName], req.authUser, res);
+async function getFlockForApi(req, res, paramName = "id") {
+  return await getFlockByIdForUser(req.params[paramName], req.authUser, res);
 }
 
 function assertFlockNotArchivedForMutation(f, res) {
@@ -2176,7 +2201,15 @@ function checkinStatusPayload(flock, role = null) {
 }
 
 async function checkinStatusPayloadWithFcrHint(flockId, role = null, user = null) {
-  const f = flocksById.get(flockId);
+  const fid = String(flockId ?? "").trim();
+  let f = flocksById.get(fid);
+  if (!f && hasDb() && isPersistableUuid(fid)) {
+    try {
+      f = await loadFlockByIdFromDbToMemory(fid);
+    } catch {
+      /* optional */
+    }
+  }
   if (!f) return null;
   if (String(f.status) === "archived" && !canViewArchivedFlocks(user)) return null;
   const base = checkinStatusPayload(f, role);
@@ -2846,8 +2879,10 @@ async function loadFlockByIdFromDbToMemory(flockId) {
 
 async function syncFlocksFromDbToMemory() {
   if (!hasDb()) return;
-  const r = await dbQuery(
-    `SELECT id::text AS id,
+  const statusInList = FLOCK_STATUS_SYNC.map((s) => `'${s}'`).join(",");
+  try {
+    const r = await dbQuery(
+      `SELECT id::text AS id,
             code AS "code",
             COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
             placement_date::text AS "placementDate",
@@ -2867,63 +2902,81 @@ async function syncFlocksFromDbToMemory() {
             create_draft AS "createDraft",
             status
        FROM poultry_flocks
-      WHERE status IN ('active','planned','archived','failed')
+      WHERE status IN (${statusInList})
       ORDER BY placement_date DESC`
-  );
-  const nextFlocksById = new Map();
-  for (const row of r.rows) {
-    const prev = flocksById.get(row.id) ?? {};
-    nextFlocksById.set(row.id, mapDbFlockRowToMemory(row, prev));
-  }
-  flocksById.clear();
-  for (const [id, flock] of nextFlocksById.entries()) {
-    flocksById.set(id, flock);
-  }
-  try {
-    await syncLogSchedulesFromDb();
+    );
+    const nextFlocksById = new Map();
+    for (const row of r.rows) {
+      const prev = flocksById.get(row.id) ?? {};
+      nextFlocksById.set(row.id, mapDbFlockRowToMemory(row, prev));
+    }
+    flocksById.clear();
+    for (const [id, flock] of nextFlocksById.entries()) {
+      flocksById.set(id, flock);
+    }
+    try {
+      await syncLogSchedulesFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[db] syncLogSchedulesFromDb:", e instanceof Error ? e.message : e);
+    }
+    try {
+      await syncFlockFeedEntriesFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[db] syncFlockFeedEntriesFromDb:", e instanceof Error ? e.message : e);
+    }
+    try {
+      await syncCheckInsFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[db] syncCheckInsFromDb:", e instanceof Error ? e.message : e);
+    }
+    try {
+      await syncMortalityEventsFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[db] syncMortalityEventsFromDb:", e instanceof Error ? e.message : e);
+    }
+    try {
+      await syncDailyLogsFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[db] syncDailyLogsFromDb:", e instanceof Error ? e.message : e);
+    }
+    try {
+      await syncPayrollImpactsFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[db] syncPayrollImpactsFromDb:", e instanceof Error ? e.message : e);
+    }
+    try {
+      await syncInventoryTransactionsFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[db] syncInventoryTransactionsFromDb:", e instanceof Error ? e.message : e);
+    }
+    rebuildPayrollMissedKeysFromLoadedPayroll();
+    lastSuccessfulFlockSyncAt = new Date().toISOString();
+    lastFlockSyncError = null;
+    hasEverSyncedFlocks = true;
   } catch (e) {
-    console.error("[ERROR]", "[db] syncLogSchedulesFromDb:", e instanceof Error ? e.message : e);
+    lastFlockSyncError = e instanceof Error ? e.message : String(e);
+    throw e;
   }
-  try {
-    await syncFlockFeedEntriesFromDb();
-  } catch (e) {
-    console.error("[ERROR]", "[db] syncFlockFeedEntriesFromDb:", e instanceof Error ? e.message : e);
-  }
-  try {
-    await syncCheckInsFromDb();
-  } catch (e) {
-    console.error("[ERROR]", "[db] syncCheckInsFromDb:", e instanceof Error ? e.message : e);
-  }
-  try {
-    await syncMortalityEventsFromDb();
-  } catch (e) {
-    console.error("[ERROR]", "[db] syncMortalityEventsFromDb:", e instanceof Error ? e.message : e);
-  }
-  try {
-    await syncDailyLogsFromDb();
-  } catch (e) {
-    console.error("[ERROR]", "[db] syncDailyLogsFromDb:", e instanceof Error ? e.message : e);
-  }
-  try {
-    await syncPayrollImpactsFromDb();
-  } catch (e) {
-    console.error("[ERROR]", "[db] syncPayrollImpactsFromDb:", e instanceof Error ? e.message : e);
-  }
-  try {
-    await syncInventoryTransactionsFromDb();
-  } catch (e) {
-    console.error("[ERROR]", "[db] syncInventoryTransactionsFromDb:", e instanceof Error ? e.message : e);
-  }
-  rebuildPayrollMissedKeysFromLoadedPayroll();
 }
 
 app.get("/api/flocks", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_flocks", "farm_checkin", "farm_feed"]), requireAction("flock.view"), async (req, res) => {
+  let syncFailed = false;
   if (hasDb()) {
     try {
       await syncFlocksFromDbToMemory();
     } catch (e) {
+      syncFailed = true;
       console.error("[ERROR]", "[db] GET /api/flocks:", e instanceof Error ? e.message : e);
     }
+  }
+  const cacheEmpty = flocksById.size === 0;
+  if (syncFailed && cacheEmpty) {
+    res.status(503).json({
+      error: "Flock data is temporarily unavailable. Please retry.",
+      code: "FLOCK_CACHE_UNAVAILABLE",
+      syncError: lastFlockSyncError,
+    });
+    return;
   }
   const includeDepleted = String(req.query.includeDepleted ?? "").toLowerCase() === "true";
   const includeArchived = String(req.query.includeArchived ?? "").toLowerCase() === "true";
@@ -2960,7 +3013,15 @@ app.get("/api/flocks", requireAuth, requireFarmAccess, requireAnyPageAccess(["fa
       intervalHours: st.intervalHours,
     };
   });
-  res.json({ flocks });
+  res.json({
+    flocks,
+    flockSync: {
+      stale: syncFailed,
+      lastSyncedAt: lastSuccessfulFlockSyncAt,
+      syncError: syncFailed ? lastFlockSyncError : null,
+      hasLoadedFromDb: hasEverSyncedFlocks,
+    },
+  });
 });
 
 app.get("/api/flocks/recovery-overview", requireAuth, requireFarmAccess, requireSuperuser, requirePageAccess("farm_flocks"), async (_req, res) => {
@@ -2981,12 +3042,13 @@ app.get("/api/flocks/recovery-overview", requireAuth, requireFarmAccess, require
         ORDER BY failed_at DESC NULLS LAST, updated_at DESC
         LIMIT 200`
     ).catch(() => ({ rows: [] }));
+    const expectedIn = FLOCK_STATUS_RECOVERY_EXPECTED.map((s) => `'${s}'`).join(",");
     const unexpected = await dbQuery(
       `SELECT id::text AS id,
               COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
               status::text AS status
          FROM poultry_flocks
-        WHERE status::text NOT IN ('planned','active','archived','failed','completed','closed')
+        WHERE status::text NOT IN (${expectedIn})
         ORDER BY updated_at DESC
         LIMIT 200`
     ).catch(() => ({ rows: [] }));
@@ -3366,10 +3428,7 @@ app.delete("/api/flocks/:id/purge", requireAuth, requireFarmAccess, requireSuper
 
 app.patch("/api/flocks/:id/archive", requireAuth, requireFarmAccess, requireSuperuser, requirePageAccess("farm_flocks"), async (req, res) => {
   const id = String(req.params.id ?? "").trim();
-  if (!flocksById.has(id)) {
-    await loadFlockByIdFromDbToMemory(id);
-  }
-  const f = getFlockByIdForUser(id, req.authUser, res);
+  const f = await getFlockByIdForUser(id, req.authUser, res);
   if (!f) return;
   if (String(f.status) === "archived") {
     res.json({ ok: true, flock: f });
@@ -3485,7 +3544,7 @@ app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requ
 });
 
 app.patch("/api/flocks/:id/checkin-schedule", requireAuth, requireFarmAccess, requireCheckinScheduleEditor, async (req, res) => {
-  const f = getFlockForApi(req, res);
+  const f = await getFlockForApi(req, res);
   if (!f) return;
   if (!assertFlockNotArchivedForMutation(f, res)) return;
   const body = req.body ?? {};
@@ -3544,7 +3603,7 @@ app.patch("/api/flocks/:id/checkin-schedule", requireAuth, requireFarmAccess, re
 });
 
 app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin"), requireAction("flock.view"), async (req, res) => {
-  const f = getFlockForApi(req, res);
+  const f = await getFlockForApi(req, res);
   if (!f) return;
   if (!assertFlockNotArchivedForMutation(f, res)) return;
   // PROD-FIX: prevents malformed data and injection
@@ -3806,7 +3865,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
 
 app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requirePageAccess("farm_feed"), requireAction("flock.view"), async (req, res) => {
   const flockId = String(req.params.id ?? "").trim();
-  const f = getFlockByIdForUser(flockId, req.authUser, res);
+  const f = await getFlockByIdForUser(flockId, req.authUser, res);
   if (!f) return;
   if (!assertFlockNotArchivedForMutation(f, res)) return;
   const parsed = feedEntrySchema.safeParse(req.body ?? {});
@@ -3886,7 +3945,7 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
 
 app.get("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requirePageAccess("farm_feed"), requireAction("flock.view"), async (req, res) => {
   const flockId = String(req.params.id ?? "").trim();
-  const f = getFlockByIdForUser(flockId, req.authUser, res);
+  const f = await getFlockByIdForUser(flockId, req.authUser, res);
   if (!f) return;
   const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 40));
   const list = flockFeedEntries
@@ -3904,7 +3963,7 @@ app.get("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requireP
 });
 
 app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, requirePageAccess("farm_mortality_log"), requireAction("mortality.record"), async (req, res) => {
-  const f = getFlockForApi(req, res);
+  const f = await getFlockForApi(req, res);
   if (!f) return;
   if (!assertFlockNotArchivedForMutation(f, res)) return;
   const body = req.body ?? {};
@@ -4066,8 +4125,8 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
   });
 });
 
-app.get("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, requirePageAccess("farm_mortality"), (req, res) => {
-  const f = getFlockForApi(req, res);
+app.get("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, requirePageAccess("farm_mortality"), async (req, res) => {
+  const f = await getFlockForApi(req, res);
   if (!f) return;
   const list = mortalityEvents
     .filter((m) => String(m.flockId) === String(f.id))
@@ -4080,8 +4139,8 @@ app.get("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, requ
   res.json({ events: list });
 });
 
-app.get("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin"), (req, res) => {
-  const f = getFlockForApi(req, res);
+app.get("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin"), async (req, res) => {
+  const f = await getFlockForApi(req, res);
   if (!f) return;
   const list = roundCheckins
     .filter((c) => sameFlockId(c.flockId, f.id))
@@ -4462,7 +4521,7 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
     return;
   }
   const { flockId, logDate, observations, actionsTaken, recommendations } = parsed.data;
-  const f = getFlockByIdForUser(flockId, req.authUser, res);
+  const f = await getFlockByIdForUser(flockId, req.authUser, res);
   if (!f) return;
   if (!assertFlockNotArchivedForMutation(f, res)) return;
   const submissionStatus = needsApproval(req.authUser) ? "pending_review" : "approved";
@@ -5019,7 +5078,7 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
 }
 
 app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requirePageAccess("farm_treatments"), requireAction("treatment.execute"), requireTreatmentLogger, async (req, res) => {
-  const f = getFlockForApi(req, res);
+  const f = await getFlockForApi(req, res);
   if (!f) return;
   if (!assertFlockNotArchivedForMutation(f, res)) return;
   const body = req.body ?? {};
@@ -5083,7 +5142,7 @@ app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requirePa
 });
 
 app.get("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requirePageAccess("farm_treatments"), requireAction("flock.view"), async (req, res) => {
-  const f = getFlockForApi(req, res);
+  const f = await getFlockForApi(req, res);
   if (!f) return;
   const startIso = parseOptionalIsoDate(req.query.start_at);
   const endIso = parseOptionalIsoDate(req.query.end_at);
@@ -5096,7 +5155,7 @@ app.get("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requirePag
 });
 
 app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requirePageAccess("farm_slaughter"), requireAction("slaughter.record"), requireSlaughterEventLogger, async (req, res) => {
-  const f = getFlockForApi(req, res);
+  const f = await getFlockForApi(req, res);
   if (!f) return;
   if (!assertFlockNotArchivedForMutation(f, res)) return;
   const body = req.body ?? {};
@@ -5265,7 +5324,7 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
 });
 
 app.get("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requirePageAccess("farm_slaughter"), requireAction("flock.view"), async (req, res) => {
-  const f = getFlockForApi(req, res);
+  const f = await getFlockForApi(req, res);
   if (!f) return;
   const startIso = parseOptionalIsoDate(req.query.start_at);
   const endIso = parseOptionalIsoDate(req.query.end_at);
@@ -5278,7 +5337,7 @@ app.get("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, requ
 });
 
 app.get("/api/flocks/:id/performance-summary", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_flocks", "farm_checkin", "farm_feed"]), requireAction("flock.view"), async (req, res) => {
-  const f = getFlockForApi(req, res);
+  const f = await getFlockForApi(req, res);
   if (!f) return;
   let summary = null;
   try {
@@ -5295,7 +5354,7 @@ app.get("/api/flocks/:id/performance-summary", requireAuth, requireFarmAccess, r
 });
 
 app.get("/api/flocks/:id/fcr-snapshot", requireAuth, requireFarmAccess, requirePageAccess("farm_flocks"), requireAction("flock.view"), async (req, res) => {
-  const f = getFlockForApi(req, res);
+  const f = await getFlockForApi(req, res);
   if (!f) return;
   try {
     const summary = await buildFlockPerformanceSummary(f.id);
@@ -5339,7 +5398,7 @@ app.patch("/api/flocks/:id/live-verification", requireAuth, requireFarmAccess, a
   } catch {
     /* ignore */
   }
-  const fLive = getFlockByIdForUser(flockId, req.authUser, res);
+  const fLive = await getFlockByIdForUser(flockId, req.authUser, res);
   if (!fLive) return;
   if (!assertFlockNotArchivedForMutation(fLive, res)) return;
   try {
@@ -5388,7 +5447,7 @@ app.get("/api/weigh-ins/:flockId/latest", requireAuth, requireFarmAccess, requir
   } catch {
     /* ignore */
   }
-  if (!getFlockByIdForUser(flockId, req.authUser, res)) return;
+  if (!(await getFlockByIdForUser(flockId, req.authUser, res))) return;
   if (!hasDb()) {
     res.json({ weighIn: null });
     return;
@@ -5422,7 +5481,7 @@ app.get("/api/weigh-ins/:flockId", requireAuth, requireFarmAccess, requirePageAc
   } catch {
     /* ignore */
   }
-  if (!getFlockByIdForUser(flockId, req.authUser, res)) return;
+  if (!(await getFlockByIdForUser(flockId, req.authUser, res))) return;
   if (!hasDb()) {
     res.json({ weighIns: [] });
     return;
@@ -5454,7 +5513,7 @@ app.post("/api/weigh-ins/:flockId", requireAuth, requireFarmAccess, requirePageA
   } catch {
     /* ignore */
   }
-  const wf = getFlockByIdForUser(flockId, req.authUser, res);
+  const wf = await getFlockByIdForUser(flockId, req.authUser, res);
   if (!wf) return;
   if (!assertFlockNotArchivedForMutation(wf, res)) return;
   if (!hasDb()) {
@@ -7132,7 +7191,7 @@ app.post("/api/log-schedule", requireAuth, requireFarmAccess, requirePageAccess(
     res.status(400).json({ error: "Valid flockId required" });
     return;
   }
-  const flockRef = getFlockByIdForUser(flockId, req.authUser, res);
+  const flockRef = await getFlockByIdForUser(flockId, req.authUser, res);
   if (!flockRef) return;
   if (!assertFlockNotArchivedForMutation(flockRef, res)) return;
   if (!Number.isFinite(intervalHours) || intervalHours <= 0) {
@@ -7180,9 +7239,9 @@ app.post("/api/log-schedule", requireAuth, requireFarmAccess, requirePageAccess(
   res.status(201).json({ schedule: row });
 });
 
-app.get("/api/log-schedule/:flockId", requireAuth, requireFarmAccess, requirePageAccess("farm_schedule_settings"), requireLogScheduleEditor, (req, res) => {
+app.get("/api/log-schedule/:flockId", requireAuth, requireFarmAccess, requirePageAccess("farm_schedule_settings"), requireLogScheduleEditor, async (req, res) => {
   const flockId = req.params.flockId;
-  if (!getFlockByIdForUser(flockId, req.authUser, res)) return;
+  if (!(await getFlockByIdForUser(flockId, req.authUser, res))) return;
   const list = logSchedules.filter((s) => sameFlockId(s.flockId, flockId));
   res.json({ schedules: list });
 });
@@ -7193,7 +7252,7 @@ app.patch("/api/log-schedule/:id", requireAuth, requireFarmAccess, requirePageAc
     res.status(404).json({ error: "Schedule not found" });
     return;
   }
-  const flockForSched = getFlockByIdForUser(s.flockId, req.authUser, res);
+  const flockForSched = await getFlockByIdForUser(s.flockId, req.authUser, res);
   if (!flockForSched) return;
   if (!assertFlockNotArchivedForMutation(flockForSched, res)) return;
   const body = req.body ?? {};
@@ -7239,7 +7298,7 @@ app.delete("/api/log-schedule/:id", requireAuth, requireFarmAccess, requirePageA
     return;
   }
   const s0 = logSchedules[i];
-  const flockForSched = getFlockByIdForUser(s0.flockId, req.authUser, res);
+  const flockForSched = await getFlockByIdForUser(s0.flockId, req.authUser, res);
   if (!flockForSched) return;
   if (!assertFlockNotArchivedForMutation(flockForSched, res)) return;
   const [removed] = logSchedules.splice(i, 1);
@@ -8008,7 +8067,7 @@ app.get("/api/flocks/:id/eligibility", requireAuth, requireFarmAccess, requirePa
     return;
   }
   const flockId = String(req.params.id ?? "").trim();
-  if (!getFlockByIdForUser(flockId, req.authUser, res)) return;
+  if (!(await getFlockByIdForUser(flockId, req.authUser, res))) return;
   try {
     // Active withdrawal blockers from legacy flock_treatments
     const t = await dbQuery(
@@ -8563,6 +8622,12 @@ app.use((err, _req, res, _next) => {
       }
     } catch (e) {
       console.error("[ERROR]", "[startup] audit backfill:", e instanceof Error ? e.message : e);
+    }
+    try {
+      await syncFlocksFromDbToMemory();
+      console.log("[INFO]", `[startup] flocks loaded from db: ${flocksById.size}`);
+    } catch (e) {
+      console.error("[ERROR]", "[startup] initial flock sync failed:", e instanceof Error ? e.message : e);
     }
   }
   app.listen(PORT, () => {

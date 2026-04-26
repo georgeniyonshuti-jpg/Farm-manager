@@ -161,6 +161,7 @@ export function FarmCheckinPage() {
     listLoading,
     detailLoading,
     error: loadError,
+    flockSync,
     loadDetails,
     loadFlocks,
   } = useFlockFieldContext(token);
@@ -292,6 +293,15 @@ export function FarmCheckinPage() {
           </Link>
         }
       />
+
+      {flockSync?.stale && !loadError ? (
+        <div
+          className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100"
+          role="status"
+        >
+          Flock list may be slightly out of date (last sync had an issue). Refresh the page if a batch is missing.
+        </div>
+      ) : null}
 
       {pageLoading && <SkeletonList rows={3} />}
       {!pageLoading && loadError && (

@@ -21,6 +21,13 @@ export type FieldPerformanceSummary = {
 /**
  * Flock list + check-in status + performance summary for field-operation pages.
  */
+export type FlockSyncMeta = {
+  stale: boolean;
+  lastSyncedAt: string | null;
+  syncError: string | null;
+  hasLoadedFromDb: boolean;
+};
+
 export function useFlockFieldContext(token: string | null) {
   const [flocks, setFlocks] = useState<FlockListRow[]>([]);
   const [flockId, setFlockId] = useState("");
@@ -29,11 +36,13 @@ export function useFlockFieldContext(token: string | null) {
   const [listLoading, setListLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [flockSync, setFlockSync] = useState<FlockSyncMeta | null>(null);
 
   const loadFlocks = useCallback(async () => {
     if (!token) {
       setFlocks([]);
       setFlockId("");
+      setFlockSync(null);
       setListLoading(false);
       return;
     }
@@ -41,15 +50,40 @@ export function useFlockFieldContext(token: string | null) {
     setListLoading(true);
     try {
       const r = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
-      const d = await r.json();
-      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Flocks failed");
-      const list = (d.flocks as FlockListRow[]) ?? [];
+      const d = (await r.json()) as {
+        flocks?: FlockListRow[];
+        error?: string;
+        code?: string;
+        flockSync?: FlockSyncMeta;
+      };
+      if (r.status === 503) {
+        setError(
+          d.code === "FLOCK_CACHE_UNAVAILABLE"
+            ? d.error ?? "Flock data is temporarily unavailable. Please retry in a few seconds."
+            : d.error ?? "Flocks could not be loaded. Try again."
+        );
+        setFlocks([]);
+        setFlockId("");
+        setFlockSync(d.flockSync ?? null);
+        return;
+      }
+      if (!r.ok) throw new Error(d.error ?? "Flocks failed");
+      const list = d.flocks ?? [];
       setFlocks(list);
       setFlockId((prev) => (prev && list.some((f) => f.id === prev) ? prev : list[0]?.id ?? ""));
+      setFlockSync(
+        d.flockSync ?? {
+          stale: false,
+          lastSyncedAt: null,
+          syncError: null,
+          hasLoadedFromDb: false,
+        }
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
       setFlocks([]);
       setFlockId("");
+      setFlockSync(null);
     } finally {
       setListLoading(false);
     }
@@ -110,6 +144,7 @@ export function useFlockFieldContext(token: string | null) {
     listLoading,
     detailLoading,
     error,
+    flockSync,
     loadFlocks,
     loadDetails,
   };
