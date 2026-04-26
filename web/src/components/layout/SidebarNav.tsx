@@ -120,6 +120,12 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
     (user.role === "manager" || user.role === "superuser")
       ? { to: "/farm/odoo-setup", label: "Odoo integration" }
       : null;
+  const reportsCenterNavItem: NavItem | null =
+    activeWorkspace === "farm" &&
+    (user.role === "vet" || user.role === "vet_manager" || user.role === "manager" || user.role === "superuser") &&
+    canSee("farm_reports")
+      ? { to: "/farm/reports", label: "Reports center" }
+      : null;
 
   const farmExtras = [
     laborerEarningsItem,
@@ -133,6 +139,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
     cycleFcrNavItem,
     accountingApprovalsNavItem,
     odooSetupNavItem,
+    reportsCenterNavItem,
   ].filter(Boolean) as NavItem[];
   const farmCore = farmCoreNavItems(user).filter((item) => {
     const byPath: Record<string, string> = {
@@ -210,6 +217,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
       integrations_admin: pick([
         "/farm/accounting-approvals",
         "/farm/odoo-setup",
+        "/farm/reports",
       ]),
     };
   }, [farmNav, effectiveDashLink]);

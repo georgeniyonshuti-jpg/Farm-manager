@@ -42,6 +42,7 @@ import { FarmTreatmentPage } from "./pages/farm/FarmTreatmentPage";
 import { FarmSlaughterPage } from "./pages/farm/FarmSlaughterPage";
 import { AccountingApprovalsPage } from "./pages/farm/AccountingApprovalsPage";
 import { OdooSetupPage } from "./pages/farm/OdooSetupPage";
+import { ReportsCenterPage } from "./pages/farm/ReportsCenterPage";
 import { FARM_FIELD_OPS_ROLES } from "./auth/permissions";
 import { useAuth } from "./auth/AuthContext";
 import { AppLoadingScreen } from "./components/AppLoadingScreen";
@@ -252,6 +253,14 @@ function AppRoutes() {
               element={
                 <ProtectedRoute roles={["manager", "superuser"]}>
                   <OdooSetupPage />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="reports"
+              element={
+                <ProtectedRoute roles={["vet", "vet_manager", "manager", "superuser"]}>
+                  <ReportsCenterPage />
                 </ProtectedRoute>
               }
             />

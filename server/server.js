@@ -38,6 +38,12 @@ import { parseActualsCsv } from "./business-model/csvParse.js";
 import { loadSuggestedActuals } from "./business-model/productionSuggestedActuals.js";
 import { buildInvestorPdfBuffer } from "./business-model/pdfInvestor.js";
 import { buildBroilerPdfBuffer } from "./business-model/pdfBroiler.js";
+import { buildFlockDeepDiveReport } from "./src/services/reports/flockDeepDiveReport.js";
+import { buildFlockComparisonReport } from "./src/services/reports/flockComparisonReport.js";
+import { buildFarmOperationsReport } from "./src/services/reports/farmOperationsReport.js";
+import { buildFlockDeepDivePdfBuffer } from "./src/services/reports/pdfFlockDeepDive.js";
+import { buildFlockComparisonPdfBuffer } from "./src/services/reports/pdfFlockComparison.js";
+import { buildFarmOperationsPdfBuffer } from "./src/services/reports/pdfFarmOperations.js";
 import { extractLiveDbActuals } from "./business-model/liveDbActuals.js";
 import { projectionToCsv, varianceToCsv, compareToCsv, heatmapsToCsv } from "./business-model/exportCsv.js";
 import accountingRouter from "./src/routes/accounting.js";
@@ -4914,6 +4920,190 @@ app.patch("/api/vet-logs/:id/review", requireAuth, requireFarmAccess, requireLea
   }
   appendAudit(req.authUser.id, req.authUser.role, `farm.vet_log.${action}`, "vet_log", logId, { reviewNotes });
   res.json({ ok: true, status: newStatus });
+});
+
+function reportDateValue(raw) {
+  const v = String(raw ?? "").trim();
+  if (!v) return null;
+  const t = new Date(v).getTime();
+  return Number.isFinite(t) ? new Date(t).toISOString() : null;
+}
+
+function canGenerateFarmReports(user) {
+  const r = String(user?.role ?? "");
+  return r === "vet" || r === "vet_manager" || r === "manager" || r === "superuser";
+}
+
+async function collectReportRowsForFlockSet(flockIds, fromIso, toIso) {
+  const fidSet = new Set((flockIds ?? []).map((x) => String(x)));
+  const range = (at) => {
+    const t = new Date(at).getTime();
+    if (!Number.isFinite(t)) return false;
+    if (fromIso && t < new Date(fromIso).getTime()) return false;
+    if (toIso && t > new Date(toIso).getTime()) return false;
+    return true;
+  };
+  const checkins = roundCheckins.filter((r) => fidSet.has(String(r.flockId)) && range(r.at));
+  const feedEntries = flockFeedEntries.filter((r) => fidSet.has(String(r.flockId)) && range(r.recordedAt));
+  const mortality = mortalityEvents.filter((r) => fidSet.has(String(r.flockId)) && range(r.at));
+  const vets = vetLogs.filter((r) => fidSet.has(String(r.flockId)) && range(r.createdAt ?? r.logDate));
+
+  const treatments = [];
+  const slaughter = [];
+  for (const fid of fidSet) {
+    const t = await listTreatmentsForFlock(fid, fromIso, toIso).catch(() => []);
+    const s = await listSlaughterForFlock(fid, fromIso, toIso).catch(() => []);
+    treatments.push(...t);
+    slaughter.push(...s);
+  }
+  return { checkins, feedEntries, mortality, vets, treatments, slaughter };
+}
+
+app.post("/api/reports/flock/deep-dive/preview", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_flocks", "dashboard_management", "dashboard_vet"]), requireVetUp, async (req, res) => {
+  if (!canGenerateFarmReports(req.authUser)) {
+    res.status(403).json({ error: "Not allowed to generate reports." });
+    return;
+  }
+  const flockId = String(req.body?.flockId ?? "").trim();
+  if (!flockId) {
+    res.status(400).json({ error: "flockId is required." });
+    return;
+  }
+  const flock = flocksById.get(flockId) ?? await loadFlockByIdFromDbToMemory(flockId);
+  if (!flock) {
+    res.status(404).json({ error: "Flock not found." });
+    return;
+  }
+  const fromIso = reportDateValue(req.body?.from);
+  const toIso = reportDateValue(req.body?.to);
+  const rows = await collectReportRowsForFlockSet([flockId], fromIso, toIso);
+  const report = buildFlockDeepDiveReport({
+    flock,
+    checkins: rows.checkins,
+    feedEntries: rows.feedEntries,
+    mortalityEvents: rows.mortality,
+    vetLogs: rows.vets,
+    treatments: rows.treatments,
+    slaughterEvents: rows.slaughter,
+    from: fromIso,
+    to: toIso,
+  });
+  res.json({ report });
+});
+
+app.post("/api/reports/flock/deep-dive/pdf", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_flocks", "dashboard_management", "dashboard_vet"]), requireVetUp, async (req, res) => {
+  const flockId = String(req.body?.flockId ?? "").trim();
+  if (!flockId) return res.status(400).json({ error: "flockId is required." });
+  const flock = flocksById.get(flockId) ?? await loadFlockByIdFromDbToMemory(flockId);
+  if (!flock) return res.status(404).json({ error: "Flock not found." });
+  const fromIso = reportDateValue(req.body?.from);
+  const toIso = reportDateValue(req.body?.to);
+  const rows = await collectReportRowsForFlockSet([flockId], fromIso, toIso);
+  const report = buildFlockDeepDiveReport({
+    flock,
+    checkins: rows.checkins,
+    feedEntries: rows.feedEntries,
+    mortalityEvents: rows.mortality,
+    vetLogs: rows.vets,
+    treatments: rows.treatments,
+    slaughterEvents: rows.slaughter,
+    from: fromIso,
+    to: toIso,
+  });
+  const buf = await buildFlockDeepDivePdfBuffer(report);
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="flock-deep-dive-${encodeURIComponent(flockId)}.pdf"`);
+  res.send(buf);
+});
+
+app.post("/api/reports/flocks/compare/preview", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_flocks", "dashboard_management", "dashboard_vet"]), requireVetUp, async (req, res) => {
+  const ids = Array.isArray(req.body?.flockIds) ? req.body.flockIds.map((x) => String(x).trim()).filter(Boolean) : [];
+  if (ids.length < 2) return res.status(400).json({ error: "Provide at least 2 flockIds." });
+  if (ids.length > 20) return res.status(400).json({ error: "Maximum 20 flockIds per comparison." });
+  const fromIso = reportDateValue(req.body?.from);
+  const toIso = reportDateValue(req.body?.to);
+  const flocks = [];
+  for (const id of ids) {
+    const f = flocksById.get(id) ?? await loadFlockByIdFromDbToMemory(id);
+    if (f) flocks.push(f);
+  }
+  if (flocks.length < 2) return res.status(404).json({ error: "Not enough valid flocks found." });
+  const rows = await collectReportRowsForFlockSet(flocks.map((f) => f.id), fromIso, toIso);
+  const report = buildFlockComparisonReport({
+    flocks,
+    checkins: rows.checkins,
+    feedEntries: rows.feedEntries,
+    mortalityEvents: rows.mortality,
+    vetLogs: rows.vets,
+    from: fromIso,
+    to: toIso,
+  });
+  res.json({ report });
+});
+
+app.post("/api/reports/flocks/compare/pdf", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_flocks", "dashboard_management", "dashboard_vet"]), requireVetUp, async (req, res) => {
+  const ids = Array.isArray(req.body?.flockIds) ? req.body.flockIds.map((x) => String(x).trim()).filter(Boolean) : [];
+  if (ids.length < 2) return res.status(400).json({ error: "Provide at least 2 flockIds." });
+  if (ids.length > 20) return res.status(400).json({ error: "Maximum 20 flockIds per comparison." });
+  const fromIso = reportDateValue(req.body?.from);
+  const toIso = reportDateValue(req.body?.to);
+  const flocks = [];
+  for (const id of ids) {
+    const f = flocksById.get(id) ?? await loadFlockByIdFromDbToMemory(id);
+    if (f) flocks.push(f);
+  }
+  if (flocks.length < 2) return res.status(404).json({ error: "Not enough valid flocks found." });
+  const rows = await collectReportRowsForFlockSet(flocks.map((f) => f.id), fromIso, toIso);
+  const report = buildFlockComparisonReport({
+    flocks,
+    checkins: rows.checkins,
+    feedEntries: rows.feedEntries,
+    mortalityEvents: rows.mortality,
+    vetLogs: rows.vets,
+    from: fromIso,
+    to: toIso,
+  });
+  const buf = await buildFlockComparisonPdfBuffer(report);
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", "attachment; filename=\"flock-comparison-report.pdf\"");
+  res.send(buf);
+});
+
+app.post("/api/reports/farm/operations/preview", requireAuth, requireFarmAccess, requireAnyPageAccess(["dashboard_management", "dashboard_vet", "farm_inventory"]), requireVetUp, async (req, res) => {
+  const fromIso = reportDateValue(req.body?.from);
+  const toIso = reportDateValue(req.body?.to);
+  const activeFlocks = [...flocksById.values()].filter((f) => String(f.status ?? "active") === "active");
+  const report = buildFarmOperationsReport({
+    flocks: activeFlocks,
+    checkins: roundCheckins,
+    feedEntries: flockFeedEntries,
+    mortalityEvents: mortalityEvents,
+    vetLogs: vetLogs,
+    inventoryTransactions,
+    from: fromIso,
+    to: toIso,
+  });
+  res.json({ report });
+});
+
+app.post("/api/reports/farm/operations/pdf", requireAuth, requireFarmAccess, requireAnyPageAccess(["dashboard_management", "dashboard_vet", "farm_inventory"]), requireVetUp, async (req, res) => {
+  const fromIso = reportDateValue(req.body?.from);
+  const toIso = reportDateValue(req.body?.to);
+  const activeFlocks = [...flocksById.values()].filter((f) => String(f.status ?? "active") === "active");
+  const report = buildFarmOperationsReport({
+    flocks: activeFlocks,
+    checkins: roundCheckins,
+    feedEntries: flockFeedEntries,
+    mortalityEvents: mortalityEvents,
+    vetLogs: vetLogs,
+    inventoryTransactions,
+    from: fromIso,
+    to: toIso,
+  });
+  const buf = await buildFarmOperationsPdfBuffer(report);
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", "attachment; filename=\"farm-operations-report.pdf\"");
+  res.send(buf);
 });
 
 // ── Report CSV exports ──

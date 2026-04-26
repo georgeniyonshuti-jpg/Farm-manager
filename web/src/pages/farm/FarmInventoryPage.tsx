@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
@@ -284,6 +285,11 @@ export function FarmInventoryPage() {
       <PageHeader
         title="Feed stock"
         subtitle="Farm-wide feed inventory — purchases in, approved logs out, balance remaining."
+        action={
+          <Link to="/farm/reports?type=farm_operations" className="text-sm font-medium text-[var(--primary-color)] hover:underline">
+            Generate operations report
+          </Link>
+        }
       />
 
       {loading && <SkeletonList rows={4} />}

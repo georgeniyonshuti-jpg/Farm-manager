@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { canFlockAction, flockActionPresentation } from "../../auth/permissions";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
@@ -69,6 +69,7 @@ type FlockRecoveryOverview = {
 };
 
 export function FlockListPage() {
+  const navigate = useNavigate();
   const { token, user } = useAuth();
   const { showToast } = useToast();
   const breedOptions = useReferenceOptions("breed", token, FALLBACK_BREED_OPTIONS);
@@ -522,6 +523,13 @@ export function FlockListPage() {
       ) : null}
       {canCreateFlock ? (
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => navigate("/farm/reports?type=flock_comparison")}
+            className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
+          >
+            Compare flocks report
+          </button>
           <button
             type="button"
             onClick={() => setShowCreateFlock((v) => !v)}

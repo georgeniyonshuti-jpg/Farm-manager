@@ -253,9 +253,14 @@ export function FlockDetailPage() {
         title={flockMeta?.label ?? "Flock"}
         subtitle={flockMeta ? <>Placement {flockMeta.placementDate}</> : undefined}
         action={
-          <Link to="/farm/flocks" className="text-sm font-medium text-emerald-800 hover:underline">
-            ← All flocks
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link to={`/farm/reports?type=flock_deep_dive&flockId=${encodeURIComponent(id ?? "")}`} className="text-sm font-medium text-[var(--primary-color)] hover:underline">
+              Generate report
+            </Link>
+            <Link to="/farm/flocks" className="text-sm font-medium text-emerald-800 hover:underline">
+              ← All flocks
+            </Link>
+          </div>
         }
       />
 

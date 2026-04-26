@@ -130,6 +130,7 @@ export const PAGE_ACCESS_DEFS: Array<{ key: string; label: string; prefixes: str
   { key: "farm_checkin_review", label: "Review check-ins", prefixes: ["/farm/checkin-review"] },
   { key: "farm_treatments", label: "Medicine tracking", prefixes: ["/farm/treatments"] },
   { key: "farm_slaughter", label: "Slaughter & FCR", prefixes: ["/farm/slaughter"] },
+  { key: "farm_reports", label: "Reports center", prefixes: ["/farm/reports"] },
   { key: "cleva_portfolio", label: "Portfolio analytics", prefixes: ["/cleva/portfolio"] },
   {
     key: "cleva_business_model",

@@ -228,6 +228,12 @@ export function ManagementHome() {
           </p>
         </div>
         <div className="flex items-center gap-3 flex-wrap justify-end">
+          <Link
+            to="/farm/reports?type=farm_operations"
+            className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] transition-colors"
+          >
+            Reports
+          </Link>
           <OdooStatusPill />
           <LiveBadge />
           <button onClick={reload}
