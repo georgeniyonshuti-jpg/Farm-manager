@@ -11,6 +11,7 @@ import { API_BASE_URL } from "../../api/config";
 import { useToast } from "../../components/Toast";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { useSuppliers } from "../../hooks/useSuppliers";
+import { useBarns } from "../../hooks/useBarns";
 
 const FALLBACK_BREED_OPTIONS = [
   { value: "generic_broiler", label: "generic_broiler" },
@@ -74,6 +75,7 @@ export function FlockListPage() {
   const { showToast } = useToast();
   const breedOptions = useReferenceOptions("breed", token, FALLBACK_BREED_OPTIONS);
   const { suppliers, loadSuppliers, createSupplier } = useSuppliers(token);
+  const { barns: farmBarns, loadBarns, createBarn } = useBarns(token);
   const canCreateFlock = canFlockAction(user, "flock.create");
   const [flocks, setFlocks] = useState<FlockRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -102,6 +104,9 @@ export function FlockListPage() {
     supplierMode: "existing" as "existing" | "new",
     purchaseSupplier: "",
     purchaseDate: "",
+    barnId: "",
+    barnMode: "existing" as "existing" | "new",
+    newBarnName: "",
   });
 
   const load = useCallback(async () => {
@@ -308,6 +313,9 @@ export function FlockListPage() {
   useEffect(() => {
     void loadSuppliers();
   }, [loadSuppliers]);
+  useEffect(() => {
+    void loadBarns();
+  }, [loadBarns]);
 
   async function submitCreateFlock(e: React.FormEvent) {
     e.preventDefault();
@@ -325,8 +333,17 @@ export function FlockListPage() {
           status: "active",
           purchaseCostRwf: createForm.purchaseCostRwf ? Number(createForm.purchaseCostRwf) : undefined,
           supplierId: createForm.supplierMode === "existing" ? (createForm.supplierId || undefined) : undefined,
-          purchaseSupplier: createForm.purchaseSupplier.trim() || undefined,
+          purchaseSupplier:
+            createForm.supplierMode === "new" ? createForm.purchaseSupplier.trim() || undefined : undefined,
           purchaseDate: createForm.purchaseDate || undefined,
+          barnId:
+            createForm.barnMode === "existing" && createForm.barnId
+              ? createForm.barnId
+              : undefined,
+          barnName:
+            createForm.barnMode === "new" && createForm.newBarnName.trim()
+              ? createForm.newBarnName.trim()
+              : undefined,
         }),
       });
       const d = await r.json().catch(() => ({}));
@@ -350,6 +367,9 @@ export function FlockListPage() {
         supplierMode: "existing",
         purchaseSupplier: "",
         purchaseDate: "",
+        barnId: "",
+        barnMode: "existing",
+        newBarnName: "",
       }));
       setShowCreateFlock(false);
       await load();
@@ -578,6 +598,62 @@ export function FlockListPage() {
               value={createForm.targetWeightKg}
               onChange={(e) => setCreateForm((v) => ({ ...v, targetWeightKg: e.target.value }))}
             />
+          </div>
+          <p className="mt-4 text-xs font-semibold text-[var(--text-secondary)]">Barn location</p>
+          <div className="mt-2 grid gap-2 sm:grid-cols-4">
+            <div className="space-y-2 sm:col-span-2">
+              <select
+                className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                value={createForm.barnMode === "new" ? "__new_barn__" : createForm.barnId}
+                onChange={(e) =>
+                  setCreateForm((v) => ({
+                    ...v,
+                    barnMode: e.target.value === "__new_barn__" ? "new" : "existing",
+                    barnId: e.target.value === "__new_barn__" ? "" : e.target.value,
+                  }))
+                }
+              >
+                <option value="">Select barn</option>
+                {farmBarns.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+                <option value="__new_barn__">+ Add new barn</option>
+              </select>
+              {createForm.barnMode === "new" && (
+                <div className="flex gap-2">
+                  <input
+                    className="min-w-0 flex-1 rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                    placeholder="Barn name"
+                    value={createForm.newBarnName}
+                    onChange={(e) => setCreateForm((v) => ({ ...v, newBarnName: e.target.value }))}
+                  />
+                  <button
+                    type="button"
+                    className="rounded-lg border border-[var(--border-color)] px-3 py-2 text-xs font-semibold text-[var(--text-primary)]"
+                    onClick={async () => {
+                      try {
+                        const created = await createBarn(createForm.newBarnName);
+                        if (created?.id) {
+                          setCreateForm((v) => ({
+                            ...v,
+                            barnMode: "existing",
+                            barnId: created.id,
+                            newBarnName: created.name ?? v.newBarnName,
+                          }));
+                          showToast("success", "Barn saved");
+                        }
+                      } catch (e) {
+                        showToast("error", e instanceof Error ? e.message : "Could not create barn");
+                      }
+                    }}
+                  >
+                    Save
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
           <p className="mt-4 text-xs font-semibold text-[var(--text-secondary)]">Biological asset cost (IAS 41 — optional)</p>
           <p className="text-xs text-[var(--text-muted)]">Enter total purchase cost only. Cost per chick is computed automatically and posted to Odoo.</p>

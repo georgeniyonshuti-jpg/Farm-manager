@@ -8,7 +8,14 @@ import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
 import { useToast } from "../../components/Toast";
+import { useSuppliers } from "../../hooks/useSuppliers";
+import { useBarns } from "../../hooks/useBarns";
+import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import type { CheckinStatus } from "./checkinStatusTypes";
+
+const FALLBACK_BREED_OPTIONS = [
+  { value: "generic_broiler", label: "generic_broiler" },
+];
 
 type Eligibility = {
   eligibleForSlaughter: boolean;
@@ -44,14 +51,116 @@ type Performance = {
 
 type FlockPickerRow = { id: string; label: string };
 
+type FlockDetailFromApi = {
+  id: string;
+  label: string;
+  placementDate: string;
+  barnId?: string | null;
+  barnName?: string | null;
+  breedCode?: string;
+  initialCount?: number;
+  targetWeightKg?: number | null;
+  purchaseCostRwf?: number | null;
+  costPerChickRwf?: number | null;
+  purchaseSupplier?: string | null;
+  purchaseDate?: string | null;
+};
+
 export function FlockDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
   const { token, user } = useAuth();
   const { showToast } = useToast();
+  const breedOptions = useReferenceOptions("breed", token, FALLBACK_BREED_OPTIONS);
+  const { suppliers, loadSuppliers } = useSuppliers(token);
+  const { barns: farmBarns, loadBarns, createBarn } = useBarns(token);
   const [flockPickerOptions, setFlockPickerOptions] = useState<FlockPickerRow[]>([]);
   const [flockMeta, setFlockMeta] = useState<{ label: string; placementDate: string } | null>(null);
+  const [flockDetail, setFlockDetail] = useState<FlockDetailFromApi | null>(null);
+  const [showSuperEdit, setShowSuperEdit] = useState(false);
+  const [superEditBusy, setSuperEditBusy] = useState(false);
+  const [superEditForm, setSuperEditForm] = useState({
+    placementDate: "",
+    initialCount: "",
+    breedCode: "generic_broiler",
+    targetWeightKg: "",
+    purchaseCostRwf: "",
+    supplierId: "",
+    supplierMode: "existing" as "existing" | "new",
+    purchaseSupplier: "",
+    purchaseDate: "",
+    barnId: "",
+    barnMode: "existing" as "existing" | "new",
+    newBarnName: "",
+  });
+  const [superEditClearBarn, setSuperEditClearBarn] = useState(false);
+
+  function openSuperuserEditPanel() {
+    if (!flockDetail) return;
+    const ps = flockDetail.purchaseSupplier?.trim();
+    const matchSid = suppliers.find((s) => s.name === ps)?.id ?? "";
+    setSuperEditClearBarn(false);
+    setSuperEditForm({
+      placementDate: flockDetail.placementDate?.slice(0, 10) ?? "",
+      initialCount: String(flockDetail.initialCount ?? ""),
+      breedCode: flockDetail.breedCode ?? "generic_broiler",
+      targetWeightKg: flockDetail.targetWeightKg != null ? String(flockDetail.targetWeightKg) : "",
+      purchaseCostRwf:
+        flockDetail.purchaseCostRwf != null ? String(flockDetail.purchaseCostRwf) : "",
+      supplierId: matchSid,
+      supplierMode: matchSid ? "existing" : ps ? "new" : "existing",
+      purchaseSupplier: ps ?? "",
+      purchaseDate: flockDetail.purchaseDate?.slice(0, 10) ?? "",
+      barnId: flockDetail.barnId ?? "",
+      barnMode: flockDetail.barnId ? "existing" : "existing",
+      newBarnName: "",
+    });
+    setShowSuperEdit(true);
+  }
+
+  async function submitSuperuserEdit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!id || user?.role !== "superuser") return;
+    setSuperEditBusy(true);
+    try {
+      const body: Record<string, unknown> = {
+        placementDate: superEditForm.placementDate,
+        initialCount: Number(superEditForm.initialCount),
+        breedCode: superEditForm.breedCode.trim().toLowerCase(),
+        targetWeightKg: superEditForm.targetWeightKg ? Number(superEditForm.targetWeightKg) : null,
+        purchaseCostRwf: superEditForm.purchaseCostRwf ? Number(superEditForm.purchaseCostRwf) : null,
+        supplierId: superEditForm.supplierMode === "existing" ? superEditForm.supplierId || undefined : undefined,
+        purchaseSupplier:
+          superEditForm.supplierMode === "new"
+            ? superEditForm.purchaseSupplier.trim() || undefined
+            : undefined,
+        purchaseDate: superEditForm.purchaseDate || undefined,
+      };
+      if (superEditClearBarn) {
+        body.clearBarn = true;
+        body.barnId = null;
+      } else if (superEditForm.barnMode === "existing" && superEditForm.barnId) {
+        body.barnId = superEditForm.barnId;
+      } else if (superEditForm.barnMode === "new" && superEditForm.newBarnName.trim()) {
+        body.barnName = superEditForm.newBarnName.trim();
+      }
+      const r = await fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: jsonAuthHeaders(token),
+        body: JSON.stringify(body),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Update failed");
+      showToast("success", "Flock details updated.");
+      setShowSuperEdit(false);
+      await load();
+    } catch (err) {
+      showToast("error", err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setSuperEditBusy(false);
+    }
+  }
   const [status, setStatus] = useState<CheckinStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -93,11 +202,12 @@ export function FlockDetailPage() {
       const fr = await fetch(`${API_BASE_URL}/api/flocks${listQ}`, { headers: readAuthHeaders(token) });
       const fd = await fr.json();
       if (!fr.ok) throw new Error((fd as { error?: string }).error);
-      const list = (fd.flocks as { id: string; label: string; placementDate: string }[]) ?? [];
+      const list = (fd.flocks as FlockDetailFromApi[]) ?? [];
       setFlockPickerOptions(list.map((row) => ({ id: row.id, label: row.label })));
       const f = list.find((x) => x.id === id);
       if (!f) throw new Error("Flock not found");
       setFlockMeta({ label: f.label, placementDate: f.placementDate });
+      setFlockDetail(f);
 
       const sr = await fetch(`${API_BASE_URL}/api/flocks/${id}/checkin-status`, { headers: readAuthHeaders(token) });
       const sd = await sr.json();
@@ -125,6 +235,11 @@ export function FlockDetailPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void loadSuppliers();
+    void loadBarns();
+  }, [loadSuppliers, loadBarns]);
 
   useEffect(() => {
     if (status) {
@@ -251,7 +366,18 @@ export function FlockDetailPage() {
     <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
         title={flockMeta?.label ?? "Flock"}
-        subtitle={flockMeta ? <>Placement {flockMeta.placementDate}</> : undefined}
+        subtitle={
+          flockMeta ? (
+            <>
+              Placement {flockMeta.placementDate}
+              {flockDetail?.barnName ? (
+                <span className="text-neutral-600"> · Barn: {flockDetail.barnName}</span>
+              ) : (
+                <span className="text-neutral-500"> · Barn: —</span>
+              )}
+            </>
+          ) : undefined
+        }
         action={
           <div className="flex items-center gap-3">
             <Link to={`/farm/reports?type=flock_deep_dive&flockId=${encodeURIComponent(id ?? "")}`} className="text-sm font-medium text-[var(--primary-color)] hover:underline">
@@ -293,6 +419,227 @@ export function FlockDetailPage() {
       {flockMeta && status && !loading && !error ? (
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="space-y-4 lg:col-span-2">
+            {flockDetail ? (
+              <section className="rounded-xl border border-neutral-200 bg-white p-4 text-sm shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-neutral-500">Flock profile</p>
+                    <dl className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <div>
+                        <dt className="text-neutral-500">Barn</dt>
+                        <dd className="font-medium text-neutral-900">{flockDetail.barnName ?? "—"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-neutral-500">Breed</dt>
+                        <dd className="font-medium text-neutral-900">{flockDetail.breedCode ?? "—"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-neutral-500">Initial birds</dt>
+                        <dd className="font-medium text-neutral-900">{flockDetail.initialCount ?? "—"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-neutral-500">Purchase supplier</dt>
+                        <dd className="font-medium text-neutral-900">{flockDetail.purchaseSupplier ?? "—"}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                  {user?.role === "superuser" ? (
+                    <button
+                      type="button"
+                      onClick={() => openSuperuserEditPanel()}
+                      className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-800 hover:bg-neutral-50"
+                    >
+                      Edit flock info
+                    </button>
+                  ) : null}
+                </div>
+                {showSuperEdit && user?.role === "superuser" ? (
+                  <form onSubmit={(ev) => void submitSuperuserEdit(ev)} className="mt-4 space-y-3 border-t border-neutral-100 pt-4">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs text-neutral-500">Placement date</span>
+                        <input
+                          type="date"
+                          className="rounded-lg border border-neutral-300 px-3 py-2"
+                          value={superEditForm.placementDate}
+                          onChange={(e) => setSuperEditForm((v) => ({ ...v, placementDate: e.target.value }))}
+                          required
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs text-neutral-500">Initial birds</span>
+                        <input
+                          className="rounded-lg border border-neutral-300 px-3 py-2"
+                          inputMode="numeric"
+                          value={superEditForm.initialCount}
+                          onChange={(e) => setSuperEditForm((v) => ({ ...v, initialCount: e.target.value }))}
+                          required
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs text-neutral-500">Breed</span>
+                        <select
+                          className="rounded-lg border border-neutral-300 px-3 py-2"
+                          value={superEditForm.breedCode}
+                          onChange={(e) => setSuperEditForm((v) => ({ ...v, breedCode: e.target.value }))}
+                        >
+                          {breedOptions.map((o) => (
+                            <option key={o.value} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs text-neutral-500">Target weight (kg, optional)</span>
+                        <input
+                          className="rounded-lg border border-neutral-300 px-3 py-2"
+                          inputMode="decimal"
+                          value={superEditForm.targetWeightKg}
+                          onChange={(e) => setSuperEditForm((v) => ({ ...v, targetWeightKg: e.target.value }))}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs text-neutral-500">Total purchase cost (RWF)</span>
+                        <input
+                          className="rounded-lg border border-neutral-300 px-3 py-2"
+                          inputMode="decimal"
+                          value={superEditForm.purchaseCostRwf}
+                          onChange={(e) => setSuperEditForm((v) => ({ ...v, purchaseCostRwf: e.target.value }))}
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs text-neutral-500">Purchase date</span>
+                        <input
+                          type="date"
+                          className="rounded-lg border border-neutral-300 px-3 py-2"
+                          value={superEditForm.purchaseDate}
+                          onChange={(e) => setSuperEditForm((v) => ({ ...v, purchaseDate: e.target.value }))}
+                        />
+                      </label>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <select
+                        className="rounded-lg border border-neutral-300 px-3 py-2"
+                        value={
+                          superEditForm.supplierMode === "new"
+                            ? "__new__"
+                            : superEditForm.supplierId
+                        }
+                        onChange={(e) =>
+                          setSuperEditForm((v) => ({
+                            ...v,
+                            supplierMode: e.target.value === "__new__" ? "new" : "existing",
+                            supplierId: e.target.value === "__new__" ? "" : e.target.value,
+                          }))
+                        }
+                      >
+                        <option value="">Supplier / hatchery</option>
+                        {suppliers.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                        <option value="__new__">+ Add new supplier</option>
+                      </select>
+                      {superEditForm.supplierMode === "new" ? (
+                        <input
+                          className="rounded-lg border border-neutral-300 px-3 py-2"
+                          placeholder="New supplier name"
+                          value={superEditForm.purchaseSupplier}
+                          onChange={(e) =>
+                            setSuperEditForm((v) => ({ ...v, purchaseSupplier: e.target.value }))
+                          }
+                        />
+                      ) : null}
+                    </div>
+                    <label className="flex items-center gap-2 text-xs text-neutral-600">
+                      <input
+                        type="checkbox"
+                        checked={superEditClearBarn}
+                        onChange={(e) => setSuperEditClearBarn(e.target.checked)}
+                      />
+                      No barn assignment
+                    </label>
+                    {!superEditClearBarn ? (
+                      <div className="space-y-2">
+                        <select
+                          className="w-full max-w-xl rounded-lg border border-neutral-300 px-3 py-2"
+                          value={
+                            superEditForm.barnMode === "new" ? "__new_barn__" : superEditForm.barnId
+                          }
+                          onChange={(e) =>
+                            setSuperEditForm((v) => ({
+                              ...v,
+                              barnMode: e.target.value === "__new_barn__" ? "new" : "existing",
+                              barnId: e.target.value === "__new_barn__" ? "" : e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">Select barn</option>
+                          {farmBarns.map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.name}
+                            </option>
+                          ))}
+                          <option value="__new_barn__">+ Add new barn</option>
+                        </select>
+                        {superEditForm.barnMode === "new" ? (
+                          <div className="flex flex-wrap gap-2">
+                            <input
+                              className="min-w-0 flex-1 rounded-lg border border-neutral-300 px-3 py-2"
+                              placeholder="Barn name"
+                              value={superEditForm.newBarnName}
+                              onChange={(e) =>
+                                setSuperEditForm((v) => ({ ...v, newBarnName: e.target.value }))
+                              }
+                            />
+                            <button
+                              type="button"
+                              className="rounded-lg border border-neutral-300 px-3 py-2 text-xs font-semibold"
+                              onClick={async () => {
+                                try {
+                                  const created = await createBarn(superEditForm.newBarnName);
+                                  if (created?.id) {
+                                    setSuperEditForm((v) => ({
+                                      ...v,
+                                      barnMode: "existing",
+                                      barnId: created.id,
+                                      newBarnName: created.name ?? v.newBarnName,
+                                    }));
+                                    showToast("success", "Barn saved");
+                                  }
+                                } catch (err) {
+                                  showToast("error", err instanceof Error ? err.message : "Could not save barn");
+                                }
+                              }}
+                            >
+                              Save barn
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="submit"
+                        disabled={superEditBusy}
+                        className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                      >
+                        {superEditBusy ? "Saving…" : "Save changes"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowSuperEdit(false)}
+                        className="rounded-lg border border-neutral-300 px-4 py-2 text-sm"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
+              </section>
+            ) : null}
             {performance ? (
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
