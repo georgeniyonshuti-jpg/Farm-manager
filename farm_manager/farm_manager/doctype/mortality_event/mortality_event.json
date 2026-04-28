@@ -1,0 +1,53 @@
+{
+ "actions": [],
+ "autoname": "format:MORT-{flock}-{event_date}-{####}",
+ "creation": "2026-04-26 18:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "is_submittable": 1,
+ "field_order": [
+  "flock",
+  "event_date",
+  "count",
+  "column_break_main",
+  "reason_code",
+  "discovered_by",
+  "section_break_detail",
+  "average_weight_kg",
+  "estimated_loss_value",
+  "stock_entry",
+  "section_break_notes",
+  "notes",
+  "amended_from"
+ ],
+ "fields": [
+  {"fieldname": "flock", "fieldtype": "Link", "label": "Flock", "options": "Flock", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
+  {"fieldname": "event_date", "fieldtype": "Date", "label": "Event Date", "default": "Today", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "count", "fieldtype": "Int", "label": "Mortality Count", "reqd": 1, "non_negative": 1, "in_list_view": 1},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "reason_code", "fieldtype": "Select", "label": "Reason", "options": "Disease\nInjury\nPredation\nHeat Stress\nSudden Death Syndrome\nUnknown\nOther", "default": "Unknown", "in_list_view": 1, "in_standard_filter": 1},
+  {"fieldname": "discovered_by", "fieldtype": "Link", "label": "Discovered By", "options": "User", "default": "user"},
+  {"fieldname": "section_break_detail", "fieldtype": "Section Break", "label": "Detail"},
+  {"fieldname": "average_weight_kg", "fieldtype": "Float", "label": "Avg Weight (kg)", "precision": "3"},
+  {"fieldname": "estimated_loss_value", "fieldtype": "Currency", "label": "Estimated Loss Value", "read_only": 1},
+  {"fieldname": "stock_entry", "fieldtype": "Link", "label": "Stock Entry", "options": "Stock Entry", "read_only": 1},
+  {"fieldname": "section_break_notes", "fieldtype": "Section Break", "label": "Notes"},
+  {"fieldname": "notes", "fieldtype": "Text", "label": "Notes"},
+  {"fieldname": "amended_from", "fieldtype": "Link", "label": "Amended From", "options": "Mortality Event", "no_copy": 1, "print_hide": 1, "read_only": 1}
+ ],
+ "links": [],
+ "modified": "2026-04-26 18:00:00",
+ "modified_by": "Administrator",
+ "module": "Farm Manager",
+ "name": "Mortality Event",
+ "owner": "Administrator",
+ "permissions": [
+  {"role": "System Manager", "create": 1, "delete": 1, "submit": 1, "cancel": 1, "amend": 1, "read": 1, "report": 1, "write": 1, "print": 1},
+  {"role": "Farm Manager", "create": 1, "submit": 1, "cancel": 1, "amend": 1, "read": 1, "report": 1, "write": 1, "print": 1},
+  {"role": "Farm Veterinarian", "create": 1, "submit": 1, "read": 1, "report": 1, "write": 1},
+  {"role": "Farm Laborer", "create": 1, "read": 1, "submit": 1, "write": 1}
+ ],
+ "sort_field": "event_date",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

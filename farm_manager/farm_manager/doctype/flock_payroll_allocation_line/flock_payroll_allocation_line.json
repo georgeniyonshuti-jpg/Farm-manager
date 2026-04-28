@@ -1,0 +1,30 @@
+{
+ "actions": [],
+ "creation": "2026-04-26 18:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "istable": 1,
+ "field_order": [
+  "flock",
+  "cost_center",
+  "allocation_pct",
+  "allocated_amount",
+  "remarks"
+ ],
+ "fields": [
+  {"fieldname": "flock", "fieldtype": "Link", "label": "Flock", "options": "Flock", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "cost_center", "fieldtype": "Link", "label": "Cost Center", "options": "Cost Center", "fetch_from": "flock.cost_center", "in_list_view": 1},
+  {"fieldname": "allocation_pct", "fieldtype": "Percent", "label": "Allocation %", "in_list_view": 1},
+  {"fieldname": "allocated_amount", "fieldtype": "Currency", "label": "Allocated Amount", "in_list_view": 1, "reqd": 1},
+  {"fieldname": "remarks", "fieldtype": "Small Text", "label": "Remarks"}
+ ],
+ "links": [],
+ "modified": "2026-04-26 18:00:00",
+ "modified_by": "Administrator",
+ "module": "Farm Manager",
+ "name": "Flock Payroll Allocation Line",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

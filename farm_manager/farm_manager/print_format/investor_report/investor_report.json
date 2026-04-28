@@ -1,0 +1,18 @@
+{
+ "creation": "2026-04-26 18:00:00",
+ "css": ".print-format h2 { color: #2c3e50; } .summary { background: #f6f8fb; padding: 12px; border-radius: 6px; }",
+ "default_print_language": "en",
+ "disabled": 0,
+ "doc_type": "Flock",
+ "doctype": "Print Format",
+ "font": "Default",
+ "html": "<div class=\"print-format\"><h2>Investor Cycle Report</h2><div class=\"summary\"><p><b>Flock:</b> {{ doc.flock_code }} &middot; <b>Farm:</b> {{ doc.farm }}</p><p><b>Cycle:</b> {{ doc.placement_date }} - {{ doc.harvest_date or 'in progress' }} ({{ doc.age_days }} days)</p></div><h3>Performance</h3><table class=\"table table-bordered\"><tr><th>Initial</th><td>{{ doc.initial_count }}</td><th>Survived</th><td>{{ doc.current_count }}</td><th>Mortality %</th><td>{{ doc.mortality_pct or 0 }}%</td></tr><tr><th>Feed (kg)</th><td>{{ doc.feed_consumed_kg }}</td><th>FCR</th><td>{{ doc.fcr_running or '-' }}</td><th>Avg Wt</th><td>{{ doc.current_avg_weight_kg or '-' }} kg</td></tr></table><h3>Financial</h3><table class=\"table table-bordered\"><tr><th>Cost Center</th><td>{{ doc.cost_center or '-' }}</td><th>Project</th><td>{{ doc.project or '-' }}</td></tr><tr><th>Current Valuation</th><td colspan=\"3\">{{ frappe.format_value(doc.current_valuation, {'fieldtype': 'Currency'}) }}</td></tr></table></div>",
+ "modified": "2026-04-26 18:00:00",
+ "modified_by": "Administrator",
+ "module": "Farm Manager",
+ "name": "Investor Report",
+ "owner": "Administrator",
+ "print_format_type": "Jinja",
+ "show_section_headings": 0,
+ "standard": "Yes"
+}

@@ -1,0 +1,36 @@
+{
+ "actions": [],
+ "creation": "2026-04-26 18:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "istable": 1,
+ "field_order": [
+  "medicine_item",
+  "route",
+  "dose",
+  "frequency",
+  "duration_days",
+  "quantity_total",
+  "uom",
+  "notes"
+ ],
+ "fields": [
+  {"fieldname": "medicine_item", "fieldtype": "Link", "label": "Medicine", "options": "Item", "reqd": 1, "in_list_view": 1, "get_query": "{\"item_group\": \"Medicine\"}"},
+  {"fieldname": "route", "fieldtype": "Select", "label": "Route", "options": "Drinking Water\nFeed Additive\nInjection\nTopical", "default": "Drinking Water", "in_list_view": 1},
+  {"fieldname": "dose", "fieldtype": "Data", "label": "Dose", "in_list_view": 1},
+  {"fieldname": "frequency", "fieldtype": "Data", "label": "Frequency"},
+  {"fieldname": "duration_days", "fieldtype": "Int", "label": "Duration (days)", "default": "1"},
+  {"fieldname": "quantity_total", "fieldtype": "Float", "label": "Total Qty", "precision": "3", "in_list_view": 1},
+  {"fieldname": "uom", "fieldtype": "Link", "label": "UOM", "options": "UOM"},
+  {"fieldname": "notes", "fieldtype": "Small Text", "label": "Notes"}
+ ],
+ "links": [],
+ "modified": "2026-04-26 18:00:00",
+ "modified_by": "Administrator",
+ "module": "Farm Manager",
+ "name": "Prescription Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

@@ -1,4 +1,5 @@
 {
+<<<<<<< HEAD
   "name": "farm-manager",
   "private": true,
   "scripts": {
@@ -8,4 +9,10 @@
     "migrate": "node server/migrate.js",
     "test": "node --test server/tests/"
   }
+=======
+	"name": "farm_manager",
+	"license": "MIT",
+	"private": true,
+	"description": "Farm Manager custom app (Frappe)"
+>>>>>>> 524398e (add barn name selection for flocks)
 }

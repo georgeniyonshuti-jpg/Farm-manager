@@ -1,0 +1,38 @@
+{
+ "actions": [],
+ "autoname": "format:LSCH-{flock}",
+ "creation": "2026-04-26 18:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "flock",
+  "frequency",
+  "preferred_time",
+  "is_active",
+  "column_break_main",
+  "assigned_to",
+  "next_due_at"
+ ],
+ "fields": [
+  {"fieldname": "flock", "fieldtype": "Link", "label": "Flock", "options": "Flock", "reqd": 1, "unique": 1, "in_list_view": 1},
+  {"fieldname": "frequency", "fieldtype": "Select", "label": "Frequency", "options": "Daily\nTwice Daily\nEvery 12h", "default": "Daily"},
+  {"fieldname": "preferred_time", "fieldtype": "Time", "label": "Preferred Time"},
+  {"fieldname": "is_active", "fieldtype": "Check", "label": "Active", "default": "1"},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "assigned_to", "fieldtype": "Link", "label": "Assigned To", "options": "User"},
+  {"fieldname": "next_due_at", "fieldtype": "Datetime", "label": "Next Due At"}
+ ],
+ "links": [],
+ "modified": "2026-04-26 18:00:00",
+ "modified_by": "Administrator",
+ "module": "Farm Manager",
+ "name": "Flock Log Schedule",
+ "owner": "Administrator",
+ "permissions": [
+  {"role": "System Manager", "create": 1, "delete": 1, "read": 1, "report": 1, "write": 1},
+  {"role": "Farm Manager", "create": 1, "read": 1, "report": 1, "write": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

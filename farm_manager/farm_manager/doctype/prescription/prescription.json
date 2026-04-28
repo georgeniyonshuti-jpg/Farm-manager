@@ -1,0 +1,50 @@
+{
+ "actions": [],
+ "autoname": "format:RX-{flock}-{prescription_date}-{####}",
+ "creation": "2026-04-26 18:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "is_submittable": 1,
+ "field_order": [
+  "flock",
+  "prescription_date",
+  "veterinarian",
+  "column_break_main",
+  "status",
+  "withdrawal_days",
+  "diagnosis",
+  "section_break_items",
+  "items",
+  "section_break_notes",
+  "notes",
+  "amended_from"
+ ],
+ "fields": [
+  {"fieldname": "flock", "fieldtype": "Link", "label": "Flock", "options": "Flock", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
+  {"fieldname": "prescription_date", "fieldtype": "Date", "label": "Date", "reqd": 1, "default": "Today", "in_list_view": 1},
+  {"fieldname": "veterinarian", "fieldtype": "Link", "label": "Veterinarian", "options": "User", "reqd": 1},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Draft\nActive\nCompleted\nCancelled", "default": "Draft", "in_list_view": 1},
+  {"fieldname": "withdrawal_days", "fieldtype": "Int", "label": "Withdrawal Days", "default": "0", "non_negative": 1},
+  {"fieldname": "diagnosis", "fieldtype": "Small Text", "label": "Diagnosis"},
+  {"fieldname": "section_break_items", "fieldtype": "Section Break", "label": "Medicines"},
+  {"fieldname": "items", "fieldtype": "Table", "label": "Items", "options": "Prescription Item", "reqd": 1},
+  {"fieldname": "section_break_notes", "fieldtype": "Section Break", "label": "Notes"},
+  {"fieldname": "notes", "fieldtype": "Text", "label": "Notes"},
+  {"fieldname": "amended_from", "fieldtype": "Link", "label": "Amended From", "options": "Prescription", "no_copy": 1, "print_hide": 1, "read_only": 1}
+ ],
+ "links": [],
+ "modified": "2026-04-26 18:00:00",
+ "modified_by": "Administrator",
+ "module": "Farm Manager",
+ "name": "Prescription",
+ "owner": "Administrator",
+ "permissions": [
+  {"role": "System Manager", "create": 1, "delete": 1, "read": 1, "report": 1, "submit": 1, "cancel": 1, "amend": 1, "write": 1, "print": 1},
+  {"role": "Farm Veterinarian", "create": 1, "read": 1, "report": 1, "submit": 1, "amend": 1, "write": 1, "print": 1},
+  {"role": "Farm Manager", "read": 1, "report": 1, "print": 1}
+ ],
+ "sort_field": "prescription_date",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

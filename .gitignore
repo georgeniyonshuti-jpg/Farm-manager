@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 node_modules
 dist
 .DS_Store
@@ -7,3 +8,17 @@ dist
 server/data/*.sqlite
 server/data/*.sqlite-wal
 server/data/*.sqlite-shm
+=======
+*.pyc
+*.egg-info
+__pycache__/
+.DS_Store
+node_modules/
+.venv/
+.env
+*.log
+build/
+dist/
+.idea/
+.vscode/
+>>>>>>> 524398e (add barn name selection for flocks)

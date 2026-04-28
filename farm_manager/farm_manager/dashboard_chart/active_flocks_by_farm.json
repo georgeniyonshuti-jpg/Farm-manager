@@ -1,0 +1,20 @@
+{
+ "based_on": "",
+ "chart_name": "Active Flocks by Farm",
+ "chart_type": "Group By",
+ "creation": "2026-04-26 18:00:00",
+ "doctype": "Dashboard Chart",
+ "document_type": "Flock",
+ "filters_json": "{\"status\": \"Active\"}",
+ "group_by_based_on": "farm",
+ "group_by_type": "Count",
+ "is_public": 1,
+ "is_standard": 1,
+ "modified": "2026-04-26 18:00:00",
+ "modified_by": "Administrator",
+ "module": "Farm Manager",
+ "name": "Active Flocks by Farm",
+ "number_of_groups": 10,
+ "owner": "Administrator",
+ "type": "Bar"
+}

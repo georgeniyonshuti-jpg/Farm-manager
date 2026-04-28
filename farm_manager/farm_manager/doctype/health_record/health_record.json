@@ -1,0 +1,51 @@
+{
+ "actions": [],
+ "autoname": "format:HR-{flock}-{record_date}-{####}",
+ "creation": "2026-04-26 18:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "flock",
+  "record_date",
+  "veterinarian",
+  "withdrawal_days",
+  "column_break_main",
+  "diagnosis",
+  "treatment",
+  "cost",
+  "section_break_links",
+  "treatment_round",
+  "prescription",
+  "section_break_notes",
+  "notes"
+ ],
+ "fields": [
+  {"fieldname": "flock", "fieldtype": "Link", "label": "Flock", "options": "Flock", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
+  {"fieldname": "record_date", "fieldtype": "Date", "label": "Date", "reqd": 1, "default": "Today", "in_list_view": 1},
+  {"fieldname": "veterinarian", "fieldtype": "Link", "label": "Veterinarian", "options": "User", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "withdrawal_days", "fieldtype": "Int", "label": "Withdrawal Days", "default": "0", "non_negative": 1},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "diagnosis", "fieldtype": "Small Text", "label": "Diagnosis", "reqd": 1},
+  {"fieldname": "treatment", "fieldtype": "Small Text", "label": "Treatment"},
+  {"fieldname": "cost", "fieldtype": "Currency", "label": "Cost", "non_negative": 1, "default": "0"},
+  {"fieldname": "section_break_links", "fieldtype": "Section Break", "label": "Links"},
+  {"fieldname": "treatment_round", "fieldtype": "Link", "label": "Treatment Round", "options": "Treatment Round"},
+  {"fieldname": "prescription", "fieldtype": "Link", "label": "Prescription", "options": "Prescription"},
+  {"fieldname": "section_break_notes", "fieldtype": "Section Break", "label": "Notes"},
+  {"fieldname": "notes", "fieldtype": "Text", "label": "Notes"}
+ ],
+ "links": [],
+ "modified": "2026-04-26 18:00:00",
+ "modified_by": "Administrator",
+ "module": "Farm Manager",
+ "name": "Health Record",
+ "owner": "Administrator",
+ "permissions": [
+  {"role": "System Manager", "create": 1, "delete": 1, "read": 1, "report": 1, "write": 1, "print": 1, "share": 1, "export": 1},
+  {"role": "Farm Veterinarian", "create": 1, "read": 1, "report": 1, "write": 1, "print": 1},
+  {"role": "Farm Manager", "read": 1, "report": 1, "print": 1}
+ ],
+ "sort_field": "record_date",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

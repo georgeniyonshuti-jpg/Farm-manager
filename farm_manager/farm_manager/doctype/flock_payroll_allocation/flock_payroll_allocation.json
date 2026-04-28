@@ -1,0 +1,39 @@
+{
+ "actions": [],
+ "autoname": "format:FPA-{salary_slip}-{####}",
+ "creation": "2026-04-26 18:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "salary_slip",
+  "employee",
+  "posting_date",
+  "column_break_main",
+  "total_amount",
+  "section_break_lines",
+  "lines"
+ ],
+ "fields": [
+  {"fieldname": "salary_slip", "fieldtype": "Link", "label": "Salary Slip", "options": "Salary Slip", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1, "unique": 1},
+  {"fieldname": "employee", "fieldtype": "Link", "label": "Employee", "options": "Employee", "fetch_from": "salary_slip.employee", "in_list_view": 1},
+  {"fieldname": "posting_date", "fieldtype": "Date", "label": "Posting Date", "fetch_from": "salary_slip.posting_date", "in_list_view": 1},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "total_amount", "fieldtype": "Currency", "label": "Total Amount", "fetch_from": "salary_slip.net_pay", "in_list_view": 1},
+  {"fieldname": "section_break_lines", "fieldtype": "Section Break", "label": "Allocation Lines"},
+  {"fieldname": "lines", "fieldtype": "Table", "label": "Lines", "options": "Flock Payroll Allocation Line", "reqd": 1}
+ ],
+ "links": [],
+ "modified": "2026-04-26 18:00:00",
+ "modified_by": "Administrator",
+ "module": "Farm Manager",
+ "name": "Flock Payroll Allocation",
+ "owner": "Administrator",
+ "permissions": [
+  {"role": "System Manager", "create": 1, "delete": 1, "read": 1, "report": 1, "write": 1},
+  {"role": "Farm Manager", "create": 1, "read": 1, "report": 1, "write": 1},
+  {"role": "Farm Accountant", "create": 1, "read": 1, "report": 1, "write": 1, "print": 1, "export": 1}
+ ],
+ "sort_field": "posting_date",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

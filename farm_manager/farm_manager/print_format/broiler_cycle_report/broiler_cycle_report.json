@@ -1,0 +1,18 @@
+{
+ "creation": "2026-04-26 18:00:00",
+ "css": ".print-format h2 { color: #2c3e50; } .metric { font-weight: bold; }",
+ "default_print_language": "en",
+ "disabled": 0,
+ "doc_type": "Flock",
+ "doctype": "Print Format",
+ "font": "Default",
+ "html": "<div class=\"print-format\"><h2>Broiler Cycle Report</h2><h3>Flock {{ doc.flock_code }}</h3><table class=\"table table-bordered\"><tr><th>Farm</th><td>{{ doc.farm }}</td><th>House</th><td>{{ doc.house or '-' }}</td></tr><tr><th>Breed</th><td>{{ doc.breed_code }}</td><th>Status</th><td>{{ doc.status }}</td></tr><tr><th>Placement</th><td>{{ doc.placement_date }}</td><th>Harvest</th><td>{{ doc.harvest_date or '-' }}</td></tr><tr><th>Initial</th><td class=\"metric\">{{ doc.initial_count }}</td><th>Current</th><td class=\"metric\">{{ doc.current_count }}</td></tr><tr><th>Mortality</th><td class=\"metric\">{{ doc.mortality_total }} ({{ doc.mortality_pct or 0 }}%)</td><th>FCR</th><td class=\"metric\">{{ doc.fcr_running or '-' }}</td></tr><tr><th>Avg Wt (kg)</th><td>{{ doc.current_avg_weight_kg or '-' }}</td><th>Valuation</th><td>{{ frappe.format_value(doc.current_valuation, {'fieldtype': 'Currency'}) }}</td></tr></table></div>",
+ "modified": "2026-04-26 18:00:00",
+ "modified_by": "Administrator",
+ "module": "Farm Manager",
+ "name": "Broiler Cycle Report",
+ "owner": "Administrator",
+ "print_format_type": "Jinja",
+ "show_section_headings": 0,
+ "standard": "Yes"
+}

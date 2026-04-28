@@ -1,0 +1,114 @@
+version: "3.9"
+
+# Self-hostable ERPNext + farm_manager bench using the official Frappe image.
+# This is suitable for VPS deployment. For Render, see ../render/render.yaml.
+
+x-backend-defaults: &backend-defaults
+  image: frappe/erpnext:v15
+  restart: unless-stopped
+  environment:
+    DB_HOST: mariadb
+    DB_PORT: "3306"
+    REDIS_CACHE: redis-cache:6379
+    REDIS_QUEUE: redis-queue:6379
+    REDIS_SOCKETIO: redis-socketio:6379
+    SOCKETIO_PORT: "9000"
+  depends_on:
+    - mariadb
+    - redis-cache
+    - redis-queue
+    - redis-socketio
+  volumes:
+    - sites:/home/frappe/frappe-bench/sites
+    - assets:/home/frappe/frappe-bench/sites/assets
+    - logs:/home/frappe/frappe-bench/logs
+    - apps:/home/frappe/frappe-bench/apps
+
+services:
+  mariadb:
+    image: mariadb:10.6
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-changeme}
+      MYSQL_DATABASE: erpnext
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    ports:
+      - "127.0.0.1:3306:3306"
+
+  redis-cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_cache:/data
+
+  redis-queue:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_queue:/data
+
+  redis-socketio:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_socketio:/data
+
+  backend:
+    <<: *backend-defaults
+    command:
+      - bash
+      - -lc
+      - |
+        bench --site $${SITE_NAME:-erp.local} migrate || true
+        bench start
+
+  websocket:
+    <<: *backend-defaults
+    command: node /home/frappe/frappe-bench/apps/frappe/socketio.js
+    ports:
+      - "9000:9000"
+
+  queue-default:
+    <<: *backend-defaults
+    command: bench worker --queue default
+
+  queue-short:
+    <<: *backend-defaults
+    command: bench worker --queue short
+
+  queue-long:
+    <<: *backend-defaults
+    command: bench worker --queue long
+
+  scheduler:
+    <<: *backend-defaults
+    command: bench schedule
+
+  nginx:
+    image: nginx:1.25-alpine
+    restart: unless-stopped
+    volumes:
+      - sites:/usr/share/nginx/html/sites:ro
+      - assets:/usr/share/nginx/html/assets:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+      - websocket
+
+volumes:
+  mariadb_data:
+  redis_cache:
+  redis_queue:
+  redis_socketio:
+  sites:
+  assets:
+  logs:
+  apps:

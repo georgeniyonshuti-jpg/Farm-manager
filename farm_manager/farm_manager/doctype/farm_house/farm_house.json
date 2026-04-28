@@ -1,0 +1,46 @@
+{
+ "actions": [],
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "field:house_name",
+ "creation": "2026-04-26 18:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "house_name",
+  "farm",
+  "house_type",
+  "column_break_main",
+  "capacity",
+  "floor_area_sqm",
+  "is_active",
+  "section_break_links",
+  "warehouse",
+  "default_uom"
+ ],
+ "fields": [
+  {"fieldname": "house_name", "fieldtype": "Data", "label": "House Name", "reqd": 1, "unique": 1, "in_list_view": 1},
+  {"fieldname": "farm", "fieldtype": "Link", "label": "Farm", "options": "Farm", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
+  {"fieldname": "house_type", "fieldtype": "Select", "label": "House Type", "options": "Broiler\nLayer\nBreeder\nGrower\nPullet\nMixed", "default": "Broiler", "in_list_view": 1},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "capacity", "fieldtype": "Int", "label": "Capacity (birds)"},
+  {"fieldname": "floor_area_sqm", "fieldtype": "Float", "label": "Floor Area (sqm)", "precision": "2"},
+  {"fieldname": "is_active", "fieldtype": "Check", "label": "Active", "default": "1"},
+  {"fieldname": "section_break_links", "fieldtype": "Section Break", "label": "ERPNext Links"},
+  {"fieldname": "warehouse", "fieldtype": "Link", "label": "Warehouse", "options": "Warehouse"},
+  {"fieldname": "default_uom", "fieldtype": "Link", "label": "Default UOM", "options": "UOM", "default": "Nos"}
+ ],
+ "links": [],
+ "modified": "2026-04-26 18:00:00",
+ "modified_by": "Administrator",
+ "module": "Farm Manager",
+ "name": "Farm House",
+ "owner": "Administrator",
+ "permissions": [
+  {"role": "System Manager", "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "share": 1, "write": 1},
+  {"role": "Farm Manager", "create": 1, "delete": 0, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "share": 1, "write": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

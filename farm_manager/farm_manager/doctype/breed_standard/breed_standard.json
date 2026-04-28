@@ -1,0 +1,51 @@
+{
+ "actions": [],
+ "allow_import": 1,
+ "allow_rename": 1,
+ "autoname": "field:breed_code",
+ "creation": "2026-04-26 18:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "breed_code",
+  "display_name",
+  "species",
+  "column_break_main",
+  "purpose",
+  "target_weight_kg",
+  "target_age_days",
+  "is_active",
+  "section_break_curve",
+  "growth_curve_json",
+  "fcr_target",
+  "notes"
+ ],
+ "fields": [
+  {"fieldname": "breed_code", "fieldtype": "Data", "label": "Breed Code", "reqd": 1, "unique": 1, "in_list_view": 1, "description": "e.g. cobb_500, ross_308, lohmann_brown"},
+  {"fieldname": "display_name", "fieldtype": "Data", "label": "Display Name", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "species", "fieldtype": "Select", "label": "Species", "options": "Chicken\nDuck\nTurkey\nQuail\nGoose\nOther", "default": "Chicken", "in_list_view": 1},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "purpose", "fieldtype": "Select", "label": "Purpose", "options": "Broiler\nLayer\nDual Purpose\nBreeder", "default": "Broiler", "in_list_view": 1},
+  {"fieldname": "target_weight_kg", "fieldtype": "Float", "label": "Target Weight (kg)", "precision": "3"},
+  {"fieldname": "target_age_days", "fieldtype": "Int", "label": "Target Age (days)"},
+  {"fieldname": "is_active", "fieldtype": "Check", "label": "Active", "default": "1"},
+  {"fieldname": "section_break_curve", "fieldtype": "Section Break", "label": "Performance Curve"},
+  {"fieldname": "growth_curve_json", "fieldtype": "Long Text", "label": "Growth Curve (JSON)", "description": "JSON array of {age_days, target_weight_kg, target_feed_g}"},
+  {"fieldname": "fcr_target", "fieldtype": "Float", "label": "FCR Target", "precision": "2"},
+  {"fieldname": "notes", "fieldtype": "Text", "label": "Notes"}
+ ],
+ "links": [],
+ "modified": "2026-04-26 18:00:00",
+ "modified_by": "Administrator",
+ "module": "Farm Manager",
+ "name": "Breed Standard",
+ "owner": "Administrator",
+ "permissions": [
+  {"role": "System Manager", "create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "share": 1, "write": 1},
+  {"role": "Farm Manager", "create": 1, "delete": 0, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "share": 1, "write": 1},
+  {"role": "Farm Veterinarian", "read": 1, "report": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

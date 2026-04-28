@@ -1,0 +1,26 @@
+{
+ "actions": [],
+ "creation": "2026-04-26 18:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "istable": 1,
+ "field_order": [
+  "category",
+  "photo",
+  "caption"
+ ],
+ "fields": [
+  {"fieldname": "category", "fieldtype": "Select", "label": "Category", "options": "Birds\nFeeders\nDrinkers\nLitter\nDead Bird\nGeneral", "default": "General", "in_list_view": 1},
+  {"fieldname": "photo", "fieldtype": "Attach Image", "label": "Photo", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "caption", "fieldtype": "Data", "label": "Caption", "in_list_view": 1}
+ ],
+ "links": [],
+ "modified": "2026-04-26 18:00:00",
+ "modified_by": "Administrator",
+ "module": "Farm Manager",
+ "name": "Flock Check-in Photo",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}

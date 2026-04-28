@@ -1,0 +1,126 @@
+# Render Blueprint for ERPNext + farm_manager.
+# Deploys: web, queue workers, scheduler, websocket, MariaDB (private), Redis instances.
+# Provision a Render Team and "New > Blueprint" pointing to this file.
+
+databases:
+  - name: erpnext-mariadb
+    plan: starter
+    type: mariadb
+    diskSizeGB: 10
+
+services:
+  - type: web
+    name: erpnext-web
+    runtime: docker
+    plan: standard
+    autoDeploy: true
+    dockerfilePath: deploy/docker/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/method/ping
+    envVars:
+      - key: SITE_NAME
+        value: erp.example.com
+      - key: DB_HOST
+        fromDatabase:
+          name: erpnext-mariadb
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: erpnext-mariadb
+          property: port
+      - key: DB_USER
+        fromDatabase:
+          name: erpnext-mariadb
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: erpnext-mariadb
+          property: password
+      - key: REDIS_CACHE
+        fromService:
+          name: redis-cache
+          type: redis
+          property: connectionString
+      - key: REDIS_QUEUE
+        fromService:
+          name: redis-queue
+          type: redis
+          property: connectionString
+      - key: REDIS_SOCKETIO
+        fromService:
+          name: redis-socketio
+          type: redis
+          property: connectionString
+      - key: ADMIN_PASSWORD
+        sync: false
+    startCommand: |
+      bench --site $SITE_NAME migrate
+      bench start
+
+  - type: worker
+    name: erpnext-queue-default
+    runtime: docker
+    plan: standard
+    autoDeploy: true
+    dockerfilePath: deploy/docker/Dockerfile
+    dockerContext: .
+    startCommand: bench worker --queue default
+    envVars: []  # inherits from web
+
+  - type: worker
+    name: erpnext-queue-long
+    runtime: docker
+    plan: standard
+    autoDeploy: true
+    dockerfilePath: deploy/docker/Dockerfile
+    dockerContext: .
+    startCommand: bench worker --queue long
+    envVars: []
+
+  - type: worker
+    name: erpnext-queue-short
+    runtime: docker
+    plan: starter
+    autoDeploy: true
+    dockerfilePath: deploy/docker/Dockerfile
+    dockerContext: .
+    startCommand: bench worker --queue short
+    envVars: []
+
+  - type: worker
+    name: erpnext-scheduler
+    runtime: docker
+    plan: starter
+    autoDeploy: true
+    dockerfilePath: deploy/docker/Dockerfile
+    dockerContext: .
+    startCommand: bench schedule
+    envVars: []
+
+  - type: web
+    name: erpnext-socketio
+    runtime: docker
+    plan: starter
+    autoDeploy: true
+    dockerfilePath: deploy/docker/Dockerfile
+    dockerContext: .
+    startCommand: node /home/frappe/frappe-bench/apps/frappe/socketio.js
+    envVars: []
+
+  - type: redis
+    name: redis-cache
+    plan: starter
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
+
+  - type: redis
+    name: redis-queue
+    plan: starter
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+
+  - type: redis
+    name: redis-socketio
+    plan: starter
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru

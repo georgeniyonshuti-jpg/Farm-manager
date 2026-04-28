@@ -1,0 +1,41 @@
+{
+ "actions": [],
+ "autoname": "format:LA-{employee}-{####}",
+ "creation": "2026-04-26 18:00:00",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "flock",
+  "role",
+  "column_break_main",
+  "from_date",
+  "to_date",
+  "allocation_pct",
+  "is_active"
+ ],
+ "fields": [
+  {"fieldname": "employee", "fieldtype": "Link", "label": "Employee", "options": "Employee", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
+  {"fieldname": "flock", "fieldtype": "Link", "label": "Flock", "options": "Flock", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
+  {"fieldname": "role", "fieldtype": "Select", "label": "Role", "options": "Laborer\nFeeder\nVet Assistant\nSupervisor\nOther", "default": "Laborer", "in_list_view": 1},
+  {"fieldname": "column_break_main", "fieldtype": "Column Break"},
+  {"fieldname": "from_date", "fieldtype": "Date", "label": "From Date", "reqd": 1},
+  {"fieldname": "to_date", "fieldtype": "Date", "label": "To Date"},
+  {"fieldname": "allocation_pct", "fieldtype": "Percent", "label": "Allocation %", "default": "100", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "is_active", "fieldtype": "Check", "label": "Active", "default": "1"}
+ ],
+ "links": [],
+ "modified": "2026-04-26 18:00:00",
+ "modified_by": "Administrator",
+ "module": "Farm Manager",
+ "name": "Laborer Assignment",
+ "owner": "Administrator",
+ "permissions": [
+  {"role": "System Manager", "create": 1, "delete": 1, "read": 1, "report": 1, "write": 1},
+  {"role": "Farm Manager", "create": 1, "delete": 1, "read": 1, "report": 1, "write": 1},
+  {"role": "HR Manager", "create": 1, "read": 1, "report": 1, "write": 1}
+ ],
+ "sort_field": "from_date",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

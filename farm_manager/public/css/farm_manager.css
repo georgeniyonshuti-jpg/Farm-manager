@@ -1,0 +1,2 @@
+/* Farm Manager (Desk) – minimal include; expand as needed */
+.fm-module-tag::before { content: ""; }
