@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import type { Ref } from "react";
 import type { BarnNameOption } from "../../hooks/useBarnNames";
 
 type Props = {
@@ -12,8 +12,8 @@ type Props = {
   onSaveNew: () => void | Promise<void>;
   error?: string;
   disabled?: boolean;
-  fieldRef?: RefObject<HTMLDivElement | null>;
-  selectRef?: RefObject<HTMLSelectElement | null>;
+  fieldRef?: Ref<HTMLDivElement>;
+  selectRef?: Ref<HTMLSelectElement>;
 };
 
 export function BarnNameField({
