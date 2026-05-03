@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { canFlockAction, flockActionPresentation } from "../../auth/permissions";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { CheckinUrgencyBadge, type CheckinBadge } from "../../components/farm/CheckinUrgencyBadge";
+import { BarnNameField } from "../../components/farm/BarnNameField";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
 import { useToast } from "../../components/Toast";
+import { useBarnNames } from "../../hooks/useBarnNames";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { useSuppliers } from "../../hooks/useSuppliers";
 
@@ -22,6 +24,14 @@ type FlockRow = {
   id: string;
   label: string;
   placementDate: string;
+  barnName?: string | null;
+  barnNameId?: string | null;
+  purchaseCostRwf?: number | null;
+  purchaseSupplier?: string | null;
+  purchaseDate?: string | null;
+  initialCount?: number;
+  breedCode?: string;
+  targetWeightKg?: number | null;
   status?: string;
   checkinBadge?: CheckinBadge;
   nextDueAt?: string;
@@ -68,12 +78,15 @@ type FlockRecoveryOverview = {
   summary?: { failedCount?: number; unexpectedStatusCount?: number; orphanReferenceCount?: number };
 };
 
+type SortCol = "risk" | "label" | "barn" | "placement";
+
 export function FlockListPage() {
   const navigate = useNavigate();
   const { token, user } = useAuth();
   const { showToast } = useToast();
   const breedOptions = useReferenceOptions("breed", token, FALLBACK_BREED_OPTIONS);
   const { suppliers, loadSuppliers, createSupplier } = useSuppliers(token);
+  const { barnNames, loadBarnNames, createBarnName } = useBarnNames(token);
   const canCreateFlock = canFlockAction(user, "flock.create");
   const [flocks, setFlocks] = useState<FlockRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -102,7 +115,19 @@ export function FlockListPage() {
     supplierMode: "existing" as "existing" | "new",
     purchaseSupplier: "",
     purchaseDate: "",
+    barnNameId: "",
+    barnMode: "existing" as "existing" | "new",
+    newBarnName: "",
   });
+  const [createFieldErrors, setCreateFieldErrors] = useState<Record<string, string>>({});
+  const [sortCol, setSortCol] = useState<SortCol>("risk");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [editingFlockId, setEditingFlockId] = useState<string | null>(null);
+  const placementRef = useRef<HTMLInputElement>(null);
+  const initialCountRef = useRef<HTMLInputElement>(null);
+  const breedRef = useRef<HTMLSelectElement>(null);
+  const barnFieldRef = useRef<HTMLDivElement>(null);
+  const barnSelectRef = useRef<HTMLSelectElement>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -308,30 +333,116 @@ export function FlockListPage() {
   useEffect(() => {
     void loadSuppliers();
   }, [loadSuppliers]);
+  useEffect(() => {
+    void loadBarnNames().catch(() => {});
+  }, [loadBarnNames]);
+
+  function scrollToFirstCreateError(keys: string[]) {
+    const order = ["placementDate", "initialCount", "breedCode", "barn", "supplier"];
+    for (const k of order) {
+      if (!keys.includes(k)) continue;
+      if (k === "placementDate") placementRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      else if (k === "initialCount") initialCountRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      else if (k === "breedCode") breedRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      else if (k === "barn") barnFieldRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      break;
+    }
+  }
+
+  function openEditFlock(f: FlockRow) {
+    if (user?.role !== "superuser") return;
+    const matchSupplier = suppliers.find((s) => s.name === (f.purchaseSupplier ?? ""));
+    setCreateForm({
+      placementDate: f.placementDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+      initialCount: f.initialCount != null ? String(f.initialCount) : "",
+      breedCode: (f.breedCode ?? "generic_broiler").trim().toLowerCase(),
+      targetWeightKg: f.targetWeightKg != null && Number.isFinite(f.targetWeightKg) ? String(f.targetWeightKg) : "",
+      purchaseCostRwf: f.purchaseCostRwf != null ? String(f.purchaseCostRwf) : "",
+      supplierId: matchSupplier?.id ?? "",
+      supplierMode: matchSupplier ? "existing" : f.purchaseSupplier ? "new" : "existing",
+      purchaseSupplier: matchSupplier ? "" : (f.purchaseSupplier ?? ""),
+      purchaseDate: f.purchaseDate?.slice(0, 10) ?? "",
+      barnNameId: f.barnNameId ?? "",
+      barnMode: f.barnNameId ? "existing" : "existing",
+      newBarnName: "",
+    });
+    setEditingFlockId(f.id);
+    setCreateFieldErrors({});
+    setShowCreateFlock(true);
+  }
 
   async function submitCreateFlock(e: React.FormEvent) {
     e.preventDefault();
     if (!canCreateFlock) return;
+    setCreateFieldErrors({});
+    let barnNameId = createForm.barnNameId.trim();
+    let barnMode = createForm.barnMode;
+    let newBarnName = createForm.newBarnName;
+    try {
+      if (barnMode === "new" && newBarnName.trim()) {
+        const createdBarn = await createBarnName(newBarnName);
+        if (createdBarn?.id) {
+          barnNameId = createdBarn.id;
+          barnMode = "existing";
+          newBarnName = "";
+          setCreateForm((v) => ({
+            ...v,
+            barnMode: "existing",
+            barnNameId: createdBarn.id,
+            newBarnName: "",
+          }));
+        }
+      }
+    } catch (be) {
+      showToast("error", be instanceof Error ? be.message : "Could not save barn name");
+      setCreateFieldErrors({ barn: "Save the new barn name before continuing." });
+      scrollToFirstCreateError(["barn"]);
+      return;
+    }
+
+    const errs: Record<string, string> = {};
+    if (!createForm.placementDate?.trim()) errs.placementDate = "Placement date is required.";
+    const n = Number(createForm.initialCount);
+    if (!createForm.initialCount?.trim() || !Number.isFinite(n) || n <= 0) {
+      errs.initialCount = "Initial bird count is required (greater than zero).";
+    }
+    if (!createForm.breedCode?.trim()) errs.breedCode = "Breed is required.";
+    const barnOk =
+      (barnMode === "existing" && barnNameId.length > 0) || (barnMode === "new" && newBarnName.trim().length > 0);
+    if (!barnOk) errs.barn = "Barn name is required.";
+    if (Object.keys(errs).length) {
+      setCreateFieldErrors(errs);
+      scrollToFirstCreateError(Object.keys(errs));
+      return;
+    }
+
     setCreateBusy(true);
     try {
-      const r = await fetch(`${API_BASE_URL}/api/flocks`, {
-        method: "POST",
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify({
-          placementDate: createForm.placementDate,
-          initialCount: Number(createForm.initialCount),
-          breedCode: createForm.breedCode.trim().toLowerCase(),
-          targetWeightKg: createForm.targetWeightKg ? Number(createForm.targetWeightKg) : null,
-          status: "active",
-          purchaseCostRwf: createForm.purchaseCostRwf ? Number(createForm.purchaseCostRwf) : undefined,
-          supplierId: createForm.supplierMode === "existing" ? (createForm.supplierId || undefined) : undefined,
-          purchaseSupplier: createForm.purchaseSupplier.trim() || undefined,
-          purchaseDate: createForm.purchaseDate || undefined,
-        }),
-      });
+      const body = {
+        placementDate: createForm.placementDate,
+        initialCount: Number(createForm.initialCount),
+        breedCode: createForm.breedCode.trim().toLowerCase(),
+        targetWeightKg: createForm.targetWeightKg ? Number(createForm.targetWeightKg) : null,
+        status: "active",
+        purchaseCostRwf: createForm.purchaseCostRwf ? Number(createForm.purchaseCostRwf) : undefined,
+        supplierId: createForm.supplierMode === "existing" ? (createForm.supplierId || undefined) : undefined,
+        purchaseSupplier: createForm.purchaseSupplier.trim() || undefined,
+        purchaseDate: createForm.purchaseDate || undefined,
+        barnNameId: barnMode === "existing" ? barnNameId || undefined : undefined,
+        barnName: barnMode === "new" ? newBarnName.trim() : undefined,
+      };
+      const isEdit = Boolean(editingFlockId) && user?.role === "superuser";
+      const r = await fetch(
+        isEdit ? `${API_BASE_URL}/api/flocks/${encodeURIComponent(editingFlockId!)}` : `${API_BASE_URL}/api/flocks`,
+        {
+          method: isEdit ? "PATCH" : "POST",
+          headers: jsonAuthHeaders(token),
+          body: JSON.stringify(body),
+        }
+      );
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
-        const err = (d as { error?: string; detail?: string }).error ?? "Failed to create flock";
+        const err = (d as { error?: string; detail?: string }).error ?? (isEdit ? "Failed to update flock" : "Failed to create flock");
         const detail = (d as { detail?: string }).detail;
         throw new Error(detail ? `${err} — ${detail}` : err);
       }
@@ -340,9 +451,10 @@ export function FlockListPage() {
       const costMsg = createForm.purchaseCostRwf
         ? " Biological asset opening is being posted to Odoo under IAS 41."
         : "";
-      showToast("success", `Flock ${name} added.${costMsg}`);
+      showToast("success", isEdit ? `Flock ${name} updated.` : `Flock ${name} added.${costMsg}`);
       setCreateForm((prev) => ({
         ...prev,
+        placementDate: new Date().toISOString().slice(0, 10),
         initialCount: "",
         targetWeightKg: "",
         purchaseCostRwf: "",
@@ -350,11 +462,15 @@ export function FlockListPage() {
         supplierMode: "existing",
         purchaseSupplier: "",
         purchaseDate: "",
+        barnNameId: "",
+        barnMode: "existing",
+        newBarnName: "",
       }));
+      setEditingFlockId(null);
       setShowCreateFlock(false);
       await load();
     } catch (e2) {
-      showToast("error", e2 instanceof Error ? e2.message : "Failed to create flock");
+      showToast("error", e2 instanceof Error ? e2.message : "Failed to save flock");
     } finally {
       setCreateBusy(false);
     }
@@ -441,16 +557,70 @@ export function FlockListPage() {
     }
   }
 
-  const visibleFlocks = flocks.filter((f) => {
-    if (riskFilter === "all") return true;
-    if (riskFilter === "blocked") return Boolean(f.withdrawalActive);
-    if (riskFilter === "at_risk") return Number(f.riskScore ?? 0) > 60;
-    if (riskFilter === "needs_vet") return f.needsRole === "vet";
-    if (riskFilter === "needs_manager") return f.needsRole === "vet_manager";
-    if (riskFilter === "overdue_checkins") return (f.timeStatus?.overdueHours ?? 0) > 0;
-    return true;
-  }).filter((f) => (focusMode ? Number(f.riskScore ?? 0) > 60 : true))
-    .sort((a, b) => Number(b.riskScore ?? 0) - Number(a.riskScore ?? 0));
+  const filteredFlocks = useMemo(
+    () =>
+      flocks
+        .filter((f) => {
+          if (riskFilter === "all") return true;
+          if (riskFilter === "blocked") return Boolean(f.withdrawalActive);
+          if (riskFilter === "at_risk") return Number(f.riskScore ?? 0) > 60;
+          if (riskFilter === "needs_vet") return f.needsRole === "vet";
+          if (riskFilter === "needs_manager") return f.needsRole === "vet_manager";
+          if (riskFilter === "overdue_checkins") return (f.timeStatus?.overdueHours ?? 0) > 0;
+          return true;
+        })
+        .filter((f) => (focusMode ? Number(f.riskScore ?? 0) > 60 : true)),
+    [flocks, riskFilter, focusMode]
+  );
+
+  const visibleFlocks = useMemo(() => {
+    const arr = [...filteredFlocks];
+    const dir = sortDir === "asc" ? 1 : -1;
+    arr.sort((a, b) => {
+      if (sortCol === "label") return dir * String(a.label).localeCompare(String(b.label), undefined, { sensitivity: "base" });
+      if (sortCol === "barn")
+        return dir * String(a.barnName ?? "—").localeCompare(String(b.barnName ?? "—"), undefined, { sensitivity: "base" });
+      if (sortCol === "placement")
+        return dir * String(a.placementDate ?? "").localeCompare(String(b.placementDate ?? ""));
+      return dir * (Number(a.riskScore ?? 0) - Number(b.riskScore ?? 0));
+    });
+    return arr;
+  }, [filteredFlocks, sortCol, sortDir]);
+
+  function toggleSort(col: SortCol) {
+    if (sortCol !== col) {
+      setSortCol(col);
+      setSortDir(col === "risk" ? "desc" : "asc");
+    } else {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    }
+  }
+
+  function toggleCreateFlockPanel() {
+    if (showCreateFlock) {
+      setShowCreateFlock(false);
+      setEditingFlockId(null);
+      setCreateFieldErrors({});
+      return;
+    }
+    setEditingFlockId(null);
+    setCreateFieldErrors({});
+    setCreateForm({
+      placementDate: new Date().toISOString().slice(0, 10),
+      initialCount: "",
+      breedCode: "generic_broiler",
+      targetWeightKg: "",
+      purchaseCostRwf: "",
+      supplierId: "",
+      supplierMode: "existing",
+      purchaseSupplier: "",
+      purchaseDate: "",
+      barnNameId: "",
+      barnMode: "existing",
+      newBarnName: "",
+    });
+    setShowCreateFlock(true);
+  }
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -532,7 +702,7 @@ export function FlockListPage() {
           </button>
           <button
             type="button"
-            onClick={() => setShowCreateFlock((v) => !v)}
+            onClick={toggleCreateFlockPanel}
             className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)]"
           >
             {showCreateFlock ? "Close" : "Create new flock"}
@@ -542,41 +712,111 @@ export function FlockListPage() {
 
       {canCreateFlock && showCreateFlock ? (
         <form onSubmit={(e) => void submitCreateFlock(e)} className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-sm)]">
-          <p className="text-sm font-semibold text-[var(--text-primary)]">Add purchased flock</p>
-          <p className="mt-1 text-xs text-[var(--text-muted)]">The system assigns a unique flock name (e.g. FL-000042).</p>
+          <p className="text-sm font-semibold text-[var(--text-primary)]">
+            {editingFlockId ? "Edit flock" : "Add purchased flock"}
+          </p>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            {editingFlockId
+              ? "Update placement, counts, breed, barn, and purchase details. Flock code stays the same."
+              : "The system assigns a unique flock name (e.g. FL-000042)."}
+          </p>
           <div className="mt-3 grid gap-2 sm:grid-cols-4">
-            <input
-              className="rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
-              type="date"
-              value={createForm.placementDate}
-              onChange={(e) => setCreateForm((v) => ({ ...v, placementDate: e.target.value }))}
-              required
-            />
-            <input
-              className="rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
-              placeholder="Initial birds"
-              inputMode="numeric"
-              value={createForm.initialCount}
-              onChange={(e) => setCreateForm((v) => ({ ...v, initialCount: e.target.value }))}
-              required
-            />
-            <select
-              className="rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
-              value={createForm.breedCode}
-              onChange={(e) => setCreateForm((v) => ({ ...v, breedCode: e.target.value }))}
-            >
-              {breedOptions.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <input
-              className="rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
-              placeholder="Target kg (optional)"
-              inputMode="decimal"
-              value={createForm.targetWeightKg}
-              onChange={(e) => setCreateForm((v) => ({ ...v, targetWeightKg: e.target.value }))}
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-[var(--text-secondary)]">
+                Placement date<span className="text-red-500"> *</span>
+              </label>
+              <input
+                ref={placementRef}
+                className={[
+                  "w-full rounded-lg border bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]",
+                  createFieldErrors.placementDate ? "border-red-500 ring-1 ring-red-500/40" : "border-[var(--border-input)]",
+                ].join(" ")}
+                type="date"
+                value={createForm.placementDate}
+                onChange={(e) => setCreateForm((v) => ({ ...v, placementDate: e.target.value }))}
+              />
+              {createFieldErrors.placementDate ? (
+                <p className="text-xs text-red-500">{createFieldErrors.placementDate}</p>
+              ) : null}
+            </div>
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-[var(--text-secondary)]">
+                Initial birds<span className="text-red-500"> *</span>
+              </label>
+              <input
+                ref={initialCountRef}
+                className={[
+                  "w-full rounded-lg border bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]",
+                  createFieldErrors.initialCount ? "border-red-500 ring-1 ring-red-500/40" : "border-[var(--border-input)]",
+                ].join(" ")}
+                placeholder="Initial birds"
+                inputMode="numeric"
+                value={createForm.initialCount}
+                onChange={(e) => setCreateForm((v) => ({ ...v, initialCount: e.target.value }))}
+              />
+              {createFieldErrors.initialCount ? (
+                <p className="text-xs text-red-500">{createFieldErrors.initialCount}</p>
+              ) : null}
+            </div>
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-[var(--text-secondary)]">
+                Breed<span className="text-red-500"> *</span>
+              </label>
+              <select
+                ref={breedRef}
+                className={[
+                  "w-full rounded-lg border bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]",
+                  createFieldErrors.breedCode ? "border-red-500 ring-1 ring-red-500/40" : "border-[var(--border-input)]",
+                ].join(" ")}
+                value={createForm.breedCode}
+                onChange={(e) => setCreateForm((v) => ({ ...v, breedCode: e.target.value }))}
+              >
+                {breedOptions.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              {createFieldErrors.breedCode ? <p className="text-xs text-red-500">{createFieldErrors.breedCode}</p> : null}
+            </div>
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-[var(--text-secondary)]">Target kg (optional)</label>
+              <input
+                className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                placeholder="Target kg (optional)"
+                inputMode="decimal"
+                value={createForm.targetWeightKg}
+                onChange={(e) => setCreateForm((v) => ({ ...v, targetWeightKg: e.target.value }))}
+              />
+            </div>
+            <BarnNameField
+              barnNames={barnNames}
+              mode={createForm.barnMode}
+              selectedId={createForm.barnNameId}
+              newBarnName={createForm.newBarnName}
+              onModeChange={(m) => setCreateForm((v) => ({ ...v, barnMode: m }))}
+              onSelectId={(id) => setCreateForm((v) => ({ ...v, barnNameId: id }))}
+              onNewNameChange={(value) => setCreateForm((v) => ({ ...v, newBarnName: value }))}
+              onSaveNew={async () => {
+                try {
+                  const created = await createBarnName(createForm.newBarnName);
+                  if (created?.id) {
+                    setCreateForm((v) => ({
+                      ...v,
+                      barnMode: "existing",
+                      barnNameId: created.id,
+                      newBarnName: created.name ?? v.newBarnName,
+                    }));
+                    showToast("success", "Barn name saved");
+                  }
+                } catch (err) {
+                  showToast("error", err instanceof Error ? err.message : "Could not create barn name");
+                }
+              }}
+              error={createFieldErrors.barn}
+              disabled={createBusy}
+              fieldRef={barnFieldRef}
+              selectRef={barnSelectRef}
             />
           </div>
           <p className="mt-4 text-xs font-semibold text-[var(--text-secondary)]">Biological asset cost (IAS 41 — optional)</p>
@@ -662,10 +902,10 @@ export function FlockListPage() {
           <div className="mt-3 flex justify-end">
             <button
               type="submit"
-              disabled={createBusy || !createForm.placementDate || !createForm.initialCount}
+              disabled={createBusy}
               className="rounded-lg bg-[var(--primary-color)] px-3 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)] disabled:opacity-60"
             >
-              {createBusy ? "Saving..." : "Add flock"}
+              {createBusy ? "Saving..." : editingFlockId ? "Save changes" : "Add flock"}
             </button>
           </div>
         </form>
@@ -757,15 +997,53 @@ export function FlockListPage() {
             </div>
 
             <div className="institutional-table-wrapper">
-              <table className="institutional-table min-w-[72rem]">
+              <table className="institutional-table flock-list-table min-w-[80rem]">
                 <thead>
                   <tr>
-                    <th>Flock</th>
+                    <th scope="col">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("label")}
+                        className="inline-flex items-center gap-1 font-bold text-[var(--text-primary)] hover:text-[var(--primary-color-dark)]"
+                      >
+                        Flock
+                        {sortCol === "label" ? <span className="text-[10px] opacity-80">{sortDir === "asc" ? "↑" : "↓"}</span> : null}
+                      </button>
+                    </th>
+                    <th scope="col">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("barn")}
+                        className="inline-flex items-center gap-1 font-bold text-[var(--text-primary)] hover:text-[var(--primary-color-dark)]"
+                      >
+                        Barn
+                        {sortCol === "barn" ? <span className="text-[10px] opacity-80">{sortDir === "asc" ? "↑" : "↓"}</span> : null}
+                      </button>
+                    </th>
+                    <th scope="col">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("placement")}
+                        className="inline-flex items-center gap-1 font-bold text-[var(--text-primary)] hover:text-[var(--primary-color-dark)]"
+                      >
+                        Placed
+                        {sortCol === "placement" ? <span className="text-[10px] opacity-80">{sortDir === "asc" ? "↑" : "↓"}</span> : null}
+                      </button>
+                    </th>
                     <th className="tbl-num">Age (d)</th>
                     <th className="tbl-num">Interval (h)</th>
                     <th className="tbl-num">FCR</th>
                     <th className="tbl-num">FCR vs target</th>
-                    <th className="tbl-num">Risk score</th>
+                    <th className="tbl-num" scope="col">
+                      <button
+                        type="button"
+                        onClick={() => toggleSort("risk")}
+                        className="inline-flex items-center gap-1 font-bold text-[var(--text-primary)] hover:text-[var(--primary-color-dark)]"
+                      >
+                        Risk score
+                        {sortCol === "risk" ? <span className="text-[10px] opacity-80">{sortDir === "asc" ? "↑" : "↓"}</span> : null}
+                      </button>
+                    </th>
                     <th className="tbl-num">Wt (kg)</th>
                     <th className="tbl-num">Wt dev %</th>
                     <th className="tbl-num">Mort. 7d</th>
@@ -788,6 +1066,10 @@ export function FlockListPage() {
                           </Link>
                         )}
                       </td>
+                      <td className="text-[var(--text-secondary)]" title={f.barnName ?? ""}>
+                        {f.barnName ?? "—"}
+                      </td>
+                      <td className="text-[var(--text-muted)] tabular-nums">{f.placementDate || "—"}</td>
                       <td className="tbl-num">{f.ageDays ?? "—"}</td>
                       <td className="tbl-num">{f.intervalHours ?? "—"}</td>
                       <td className="tbl-num">{f.latestFcr != null ? f.latestFcr.toFixed(2) : "—"}</td>
@@ -877,6 +1159,16 @@ export function FlockListPage() {
                               className="rounded border border-red-500/35 px-1.5 py-0.5 text-[10px] text-red-300 hover:bg-red-500/10 disabled:opacity-60"
                             >
                               {deleteFailedBusyId === f.id ? "…" : "Delete failed"}
+                            </button>
+                          ) : null}
+                          {user?.role === "superuser" && f.status !== "failed" && f.status !== "archived" ? (
+                            <button
+                              type="button"
+                              className="rounded border border-[var(--border-color)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
+                              title="Edit flock"
+                              onClick={() => openEditFlock(f)}
+                            >
+                              Edit
                             </button>
                           ) : null}
                           {flockActionPresentation(user, "treatment.execute").mode !== "enabled" &&

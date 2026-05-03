@@ -1492,6 +1492,8 @@ const DEFAULT_CHECKIN_BANDS = [
 const flocksById = new Map();
 /** @type {Map<string, { id: string, name: string, normalizedName: string }>} */
 const suppliersByNormalized = new Map();
+/** @type {Map<string, { id: string, name: string, normalizedName: string }>} */
+const barnNamesByNormalized = new Map();
 
 /** DB enum values used when syncing flocks from PostgreSQL to memory (see migrations on poultry_flock_status). */
 const FLOCK_STATUS_SYNC = Object.freeze(["active", "planned", "archived", "failed"]);
@@ -2198,6 +2200,93 @@ async function resolveSupplierForWrite(supplierId, supplierName) {
     }
   }
   return await upsertSupplierByName(supplierName);
+}
+
+/**
+ * Upsert barn name in master list (same normalization rules as suppliers).
+ * @param {string | null | undefined} rawName
+ * @returns {Promise<{ id: string, name: string, normalizedName: string } | null>}
+ */
+async function upsertBarnByName(rawName) {
+  const cleaned = String(rawName ?? "").trim().replace(/\s+/g, " ");
+  const normalized = normalizeSupplierName(cleaned);
+  if (!cleaned || !normalized) return null;
+  if (hasDb()) {
+    try {
+      const q = await dbQuery(
+        `INSERT INTO poultry_barn_names (name, normalized_name, updated_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (normalized_name) DO UPDATE
+           SET name = EXCLUDED.name,
+               updated_at = now()
+         RETURNING id::text AS id, name, normalized_name AS "normalizedName"`,
+        [cleaned, normalized]
+      );
+      const row = q.rows[0];
+      if (row?.id) {
+        const rec = { id: String(row.id), name: String(row.name), normalizedName: String(row.normalizedName) };
+        barnNamesByNormalized.set(rec.normalizedName, rec);
+        return rec;
+      }
+    } catch {
+      // Table may be missing during phased rollout.
+    }
+  }
+  const existing = barnNamesByNormalized.get(normalized);
+  if (existing) return existing;
+  const rec = { id: `barn_mem_${crypto.randomBytes(6).toString("hex")}`, name: cleaned, normalizedName: normalized };
+  barnNamesByNormalized.set(normalized, rec);
+  return rec;
+}
+
+/**
+ * Resolve barn from barnNameId or typed barn name.
+ * @param {string | null} barnNameId
+ * @param {string | null} barnName
+ */
+async function resolveBarnForWrite(barnNameId, barnName) {
+  const bid = String(barnNameId ?? "").trim();
+  if (bid && hasDb()) {
+    try {
+      const q = await dbQuery(
+        `SELECT id::text AS id, name, normalized_name AS "normalizedName"
+           FROM poultry_barn_names
+          WHERE id::text = $1
+          LIMIT 1`,
+        [bid]
+      );
+      const row = q.rows[0];
+      if (row?.id) {
+        const rec = { id: String(row.id), name: String(row.name), normalizedName: String(row.normalizedName) };
+        barnNamesByNormalized.set(rec.normalizedName, rec);
+        return rec;
+      }
+    } catch {
+      // Fallback to barnName path below.
+    }
+  }
+  return await upsertBarnByName(barnName);
+}
+
+async function listBarnNames() {
+  if (hasDb()) {
+    try {
+      const q = await dbQuery(
+        `SELECT id::text AS id, name, normalized_name AS "normalizedName"
+           FROM poultry_barn_names
+          ORDER BY name ASC
+          LIMIT 2000`
+      );
+      return q.rows.map((r) => ({
+        id: String(r.id),
+        name: String(r.name),
+        normalizedName: String(r.normalizedName),
+      }));
+    } catch {
+      // ignore
+    }
+  }
+  return [...barnNamesByNormalized.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 async function listSuppliers() {
@@ -2935,6 +3024,8 @@ function mapDbFlockRowToMemory(row, prev = {}) {
     id: row.id,
     code: row.code != null ? String(row.code) : (prev.code ?? null),
     label: String(row.label ?? `Flock ${String(row.id).slice(0, 8)}`),
+    barnNameId: row.barnNameId != null ? String(row.barnNameId) : (prev.barnNameId ?? null),
+    barnName: row.barnName != null ? String(row.barnName) : (prev.barnName ?? null),
     placementDate: String(row.placementDate ?? new Date().toISOString().slice(0, 10)),
     initialCount: Math.max(1, Number(row.initialCount ?? prev.initialCount ?? 1)),
     targetWeightKg: row.targetWeightKg != null ? Number(row.targetWeightKg) : (prev.targetWeightKg ?? null),
@@ -2954,6 +3045,20 @@ function mapDbFlockRowToMemory(row, prev = {}) {
     failedReason: row.failedReason != null ? String(row.failedReason) : null,
     failedAt: row.failedAt != null ? String(row.failedAt) : null,
     createDraft: row.createDraft ?? null,
+    purchaseCostRwf:
+      row.purchaseCostRwf != null && row.purchaseCostRwf !== ""
+        ? Number(row.purchaseCostRwf)
+        : (prev.purchaseCostRwf ?? null),
+    costPerChickRwf:
+      row.costPerChickRwf != null && row.costPerChickRwf !== ""
+        ? Number(row.costPerChickRwf)
+        : (prev.costPerChickRwf ?? null),
+    purchaseSupplier:
+      row.purchaseSupplier != null ? String(row.purchaseSupplier) : (prev.purchaseSupplier ?? null),
+    purchaseDate:
+      row.purchaseDate != null && String(row.purchaseDate).trim() !== ""
+        ? String(row.purchaseDate).slice(0, 10)
+        : (prev.purchaseDate ?? null),
   };
 }
 
@@ -2961,27 +3066,34 @@ async function loadFlockByIdFromDbToMemory(flockId) {
   const id = String(flockId ?? "").trim();
   if (!hasDb() || !isPersistableUuid(id)) return null;
   const r = await dbQuery(
-    `SELECT id::text AS id,
-            code AS "code",
-            COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
-            placement_date::text AS "placementDate",
-            initial_count AS "initialCount",
-            target_weight_kg AS "targetWeightKg",
-            initial_weight_kg AS "initialWeightKg",
-            breed_code AS "breedCode",
-            verified_live_count AS "verifiedLiveCount",
-            verified_live_note AS "verifiedLiveNote",
-            verified_live_at AS "verifiedLiveAt",
-            checkin_bands AS "checkinBands",
-            photos_required_per_round AS "photosRequiredPerRound",
-            target_slaughter_day_min AS "targetSlaughterDayMin",
-            target_slaughter_day_max AS "targetSlaughterDayMax",
-            failed_reason AS "failedReason",
-            failed_at AS "failedAt",
-            create_draft AS "createDraft",
-            status
-       FROM poultry_flocks
-      WHERE id::text = $1
+    `SELECT f.id::text AS id,
+            f.code AS "code",
+            COALESCE(f.code, CONCAT('Flock ', LEFT(f.id::text, 8))) AS label,
+            f.barn_name_id::text AS "barnNameId",
+            bn.name AS "barnName",
+            f.placement_date::text AS "placementDate",
+            f.initial_count AS "initialCount",
+            f.target_weight_kg AS "targetWeightKg",
+            f.initial_weight_kg AS "initialWeightKg",
+            f.breed_code AS "breedCode",
+            f.verified_live_count AS "verifiedLiveCount",
+            f.verified_live_note AS "verifiedLiveNote",
+            f.verified_live_at AS "verifiedLiveAt",
+            f.checkin_bands AS "checkinBands",
+            f.photos_required_per_round AS "photosRequiredPerRound",
+            f.target_slaughter_day_min AS "targetSlaughterDayMin",
+            f.target_slaughter_day_max AS "targetSlaughterDayMax",
+            f.failed_reason AS "failedReason",
+            f.failed_at AS "failedAt",
+            f.create_draft AS "createDraft",
+            f.status,
+            f.purchase_cost_rwf AS "purchaseCostRwf",
+            f.cost_per_chick_rwf AS "costPerChickRwf",
+            f.purchase_supplier AS "purchaseSupplier",
+            f.purchase_date::text AS "purchaseDate"
+       FROM poultry_flocks f
+       LEFT JOIN poultry_barn_names bn ON bn.id = f.barn_name_id
+      WHERE f.id::text = $1
       LIMIT 1`,
     [id]
   );
@@ -2997,28 +3109,35 @@ async function syncFlocksFromDbToMemory() {
   const statusInList = FLOCK_STATUS_SYNC.map((s) => `'${s}'`).join(",");
   try {
     const r = await dbQuery(
-      `SELECT id::text AS id,
-            code AS "code",
-            COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
-            placement_date::text AS "placementDate",
-            initial_count AS "initialCount",
-            target_weight_kg AS "targetWeightKg",
-            initial_weight_kg AS "initialWeightKg",
-            breed_code AS "breedCode",
-            verified_live_count AS "verifiedLiveCount",
-            verified_live_note AS "verifiedLiveNote",
-            verified_live_at AS "verifiedLiveAt",
-            checkin_bands AS "checkinBands",
-            photos_required_per_round AS "photosRequiredPerRound",
-            target_slaughter_day_min AS "targetSlaughterDayMin",
-            target_slaughter_day_max AS "targetSlaughterDayMax",
-            failed_reason AS "failedReason",
-            failed_at AS "failedAt",
-            create_draft AS "createDraft",
-            status
-       FROM poultry_flocks
-      WHERE status IN (${statusInList})
-      ORDER BY placement_date DESC`
+      `SELECT f.id::text AS id,
+            f.code AS "code",
+            COALESCE(f.code, CONCAT('Flock ', LEFT(f.id::text, 8))) AS label,
+            f.barn_name_id::text AS "barnNameId",
+            bn.name AS "barnName",
+            f.placement_date::text AS "placementDate",
+            f.initial_count AS "initialCount",
+            f.target_weight_kg AS "targetWeightKg",
+            f.initial_weight_kg AS "initialWeightKg",
+            f.breed_code AS "breedCode",
+            f.verified_live_count AS "verifiedLiveCount",
+            f.verified_live_note AS "verifiedLiveNote",
+            f.verified_live_at AS "verifiedLiveAt",
+            f.checkin_bands AS "checkinBands",
+            f.photos_required_per_round AS "photosRequiredPerRound",
+            f.target_slaughter_day_min AS "targetSlaughterDayMin",
+            f.target_slaughter_day_max AS "targetSlaughterDayMax",
+            f.failed_reason AS "failedReason",
+            f.failed_at AS "failedAt",
+            f.create_draft AS "createDraft",
+            f.status,
+            f.purchase_cost_rwf AS "purchaseCostRwf",
+            f.cost_per_chick_rwf AS "costPerChickRwf",
+            f.purchase_supplier AS "purchaseSupplier",
+            f.purchase_date::text AS "purchaseDate"
+       FROM poultry_flocks f
+       LEFT JOIN poultry_barn_names bn ON bn.id = f.barn_name_id
+      WHERE f.status IN (${statusInList})
+      ORDER BY f.placement_date DESC`
     );
     const nextFlocksById = new Map();
     for (const row of r.rows) {
@@ -3235,6 +3354,8 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
   const purchaseSupplierInput = String(body.purchaseSupplier ?? "").trim() || null;
   const purchaseDateRaw = String(body.purchaseDate ?? "").trim();
   const purchaseDate = /^\d{4}-\d{2}-\d{2}$/.test(purchaseDateRaw) ? purchaseDateRaw : null;
+  const barnNameIdInput = String(body.barnNameId ?? "").trim() || null;
+  const barnNameInput = String(body.barnName ?? "").trim() || null;
 
   let supplier = null;
   try {
@@ -3243,6 +3364,17 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
     console.error("[ERROR]", "[db] resolve supplier for flock create:", e instanceof Error ? e.message : e);
   }
   const purchaseSupplier = supplier?.name ?? purchaseSupplierInput;
+
+  let barn = null;
+  try {
+    barn = await resolveBarnForWrite(barnNameIdInput, barnNameInput);
+  } catch (e) {
+    console.error("[ERROR]", "[db] resolve barn for flock create:", e instanceof Error ? e.message : e);
+  }
+  if (!barn) {
+    res.status(400).json({ error: "Barn name is required (barnNameId or barnName)." });
+    return;
+  }
 
   if (!placementDate || !Number.isFinite(initialCount) || initialCount <= 0 || !breedCode) {
     res.status(400).json({ error: "placementDate, initialCount (>0), and breedCode are required" });
@@ -3281,15 +3413,15 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
       const inserted = await dbQuery(
         `INSERT INTO poultry_flocks
           (breed_code, placement_date, initial_count, target_weight_kg, status, code,
-           purchase_cost_rwf, cost_per_chick_rwf, purchase_supplier, purchase_date)
+           purchase_cost_rwf, cost_per_chick_rwf, purchase_supplier, purchase_date, barn_name_id)
          VALUES ($1, $2::date, $3, $4, $5,
                  'FL-' || lpad(nextval('poultry_flock_code_seq')::text, 6, '0'),
-                 $6, $7, $8, $9::date)
+                 $6, $7, $8, $9::date, $10::uuid)
          RETURNING id::text AS id,
                    COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
                    code`,
         [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, status,
-         purchaseCostRwf, costPerChickRwf, purchaseSupplier, purchaseDate]
+         purchaseCostRwf, costPerChickRwf, purchaseSupplier, purchaseDate, barn.id]
       );
       createdId = String(inserted.rows[0]?.id ?? createdId);
       createdCode = inserted.rows[0]?.code != null ? String(inserted.rows[0].code) : createdCode;
@@ -3332,6 +3464,8 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
       id: createdId,
       label: createdLabel,
       code: createdCode,
+      barnNameId: barn.id,
+      barnName: barn.name,
       placementDate,
       initialCount: Math.floor(initialCount),
       breedCode,
@@ -3349,6 +3483,7 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
       initialCount: Math.floor(initialCount),
       breedCode,
       status,
+      barnName: barn.name,
     });
     res.status(201).json({ flock: flockRow });
   } catch (e) {
@@ -3363,6 +3498,8 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
       costPerChickRwf,
       purchaseSupplier,
       purchaseDate,
+      barnNameId: barn?.id ?? null,
+      barnName: barn?.name ?? null,
     };
     let failedId = `flk_failed_${crypto.randomBytes(6).toString("hex")}`;
     try {
@@ -3370,11 +3507,14 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
         const failedInsert = await dbQuery(
           `INSERT INTO poultry_flocks
             (breed_code, placement_date, initial_count, target_weight_kg, status,
-             failed_reason, failed_at, create_draft)
-           VALUES ($1, $2::date, $3, $4, 'failed', $5, now(), $6::jsonb)
+             failed_reason, failed_at, create_draft, barn_name_id)
+           VALUES ($1, $2::date, $3, $4, 'failed', $5, now(), $6::jsonb,
+             (SELECT id FROM poultry_barn_names WHERE normalized_name = 'unassigned' LIMIT 1))
            RETURNING id::text AS id,
                      code AS "code",
                      COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
+                     barn_name_id::text AS "barnNameId",
+                     (SELECT name FROM poultry_barn_names n WHERE n.id = barn_name_id) AS "barnName",
                      placement_date::text AS "placementDate",
                      initial_count AS "initialCount",
                      target_weight_kg AS "targetWeightKg",
@@ -3460,23 +3600,46 @@ app.post("/api/flocks/:id/retry-create", requireAuth, requireFarmAccess, require
     res.status(400).json({ error: "Failed flock draft is incomplete. Delete it and create a fresh flock." });
     return;
   }
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Retry later." });
+    return;
+  }
+  let barnRetry = null;
   try {
-    if (!hasDb()) {
-      res.status(503).json({ error: "Database unavailable. Retry later." });
-      return;
+    barnRetry = await resolveBarnForWrite(draft.barnNameId ?? null, draft.barnName ?? null);
+  } catch {
+    barnRetry = null;
+  }
+  if (!barnRetry) {
+    try {
+      const u = await dbQuery(
+        `SELECT id::text AS id, name, normalized_name AS "normalizedName" FROM poultry_barn_names WHERE normalized_name = 'unassigned' LIMIT 1`
+      );
+      const ur = u.rows[0];
+      if (ur?.id) {
+        barnRetry = { id: String(ur.id), name: String(ur.name), normalizedName: String(ur.normalizedName) };
+      }
+    } catch {
+      barnRetry = null;
     }
+  }
+  if (!barnRetry) {
+    res.status(503).json({ error: "Barn master data unavailable. Run migrations and retry." });
+    return;
+  }
+  try {
     await ensurePoultryFlockCodeSequence();
     const inserted = await dbQuery(
       `INSERT INTO poultry_flocks
         (breed_code, placement_date, initial_count, target_weight_kg, status, code,
-         purchase_cost_rwf, cost_per_chick_rwf, purchase_supplier, purchase_date)
+         purchase_cost_rwf, cost_per_chick_rwf, purchase_supplier, purchase_date, barn_name_id)
        VALUES ($1, $2::date, $3, $4, 'active',
                'FL-' || lpad(nextval('poultry_flock_code_seq')::text, 6, '0'),
-               $5, $6, $7, $8::date)
+               $5, $6, $7, $8::date, $9::uuid)
        RETURNING id::text AS id,
                  COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
                  code`,
-      [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, purchaseCostRwf, costPerChickRwf, purchaseSupplier, purchaseDate]
+      [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, purchaseCostRwf, costPerChickRwf, purchaseSupplier, purchaseDate, barnRetry.id]
     );
     const createdId = String(inserted.rows[0]?.id ?? "");
     const createdCode = inserted.rows[0]?.code != null ? String(inserted.rows[0].code) : null;
@@ -3489,6 +3652,8 @@ app.post("/api/flocks/:id/retry-create", requireAuth, requireFarmAccess, require
       id: createdId,
       label: createdLabel,
       code: createdCode,
+      barnNameId: barnRetry.id,
+      barnName: barnRetry.name,
       placementDate,
       initialCount: Math.floor(initialCount),
       breedCode,
@@ -3507,6 +3672,122 @@ app.post("/api/flocks/:id/retry-create", requireAuth, requireFarmAccess, require
   } catch (e) {
     console.error("[ERROR]", "[db] POST /api/flocks/:id/retry-create:", e instanceof Error ? e.message : e);
     res.status(503).json({ error: "Retry create failed. Please try again." });
+  }
+});
+
+app.patch("/api/flocks/:id", requireAuth, requireFarmAccess, requireSuperuser, requirePageAccess("farm_flocks"), async (req, res) => {
+  const id = String(req.params.id ?? "").trim();
+  if (!isPersistableUuid(id)) {
+    res.status(400).json({ error: "Invalid flock id" });
+    return;
+  }
+  const f = flocksById.get(id) ?? (await loadFlockByIdFromDbToMemory(id));
+  if (!f || String(f.status) === "failed") {
+    res.status(404).json({ error: "Flock not found" });
+    return;
+  }
+  const body = req.body ?? {};
+  const placementDateRaw = String(body.placementDate ?? "").trim();
+  const placementDate = /^\d{4}-\d{2}-\d{2}$/.test(placementDateRaw) ? placementDateRaw : "";
+  const initialCount = Number(body.initialCount);
+  const breedCode = String(body.breedCode ?? "").trim().toLowerCase();
+  const targetWeightKgRaw = body.targetWeightKg;
+  const targetWeightKg =
+    targetWeightKgRaw == null || targetWeightKgRaw === "" ? null : Number(targetWeightKgRaw);
+  let purchaseCostRwf = body.purchaseCostRwf == null || body.purchaseCostRwf === "" ? null : Number(body.purchaseCostRwf);
+  let costPerChickRwf = body.costPerChickRwf == null || body.costPerChickRwf === "" ? null : Number(body.costPerChickRwf);
+  const supplierId = String(body.supplierId ?? "").trim() || null;
+  const purchaseSupplierInput = String(body.purchaseSupplier ?? "").trim() || null;
+  const purchaseDateRaw = String(body.purchaseDate ?? "").trim();
+  const purchaseDate = /^\d{4}-\d{2}-\d{2}$/.test(purchaseDateRaw) ? purchaseDateRaw : null;
+  const barnNameIdInput = String(body.barnNameId ?? "").trim() || null;
+  const barnNameInput = String(body.barnName ?? "").trim() || null;
+
+  let supplier = null;
+  try {
+    supplier = await resolveSupplierForWrite(supplierId, purchaseSupplierInput);
+  } catch (e) {
+    console.error("[ERROR]", "[db] resolve supplier for flock patch:", e instanceof Error ? e.message : e);
+  }
+  const purchaseSupplier = supplier?.name ?? purchaseSupplierInput;
+
+  let barn = null;
+  try {
+    barn = await resolveBarnForWrite(barnNameIdInput, barnNameInput);
+  } catch (e) {
+    console.error("[ERROR]", "[db] resolve barn for flock patch:", e instanceof Error ? e.message : e);
+  }
+  if (!barn) {
+    res.status(400).json({ error: "Barn name is required (barnNameId or barnName)." });
+    return;
+  }
+  if (!placementDate || !Number.isFinite(initialCount) || initialCount <= 0 || !breedCode) {
+    res.status(400).json({ error: "placementDate, initialCount (>0), and breedCode are required" });
+    return;
+  }
+  if (!systemConfig.validateAgainstCategory("breed", breedCode, systemConfig.getStaticFallbackCodes("breed"))) {
+    res.status(400).json({ error: "Invalid or inactive breedCode" });
+    return;
+  }
+  if (targetWeightKg != null && (!Number.isFinite(targetWeightKg) || targetWeightKg <= 0)) {
+    res.status(400).json({ error: "targetWeightKg must be a positive number when provided" });
+    return;
+  }
+  if (purchaseCostRwf != null && (!Number.isFinite(purchaseCostRwf) || purchaseCostRwf <= 0)) {
+    res.status(400).json({ error: "purchaseCostRwf must be a positive number when provided" });
+    return;
+  }
+  if (costPerChickRwf != null && (!Number.isFinite(costPerChickRwf) || costPerChickRwf <= 0)) {
+    res.status(400).json({ error: "costPerChickRwf must be a positive number when provided" });
+    return;
+  }
+  if (purchaseCostRwf == null && costPerChickRwf != null) {
+    purchaseCostRwf = Number(costPerChickRwf) * Math.floor(initialCount);
+  } else if (purchaseCostRwf != null && costPerChickRwf == null) {
+    costPerChickRwf = Math.floor(initialCount) > 0 ? Number(purchaseCostRwf) / Math.floor(initialCount) : null;
+  }
+
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable." });
+    return;
+  }
+  try {
+    await dbQuery(
+      `UPDATE poultry_flocks SET
+         breed_code = $2,
+         placement_date = $3::date,
+         initial_count = $4,
+         target_weight_kg = $5,
+         purchase_cost_rwf = $6,
+         cost_per_chick_rwf = $7,
+         purchase_supplier = $8,
+         purchase_date = $9::date,
+         barn_name_id = $10::uuid,
+         updated_at = now()
+       WHERE id::text = $1`,
+      [
+        id,
+        breedCode,
+        placementDate,
+        Math.floor(initialCount),
+        targetWeightKg,
+        purchaseCostRwf,
+        costPerChickRwf,
+        purchaseSupplier,
+        purchaseDate,
+        barn.id,
+      ]
+    );
+    const refreshed = await loadFlockByIdFromDbToMemory(id);
+    appendAudit(req.authUser.id, req.authUser.role, "flock.update", "flock", id, {
+      breedCode,
+      placementDate,
+      barnName: barn.name,
+    });
+    res.json({ flock: refreshed ?? flocksById.get(id) });
+  } catch (e) {
+    console.error("[ERROR]", "[db] PATCH /api/flocks/:id:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Could not update flock." });
   }
 });
 
@@ -5217,13 +5498,15 @@ app.get("/api/reports/flocks.csv", requireAuth, requireFarmAccess, requireLeadVe
     try {
       const r = await dbQuery(
         `SELECT f.id, f.code AS flock_code, f.breed_code, f.placement_date, f.initial_count,
-                f.status, f.target_weight_kg, f.created_at
+                f.status, f.target_weight_kg, f.created_at,
+                COALESCE(bn.name, '') AS barn_name
            FROM poultry_flocks f
+           LEFT JOIN poultry_barn_names bn ON bn.id = f.barn_name_id
           ORDER BY f.placement_date DESC LIMIT 5000`
       );
-      const header = "id,flock_code,breed_code,placement_date,initial_count,status,target_weight_kg,created_at";
+      const header = "id,flock_code,breed_code,barn_name,placement_date,initial_count,status,target_weight_kg,created_at";
       const csvRows = r.rows.map((row) =>
-        [row.id, row.flock_code, row.breed_code, row.placement_date, row.initial_count, row.status, row.target_weight_kg ?? "", row.created_at].join(",")
+        [row.id, row.flock_code, row.breed_code, row.barn_name ?? "", row.placement_date, row.initial_count, row.status, row.target_weight_kg ?? "", row.created_at].join(",")
       );
       res.setHeader("Content-Type", "text/csv");
       res.setHeader("Content-Disposition", "attachment; filename=flocks_report.csv");
@@ -6287,6 +6570,39 @@ app.post("/api/suppliers", requireAuth, requireFarmAccess, requireAnyPageAccess(
   } catch (e) {
     console.error("[ERROR]", "[db] POST /api/suppliers:", e instanceof Error ? e.message : e);
     res.status(503).json({ error: "Could not create supplier." });
+  }
+});
+
+app.get("/api/barn-names", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_flocks", "farm_checkin", "farm_feed"]), async (_req, res) => {
+  try {
+    const barns = await listBarnNames();
+    res.json({ barnNames: barns.map((b) => ({ id: b.id, name: b.name })) });
+  } catch (e) {
+    console.error("[ERROR]", "[db] GET /api/barn-names:", e instanceof Error ? e.message : e);
+    if (!hasDb()) {
+      res.json({ barnNames: [...barnNamesByNormalized.values()].map((b) => ({ id: b.id, name: b.name })).sort((a, b) => a.name.localeCompare(b.name)) });
+      return;
+    }
+    res.status(503).json({ error: "Barn name list unavailable. Please retry shortly." });
+  }
+});
+
+app.post("/api/barn-names", requireAuth, requireFarmAccess, requirePageAccess("farm_flocks"), requireAction("flock.create"), async (req, res) => {
+  const name = String(req.body?.name ?? "").trim();
+  if (!name) {
+    res.status(400).json({ error: "name is required." });
+    return;
+  }
+  try {
+    const barn = await upsertBarnByName(name);
+    if (!barn) {
+      res.status(400).json({ error: "Invalid barn name." });
+      return;
+    }
+    res.status(201).json({ barnName: { id: barn.id, name: barn.name } });
+  } catch (e) {
+    console.error("[ERROR]", "[db] POST /api/barn-names:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Could not create barn name." });
   }
 });
 
@@ -8633,18 +8949,20 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
     }
 
     const flocks = await dbQuery(
-      `SELECT id,
-              COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
-              placement_date AS "placementDate",
-              initial_count AS "initialCount",
-              initial_weight_kg AS "initialWeightKg",
-              breed_code AS "breedCode",
-              verified_live_count AS "verifiedLiveCount",
-              target_weight_kg AS "targetWeightKg",
-              status
-         FROM poultry_flocks
-        WHERE status = 'active'
-        ORDER BY placement_date DESC`
+      `SELECT f.id,
+              COALESCE(f.code, CONCAT('Flock ', LEFT(f.id::text, 8))) AS label,
+              bn.name AS "barnName",
+              f.placement_date AS "placementDate",
+              f.initial_count AS "initialCount",
+              f.initial_weight_kg AS "initialWeightKg",
+              f.breed_code AS "breedCode",
+              f.verified_live_count AS "verifiedLiveCount",
+              f.target_weight_kg AS "targetWeightKg",
+              f.status
+         FROM poultry_flocks f
+         LEFT JOIN poultry_barn_names bn ON bn.id = f.barn_name_id
+        WHERE f.status = 'active'
+        ORDER BY f.placement_date DESC`
     );
 
     const latestWeigh = await dbQuery(
@@ -8754,7 +9072,8 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
       const overdue = overdueByFlock.get(String(f.id)) ?? {};
       const withdrawal = withdrawalByFlock.get(String(f.id)) ?? {};
       const label = String(f.label ?? "");
-      const barn = label.includes("-") ? label.split("-")[0].trim() : "Unassigned";
+      const barnFromDb = f.barnName != null && String(f.barnName).trim() !== "" ? String(f.barnName).trim() : null;
+      const barn = barnFromDb ?? (label.includes("-") ? label.split("-")[0].trim() : "Unassigned");
       const ageDays = Math.max(
         0,
         Math.floor((Date.now() - new Date(`${String(f.placementDate)}T00:00:00Z`).getTime()) / 86400000)

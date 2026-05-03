@@ -9,6 +9,7 @@ export type FlockListRow = {
   code?: string | null;
   placementDate?: string;
   initialCount?: number;
+  barnName?: string | null;
 };
 
 export type FieldPerformanceSummary = {

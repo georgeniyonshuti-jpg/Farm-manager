@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
@@ -55,6 +55,9 @@ export function FarmFeedPage() {
   const [entriesError, setEntriesError] = useState<string | null>(null);
   const [inventoryBalanceKg, setInventoryBalanceKg] = useState<number | null>(null);
   const [showFeedForm, setShowFeedForm] = useState(false);
+  const [feedFieldErrors, setFeedFieldErrors] = useState<Record<string, string>>({});
+  const flockSelectRef = useRef<HTMLSelectElement>(null);
+  const feedKgInputRef = useRef<HTMLInputElement>(null);
   const feedTypeOptions = useReferenceOptions("feed_type", token, [
     { value: "starter", label: "Starter" },
     { value: "grower", label: "Grower" },
@@ -107,10 +110,17 @@ export function FarmFeedPage() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!flockId) return;
+    setFeedFieldErrors({});
+    const errs: Record<string, string> = {};
+    if (!flockId) errs.flockId = "Flock is required.";
     const kg = Number(feedKg);
-    if (!Number.isFinite(kg) || kg <= 0) {
-      showToast("error", "Enter feed weight in kg (greater than zero).");
+    if (!String(feedKg).trim() || !Number.isFinite(kg) || kg <= 0) {
+      errs.feedKg = "Enter feed weight in kg (greater than zero).";
+    }
+    if (Object.keys(errs).length) {
+      setFeedFieldErrors(errs);
+      if (errs.flockId) flockSelectRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      else feedKgInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     setBusy(true);
@@ -211,10 +221,22 @@ export function FarmFeedPage() {
         <>
           <label className="block text-sm font-medium text-[var(--text-secondary)]">
             {tFlock}
+            <span className="text-red-500"> *</span>
             <select
-              className="mt-1 w-full min-h-[48px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-3 text-base text-[var(--text-primary)]"
+              ref={flockSelectRef}
+              className={[
+                "mt-1 w-full min-h-[48px] rounded-xl border bg-[var(--surface-input)] px-3 text-base text-[var(--text-primary)]",
+                feedFieldErrors.flockId ? "border-red-500 ring-1 ring-red-500/40" : "border-[var(--border-input)]",
+              ].join(" ")}
               value={flockId}
-              onChange={(e) => setFlockId(e.target.value)}
+              onChange={(e) => {
+                setFlockId(e.target.value);
+                setFeedFieldErrors((prev) => {
+                  const next = { ...prev };
+                  delete next.flockId;
+                  return next;
+                });
+              }}
             >
               {flocks.map((f) => (
                 <option key={f.id} value={f.id}>
@@ -222,6 +244,7 @@ export function FarmFeedPage() {
                 </option>
               ))}
             </select>
+            {feedFieldErrors.flockId ? <p className="mt-1 text-xs text-red-500">{feedFieldErrors.flockId}</p> : null}
           </label>
 
           {status ? (
@@ -311,13 +334,26 @@ export function FarmFeedPage() {
             >
               <label className="block text-sm font-medium text-[var(--text-secondary)]">
                 {tFeedKg}
+                <span className="text-red-500"> *</span>
                 <input
+                  ref={feedKgInputRef}
                   inputMode="decimal"
-                  className="mt-1 w-full min-h-[52px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 text-lg text-[var(--text-primary)]"
+                  className={[
+                    "mt-1 w-full min-h-[52px] rounded-xl border bg-[var(--surface-input)] px-4 text-lg text-[var(--text-primary)]",
+                    feedFieldErrors.feedKg ? "border-red-500 ring-1 ring-red-500/40" : "border-[var(--border-input)]",
+                  ].join(" ")}
                   value={feedKg}
-                  onChange={(e) => setFeedKg(e.target.value)}
+                  onChange={(e) => {
+                    setFeedKg(e.target.value);
+                    setFeedFieldErrors((prev) => {
+                      const next = { ...prev };
+                      delete next.feedKg;
+                      return next;
+                    });
+                  }}
                   placeholder="0"
                 />
+                {feedFieldErrors.feedKg ? <p className="mt-1 text-xs text-red-500">{feedFieldErrors.feedKg}</p> : null}
               </label>
               <label className="block text-sm font-medium text-[var(--text-secondary)]">
                 {tFeedType}

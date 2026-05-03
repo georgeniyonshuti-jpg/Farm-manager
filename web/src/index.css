@@ -359,6 +359,23 @@ textarea:focus-visible {
   overflow-y: clip;
 }
 
+/* Flock list: dense horizontal table with zebra striping (spec: traditional data grid). */
+.flock-list-table.institutional-table th:not(.tbl-num):not(.tbl-actions):not(.tbl-badge),
+.flock-list-table.institutional-table td:not(.tbl-num):not(.tbl-actions):not(.tbl-badge) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 12rem;
+}
+.flock-list-table.institutional-table thead th {
+  font-weight: 700;
+  border-bottom: 2px solid var(--border-color);
+  background: var(--table-header-bg);
+}
+.flock-list-table.institutional-table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--surface-subtle) 52%, transparent);
+}
+
 /* ─────────────────────────────────────────────────────────────
    Shell layout
 ───────────────────────────────────────────────────────────── */
