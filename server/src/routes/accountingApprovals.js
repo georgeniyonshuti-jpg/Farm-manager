@@ -1323,7 +1323,9 @@ router.get("/action-queue", async (req, res) => {
 
     res.json({ items: all, total: all.length });
   } catch (e) {
-    res.status(503).json({ error: e instanceof Error ? e.message : "Query failed." });
+    const msg = e instanceof Error ? e.message : "Query failed.";
+    console.error("[ERROR]", "[accounting] GET action-queue:", msg);
+    res.status(503).json({ error: msg });
   }
 });
 

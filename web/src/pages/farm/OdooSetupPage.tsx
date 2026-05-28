@@ -264,7 +264,7 @@ export function OdooSetupPage() {
   }, [token]);
 
   useEffect(() => {
-    if (!isManager) return;
+    if (!isManager || document.visibilityState === "hidden") return;
     if (tab === "overview") { loadStatus(); loadFarmAccounts(); loadActionSummary(); }
     else if (tab === "accounts") loadAllAccounts();
     else if (tab === "partners") loadPartners();

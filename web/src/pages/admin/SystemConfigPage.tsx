@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
+import { canAccessPageByKey } from "../../auth/permissions";
 import { API_BASE_URL } from "../../api/config";
 import { useToast } from "../../components/Toast";
 import { ErrorState } from "../../components/LoadingSkeleton";
@@ -62,7 +63,13 @@ export function SystemConfigPage() {
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string>>({});
   const [breedJson, setBreedJson] = useState("");
 
+  const canLoad = canAccessPageByKey(user, "admin_system_config");
+
   const load = useCallback(async () => {
+    if (!canLoad) {
+      setLoading(false);
+      return;
+    }
     setLoadError(null);
     setLoading(true);
     try {
@@ -91,11 +98,13 @@ export function SystemConfigPage() {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, canLoad]);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  if (!canLoad) return null;
 
   const sortedCategories = useMemo(() => {
     const canManageAll = user?.role === "superuser";

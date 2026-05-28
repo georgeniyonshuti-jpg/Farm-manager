@@ -264,7 +264,7 @@ export function AccountingApprovalsPage() {
   }, [token]);
 
   useEffect(() => {
-    if (!isManager) return;
+    if (!isManager || document.visibilityState === "hidden") return;
     if (tab === "action") void loadActionQueue();
     else if (tab === "inbox") void loadInbox();
     else if (tab === "sync") void loadOutbox();

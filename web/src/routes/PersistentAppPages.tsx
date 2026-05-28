@@ -32,7 +32,8 @@ import { OdooSetupPage } from "../pages/farm/OdooSetupPage";
 import { PayrollImpactPage } from "../pages/farm/PayrollImpactPage";
 import { ReportsCenterPage } from "../pages/farm/ReportsCenterPage";
 import { LaborerEarningsPage } from "../pages/laborer/LaborerEarningsPage";
-import { ProtectedRoute, WorkspaceGate } from "./ProtectedRoute";
+import { PersistentRouteGuard } from "./PersistentRouteGuard";
+import { PersistentWorkspaceGate } from "./PersistentWorkspaceGate";
 import { pathExact } from "./persistentPaths";
 
 const FLOCK_ROLES = [
@@ -58,78 +59,78 @@ export function PersistentAppPages() {
   const p = pathname;
 
   return (
-    <>
+    <div className="relative isolate w-full min-h-0">
       <PersistentPageSlot active={pathExact(p, "/dashboard/laborer")} mountDelayMs={0}>
-        <ProtectedRoute roles={["laborer", "dispatcher", "vet"]}>
+        <PersistentRouteGuard roles={["laborer", "dispatcher", "vet"]}>
           <LaborerHome />
-        </ProtectedRoute>
+        </PersistentRouteGuard>
       </PersistentPageSlot>
 
       <PersistentPageSlot active={pathExact(p, "/dashboard/vet")} mountDelayMs={100}>
-        <ProtectedRoute roles={["vet", "vet_manager", "superuser"]}>
+        <PersistentRouteGuard roles={["vet", "vet_manager", "superuser"]}>
           <VetHome />
-        </ProtectedRoute>
+        </PersistentRouteGuard>
       </PersistentPageSlot>
 
       <PersistentPageSlot active={pathExact(p, "/dashboard/management")} mountDelayMs={200}>
-        <ProtectedRoute roles={[...MANAGEMENT_ROLES]}>
+        <PersistentRouteGuard roles={[...MANAGEMENT_ROLES]}>
           <ManagementHome />
-        </ProtectedRoute>
+        </PersistentRouteGuard>
       </PersistentPageSlot>
 
       <PersistentPageSlot active={pathExact(p, "/laborer/earnings")} mountDelayMs={300}>
-        <ProtectedRoute roles={["laborer", "dispatcher", "vet"]}>
+        <PersistentRouteGuard roles={["laborer", "dispatcher", "vet"]}>
           <LaborerEarningsPage />
-        </ProtectedRoute>
+        </PersistentRouteGuard>
       </PersistentPageSlot>
 
-      <WorkspaceGate workspace="farm">
+      <PersistentWorkspaceGate workspace="farm">
         <PersistentPageSlot active={pathExact(p, "/farm/flocks")} mountDelayMs={0}>
-          <ProtectedRoute roles={[...FLOCK_ROLES]}>
+          <PersistentRouteGuard roles={[...FLOCK_ROLES]}>
             <FlockListPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/fcr")} mountDelayMs={500}>
-          <ProtectedRoute roles={[...FLOCK_ROLES]}>
+          <PersistentRouteGuard roles={[...FLOCK_ROLES]}>
             <FarmFcrRedirectPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/checkin")} mountDelayMs={0}>
-          <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+          <PersistentRouteGuard roles={FARM_FIELD_OPS_ROLES}>
             <FarmCheckinPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/mortality-log")} mountDelayMs={600}>
-          <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+          <PersistentRouteGuard roles={FARM_FIELD_OPS_ROLES}>
             <FarmMortalityLogPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/daily-log")} mountDelayMs={700}>
-          <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+          <PersistentRouteGuard roles={FARM_FIELD_OPS_ROLES}>
             <FarmDailyLogPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/feed")} mountDelayMs={100}>
-          <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+          <PersistentRouteGuard roles={FARM_FIELD_OPS_ROLES}>
             <FarmFeedPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/mortality")} mountDelayMs={800}>
-          <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
+          <PersistentRouteGuard roles={FARM_FIELD_OPS_ROLES}>
             <FarmMortalityPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/vet-logs")} mountDelayMs={1200}>
-          <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
+          <PersistentRouteGuard roles={["superuser", "manager", "vet_manager", "vet"]}>
             <FarmVetLogsPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/inventory")} mountDelayMs={900}>
@@ -137,61 +138,61 @@ export function PersistentAppPages() {
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/treatments")} mountDelayMs={1600}>
-          <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
+          <PersistentRouteGuard roles={["superuser", "manager", "vet_manager", "vet"]}>
             <FarmTreatmentPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/slaughter")} mountDelayMs={1400}>
-          <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
+          <PersistentRouteGuard roles={["superuser", "manager", "vet_manager", "vet"]}>
             <FarmSlaughterPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/batch-schedule")} mountDelayMs={1500}>
-          <ProtectedRoute roles={["superuser", "manager", "vet_manager", "vet"]}>
+          <PersistentRouteGuard roles={["superuser", "manager", "vet_manager", "vet"]}>
             <FlockScheduleSettingsPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/schedule-settings")} mountDelayMs={1700}>
-          <ProtectedRoute roles={["manager", "vet_manager", "superuser"]}>
+          <PersistentRouteGuard roles={["manager", "vet_manager", "superuser"]}>
             <LogScheduleSettingsPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/checkin-review")} mountDelayMs={1100}>
-          <ProtectedRoute roles={["vet", "manager", "vet_manager", "superuser"]}>
+          <PersistentRouteGuard roles={["vet", "manager", "vet_manager", "superuser"]}>
             <FarmCheckinReviewPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/payroll")} mountDelayMs={1800}>
-          <ProtectedRoute roles={["manager", "vet_manager", "superuser"]}>
+          <PersistentRouteGuard roles={["manager", "vet_manager", "superuser"]}>
             <PayrollImpactPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/accounting-approvals")} mountDelayMs={1900}>
-          <ProtectedRoute roles={["manager", "superuser"]}>
+          <PersistentRouteGuard roles={["manager", "superuser"]}>
             <AccountingApprovalsPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/odoo-setup")} mountDelayMs={2000}>
-          <ProtectedRoute roles={["manager", "superuser"]}>
+          <PersistentRouteGuard roles={["manager", "superuser"]}>
             <OdooSetupPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
 
         <PersistentPageSlot active={pathExact(p, "/farm/reports")} mountDelayMs={1300}>
-          <ProtectedRoute roles={["vet", "vet_manager", "manager", "superuser"]}>
+          <PersistentRouteGuard roles={["vet", "vet_manager", "manager", "superuser"]}>
             <ReportsCenterPage />
-          </ProtectedRoute>
+          </PersistentRouteGuard>
         </PersistentPageSlot>
-      </WorkspaceGate>
+      </PersistentWorkspaceGate>
 
-      <WorkspaceGate workspace="clevacredit">
+      <PersistentWorkspaceGate workspace="clevacredit">
         <PersistentPageSlot active={pathExact(p, "/cleva/portfolio")} mountDelayMs={2100}>
           <PortfolioPage />
         </PersistentPageSlot>
@@ -211,25 +212,25 @@ export function PersistentAppPages() {
         <PersistentPageSlot active={pathExact(p, "/cleva/credit-scoring")} mountDelayMs={2500}>
           <CreditScoringPage />
         </PersistentPageSlot>
-      </WorkspaceGate>
+      </PersistentWorkspaceGate>
 
       <PersistentPageSlot active={pathExact(p, "/admin/users")} mountDelayMs={2600}>
-        <ProtectedRoute superuserOnly>
+        <PersistentRouteGuard superuserOnly>
           <UserManagementPage />
-        </ProtectedRoute>
+        </PersistentRouteGuard>
       </PersistentPageSlot>
 
       <PersistentPageSlot active={pathExact(p, "/admin/system-config")} mountDelayMs={2700}>
-        <ProtectedRoute roles={["vet_manager", "manager", "superuser"]}>
+        <PersistentRouteGuard roles={["vet_manager", "manager", "superuser"]}>
           <SystemConfigPage />
-        </ProtectedRoute>
+        </PersistentRouteGuard>
       </PersistentPageSlot>
 
       <PersistentPageSlot active={pathExact(p, "/admin/super")} mountDelayMs={2800}>
-        <ProtectedRoute superuserOnly>
+        <PersistentRouteGuard superuserOnly>
           <SuperAdminPanelPage />
-        </ProtectedRoute>
+        </PersistentRouteGuard>
       </PersistentPageSlot>
-    </>
+    </div>
   );
 }
