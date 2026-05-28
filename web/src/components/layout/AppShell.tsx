@@ -6,6 +6,7 @@ import { OdooConnectionProvider } from "../../context/OdooConnectionContext";
 import { GlobalHeader } from "./GlobalHeader";
 import { FinancialRestrictedBanner } from "./FinancialRestrictedBanner";
 import { SidebarNav } from "./SidebarNav";
+import { AnnouncementBanner } from "../AnnouncementBanner";
 import { PersistentAppPages } from "../../routes/PersistentAppPages";
 import { isAppShellPersistentPath } from "../../routes/persistentPaths";
 
@@ -30,6 +31,7 @@ export function AppShell() {
   return (
     <OdooConnectionProvider>
     <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[var(--background-color)]">
+      <AnnouncementBanner />
       <GlobalHeader
         showDesktopSidebarToggle={!compactFieldView}
         desktopSidebarCollapsed={desktopSidebarCollapsed}

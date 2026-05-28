@@ -51,6 +51,7 @@ import accountingApprovalsRouter, { initAccountingApprovalsRouter } from "./src/
 import ias41Router, { initIas41Service } from "./src/routes/ias41Routes.js";
 import reconciliationRouter, { initReconciliationRouter } from "./src/routes/accountingReconciliation.js";
 import odooSetupRouter from "./src/routes/odooSetupRoute.js";
+import { createSaasRouter } from "./src/routes/saasRoutes.js";
 import { initOdooSyncWorker, processOdooSyncOutbox, enqueueOdooSync } from "./src/services/odoo/odooSyncWorker.js";
 import {
   mapFeedProcurementToBill,
@@ -389,15 +390,24 @@ function parseStringArray(value, fallback = []) {
   return fallback;
 }
 
+const DEFAULT_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
+
+async function companyIdForUser(userId) {
+  if (!hasDb()) return DEFAULT_COMPANY_ID;
+  const r = await dbQuery(`SELECT company_id::text AS id FROM users WHERE id = $1::uuid`, [userId]);
+  return r.rows[0]?.id ?? DEFAULT_COMPANY_ID;
+}
+
 async function persistUserToDb(row) {
   if (!hasDb()) return;
+  const companyId = row.companyId ?? DEFAULT_COMPANY_ID;
   await dbQuery(
     `INSERT INTO users (
       id, email, full_name, role, password_hash, business_unit_access,
-      can_view_sensitive_financial, department_keys, page_access
+      can_view_sensitive_financial, department_keys, page_access, company_id
     )
     VALUES (
-      $1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb
+      $1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::uuid
     )
     ON CONFLICT (id) DO UPDATE SET
       email = EXCLUDED.email,
@@ -407,7 +417,8 @@ async function persistUserToDb(row) {
       business_unit_access = EXCLUDED.business_unit_access,
       can_view_sensitive_financial = EXCLUDED.can_view_sensitive_financial,
       department_keys = EXCLUDED.department_keys,
-      page_access = EXCLUDED.page_access`,
+      page_access = EXCLUDED.page_access,
+      company_id = COALESCE(EXCLUDED.company_id, users.company_id)`,
     [
       row.id,
       row.email,
@@ -418,6 +429,7 @@ async function persistUserToDb(row) {
       Boolean(row.canViewSensitiveFinancial),
       JSON.stringify(Array.isArray(row.departmentKeys) ? row.departmentKeys : []),
       JSON.stringify(normalizePageAccess(row.pageAccess, PAGE_ACCESS_KEYS)),
+      companyId,
     ]
   );
 }
@@ -3133,7 +3145,8 @@ async function syncFlocksFromDbToMemory() {
             f.purchase_cost_rwf AS "purchaseCostRwf",
             f.cost_per_chick_rwf AS "costPerChickRwf",
             f.purchase_supplier AS "purchaseSupplier",
-            f.purchase_date::text AS "purchaseDate"
+            f.purchase_date::text AS "purchaseDate",
+            f.company_id::text AS "companyId"
        FROM poultry_flocks f
        LEFT JOIN poultry_barn_names bn ON bn.id = f.barn_name_id
       WHERE f.status IN (${statusInList})
@@ -3217,8 +3230,10 @@ app.get("/api/flocks", requireAuth, requireFarmAccess, requireAnyPageAccess(["fa
   const includeFailed = String(req.query.includeFailed ?? "").toLowerCase() === "true";
   const canArch = canViewArchivedFlocks(req.authUser);
   const canSeeFailed = req.authUser?.role === "superuser";
+  const scopedCompanyId = await companyIdForUser(req.authUser.id);
   // FIX: embed check-in urgency per flock for list + detail views
   const flocks = [...flocksById.values()]
+    .filter((f) => !f.companyId || f.companyId === scopedCompanyId)
     .map((f) => {
       const birdsLiveEstimate = effectiveBirdsLiveEstimate(f);
       return { ...f, birdsLiveEstimate };
@@ -3403,6 +3418,7 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
     costPerChickRwf = Math.floor(initialCount) > 0 ? Number(purchaseCostRwf) / Math.floor(initialCount) : null;
   }
   const status = statusInput === "planned" ? "planned" : "active";
+  const flockCompanyId = await companyIdForUser(req.authUser.id);
 
   let createdId = `flk_${crypto.randomBytes(6).toString("hex")}`;
   let createdCode = `FM-MEM-${createdId.slice(4)}`;
@@ -3413,15 +3429,15 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
       const inserted = await dbQuery(
         `INSERT INTO poultry_flocks
           (breed_code, placement_date, initial_count, target_weight_kg, status, code,
-           purchase_cost_rwf, cost_per_chick_rwf, purchase_supplier, purchase_date, barn_name_id)
+           purchase_cost_rwf, cost_per_chick_rwf, purchase_supplier, purchase_date, barn_name_id, company_id)
          VALUES ($1, $2::date, $3, $4, $5,
                  'FM-' || lpad(nextval('poultry_flock_code_seq')::text, 3, '0'),
-                 $6, $7, $8, $9::date, $10::uuid)
+                 $6, $7, $8, $9::date, $10::uuid, $11::uuid)
          RETURNING id::text AS id,
                    COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
                    code`,
         [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, status,
-         purchaseCostRwf, costPerChickRwf, purchaseSupplier, purchaseDate, barn.id]
+         purchaseCostRwf, costPerChickRwf, purchaseSupplier, purchaseDate, barn.id, flockCompanyId]
       );
       createdId = String(inserted.rows[0]?.id ?? createdId);
       createdCode = inserted.rows[0]?.code != null ? String(inserted.rows[0].code) : createdCode;
@@ -9324,6 +9340,25 @@ app.use("/api/accounting-approvals", requireAuth, accountingApprovalsRouter);
 app.use("/api/ias41", requireAuth, ias41Router);
 app.use("/api/accounting-reconciliation", requireAuth, reconciliationRouter);
 app.use("/api/odoo-setup", requireAuth, odooSetupRouter);
+
+app.use(
+  "/api",
+  createSaasRouter({
+    dbQuery,
+    hasDb,
+    requireAuth,
+    requireSuperuser,
+    hashPassword,
+    newSessionId,
+    sessions,
+    persistUserToDb,
+    upsertUser,
+    sanitizeUser,
+    appendAudit,
+    usersByEmail,
+    usersById,
+  })
+);
 
 // FIX: generic 404 handler
 app.use((_req, res) => {

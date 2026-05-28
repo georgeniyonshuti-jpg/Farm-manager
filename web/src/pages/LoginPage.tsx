@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { defaultHomeForUser } from "../routes/ProtectedRoute";
 import { BrandLogo } from "../components/BrandLogo";
@@ -98,6 +98,12 @@ export function LoginPage() {
           >
             {busy ? "Signing in…" : "Sign in"}
           </button>
+          <p className="text-center text-xs text-[var(--text-muted)]">
+            New here?{" "}
+            <Link to="/signup" className="underline">
+              Create workspace
+            </Link>
+          </p>
         </form>
 
       </div>

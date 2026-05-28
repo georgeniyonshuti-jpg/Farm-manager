@@ -7,9 +7,14 @@ import { FarmSection } from "./routes/FarmSection";
 import { ProtectedRoute } from "./routes/ProtectedRoute";
 import { HomeRedirect } from "./pages/HomeRedirect";
 import { LoginPage } from "./pages/LoginPage";
+import { SignupPage } from "./pages/SignupPage";
+import { WelcomePage } from "./pages/WelcomePage";
+import { PricingPage } from "./pages/PricingPage";
+import { TrialExpiredPage } from "./pages/TrialExpiredPage";
+import { SuperAdminRoute } from "./routes/SuperAdminRoute";
 import { FlockDetailPage } from "./pages/farm/FlockDetailPage";
 import { FlockFcrPage } from "./pages/farm/FlockFcrPage";
-import { UnauthorizedPage } from "./pages/UnauthorizedPage";
+import { AccessDeniedRedirect } from "./routes/AccessDeniedRedirect";
 import { ToastProvider } from "./components/Toast";
 import { VersionBadge } from "./components/VersionBadge";
 import { SystemStatus } from "./components/SystemStatus";
@@ -26,10 +31,13 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/signup" element={<SignupPage />} />
+      <Route path="/billing/pricing" element={<PricingPage />} />
+      <Route path="/billing/trial-expired" element={<TrialExpiredPage />} />
 
       <Route element={<ProtectedRoute />}>
-        {/* FIX: RBAC — dedicated page when role/workspace denies access */}
-        <Route path="/unauthorized" element={<UnauthorizedPage />} />
+        <Route path="/welcome" element={<WelcomePage />} />
+        <Route path="/unauthorized" element={<AccessDeniedRedirect />} />
         <Route element={<AppShell />}>
           <Route path="/" element={<HomeRedirect />} />
 
@@ -89,6 +97,10 @@ function AppRoutes() {
 
           <Route path="/admin/users" element={null} />
           <Route path="/admin/system-config" element={null} />
+
+          <Route element={<SuperAdminRoute />}>
+            <Route path="/admin/super" element={null} />
+          </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

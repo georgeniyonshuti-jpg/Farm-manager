@@ -181,6 +181,8 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
 
   const adminLink =
     user.role === "superuser" && canSee("admin_users") ? { to: "/admin/users", label: "User management" } : null;
+  const superAdminLink =
+    user.role === "superuser" ? { to: "/admin/super", label: "Super admin" } : null;
   const typeLink =
     user.role === "vet_manager" || user.role === "manager" || user.role === "superuser"
       ? (canSee("admin_system_config") ? { to: "/admin/system-config", label: "Type settings" } : null)
@@ -280,6 +282,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
           ]
         : nav),
       adminLink,
+      superAdminLink,
       typeLink,
     ].filter(Boolean) as NavItem[];
     const seen = new Set<string>();
@@ -382,6 +385,22 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
               }
             >
               <NavText text={adminLink.label} />
+            </NavLink>
+          )}
+          {superAdminLink && (
+            <NavLink
+              to={superAdminLink.to}
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                [
+                  "flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-medium",
+                  isActive
+                    ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
+                    : "border-l-transparent text-[var(--text-secondary)] hover:bg-[var(--primary-color-soft)] hover:text-[var(--text-primary)]",
+                ].join(" ")
+              }
+            >
+              <NavText text={superAdminLink.label} />
             </NavLink>
           )}
           {typeLink && (!adminLink || typeLink.to !== adminLink.to) && (

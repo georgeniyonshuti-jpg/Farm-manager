@@ -1,6 +1,6 @@
 /** Paths rendered via PersistentAppPages (Outlet hidden). */
 export function isAppShellPersistentPath(pathname: string): boolean {
-  if (pathname === "/" || pathname === "/unauthorized") return false;
+  if (pathname === "/") return false;
   // Dynamic flock pages stay on Outlet so useParams() works.
   if (/^\/farm\/flocks\/[^/]+/.test(pathname)) return false;
   return (

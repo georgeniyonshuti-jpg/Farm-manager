@@ -9,6 +9,7 @@ import {
 } from "../auth/permissions";
 import type { ActiveWorkspace, UserRole } from "../auth/types";
 import { AppLoadingScreen } from "../components/AppLoadingScreen";
+import { AccessDeniedRedirect } from "./AccessDeniedRedirect";
 
 function SessionLoadingScreen() {
   return <AppLoadingScreen />;
@@ -40,32 +41,28 @@ export function ProtectedRoute({
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  // FIX: RBAC — laborer/dispatcher blocked paths → /unauthorized (not silent redirect home)
   if (
     user &&
     !isSuperuser(user) &&
     !canAccessRouteLaborerBlock(user, location.pathname)
   ) {
-    return <Navigate to="/unauthorized" replace state={{ from: location }} />;
+    return <AccessDeniedRedirect />;
   }
 
   if (user && !canAccessPathByPageVisibility(user, location.pathname)) {
-    return <Navigate to="/unauthorized" replace state={{ from: location }} />;
+    return <AccessDeniedRedirect />;
   }
 
-  // FIX: RBAC — role-only routes reject non–superusers without access
   if (superuserOnly && !isSuperuser(user)) {
-    return <Navigate to="/unauthorized" replace state={{ from: location }} />;
+    return <AccessDeniedRedirect />;
   }
 
-  // FIX: RBAC — superuser may access every route; others must match allowed roles
   if (user && roles?.length && !isSuperuser(user) && !roles.includes(user.role)) {
-    return <Navigate to="/unauthorized" replace state={{ from: location }} />;
+    return <AccessDeniedRedirect />;
   }
 
-  // FIX: RBAC — minimum role hierarchy (superuser already passes roleAtLeast)
   if (user && minimumRole && !roleAtLeast(user, minimumRole)) {
-    return <Navigate to="/unauthorized" replace state={{ from: location }} />;
+    return <AccessDeniedRedirect />;
   }
 
   return children ? <>{children}</> : <Outlet />;
@@ -87,9 +84,8 @@ export function WorkspaceGate({
 
   if (!user) return <Navigate to="/login" replace />;
 
-  // FIX: RBAC — wrong workspace URL → /unauthorized; superuser may use both workspaces
   if (!canAccessWorkspace(user, workspace) && !isSuperuser(user)) {
-    return <Navigate to="/unauthorized" replace />;
+    return <AccessDeniedRedirect />;
   }
 
   return <>{children}</>;

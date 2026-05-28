@@ -4,6 +4,7 @@ import { FARM_FIELD_OPS_ROLES } from "../auth/permissions";
 import { PersistentPageSlot } from "../components/layout/PersistentPageSlot";
 import { UserManagementPage } from "../pages/admin/UserManagementPage";
 import { SystemConfigPage } from "../pages/admin/SystemConfigPage";
+import { SuperAdminPanelPage } from "../pages/admin/SuperAdminPanelPage";
 import { BusinessModelAnalyticsPage } from "../pages/cleva/BusinessModelAnalyticsPage";
 import { CreditScoringPage } from "../pages/cleva/CreditScoringPage";
 import { GeneralLendingPage } from "../pages/cleva/GeneralLendingPage";
@@ -221,6 +222,12 @@ export function PersistentAppPages() {
       <PersistentPageSlot active={pathExact(p, "/admin/system-config")} mountDelayMs={2700}>
         <ProtectedRoute roles={["vet_manager", "manager", "superuser"]}>
           <SystemConfigPage />
+        </ProtectedRoute>
+      </PersistentPageSlot>
+
+      <PersistentPageSlot active={pathExact(p, "/admin/super")} mountDelayMs={2800}>
+        <ProtectedRoute superuserOnly>
+          <SuperAdminPanelPage />
         </ProtectedRoute>
       </PersistentPageSlot>
     </>

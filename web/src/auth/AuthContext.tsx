@@ -26,6 +26,7 @@ type AuthContextValue = {
   logout: () => Promise<void>;
   setActiveWorkspace: (w: ActiveWorkspace) => void;
   refreshMe: () => Promise<void>;
+  establishSession: (token: string, user: SessionUser) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -144,6 +145,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [user]
   );
 
+  const establishSession = useCallback(
+    (t: string, u: SessionUser) => {
+      setTokenPersist(t);
+      setUser(u);
+      setActiveWorkspaceState(defaultWorkspaceForUser(u));
+    },
+    [setTokenPersist]
+  );
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
@@ -153,9 +163,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login,
       logout,
       refreshMe,
+      establishSession,
       setActiveWorkspace,
     }),
-    [user, token, activeWorkspace, bootstrapped, login, logout, refreshMe, setActiveWorkspace]
+    [user, token, activeWorkspace, bootstrapped, login, logout, refreshMe, establishSession, setActiveWorkspace]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
