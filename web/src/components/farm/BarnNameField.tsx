@@ -12,8 +12,8 @@ type Props = {
   onSaveNew: () => void | Promise<void>;
   error?: string;
   disabled?: boolean;
-  fieldRef?: RefObject<HTMLDivElement | null>;
-  selectRef?: RefObject<HTMLSelectElement | null>;
+  fieldRef?: RefObject<HTMLDivElement>;
+  selectRef?: RefObject<HTMLSelectElement>;
 };
 
 export function BarnNameField({
