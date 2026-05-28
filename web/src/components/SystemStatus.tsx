@@ -35,6 +35,7 @@ export function SystemStatus() {
   }, [user?.role]);
 
   if (user?.role !== "superuser") return null;
+  if (ok === null) return null;
 
   return (
     <div className="fixed bottom-3 right-3 z-50 rounded-xl border border-neutral-700 bg-neutral-900/85 px-3 py-2 text-xs text-white shadow-lg">

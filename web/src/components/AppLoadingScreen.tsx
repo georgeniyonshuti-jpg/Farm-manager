@@ -1,18 +1,154 @@
-export function AppLoadingScreen() {
+import { useEffect, useState } from "react";
+import type { ApiHealthStatus } from "../hooks/useApiHealthStatus";
+
+const LOADING_STEPS = [
+  { message: "Connecting to workspace...", duration: 600 },
+  { message: "Loading your flocks...", duration: 800 },
+  { message: "Fetching check-in data...", duration: 700 },
+  { message: "Syncing schedules...", duration: 600 },
+  { message: "Almost ready...", duration: 500 },
+] as const;
+
+type Props = {
+  apiStatus?: ApiHealthStatus;
+};
+
+export function AppLoadingScreen({ apiStatus = "checking" }: Props) {
+  const [stepIndex, setStepIndex] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [dots, setDots] = useState("");
+
+  useEffect(() => {
+    let step = 0;
+    const totalDuration = LOADING_STEPS.reduce((sum, s) => sum + s.duration, 0);
+    let elapsed = 0;
+
+    const advance = () => {
+      if (step < LOADING_STEPS.length - 1) {
+        elapsed += LOADING_STEPS[step].duration;
+        step += 1;
+        setStepIndex(step);
+        setProgress(Math.round((elapsed / totalDuration) * 90));
+        window.setTimeout(advance, LOADING_STEPS[step].duration);
+      }
+    };
+
+    const t = window.setTimeout(advance, LOADING_STEPS[0].duration);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setDots((d) => (d.length >= 3 ? "" : `${d}.`));
+    }, 400);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (apiStatus === "up") setProgress(100);
+  }, [apiStatus]);
+
+  const currentMessage = LOADING_STEPS[stepIndex]?.message ?? "Getting everything ready...";
+  const messageBase = currentMessage.replace(/\.\.\.$/, "");
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--background-color)] px-4">
-      <div className="w-full max-w-sm rounded-3xl border border-[var(--border-color)] bg-white p-8 text-center shadow-[var(--shadow-soft)]">
-        <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-2xl bg-[var(--primary-gradient)] shadow-md">
-          <span className="relative inline-flex h-9 w-9 items-center justify-center">
-            <span className="absolute inline-flex h-9 w-9 animate-ping rounded-full bg-white/35" />
-            <span className="inline-flex h-5 w-5 rounded-full bg-white" />
-          </span>
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 50%, #f0f9ff 100%)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 9999,
+      }}
+    >
+      <div
+        style={{
+          background: "#ffffff",
+          borderRadius: 20,
+          padding: "40px 48px",
+          width: 340,
+          boxShadow: "0 8px 40px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.04)",
+          textAlign: "center",
+        }}
+      >
+        <div
+          style={{
+            width: 72,
+            height: 72,
+            borderRadius: 18,
+            background: "linear-gradient(135deg, #166534 0%, #16a34a 100%)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            margin: "0 auto 24px",
+            fontSize: 36,
+            boxShadow: "0 4px 16px rgba(22,101,52,0.25)",
+          }}
+          aria-hidden
+        >
+          🐔
         </div>
-        <h1 className="text-lg font-semibold text-[var(--text-primary)]">Farm Manager</h1>
-        <p className="mt-1 text-sm text-[var(--text-muted)]">Loading your workspace...</p>
-        <div className="mt-5 h-2 w-full overflow-hidden rounded-full bg-[var(--primary-color-soft)]">
-          <div className="h-full w-1/2 animate-pulse rounded-full bg-[var(--primary-color)]" />
+
+        <div
+          style={{
+            fontSize: 22,
+            fontWeight: 800,
+            color: "#111827",
+            letterSpacing: "-0.02em",
+            marginBottom: 4,
+          }}
+        >
+          Farm Manager
         </div>
+
+        <div style={{ fontSize: 13, color: "#6B7280", marginBottom: 28 }}>Clevafarm</div>
+
+        <div
+          style={{
+            height: 6,
+            background: "#E5E7EB",
+            borderRadius: 99,
+            overflow: "hidden",
+            marginBottom: 14,
+          }}
+        >
+          <div
+            style={{
+              height: "100%",
+              width: `${progress}%`,
+              background: "linear-gradient(90deg, #16a34a, #4ade80)",
+              borderRadius: 99,
+              transition: "width 0.6s cubic-bezier(0.4, 0, 0.2, 1)",
+            }}
+          />
+        </div>
+
+        <div style={{ fontSize: 13, color: "#6B7280", minHeight: 20, transition: "opacity 0.3s" }}>
+          {messageBase}
+          {dots}
+        </div>
+
+        {apiStatus === "down" ? (
+          <div
+            style={{
+              marginTop: 16,
+              padding: "8px 14px",
+              background: "#FEF2F2",
+              border: "1px solid #FECACA",
+              borderRadius: 8,
+              fontSize: 12,
+              color: "#991B1B",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <span aria-hidden>⚠️</span>
+            <span>Having trouble reaching the server. Retrying...</span>
+          </div>
+        ) : null}
       </div>
     </div>
   );
