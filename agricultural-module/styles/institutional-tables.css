@@ -1,0 +1,20 @@
+/* Use on management / investor tables: descriptions and notes wrap cleanly */
+.institutional-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.institutional-table th,
+.institutional-table td {
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+  vertical-align: top;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.institutional-table th {
+  text-align: left;
+  font-weight: 600;
+}

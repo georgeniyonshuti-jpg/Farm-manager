@@ -1,0 +1,45 @@
+{
+  "meta": {
+    "version": 1,
+    "unit_avg_weight_kg": "per bird sample average",
+    "day_index": "0 = placement day"
+  },
+  "breeds": {
+    "cobb_500": {
+      "display_name": "Cobb 500",
+      "curve_kg_avg_weight_by_day": {
+        "0": 0.042,
+        "7": 0.17,
+        "14": 0.45,
+        "21": 0.95,
+        "28": 1.65,
+        "35": 2.45,
+        "42": 3.25
+      }
+    },
+    "ross_308": {
+      "display_name": "Ross 308",
+      "curve_kg_avg_weight_by_day": {
+        "0": 0.042,
+        "7": 0.165,
+        "14": 0.44,
+        "21": 0.93,
+        "28": 1.62,
+        "35": 2.4,
+        "42": 3.2
+      }
+    },
+    "generic_broiler": {
+      "display_name": "Generic broiler (illustrative)",
+      "curve_kg_avg_weight_by_day": {
+        "0": 0.04,
+        "7": 0.15,
+        "14": 0.4,
+        "21": 0.88,
+        "28": 1.55,
+        "35": 2.3,
+        "42": 3.05
+      }
+    }
+  }
+}
