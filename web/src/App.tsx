@@ -13,7 +13,6 @@ import { ManagementHome } from "./pages/dashboards/ManagementHome";
 import { FarmDailyLogPage } from "./pages/farm/FarmDailyLogPage";
 import { FarmFeedPage } from "./pages/farm/FarmFeedPage";
 import { FarmInventoryPage } from "./pages/farm/FarmInventoryPage";
-import { FarmCheckinPage } from "./pages/farm/FarmCheckinPage";
 import { FarmMortalityLogPage } from "./pages/farm/FarmMortalityLogPage";
 import { FarmMortalityPage } from "./pages/farm/FarmMortalityPage";
 import { FarmVetLogsPage } from "./pages/farm/FarmVetLogsPage";
@@ -145,11 +144,7 @@ function AppRoutes() {
             />
             <Route
               path="checkin"
-              element={
-                <ProtectedRoute roles={FARM_FIELD_OPS_ROLES}>
-                  <FarmCheckinPage />
-                </ProtectedRoute>
-              }
+              element={<ProtectedRoute roles={FARM_FIELD_OPS_ROLES} />}
             />
             <Route
               path="mortality-log"

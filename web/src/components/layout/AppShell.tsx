@@ -6,6 +6,7 @@ import { OdooConnectionProvider } from "../../context/OdooConnectionContext";
 import { GlobalHeader } from "./GlobalHeader";
 import { FinancialRestrictedBanner } from "./FinancialRestrictedBanner";
 import { SidebarNav } from "./SidebarNav";
+import { PersistentFarmCheckin } from "../../routes/PersistentFarmCheckin";
 
 export function AppShell() {
   const location = useLocation();
@@ -17,6 +18,7 @@ export function AppShell() {
   const compactFieldView = laborerLikeView || juniorVetMode || fieldOpsMode;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
+  const checkinActive = location.pathname === "/farm/checkin";
   const desktopSidebarWidthClass = desktopSidebarCollapsed ? "md:w-[84px]" : "md:w-[220px]";
   const desktopMainOffsetClass = compactFieldView
     ? "md:ml-0"
@@ -75,7 +77,10 @@ export function AppShell() {
           }`}
         >
           <div className="w-full">
-            <Outlet />
+            <div style={{ display: checkinActive ? "none" : "block" }}>
+              <Outlet />
+            </div>
+            <PersistentFarmCheckin />
           </div>
         </main>
         </div>
