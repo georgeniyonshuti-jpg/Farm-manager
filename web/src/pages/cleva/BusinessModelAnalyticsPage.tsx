@@ -23,6 +23,8 @@ import { ErrorState } from "../../components/LoadingSkeleton";
 import { BusinessModelBudgetTab } from "./BusinessModelBudgetTab";
 import { BusinessModelMemosTab } from "./BusinessModelMemosTab";
 import { BusinessModelBroilerOpsTab } from "./BusinessModelBroilerOpsTab";
+import BatchResults from "../../components/analytics/BatchResults";
+import { broilerInputsFromRecord, runBroilerModel, type BroilerModelResults } from "../../lib/broilerModel";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -673,12 +675,8 @@ export function BusinessModelAnalyticsPage() {
 
   // Broiler state
   const [broilerInputs, setBroilerInputs] = useState<BroilerInputs | null>(null);
-  const [broilerSummary, setBroilerSummary] = useState<Record<string, number> | null>(null);
-  const [trajectory, setTrajectory] = useState<Record<string, number>[] | null>(null);
-  const [insights, setInsights] = useState<string[] | null>(null);
-  const [weeklyMortality, setWeeklyMortality] = useState<
-    { week: number; mortality_pct_of_week_start: number }[] | null
-  >(null);
+  const [modelResults, setModelResults] = useState<BroilerModelResults | null>(null);
+  const [broilerHasRun, setBroilerHasRun] = useState(false);
 
   const loadPaygoDefaults = useCallback(async () => {
     setError(null);
@@ -790,29 +788,15 @@ export function BusinessModelAnalyticsPage() {
     }
   };
 
-  const runBroiler = async () => {
+  const runBroiler = () => {
     if (!broilerInputs) return;
-    setBusy(true);
     setError(null);
-    try {
-      const r = await fetch(`${API_BASE_URL}/api/business-model/broiler`, {
-        method: "POST",
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify({ inputs: broilerInputs }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Broiler model failed");
-      setBroilerSummary((d as { summary: Record<string, number> }).summary);
-      setTrajectory((d as { trajectory: Record<string, number>[] }).trajectory);
-      setInsights((d as { insights: string[] }).insights);
-      setWeeklyMortality(
-        (d as { weeklyMortality?: { week: number; mortality_pct_of_week_start: number }[] }).weeklyMortality ?? null
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Broiler model failed");
-    } finally {
-      setBusy(false);
-    }
+    const results = runBroilerModel(broilerInputsFromRecord(broilerInputs));
+    setModelResults(results);
+    setBroilerHasRun(true);
+    window.setTimeout(() => {
+      document.getElementById("batch-results")?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
   };
 
   const loadLiveActuals = async () => {
@@ -1996,10 +1980,11 @@ export function BusinessModelAnalyticsPage() {
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
                     <button
-                      type="button" disabled={busy} onClick={() => void runBroiler()}
-                      className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 disabled:opacity-50"
+                      type="button"
+                      onClick={() => runBroiler()}
+                      className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
                     >
-                      {busy ? "Running…" : "Run broiler model"}
+                      Run broiler model
                     </button>
                     <button
                       type="button" onClick={() => void loadBroilerDefaults()}
@@ -2011,97 +1996,9 @@ export function BusinessModelAnalyticsPage() {
                 </div>
               ) : null}
 
-              {broilerSummary ? (
-                <>
-                  {/* Profitability explanation */}
-                  <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3 text-xs text-blue-900">
-                    <strong>Reading these KPIs:</strong> Net profit = Revenue − total costs.
-                    ROI = Net profit / total cost (not annualized — this is per-cycle).
-                    Break-even price = minimum RWF/kg to cover all costs.
-                    Effective FCR = actual feed kg used / live mass gained (lower is better).
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    {[
-                      ["Net profit", fmtRwf(broilerSummary.net_profit_rwf), broilerSummary.net_profit_rwf >= 0 ? "emerald" : "red"],
-                      ["Gross profit", fmtRwf(broilerSummary.gross_profit_rwf), broilerSummary.gross_profit_rwf >= 0 ? "emerald" : "red"],
-                      ["Revenue", fmtRwf(broilerSummary.revenue_rwf), "slate"],
-                      ["Total cost", fmtRwf(broilerSummary.total_cost_rwf), "slate"],
-                      ["Birds harvested", broilerSummary.birds_end.toFixed(0), "slate"],
-                      ["Effective FCR", broilerSummary.effective_fcr.toFixed(3), "slate"],
-                      ["Break-even price/kg", fmtRwf(broilerSummary.break_even_price_per_kg, false), "amber"],
-                      ["ROI (cycle)", Number.isFinite(broilerSummary.roi_cycle) ? fmtPct(broilerSummary.roi_cycle, 1) : "—", "slate"],
-                    ].map(([k, v, color]) => (
-                      <MetricCard key={k as string} label={k as string} value={v as string} color={color as string} />
-                    ))}
-                  </div>
-                </>
-              ) : null}
-
-              {weeklyMortality?.length ? (
-                <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-                  <h3 className="mb-2 font-semibold text-neutral-900">Weekly mortality rate</h3>
-                  <p className="mb-3 text-xs text-neutral-500">
-                    Mortality as % of flock alive at start of each week. Industry benchmark: {"<"}1%/week is healthy,
-                    1–2% warrants monitoring, {">"}2% suggests disease event or management issue.
-                  </p>
-                  <div className="h-48 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={weeklyMortality} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
-                        <XAxis dataKey="week" tick={{ fontSize: 11 }} tickFormatter={(v) => `W${v}`} />
-                        <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => `${v.toFixed(1)}%`} />
-                        <Tooltip formatter={(v) => `${Number(v).toFixed(2)}%`} labelFormatter={(l) => `Week ${l}`} />
-                        <ReferenceLine y={1} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: "1% ref", position: "right", fontSize: 9 }} />
-                        <ReferenceLine y={2} stroke="#dc2626" strokeDasharray="4 4" label={{ value: "2% alert", position: "right", fontSize: 9 }} />
-                        <Bar dataKey="mortality_pct_of_week_start" name="Weekly mortality %" fill="#6366f1" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              ) : null}
-
-              {insights?.length ? (
-                <div className="rounded-xl border border-amber-100 bg-amber-50/80 p-4 text-sm text-amber-950">
-                  <h3 className="font-semibold">Insights & recommendations</h3>
-                  <p className="mt-1 mb-2 text-xs text-amber-700">
-                    Auto-generated from the model run. Each insight highlights a performance driver or risk factor.
-                  </p>
-                  <ul className="space-y-1.5 pl-2">
-                    {insights.map((t, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <span className="mt-0.5 shrink-0 text-amber-600">•</span>
-                        <span>{t}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-
-              {trajectory?.length ? (
-                <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-                  <h3 className="mb-1 text-sm font-semibold text-neutral-900">Daily flock trajectory</h3>
-                  <p className="mb-3 text-xs text-neutral-500">
-                    Birds alive decreases as mortality accrues over the cycle. Cumulative cost grows faster early when chick
-                    and feed costs are highest. Revenue is realized at slaughter (end of cycle in this model).
-                  </p>
-                  <div className="h-72 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart
-                        data={trajectory.map((r) => ({ day: r.day, birds: r.birds_alive, cost: r.cost_cum_rwf / 1e6, revenue: (r.revenue_cum_rwf ?? 0) / 1e6 }))}
-                        margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" />
-                        <XAxis dataKey="day" tick={{ fontSize: 11 }} label={{ value: "Day", position: "insideBottom", offset: -2, fontSize: 10 }} />
-                        <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
-                        <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(v) => `${v.toFixed(1)}M`} />
-                        <Tooltip />
-                        <Legend />
-                        <Bar yAxisId="left" dataKey="birds" name="Birds alive" fill="#0d9488" opacity={0.7} />
-                        <Line yAxisId="right" type="monotone" dataKey="cost" name="Cost (M RWF)" stroke="#dc2626" dot={false} strokeWidth={2} />
-                        <Line yAxisId="right" type="monotone" dataKey="revenue" name="Revenue (M RWF)" stroke="#16a34a" dot={false} strokeWidth={2} strokeDasharray="4 4" />
-                      </ComposedChart>
-                    </ResponsiveContainer>
-                  </div>
+              {broilerHasRun && modelResults ? (
+                <div id="batch-results" className="mt-10">
+                  <BatchResults results={modelResults} />
                 </div>
               ) : null}
             </>
