@@ -718,7 +718,7 @@ export function FlockListPage() {
           <p className="mt-1 text-xs text-[var(--text-muted)]">
             {editingFlockId
               ? "Update placement, counts, breed, barn, and purchase details. Flock code stays the same."
-              : "The system assigns a unique flock name (e.g. FL-000042)."}
+              : "The system assigns a unique flock name (e.g. FM-001)."}
           </p>
           <div className="mt-3 grid gap-2 sm:grid-cols-4">
             <div className="space-y-1">

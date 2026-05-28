@@ -3405,7 +3405,7 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
   const status = statusInput === "planned" ? "planned" : "active";
 
   let createdId = `flk_${crypto.randomBytes(6).toString("hex")}`;
-  let createdCode = `FL-MEM-${createdId.slice(4)}`;
+  let createdCode = `FM-MEM-${createdId.slice(4)}`;
   let createdLabel = createdCode;
   try {
     if (hasDb()) {
@@ -3415,7 +3415,7 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
           (breed_code, placement_date, initial_count, target_weight_kg, status, code,
            purchase_cost_rwf, cost_per_chick_rwf, purchase_supplier, purchase_date, barn_name_id)
          VALUES ($1, $2::date, $3, $4, $5,
-                 'FL-' || lpad(nextval('poultry_flock_code_seq')::text, 6, '0'),
+                 'FM-' || lpad(nextval('poultry_flock_code_seq')::text, 3, '0'),
                  $6, $7, $8, $9::date, $10::uuid)
          RETURNING id::text AS id,
                    COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
@@ -3634,7 +3634,7 @@ app.post("/api/flocks/:id/retry-create", requireAuth, requireFarmAccess, require
         (breed_code, placement_date, initial_count, target_weight_kg, status, code,
          purchase_cost_rwf, cost_per_chick_rwf, purchase_supplier, purchase_date, barn_name_id)
        VALUES ($1, $2::date, $3, $4, 'active',
-               'FL-' || lpad(nextval('poultry_flock_code_seq')::text, 6, '0'),
+               'FM-' || lpad(nextval('poultry_flock_code_seq')::text, 3, '0'),
                $5, $6, $7, $8::date, $9::uuid)
        RETURNING id::text AS id,
                  COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,

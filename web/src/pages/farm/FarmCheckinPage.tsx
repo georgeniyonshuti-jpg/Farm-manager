@@ -435,6 +435,7 @@ export function FarmCheckinPage() {
           birdsLiveEstimate={performance?.birdsLiveEstimate}
           verifiedLiveCount={performance?.verifiedLiveCount}
           mortalityToDate={performance?.mortalityToDate}
+          status={status}
           footer={
             <Link
               to="/farm/feed"
@@ -446,13 +447,20 @@ export function FarmCheckinPage() {
         />
       ) : null}
 
-      {!pageLoading && !loadError && status && <CheckinStatusBlock status={status} />}
-
       {!pageLoading && !loadError && status ? (
       <form
         onSubmit={(e) => void handleSubmit(e)}
         className="space-y-5 rounded-2xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-sm)] sm:p-5"
       >
+        <CheckinPhotoBlock
+          minCount={status?.photosRequiredPerRound ?? 1}
+          maxCount={6}
+          allowMultiple
+          busy={busy}
+          pickerLabel={lblFlockSignPhoto}
+          onPhotos={setPhotosFlockSign}
+        />
+
         <div>
           <label className="mb-1 block text-sm font-medium text-[var(--text-secondary)]" htmlFor="coop-temperature">
             {lblCoopTemp}
@@ -467,15 +475,6 @@ export function FarmCheckinPage() {
             required
           />
         </div>
-
-        <CheckinPhotoBlock
-          minCount={status?.photosRequiredPerRound ?? 1}
-          maxCount={6}
-          allowMultiple
-          busy={busy}
-          pickerLabel={lblFlockSignPhoto}
-          onPhotos={setPhotosFlockSign}
-        />
 
         <CheckinPhotoBlock
           minCount={1}
