@@ -29,9 +29,18 @@ export type FlockSyncMeta = {
   hasLoadedFromDb: boolean;
 };
 
-export function useFlockFieldContext(token: string | null) {
+export type UseFlockFieldContextOptions = {
+  /** When `""`, flock list loads with no flock selected ("All flocks"). */
+  defaultFlockId?: string;
+};
+
+export function useFlockFieldContext(
+  token: string | null,
+  options?: UseFlockFieldContextOptions
+) {
+  const defaultAll = options?.defaultFlockId === "";
   const [flocks, setFlocks] = useState<FlockListRow[]>([]);
-  const [flockId, setFlockId] = useState("");
+  const [flockId, setFlockId] = useState(defaultAll ? "" : "");
   const [status, setStatus] = useState<CheckinStatus | null>(null);
   const [performance, setPerformance] = useState<FieldPerformanceSummary | null>(null);
   const [listLoading, setListLoading] = useState(true);
@@ -71,7 +80,11 @@ export function useFlockFieldContext(token: string | null) {
       if (!r.ok) throw new Error(d.error ?? "Flocks failed");
       const list = d.flocks ?? [];
       setFlocks(list);
-      setFlockId((prev) => (prev && list.some((f) => f.id === prev) ? prev : list[0]?.id ?? ""));
+      setFlockId((prev) => {
+        if (prev && list.some((f) => f.id === prev)) return prev;
+        if (defaultAll) return "";
+        return list[0]?.id ?? "";
+      });
       setFlockSync(
         d.flockSync ?? {
           stale: false,
@@ -88,7 +101,7 @@ export function useFlockFieldContext(token: string | null) {
     } finally {
       setListLoading(false);
     }
-  }, [token]);
+  }, [token, defaultAll]);
 
   const loadDetails = useCallback(async () => {
     if (!token || !flockId) {

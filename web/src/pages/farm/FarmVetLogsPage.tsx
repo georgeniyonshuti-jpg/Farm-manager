@@ -41,7 +41,7 @@ export function FarmVetLogsPage() {
     listLoading,
     error: ctxError,
     loadFlocks,
-  } = useFlockFieldContext(token);
+  } = useFlockFieldContext(token, { defaultFlockId: "" });
 
   const isReviewer = user ? roleAtLeast(user, "vet_manager") : false;
 
@@ -159,6 +159,7 @@ export function FarmVetLogsPage() {
                 value={flockId}
                 onChange={(e) => { setFlockId(e.target.value); setPage(1); }}
               >
+                <option value="">All flocks</option>
                 {flocks.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
               </select>
               <select

@@ -59,7 +59,7 @@ export function FarmMortalityPage() {
     error: ctxError,
     loadFlocks,
     loadDetails,
-  } = useFlockFieldContext(token);
+  } = useFlockFieldContext(token, { defaultFlockId: "" });
 
   const [rows, setRows] = useState<MortalityRow[]>([]);
   const [eventsError, setEventsError] = useState<string | null>(null);
@@ -68,7 +68,7 @@ export function FarmMortalityPage() {
   const [statusFilter, setStatusFilter] = useState("all");
 
   const loadEvents = useCallback(async () => {
-    if (!token || !flockId) {
+    if (!token) {
       setRows([]);
       setEventsLoading(false);
       return;
@@ -76,6 +76,26 @@ export function FarmMortalityPage() {
     setEventsError(null);
     setEventsLoading(true);
     try {
+      if (!flockId) {
+        if (flocks.length === 0) {
+          setRows([]);
+          return;
+        }
+        const batches = await Promise.all(
+          flocks.map(async (f) => {
+            const mr = await fetch(
+              `${API_BASE_URL}/api/flocks/${encodeURIComponent(f.id)}/mortality-events`,
+              { headers: readAuthHeaders(token) }
+            );
+            const md = await mr.json();
+            if (!mr.ok) throw new Error((md as { error?: string }).error ?? "Load failed");
+            return (md.events as MortalityRow[]) ?? [];
+          })
+        );
+        const merged = batches.flat().sort((a, b) => (a.at < b.at ? 1 : -1));
+        setRows(merged);
+        return;
+      }
       const mr = await fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/mortality-events`, {
         headers: readAuthHeaders(token),
       });
@@ -88,7 +108,7 @@ export function FarmMortalityPage() {
     } finally {
       setEventsLoading(false);
     }
-  }, [token, flockId]);
+  }, [token, flockId, flocks]);
 
   useEffect(() => {
     void loadEvents();
@@ -134,6 +154,7 @@ export function FarmMortalityPage() {
             value={flockId}
             onChange={(e) => setFlockId(e.target.value)}
           >
+            <option value="">All flocks</option>
             {flocks.map((f) => (
               <option key={f.id} value={f.id}>
                 {f.label}
@@ -259,7 +280,7 @@ export function FarmMortalityPage() {
         </div>
       ) : null}
 
-      {!loading && !pageError && filteredRows.length === 0 && !rows.length && flockId ? (
+      {!loading && !pageError && filteredRows.length === 0 && !rows.length ? (
         <EmptyState title={tEmptyTitle} description={tEmptyBody} />
       ) : null}
     </div>

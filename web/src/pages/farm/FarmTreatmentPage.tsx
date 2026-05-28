@@ -260,35 +260,49 @@ export function FarmTreatmentPage() {
       const f = (fd.flocks as Flock[]) ?? [];
       setFlocks(f);
       setMedicines((md.medicines as Medicine[]) ?? []);
-      const selected = flockId || f[0]?.id || "";
-      setFlockId(selected);
-      if (!selected) {
-        setRows([]);
-        return;
-      }
+      const selected = flockId;
       const q = new URLSearchParams();
       if (startAt) q.set("start_at", `${startAt}T00:00:00.000Z`);
       if (endAt) q.set("end_at", `${endAt}T23:59:59.999Z`);
-      const [tr, rr, orr, frs] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/flocks/${selected}/treatments?${q.toString()}`, {
+      const flockQ = encodeURIComponent(selected);
+      const treatmentFetches = selected
+        ? [
+            fetch(`${API_BASE_URL}/api/flocks/${selected}/treatments?${q.toString()}`, {
+              headers: readAuthHeaders(token),
+            }),
+          ]
+        : f.map((fl) =>
+            fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(fl.id)}/treatments?${q.toString()}`, {
+              headers: readAuthHeaders(token),
+            })
+          );
+      const [trResults, rr, orr, frs] = await Promise.all([
+        Promise.all(treatmentFetches),
+        fetch(`${API_BASE_URL}/api/treatment-rounds?flock_id=${flockQ}`, {
           headers: readAuthHeaders(token),
         }),
-        fetch(`${API_BASE_URL}/api/treatment-rounds?flock_id=${encodeURIComponent(selected)}`, {
-          headers: readAuthHeaders(token),
-        }),
-        fetch(`${API_BASE_URL}/api/treatment-rounds/overdue?flock_id=${encodeURIComponent(selected)}`, {
+        fetch(`${API_BASE_URL}/api/treatment-rounds/overdue?flock_id=${flockQ}`, {
           headers: readAuthHeaders(token),
         }),
         fetch(`${API_BASE_URL}/api/medicine/forecast?lookback_days=30`, {
           headers: readAuthHeaders(token),
         }),
       ]);
-      const td = await tr.json();
+      const treatmentJson = await Promise.all(
+        trResults.map(async (tr) => {
+          const td = await tr.json();
+          if (!tr.ok) throw new Error((td as { error?: string }).error ?? "Failed to load treatments");
+          return (td as { treatments?: Treatment[] }).treatments ?? [];
+        })
+      );
       const rd = await rr.json().catch(() => ({ rounds: [] }));
       const od = await orr.json().catch(() => ({ overdueRounds: [] }));
       const fd2 = await frs.json().catch(() => ({ forecast: [] }));
-      if (!tr.ok) throw new Error(td.error ?? "Failed to load treatments");
-      setRows((td.treatments as Treatment[]) ?? []);
+      setRows(
+        treatmentJson
+          .flat()
+          .sort((a, b) => (a.at < b.at ? 1 : -1))
+      );
       setRounds((rd.rounds as Round[]) ?? []);
       setOverdueRounds((od.overdueRounds as OverdueRound[]) ?? []);
       setForecastRows((fd2.forecast as ForecastRow[]) ?? []);
@@ -501,7 +515,7 @@ export function FarmTreatmentPage() {
           </a>
         }
       />
-      {!loading && flockStrip ? (
+      {!loading && flockId && flockStrip ? (
         <FlockContextStrip
           label={flockStrip.label}
           code={flocks.find((x) => x.id === flockId)?.code}
@@ -549,6 +563,7 @@ export function FarmTreatmentPage() {
                   <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={startAt} onChange={(e) => setStartAt(e.target.value)} />
                   <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
                   <select className="rounded-lg border border-neutral-300 px-3 py-2 sm:col-span-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
+                    <option value="">All flocks</option>
                     {flocks.map((f) => (
                       <option key={f.id} value={f.id}>{f.label}</option>
                     ))}
@@ -659,6 +674,7 @@ export function FarmTreatmentPage() {
               <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
                 <p className="mb-2 text-sm font-semibold text-neutral-800">Flock</p>
                 <select className="w-full max-w-md rounded-lg border border-neutral-300 px-3 py-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
+                  <option value="">All flocks</option>
                   {flocks.map((f) => (
                     <option key={f.id} value={f.id}>{f.label}</option>
                   ))}

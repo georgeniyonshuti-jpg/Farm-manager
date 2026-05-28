@@ -99,13 +99,38 @@ export function FarmSlaughterPage() {
       // Attach live estimates from performance summaries loaded lazily on demand.
       const f = (fd.flocks as Flock[]) ?? [];
       setFlocks(f);
-      const selected = flockId || f[0]?.id || "";
-      setFlockId(selected);
-      if (!selected) return;
-
+      const selected = flockId;
       const q = new URLSearchParams();
       if (startAt) q.set("start_at", `${startAt}T00:00:00.000Z`);
       if (endAt) q.set("end_at", `${endAt}T23:59:59.999Z`);
+      if (!selected) {
+        if (f.length === 0) {
+          setRows([]);
+          setSummary(null);
+          setEligibility(null);
+          return;
+        }
+        const slaughterResults = await Promise.all(
+          f.map((fl) =>
+            fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(fl.id)}/slaughter-events?${q.toString()}`, {
+              headers: readAuthHeaders(token),
+            }).then(async (sr) => {
+              const sd = await sr.json();
+              if (!sr.ok) throw new Error((sd as { error?: string }).error ?? "Failed to load slaughter events");
+              return (sd as { slaughterEvents?: Slaughter[] }).slaughterEvents ?? [];
+            })
+          )
+        );
+        setRows(
+          slaughterResults
+            .flat()
+            .sort((a, b) => (a.at < b.at ? 1 : -1))
+        );
+        setSummary(null);
+        setEligibility(null);
+        return;
+      }
+
       const [sr, pr, er] = await Promise.all([
         fetch(`${API_BASE_URL}/api/flocks/${selected}/slaughter-events?${q.toString()}`, { headers: readAuthHeaders(token) }),
         fetch(`${API_BASE_URL}/api/flocks/${selected}/performance-summary`, { headers: readAuthHeaders(token) }),
@@ -120,7 +145,6 @@ export function FarmSlaughterPage() {
       const perf = pd as PerformanceSummary;
       setSummary(perf);
       setEligibility(ed as Eligibility);
-      // Attach live estimate to flock list entry so the form can hint max birds.
       setFlocks((prev) =>
         prev.map((fl) =>
           fl.id === selected ? { ...fl, birdsLiveEstimate: perf.birdsLiveEstimate } : fl
@@ -204,7 +228,7 @@ export function FarmSlaughterPage() {
             <strong>Accounting Approvals → Needs Action</strong> for manual follow-up.
           </div>
 
-          {eligibility && !eligibility.eligibleForSlaughter ? (
+          {flockId && eligibility && !eligibility.eligibleForSlaughter ? (
             <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
               <p className="font-semibold">⛔ Slaughter blocked</p>
               <ul className="mt-2 space-y-1">
@@ -218,36 +242,40 @@ export function FarmSlaughterPage() {
               </ul>
             </div>
           ) : null}
-          <div className="table-block">
-            <div className="institutional-table-wrapper">
-              <table className="institutional-table">
-                <thead>
-                  <tr>
-                    <th className="tbl-num">Feed to date (kg)</th>
-                    <th className="tbl-num">Live estimate</th>
-                    <th className="tbl-num">Mortality to date</th>
-                    <th className="tbl-num">FCR</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td className="tbl-num font-semibold">{summary?.feedToDateKg ?? 0}</td>
-                    <td className="tbl-num font-semibold">{summary?.birdsLiveEstimate ?? 0}</td>
-                    <td className="tbl-num font-semibold">{summary?.mortalityToDate ?? 0}</td>
-                    <td className="tbl-num font-semibold">{summary?.fcr != null ? summary.fcr.toFixed(2) : "—"}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <p className="text-xs text-neutral-600">
-            This screen focuses on harvest-oriented metrics. For full-cycle broiler FCR (feed ÷ flock weight gained),
-            open the{" "}
-            <Link className="font-medium text-emerald-800 underline" to={`/farm/flocks/${encodeURIComponent(flockId)}/fcr`}>
-              Cycle FCR action center
-            </Link>{" "}
-            for this flock.
-          </p>
+          {flockId ? (
+            <>
+              <div className="table-block">
+                <div className="institutional-table-wrapper">
+                  <table className="institutional-table">
+                    <thead>
+                      <tr>
+                        <th className="tbl-num">Feed to date (kg)</th>
+                        <th className="tbl-num">Live estimate</th>
+                        <th className="tbl-num">Mortality to date</th>
+                        <th className="tbl-num">FCR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td className="tbl-num font-semibold">{summary?.feedToDateKg ?? 0}</td>
+                        <td className="tbl-num font-semibold">{summary?.birdsLiveEstimate ?? 0}</td>
+                        <td className="tbl-num font-semibold">{summary?.mortalityToDate ?? 0}</td>
+                        <td className="tbl-num font-semibold">{summary?.fcr != null ? summary.fcr.toFixed(2) : "—"}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <p className="text-xs text-neutral-600">
+                This screen focuses on harvest-oriented metrics. For full-cycle broiler FCR (feed ÷ flock weight gained),
+                open the{" "}
+                <Link className="font-medium text-emerald-800 underline" to={`/farm/flocks/${encodeURIComponent(flockId)}/fcr`}>
+                  Cycle FCR action center
+                </Link>{" "}
+                for this flock.
+              </p>
+            </>
+          ) : null}
 
           <div className="table-block">
             <div className="table-toolbar">
@@ -256,6 +284,7 @@ export function FarmSlaughterPage() {
                 value={flockId}
                 onChange={(e) => setFlockId(e.target.value)}
               >
+                <option value="">All flocks</option>
                 {flocks.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
               </select>
               <input
