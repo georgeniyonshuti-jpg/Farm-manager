@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { PermissionGuard } from "../../components/PermissionGuard";
 import { useAuth } from "../../auth/AuthContext";
@@ -69,12 +70,13 @@ function riskLabel(rc: OpsBoardFlock["riskClass"]) {
 
 // ─── Section header ────────────────────────────────────────────────────────────
 
-function SectionHeader({ label, sub, action }: { label: string; sub?: string; action?: React.ReactNode }) {
+function SectionHeader({ label, sub, action, num }: { label: string; sub?: string; action?: ReactNode; num: string }) {
   return (
-    <div className="flex items-end justify-between gap-3 pt-2 pb-1">
-      <div>
-        <h2 className="text-xs font-bold uppercase tracking-[0.1em] text-[var(--text-muted)]">{label}</h2>
-        {sub && <p className="text-xs text-[var(--text-muted)] mt-0.5 opacity-70">{sub}</p>}
+    <div className="flex items-center justify-between gap-3 pt-2 pb-1 border-b border-[var(--border-color)] mb-1">
+      <div className="flex items-baseline gap-2.5 min-w-0">
+        <span className="section-num shrink-0">{num}</span>
+        <h2 className="font-display text-sm font-semibold tracking-tight text-[var(--text-primary)] truncate">{label}</h2>
+        {sub && <span className="hidden sm:inline text-[11px] text-[var(--text-muted)] truncate">{sub}</span>}
       </div>
       {action}
     </div>
@@ -119,6 +121,45 @@ function OdooStatusPill() {
       <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${ok ? "bg-emerald-400" : "bg-amber-400"}`} />
       <span className="min-w-0 truncate">{ok ? "Odoo connected" : "Odoo not connected"}</span>
     </Link>
+  );
+}
+
+// ─── Finance card helpers ──────────────────────────────────────────────────────
+
+function FinanceCard({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)] p-5 flex flex-col gap-2">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">{label}</p>
+      {children}
+    </div>
+  );
+}
+
+function FinanceLockedCard({ label, reason }: { label: string; reason: string }) {
+  return (
+    <div className="rounded-[var(--radius-lg)] border border-dashed border-[var(--border-color)] bg-[var(--surface-card)] p-5 flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">{label}</p>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--text-muted)] opacity-60 shrink-0">
+          <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </svg>
+      </div>
+      <p className="text-sm text-[var(--text-muted)]">{reason}</p>
+    </div>
+  );
+}
+
+function FinanceBarPlaceholder({ bars, color = "var(--primary-color)" }: { bars: number[]; color?: string }) {
+  return (
+    <div className="mt-3 flex items-end gap-1 h-10">
+      {bars.map((h, i) => (
+        <div
+          key={i}
+          className="flex-1 rounded-sm opacity-25"
+          style={{ height: `${Math.round(h * 100)}%`, background: color }}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -220,32 +261,38 @@ export function ManagementHome() {
     <div className="mx-auto w-full max-w-[1280px] space-y-0 pb-12">
 
       {/* ── Page header strip ── */}
-      <div className="flex items-center justify-between py-4 border-b border-[var(--border-color)] mb-6">
-        <div>
-          <h1 className="text-xl font-bold text-[var(--text-primary)] tracking-tight">Command Center</h1>
-          <p className="text-xs text-[var(--text-muted)] mt-0.5">
-            Cross-unit KPIs — Clevafarm operations and finance
-          </p>
-        </div>
-        <div className="flex items-center gap-3 flex-wrap justify-end">
-          <Link
-            to="/farm/reports?type=farm_operations"
-            className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] transition-colors"
-          >
-            Reports
-          </Link>
-          <OdooStatusPill />
-          <LiveBadge />
-          <button onClick={reload}
-            className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] transition-colors">
-            Refresh
-          </button>
-          {isSuperuser && (
-            <button onClick={() => setConfigOpen(true)}
-              className="rounded-[var(--radius-md)] border border-[var(--primary-color)]/30 bg-[var(--primary-color)]/10 px-3 py-1.5 text-xs font-semibold text-[var(--primary-color)] hover:bg-[var(--primary-color)]/15 transition-colors">
-              Widgets ⚙
+      <div className="flex flex-col gap-3 pt-2 pb-5 mb-6 border-b border-[var(--border-color)]">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="font-display text-3xl font-bold tracking-tight leading-none"
+              style={{ background: "var(--primary-gradient)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>
+              Command Center
+            </h1>
+            <p className="mt-1.5 text-[12px] text-[var(--text-muted)] flex items-center gap-2">
+              <span className="live-dot" />
+              Cross-unit KPIs — Clevafarm operations and finance
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <Link
+              to="/farm/reports?type=farm_operations"
+              className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] transition-colors"
+            >
+              Reports
+            </Link>
+            <OdooStatusPill />
+            <LiveBadge />
+            <button onClick={reload}
+              className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] transition-colors">
+              Refresh
             </button>
-          )}
+            {isSuperuser && (
+              <button onClick={() => setConfigOpen(true)}
+                className="rounded-[var(--radius-md)] border border-[var(--primary-color)]/30 bg-[var(--primary-color)]/10 px-3 py-1.5 text-xs font-semibold text-[var(--primary-color)] hover:bg-[var(--primary-color)]/15 transition-colors">
+                Widgets
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -305,7 +352,7 @@ export function ManagementHome() {
       {/* ══════════════ EXEC KPIs ══════════════ */}
       {show("exec_kpis") && (
         <section className="space-y-3 mb-8">
-          <SectionHeader label="Executive overview" sub="Live farm operations snapshot" />
+          <SectionHeader num="01" label="Executive overview" sub="Live farm operations snapshot" />
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
             <MiniStat label="Active flocks" value={loading ? "…" : flocks.length} icon="🐔" glow />
             <MiniStat label="Healthy" value={loading ? "…" : healthyCount} tone="good" icon="✓" glow />
@@ -326,7 +373,7 @@ export function ManagementHome() {
       {/* ══════════════ FARM HEALTH SCORE ══════════════ */}
       {show("health_score") && (
         <section className="mb-8 space-y-3">
-          <SectionHeader label="Farm health" />
+          <SectionHeader num="02" label="Farm health" />
           <div className="grid gap-4 md:grid-cols-3">
             {/* Score card */}
             <div className="rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)] p-5 flex flex-col items-center justify-center gap-3">
@@ -400,7 +447,7 @@ export function ManagementHome() {
       {/* ══════════════ RISK INTELLIGENCE ══════════════ */}
       {show("risk_intel") && (
         <section className="mb-8 space-y-3">
-          <SectionHeader label="Risk intelligence" sub="Flock distribution and priority ranking" />
+          <SectionHeader num="03" label="Risk intelligence" sub="Flock distribution and priority ranking" />
           <div className="grid gap-4 lg:grid-cols-3 lg:items-stretch">
             <ChartPanel title="Risk distribution" subtitle="Healthy vs watch vs at-risk vs critical" loading={loading} error={error} empty={!loading && !error && flocks.length === 0}>
               <RiskDonut data={riskClassCount(flocks)} />
@@ -415,7 +462,7 @@ export function ManagementHome() {
       {/* ══════════════ OPS TRENDS ══════════════ */}
       {show("ops_trends") && (
         <section className="mb-8 space-y-3">
-          <SectionHeader label="Ops trends" sub="Mortality and FCR performance over time" />
+          <SectionHeader num="04" label="Ops trends" sub="Mortality and FCR performance over time" />
           <div className="grid gap-4 xl:grid-cols-2">
             <ChartPanel title="Mortality trend" subtitle="7-day farm average mortality rate" loading={loading} error={error} empty={!loading && !error && flocks.length === 0}>
               <MortalityTrendLine data={mortalityData} />
@@ -430,7 +477,7 @@ export function ManagementHome() {
       {/* ══════════════ BLOCKERS ══════════════ */}
       {show("blockers") && (
         <section className="mb-8 space-y-3">
-          <SectionHeader label="Operational blockers" sub="Overdue rounds and withdrawal blockers per flock"
+          <SectionHeader num="05" label="Operational blockers" sub="Overdue rounds and withdrawal blockers per flock"
             action={
               totalBlockers > 0 ? (
                 <span className="rounded-full border border-red-500/20 bg-red-500/10 px-2.5 py-0.5 text-xs font-semibold text-red-400">{totalBlockers} active</span>
@@ -448,7 +495,7 @@ export function ManagementHome() {
       {/* ══════════════ FLOCK SCANNER TABLE ══════════════ */}
       {show("flock_table") && (
         <section className="mb-8 space-y-3">
-          <SectionHeader label="Flock scanner" sub="Live status of all active flocks"
+          <SectionHeader num="06" label="Flock scanner" sub="Live status of all active flocks"
             action={<Link to="/farm/flocks" className="text-xs text-[var(--primary-color)] hover:underline font-medium">View all →</Link>}
           />
           <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]">
@@ -517,7 +564,7 @@ export function ManagementHome() {
                           <span className="text-emerald-500 text-xs">✓</span>
                         )}
                       </td>
-                      <td className="px-4 py-2.5 text-xs text-[var(--text-muted)] max-w-[160px] truncate">{f.topIssue || "—"}</td>
+                      <td className="px-4 py-2.5 text-xs text-[var(--text-muted)] max-w-[240px] truncate" title={f.topIssue || undefined}>{f.topIssue || "—"}</td>
                       <td className="px-4 py-2.5 text-center">
                         <span className={["text-[11px] font-semibold border px-2 py-0.5 rounded-full", riskBadge(f.riskClass)].join(" ")}>
                           {riskLabel(f.riskClass)}
@@ -535,40 +582,31 @@ export function ManagementHome() {
       {/* ══════════════ FINANCIAL PULSE ══════════════ */}
       {show("finance") && (
         <section className="mb-8 space-y-3">
-          <SectionHeader label="Financial pulse" sub="Financial metrics (subject to permissions)" />
+          <SectionHeader num="07" label="Financial pulse" sub="Financial metrics (subject to permissions)" />
           <div className="grid gap-4 lg:grid-cols-3">
             <PermissionGuard
               permission="view_net_profit"
-              fallback={
-                <div className="rounded-[var(--radius-lg)] border border-dashed border-[var(--border-color)] bg-[var(--surface-card)] p-5 flex flex-col gap-2">
-                  <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Net margin</p>
-                  <p className="text-sm text-[var(--text-muted)]">Financial clearance required to view net profit data.</p>
-                </div>
-              }
+              fallback={<FinanceLockedCard label="Net margin" reason="Financial clearance required." />}
             >
-              <div className="rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)] p-5">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-2">Net profit outlook</p>
-                <p className="font-mono text-2xl font-bold text-[var(--text-muted)]">Restricted</p>
-                <p className="text-xs text-[var(--text-muted)] mt-1">Wire ledger consolidation pending.</p>
-              </div>
+              <FinanceCard label="Net profit outlook">
+                <p className="font-mono-data text-2xl font-bold text-[var(--text-muted)]">Pending</p>
+                <p className="text-xs text-[var(--text-muted)] mt-1">Ledger consolidation in progress.</p>
+                <FinanceBarPlaceholder bars={[0.4, 0.6, 0.5, 0.7, 0.55, 0.8, 0.65]} />
+              </FinanceCard>
             </PermissionGuard>
 
-            <div className="rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)] p-5">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-2">Clevafarm Finance portfolio</p>
+            <FinanceCard label="Finance portfolio">
               <p className="text-sm text-[var(--text-secondary)]">Exposure and PAR summary</p>
-              <div className="flex-1" />
-            </div>
+              <FinanceBarPlaceholder bars={[0.9, 0.7, 0.8, 0.6, 0.75, 0.85, 0.7]} color="var(--secondary-color)" />
+            </FinanceCard>
 
-            <PermissionGuard permission="view_bank_balances" fallback={
-              <div className="rounded-[var(--radius-lg)] border border-dashed border-[var(--border-color)] bg-[var(--surface-card)] p-5">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-2">Liquidity</p>
-                <p className="text-sm text-[var(--text-muted)]">Bank balances require clearance.</p>
-              </div>
-            }>
-              <div className="rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)] p-5">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] mb-2">Liquidity</p>
-                <p className="text-sm text-[var(--text-secondary)]">Bank balances visible with clearance.</p>
-              </div>
+            <PermissionGuard permission="view_bank_balances"
+              fallback={<FinanceLockedCard label="Liquidity" reason="Bank balances require clearance." />}
+            >
+              <FinanceCard label="Liquidity">
+                <p className="text-sm text-[var(--text-secondary)]">Bank balances available with clearance.</p>
+                <FinanceBarPlaceholder bars={[0.5, 0.6, 0.7, 0.65, 0.8, 0.75, 0.9]} color="var(--primary-color)" />
+              </FinanceCard>
             </PermissionGuard>
           </div>
         </section>

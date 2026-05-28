@@ -9,62 +9,84 @@ type Props = {
   glow?: boolean;
 };
 
-function toneClasses(tone: Tone): { card: string; value: string; change?: string } {
+function toneConfig(tone: Tone): {
+  bar: string;
+  value: string;
+  change: string;
+  glow: string;
+  watermark: string;
+} {
   switch (tone) {
     case "good":
       return {
-        card: "border-emerald-500/30 bg-[var(--surface-card)]",
+        bar: "stat-bar-good",
         value: "text-emerald-500",
         change: "text-emerald-500",
+        glow: "stat-glow-good",
+        watermark: "text-emerald-500/[0.06]",
       };
     case "warn":
       return {
-        card: "border-amber-500/30 bg-[var(--surface-card)]",
+        bar: "stat-bar-warn",
         value: "text-amber-500",
         change: "text-amber-500",
+        glow: "stat-glow-warn",
+        watermark: "text-amber-500/[0.06]",
       };
     case "bad":
       return {
-        card: "border-red-500/30 bg-[var(--surface-card)]",
+        bar: "stat-bar-bad",
         value: "text-red-500",
         change: "text-red-500",
+        glow: "stat-glow-bad",
+        watermark: "text-red-500/[0.06]",
       };
     default:
       return {
-        card: "border-[var(--border-color)] bg-[var(--surface-card)]",
+        bar: "stat-bar-default",
         value: "text-[var(--text-primary)]",
+        change: "text-[var(--text-muted)]",
+        glow: "",
+        watermark: "text-[var(--text-muted)]/[0.05]",
       };
-  }
-}
-
-function glowClass(tone: Tone): string {
-  switch (tone) {
-    case "good": return "stat-glow-good";
-    case "warn": return "stat-glow-warn";
-    case "bad": return "stat-glow-bad";
-    default: return "";
   }
 }
 
 export function MiniStat({ label, value, tone = "default", change, icon, glow = false }: Props) {
-  const c = toneClasses(tone);
+  const c = toneConfig(tone);
   return (
     <div
       className={[
-        "rounded-[var(--radius-lg)] border px-4 py-3 animate-fade-up",
-        c.card,
-        glow ? glowClass(tone) : "shadow-[var(--shadow-sm)]",
+        "relative overflow-hidden rounded-[var(--radius-lg)] border bg-[var(--surface-card)] px-4 py-3.5 animate-fade-up",
+        c.bar,
+        glow ? c.glow : "shadow-[var(--shadow-sm)]",
+        "border-[var(--border-color)]",
       ].join(" ")}
     >
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-          {label}
-        </p>
-        {icon && <span className="text-base opacity-60">{icon}</span>}
-      </div>
-      <p className={["mt-1.5 text-2xl font-bold tabular-nums", c.value].join(" ")}>{value}</p>
+      {/* Background watermark icon */}
+      {icon && (
+        <span
+          aria-hidden
+          className={["absolute -right-1 -bottom-2 select-none text-[4rem] leading-none pointer-events-none", c.watermark].join(" ")}
+        >
+          {icon}
+        </span>
+      )}
+
+      {/* Label */}
+      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)] truncate pr-8">
+        {label}
+      </p>
+
+      {/* Value */}
+      <p className={["mt-2 font-mono-data text-3xl font-bold leading-none tabular-nums", c.value].join(" ")}>
+        {value}
+      </p>
+
+      {/* Change / sub-label */}
       {change ? (
-        <p className={["mt-0.5 text-xs font-medium", c.change ?? "text-[var(--text-muted)]"].join(" ")}>
+        <p className={["mt-1.5 flex items-center gap-1 text-[11px] font-medium", c.change].join(" ")}>
+          <span aria-hidden className="text-[10px]">›</span>
           {change}
         </p>
       ) : null}

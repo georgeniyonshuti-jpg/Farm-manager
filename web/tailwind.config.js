@@ -4,6 +4,11 @@ export default {
   darkMode: ["selector", "[data-theme='dark']"],
   theme: {
     extend: {
+      fontFamily: {
+        display: ['"Bricolage Grotesque"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        body: ['"DM Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['"DM Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+      },
       colors: {
         surface: "var(--surface-color)",
         "surface-card": "var(--surface-card)",

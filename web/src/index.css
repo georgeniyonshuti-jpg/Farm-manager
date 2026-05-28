@@ -8,6 +8,11 @@
 :root {
   --app-header-h: 4rem;
 
+  /* Fonts */
+  --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-body: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
   /* Brand */
   --primary-color: #1d9e75;
   --primary-color-dark: #16805f;
@@ -76,6 +81,20 @@
   /* Gradient */
   --primary-gradient: linear-gradient(135deg, #2dd4a8 0%, #1d9e75 55%, #1196b5 100%);
   --page-gradient: linear-gradient(180deg, var(--background-color) 0%, #edf6f3 100%);
+
+  /* Role colors */
+  --role-laborer: #1d9e75;
+  --role-laborer-bg: #e1f5ee;
+  --role-laborer-text: #0f6e56;
+  --role-vet: #d97706;
+  --role-vet-bg: #faeeda;
+  --role-vet-text: #854f0b;
+  --role-manager: #185fa5;
+  --role-manager-bg: #e6f1fb;
+  --role-manager-text: #185fa5;
+
+  /* Header */
+  --header-border: var(--border-color);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -142,6 +161,20 @@
   /* Gradient */
   --primary-gradient: linear-gradient(135deg, #22c78a 0%, #1d9e75 55%, #38bdf8 100%);
   --page-gradient: linear-gradient(180deg, var(--background-color) 0%, #080e1c 100%);
+
+  /* Role colors (dark) */
+  --role-laborer: #22c78a;
+  --role-laborer-bg: rgba(34, 199, 138, 0.15);
+  --role-laborer-text: #22c78a;
+  --role-vet: #fbbf24;
+  --role-vet-bg: rgba(251, 191, 36, 0.15);
+  --role-vet-text: #fbbf24;
+  --role-manager: #60a5fa;
+  --role-manager-bg: rgba(96, 165, 250, 0.15);
+  --role-manager-text: #60a5fa;
+
+  /* Header */
+  --header-border: linear-gradient(90deg, transparent, var(--primary-color) 30%, var(--secondary-color) 70%, transparent);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -159,8 +192,18 @@ html {
 body {
   background: var(--background-color);
   color: var(--text-primary);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-body);
   line-height: 1.45;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-mono-data {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 
 button,
@@ -443,6 +486,22 @@ textarea:focus-visible {
 }
 .stat-glow-bad {
   box-shadow: 0 0 0 1px var(--border-color), 0 4px 24px var(--glow-bad);
+}
+
+/* Stat card accent bar (left edge tone indicator) */
+.stat-bar-good  { border-left: 3px solid var(--primary-color); }
+.stat-bar-warn  { border-left: 3px solid var(--accent-warning); }
+.stat-bar-bad   { border-left: 3px solid var(--accent-danger); }
+.stat-bar-default { border-left: 3px solid var(--border-strong); }
+
+/* Section number label */
+.section-num {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  opacity: 0.7;
 }
 
 /* Chart card */

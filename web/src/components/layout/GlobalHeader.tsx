@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import type { ActiveWorkspace, SessionUser, UserRole } from "../../auth/types";
@@ -33,37 +34,42 @@ function initialsFromDisplayName(name: string): string {
   return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
 }
 
-function avatarClasses(role: UserRole): string {
-  const base =
-    "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white shadow-sm";
+function avatarStyle(role: UserRole): CSSProperties {
   switch (role) {
     case "laborer":
     case "dispatcher":
-      return `${base} bg-[#1D9E75]`;
+      return { background: "var(--role-laborer)" };
     case "vet":
     case "vet_manager":
-      return `${base} bg-[#d97706]`;
+      return { background: "var(--role-vet)" };
     case "manager":
-      return `${base} bg-[#185FA5]`;
+      return { background: "var(--role-manager)" };
     default:
-      return `${base} bg-slate-500`;
+      return { background: "var(--text-muted)" };
   }
 }
 
-function rolePillClasses(role: UserRole): string {
-  const base = "rounded-full px-2.5 py-0.5 text-[11px] font-medium leading-tight";
+function avatarClasses(_role: UserRole): string {
+  return "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white shadow-sm";
+}
+
+function rolePillStyle(role: UserRole): CSSProperties {
   switch (role) {
     case "laborer":
     case "dispatcher":
-      return `${base} bg-[#E1F5EE] text-[#0F6E56]`;
+      return { background: "var(--role-laborer-bg)", color: "var(--role-laborer-text)" };
     case "vet":
     case "vet_manager":
-      return `${base} bg-[#FAEEDA] text-[#854F0B]`;
+      return { background: "var(--role-vet-bg)", color: "var(--role-vet-text)" };
     case "manager":
-      return `${base} bg-[#E6F1FB] text-[#185FA5]`;
+      return { background: "var(--role-manager-bg)", color: "var(--role-manager-text)" };
     default:
-      return `${base} bg-[var(--surface-subtle)] text-[var(--text-secondary)]`;
+      return { background: "var(--surface-subtle)", color: "var(--text-secondary)" };
   }
+}
+
+function rolePillClasses(_role: UserRole): string {
+  return "rounded-full px-2.5 py-0.5 text-[11px] font-medium leading-tight";
 }
 
 function routeTitleKey(pathname: string): string | null {
@@ -110,11 +116,11 @@ function UserMenuChip({ user, roleBadge, onLogout, compactOnMobile = false }: Us
         aria-haspopup="menu"
         onClick={() => setOpen((o) => !o)}
       >
-        <span className={avatarClasses(user.role)}>{initials}</span>
+        <span className={avatarClasses(user.role)} style={avatarStyle(user.role)}>{initials}</span>
         <div className={`min-w-0 flex-1 text-left ${compactOnMobile ? "hidden md:block" : ""}`}>
           <p className="truncate text-[13px] font-medium text-[var(--text-primary)]">{user.displayName}</p>
           <p className="mt-0.5">
-            <span className={rolePillClasses(user.role)}>{roleBadge}</span>
+            <span className={rolePillClasses(user.role)} style={rolePillStyle(user.role)}>{roleBadge}</span>
           </p>
         </div>
         <span className="hidden text-[var(--text-muted)] md:inline" aria-hidden>
