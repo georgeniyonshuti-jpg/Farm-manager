@@ -2,7 +2,7 @@ services:
   - type: web
     name: farm-manager-api
     env: node
-    buildCommand: npm install
+    buildCommand: cd server && npm install
     startCommand: node server/server.js
     envVars:
       - key: NODE_ENV
