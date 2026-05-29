@@ -38,7 +38,7 @@ export function TenantGuard({ children }: TenantGuardProps) {
     );
   }
 
-  if (!isCorrectTenant) return null;
+  if (!isCorrectTenant) return <AppLoadingScreen />;
 
   return <>{children}</>;
 }

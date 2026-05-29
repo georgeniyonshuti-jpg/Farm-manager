@@ -124,7 +124,7 @@ function AppRoutes() {
             <Route path="admin/super" element={null} />
           </Route>
 
-          <Route path="*" element={<Navigate to="." replace />} />
+          <Route path="*" element={<HomeRedirect />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -10,7 +10,12 @@ import {
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { defaultHomeForUser } from "../routes/ProtectedRoute";
-import { resolveCompanyBySlug, type ResolvedCompany } from "../lib/tenancy";
+import {
+  resolveCompanyBySlug,
+  resolveUserCompanySlug,
+  userMatchesTenant,
+  type ResolvedCompany,
+} from "../lib/tenancy";
 
 type TenantContextValue = {
   tenantCompany: ResolvedCompany | null;
@@ -53,20 +58,14 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   }, [slug, loadSlug]);
 
   useEffect(() => {
-    if (slugLoading || !tenantCompany || !user?.companyId) return;
-    if (user.role === "superuser") return;
-    if (tenantCompany.id !== user.companyId) {
-      const home = user.companySlug
-        ? defaultHomeForUser(user.role, user.companySlug)
-        : "/";
-      navigate(home, { replace: true });
-    }
+    if (slugLoading || !tenantCompany || !user) return;
+    if (userMatchesTenant(user, tenantCompany)) return;
+    const userSlug = resolveUserCompanySlug(user);
+    navigate(defaultHomeForUser(user.role, userSlug), { replace: true });
   }, [tenantCompany, user, slugLoading, navigate]);
 
   const isCorrectTenant = Boolean(
-    tenantCompany &&
-      user?.companyId &&
-      (user.role === "superuser" || tenantCompany.id === user.companyId)
+    tenantCompany && user && userMatchesTenant(user, tenantCompany)
   );
 
   const value = useMemo(

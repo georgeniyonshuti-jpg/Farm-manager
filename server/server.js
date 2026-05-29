@@ -401,6 +401,25 @@ async function companyIdForUser(userId) {
   return r.rows[0]?.id ?? DEFAULT_COMPANY_ID;
 }
 
+async function hydrateUserCompanyFromDb(userRow) {
+  if (!hasDb() || !userRow) return userRow;
+  if (userRow.companyId && userRow.companySlug) return userRow;
+  const r = await dbQuery(
+    `SELECT u.company_id::text AS "companyId", c.slug AS "companySlug", c.name AS "companyName"
+     FROM users u
+     LEFT JOIN companies c ON c.id = u.company_id
+     WHERE u.id = $1::uuid`,
+    [userRow.id]
+  );
+  const db = r.rows[0];
+  if (!db) return userRow;
+  return updateUserRecord(userRow, {
+    companyId: db.companyId ?? DEFAULT_COMPANY_ID,
+    companySlug: db.companySlug ?? "default-farm",
+    companyName: db.companyName ?? "Default farm",
+  });
+}
+
 async function persistUserToDb(row) {
   if (!hasDb()) return;
   const companyId = row.companyId ?? DEFAULT_COMPANY_ID;
@@ -582,6 +601,9 @@ async function ensureRequiredProductionSuperusers() {
       canViewSensitiveFinancial: true,
       departmentKeys: [],
       pageAccess: [...PAGE_ACCESS_KEYS],
+      companyId: existing?.companyId ?? DEFAULT_COMPANY_ID,
+      companySlug: existing?.companySlug ?? "default-farm",
+      companyName: existing?.companyName ?? "Default farm",
     };
     try {
       await persistUserToDb(row);
@@ -2524,7 +2546,7 @@ app.get("/health", (_req, res) => {
   });
 });
 
-app.post("/api/auth/login", (req, res) => {
+app.post("/api/auth/login", async (req, res) => {
   // PROD-FIX: prevents malformed data and injection
   const loginParsed = loginSchema.safeParse(req.body ?? {});
   if (!loginParsed.success) {
@@ -2535,11 +2557,12 @@ app.post("/api/auth/login", (req, res) => {
   const email = payload.email.trim().toLowerCase();
   const password = payload.password;
   const uid = usersByEmail.get(email);
-  const u = uid ? usersById.get(uid) : null;
+  let u = uid ? usersById.get(uid) : null;
   if (!u || u.passwordHash !== hashPassword(password)) {
     res.status(401).json({ error: "Invalid email or password" });
     return;
   }
+  u = await hydrateUserCompanyFromDb(u);
   const token = newSessionId();
   sessions.set(token, { userId: u.id, exp: Date.now() + 1000 * 60 * 60 * 24 * 7 });
   appendAudit(u.id, u.role, "auth.login", "session", null, { email: u.email });
@@ -2554,8 +2577,9 @@ app.post("/api/auth/logout", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/auth/me", requireAuth, (req, res) => {
-  res.json({ user: sanitizeUser(req.authUser) });
+app.get("/api/auth/me", requireAuth, async (req, res) => {
+  const u = await hydrateUserCompanyFromDb(req.authUser);
+  res.json({ user: sanitizeUser(u) });
 });
 
 app.get("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_users"), async (_req, res) => {

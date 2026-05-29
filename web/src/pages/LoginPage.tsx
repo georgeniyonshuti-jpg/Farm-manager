@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { resolveUserCompanySlug } from "../lib/tenancy";
 import { defaultHomeForUser } from "../routes/ProtectedRoute";
 import { BrandLogo } from "../components/BrandLogo";
 
@@ -22,12 +23,7 @@ export function LoginPage() {
   }
 
   if (user) {
-    return (
-      <Navigate
-        to={user.companySlug ? defaultHomeForUser(user.role, user.companySlug) : "/"}
-        replace
-      />
-    );
+    return <Navigate to={defaultHomeForUser(user.role, resolveUserCompanySlug(user))} replace />;
   }
 
   const signIn = async (credEmail: string, credPassword: string) => {
@@ -35,7 +31,7 @@ export function LoginPage() {
     setBusy(true);
     try {
       const u = await login({ email: credEmail.trim(), password: credPassword });
-      navigate(u.companySlug ? defaultHomeForUser(u.role, u.companySlug) : "/", { replace: true });
+      navigate(defaultHomeForUser(u.role, resolveUserCompanySlug(u)), { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed");
     } finally {

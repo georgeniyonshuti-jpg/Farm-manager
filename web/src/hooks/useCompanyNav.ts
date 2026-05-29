@@ -1,11 +1,11 @@
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { tenantPath } from "../lib/tenancy";
+import { resolveUserCompanySlug, tenantPath } from "../lib/tenancy";
 
 export function useCompanyNav() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const slug = user?.companySlug ?? "";
+  const slug = user ? resolveUserCompanySlug(user) : "";
 
   function navTo(path: string, options?: { replace?: boolean }): void {
     if (!slug) {

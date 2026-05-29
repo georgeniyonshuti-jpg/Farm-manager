@@ -1,5 +1,9 @@
 import { API_BASE_URL } from "../api/config";
 import { readAuthHeaders } from "./authHeaders";
+import type { SessionUser } from "../auth/types";
+
+/** Default workspace for legacy single-tenant DB rows (migration 044). */
+export const DEFAULT_COMPANY_SLUG = "default-farm";
 
 export type ResolvedCompany = {
   id: string;
@@ -30,6 +34,21 @@ export function tenantPath(slug: string, path: string): string {
 
 export function userBelongsToCompany(userCompanyId: string, urlCompanyId: string): boolean {
   return userCompanyId === urlCompanyId;
+}
+
+/** Slug for routing when API session omits companySlug (legacy in-memory users). */
+export function resolveUserCompanySlug(user: Pick<SessionUser, "companySlug"> | null | undefined): string {
+  const s = user?.companySlug?.trim();
+  return s || DEFAULT_COMPANY_SLUG;
+}
+
+export function userMatchesTenant(
+  user: SessionUser,
+  tenant: ResolvedCompany
+): boolean {
+  if (user.role === "superuser") return true;
+  if (user.companyId) return tenant.id === user.companyId;
+  return tenant.slug === resolveUserCompanySlug(user);
 }
 
 export async function resolveCompanyBySlug(
