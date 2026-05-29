@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { API_BASE_URL } from "../api/config";
 import { BrandLogo } from "../components/BrandLogo";
 import { useAuth } from "../auth/AuthContext";
+import { tenantPath } from "../lib/tenancy";
 import { defaultHomeForUser } from "../routes/ProtectedRoute";
 import type { SessionUser } from "../auth/types";
 
@@ -37,7 +38,12 @@ export function SignupPage() {
   }
 
   if (user) {
-    return <Navigate to={defaultHomeForUser(user.role)} replace />;
+    return (
+      <Navigate
+        to={user.companySlug ? defaultHomeForUser(user.role, user.companySlug) : "/"}
+        replace
+      />
+    );
   }
 
   async function handleSubmit(e: FormEvent): Promise<void> {
@@ -69,7 +75,9 @@ export function SignupPage() {
       }
       establishSession(body.token, body.user);
       setStep(3);
-      setTimeout(() => navigate("/welcome", { replace: true }), 1200);
+      const slug = body.user.companySlug;
+      const welcomeTo = slug ? tenantPath(slug, "welcome") : "/welcome";
+      setTimeout(() => navigate(welcomeTo, { replace: true }), 1200);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {

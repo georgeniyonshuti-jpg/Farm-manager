@@ -8,6 +8,7 @@ import {
   roleAtLeast,
 } from "../auth/permissions";
 import type { ActiveWorkspace, UserRole } from "../auth/types";
+import { stripTenantPrefix, tenantPath } from "../lib/tenancy";
 import { AppLoadingScreen } from "../components/AppLoadingScreen";
 import { AccessDeniedRedirect } from "./AccessDeniedRedirect";
 
@@ -41,15 +42,17 @@ export function ProtectedRoute({
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
+  const appPath = stripTenantPrefix(location.pathname);
+
   if (
     user &&
     !isSuperuser(user) &&
-    !canAccessRouteLaborerBlock(user, location.pathname)
+    !canAccessRouteLaborerBlock(user, appPath)
   ) {
     return <AccessDeniedRedirect />;
   }
 
-  if (user && !canAccessPathByPageVisibility(user, location.pathname)) {
+  if (user && !canAccessPathByPageVisibility(user, appPath)) {
     return <AccessDeniedRedirect />;
   }
 
@@ -91,7 +94,7 @@ export function WorkspaceGate({
   return <>{children}</>;
 }
 
-export function defaultHomeForUser(role: UserRole): string {
+export function defaultHomePathForRole(role: UserRole): string {
   switch (role) {
     case "laborer":
     case "dispatcher":
@@ -104,4 +107,10 @@ export function defaultHomeForUser(role: UserRole): string {
     default:
       return "/dashboard/management";
   }
+}
+
+export function defaultHomeForUser(role: UserRole, companySlug?: string): string {
+  const path = defaultHomePathForRole(role);
+  if (!companySlug) return path;
+  return tenantPath(companySlug, path);
 }

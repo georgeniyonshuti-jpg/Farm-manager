@@ -8,6 +8,9 @@ import { isLaborerLocaleUser, useLaborerT } from "../../i18n/laborerI18n";
 import { LaborerLanguageToggle } from "../LaborerLanguageToggle";
 import { BrandLogo } from "../BrandLogo";
 import { useTheme } from "../../context/ThemeContext";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
+import { useTenant } from "../../context/TenantContext";
+import { stripTenantPrefix } from "../../lib/tenancy";
 
 const ROLE_LABEL_EN: Record<UserRole, string> = {
   superuser: "Superuser",
@@ -73,12 +76,13 @@ function rolePillClasses(_role: UserRole): string {
 }
 
 function routeTitleKey(pathname: string): string | null {
-  if (pathname.startsWith("/dashboard/laborer")) return "Field operations hub";
-  if (pathname.startsWith("/dashboard/vet")) return "Vet hub";
-  if (pathname.startsWith("/dashboard/management")) return "Command center";
-  if (pathname.startsWith("/farm")) return "Farm";
-  if (pathname.startsWith("/cleva")) return "Clevafarm Finance";
-  if (pathname.startsWith("/admin")) return "Admin";
+  const p = stripTenantPrefix(pathname);
+  if (p.startsWith("/dashboard/laborer")) return "Field operations hub";
+  if (p.startsWith("/dashboard/vet")) return "Vet hub";
+  if (p.startsWith("/dashboard/management")) return "Command center";
+  if (p.startsWith("/farm")) return "Farm";
+  if (p.startsWith("/cleva")) return "Clevafarm Finance";
+  if (p.startsWith("/admin")) return "Admin";
   return null;
 }
 
@@ -190,6 +194,8 @@ export function GlobalHeader({
 }: GlobalHeaderProps) {
   const headerRef = useRef<HTMLElement>(null);
   const { user, logout, activeWorkspace, setActiveWorkspace } = useAuth();
+  const { companyHref } = useCompanyNav();
+  const { tenantCompany } = useTenant();
   const location = useLocation();
   const farmWorkspace = useLaborerT("Farm / Poultry");
   const clevaWorkspace = useLaborerT("Clevafarm Finance");
@@ -221,10 +227,11 @@ export function GlobalHeader({
 
   const showSwitcher = user.businessUnitAccess === "both";
   const showLang = isLaborerLocaleUser(user);
+  const appPath = stripTenantPrefix(location.pathname);
   const showActionCenter =
-    (user.role === "laborer" || user.role === "dispatcher") && location.pathname !== "/dashboard/laborer";
+    (user.role === "laborer" || user.role === "dispatcher") && appPath !== "/dashboard/laborer";
   const showVetHubActions =
-    (user.role === "vet" || user.role === "vet_manager") && location.pathname === "/dashboard/vet";
+    (user.role === "vet" || user.role === "vet_manager") && appPath === "/dashboard/vet";
 
   const workspaces: { id: ActiveWorkspace; label: string }[] = [
     { id: "farm", label: farmWorkspace },
@@ -255,7 +262,7 @@ export function GlobalHeader({
     <>
       {showActionCenter ? (
         <Link
-          to="/dashboard/laborer"
+          to={companyHref("dashboard/laborer")}
           className="bounce-tap inline-flex min-h-[36px] items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--surface-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)] md:min-h-[44px] md:py-2 md:text-sm"
         >
           {homeLabel}
@@ -264,13 +271,13 @@ export function GlobalHeader({
       {showVetHubActions ? (
         <>
           <Link
-            to="/laborer/earnings"
+            to={companyHref("laborer/earnings")}
             className="bounce-tap inline-flex min-h-[36px] items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--surface-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)] md:min-h-[44px] md:py-2 md:text-sm"
           >
             {linkEarnings}
           </Link>
           <Link
-            to="/farm/batch-schedule"
+            to={companyHref("farm/batch-schedule")}
             className="bounce-tap inline-flex min-h-[36px] items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--surface-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)] md:min-h-[44px] md:py-2 md:text-sm"
           >
             {batchCta}
@@ -289,11 +296,20 @@ export function GlobalHeader({
         {/* Mobile */}
         <div className="md:hidden">
           <div className="flex min-h-[48px] items-center justify-between gap-2 border-b border-[var(--border-color)] px-2.5 py-1.5">
-            <Link to="/" className="flex min-w-0 items-center gap-2">
+            <Link to={user.companySlug ? companyHref("") : "/"} className="flex min-w-0 items-center gap-2">
               <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[var(--primary-color-soft)]">
                 <BrandLogo size={34} />
               </span>
-              <span className="truncate text-[15px] font-semibold text-[var(--text-primary)]">{appName}</span>
+              <span className="min-w-0">
+                <span className="block truncate text-[15px] font-semibold text-[var(--text-primary)]">
+                  {tenantCompany?.name ?? user.companyName ?? appName}
+                </span>
+                {user.companySlug ? (
+                  <span className="block truncate font-mono text-[10px] text-[var(--text-muted)]">
+                    app/{user.companySlug}
+                  </span>
+                ) : null}
+              </span>
             </Link>
             <div className="flex items-center gap-2">
               {showMobileSidebarToggle ? (
@@ -350,11 +366,20 @@ export function GlobalHeader({
                 )}
               </button>
             ) : null}
-            <Link to="/" className="flex min-w-0 shrink-0 items-center gap-3">
+            <Link to={user.companySlug ? companyHref("") : "/"} className="flex min-w-0 shrink-0 items-center gap-3">
             <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--primary-color-soft)]">
               <BrandLogo size={36} />
             </span>
-            <span className="truncate text-base font-semibold text-[var(--text-primary)]">{appName}</span>
+            <span className="min-w-0">
+              <span className="block truncate font-display text-base font-semibold text-[var(--text-primary)]">
+                {tenantCompany?.name ?? user.companyName ?? appName}
+              </span>
+              {user.companySlug ? (
+                <span className="block truncate font-mono text-[10px] text-[var(--text-muted)]">
+                  app/{user.companySlug}
+                </span>
+              ) : null}
+            </span>
             </Link>
           </div>
           <div className="flex min-w-0 flex-1 justify-center px-2">

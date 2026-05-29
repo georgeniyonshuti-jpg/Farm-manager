@@ -23,6 +23,10 @@ import { useAuth } from "./auth/AuthContext";
 import { AppLoadingScreen } from "./components/AppLoadingScreen";
 import { ThemeProvider } from "./context/ThemeContext";
 import { useApiHealthStatus } from "./hooks/useApiHealthStatus";
+import { TenantProvider } from "./context/TenantContext";
+import { TenantGuard } from "./components/guards/TenantGuard";
+import { LegacyTenantRedirect } from "./routes/LegacyTenantRedirect";
+import { RootRedirect } from "./routes/RootRedirect";
 
 function AppRoutes() {
   const { bootstrapped } = useAuth();
@@ -36,17 +40,35 @@ function AppRoutes() {
       <Route path="/billing/trial-expired" element={<TrialExpiredPage />} />
 
       <Route element={<ProtectedRoute />}>
-        <Route path="/welcome" element={<WelcomePage />} />
+        <Route path="/" element={<RootRedirect />} />
         <Route path="/unauthorized" element={<AccessDeniedRedirect />} />
-        <Route element={<AppShell />}>
-          <Route path="/" element={<HomeRedirect />} />
 
-          <Route path="/dashboard/laborer" element={null} />
-          <Route path="/dashboard/vet" element={null} />
-          <Route path="/dashboard/management" element={null} />
-          <Route path="/laborer/earnings" element={null} />
+        <Route path="/dashboard/*" element={<LegacyTenantRedirect />} />
+        <Route path="/farm/*" element={<LegacyTenantRedirect />} />
+        <Route path="/cleva/*" element={<LegacyTenantRedirect />} />
+        <Route path="/laborer/*" element={<LegacyTenantRedirect />} />
+        <Route path="/admin/*" element={<LegacyTenantRedirect />} />
+        <Route path="/welcome" element={<LegacyTenantRedirect />} />
 
-          <Route path="/farm" element={<FarmSection />}>
+        <Route
+          path="/app/:slug"
+          element={
+            <TenantProvider>
+              <TenantGuard>
+                <AppShell />
+              </TenantGuard>
+            </TenantProvider>
+          }
+        >
+          <Route index element={<HomeRedirect />} />
+          <Route path="welcome" element={<WelcomePage />} />
+
+          <Route path="dashboard/laborer" element={null} />
+          <Route path="dashboard/vet" element={null} />
+          <Route path="dashboard/management" element={null} />
+          <Route path="laborer/earnings" element={null} />
+
+          <Route path="farm" element={<FarmSection />}>
             <Route path="flocks" element={null} />
             <Route
               path="flocks/:id"
@@ -87,7 +109,7 @@ function AppRoutes() {
             <Route path="reports" element={null} />
           </Route>
 
-          <Route path="/cleva" element={<ClevaSection />}>
+          <Route path="cleva" element={<ClevaSection />}>
             <Route path="portfolio" element={null} />
             <Route path="business-model" element={null} />
             <Route path="general-lending" element={null} />
@@ -95,15 +117,17 @@ function AppRoutes() {
             <Route path="credit-scoring" element={null} />
           </Route>
 
-          <Route path="/admin/users" element={null} />
-          <Route path="/admin/system-config" element={null} />
+          <Route path="admin/users" element={null} />
+          <Route path="admin/system-config" element={null} />
 
           <Route element={<SuperAdminRoute />}>
-            <Route path="/admin/super" element={null} />
+            <Route path="admin/super" element={null} />
           </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="." replace />} />
         </Route>
+
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
   );

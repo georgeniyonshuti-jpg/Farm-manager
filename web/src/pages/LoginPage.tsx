@@ -22,7 +22,12 @@ export function LoginPage() {
   }
 
   if (user) {
-    return <Navigate to={defaultHomeForUser(user.role)} replace />;
+    return (
+      <Navigate
+        to={user.companySlug ? defaultHomeForUser(user.role, user.companySlug) : "/"}
+        replace
+      />
+    );
   }
 
   const signIn = async (credEmail: string, credPassword: string) => {
@@ -30,7 +35,7 @@ export function LoginPage() {
     setBusy(true);
     try {
       const u = await login({ email: credEmail.trim(), password: credPassword });
-      navigate(defaultHomeForUser(u.role), { replace: true });
+      navigate(u.companySlug ? defaultHomeForUser(u.role, u.companySlug) : "/", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed");
     } finally {

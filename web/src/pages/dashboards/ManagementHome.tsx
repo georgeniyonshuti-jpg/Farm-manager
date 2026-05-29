@@ -37,6 +37,7 @@ import {
 import { readAuthHeaders } from "../../lib/authHeaders";
 import { API_BASE_URL } from "../../api/config";
 import { useOdooConnection } from "../../context/OdooConnectionContext";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
 
 // ─── Widget definitions ────────────────────────────────────────────────────────
 
@@ -95,6 +96,7 @@ function LiveBadge() {
 }
 
 function OdooStatusPill() {
+  const { companyHref } = useCompanyNav();
   const { status, loading } = useOdooConnection();
   if (loading && !status) {
     return (
@@ -110,7 +112,7 @@ function OdooStatusPill() {
   const err = status?.error?.trim() || null;
   return (
     <Link
-      to="/farm/odoo-setup"
+      to={companyHref("farm/odoo-setup")}
       className={
         ok
           ? "inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-400 transition-colors hover:bg-emerald-500/15"
@@ -210,6 +212,7 @@ const SYNC_POLL_MS = 5 * 60 * 1000;
 
 export function ManagementHome() {
   const { token, user } = useAuth();
+  const { companyHref } = useCompanyNav();
   const { data, loading, error, reload } = useOpsBoardData(token);
   const isSuperuser = user?.role === "superuser";
   const role = user?.role ?? "manager";
@@ -275,7 +278,7 @@ export function ManagementHome() {
           </div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
             <Link
-              to="/farm/reports?type=farm_operations"
+              to={`${companyHref("farm/reports")}?type=farm_operations`}
               className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] transition-colors"
             >
               Reports
@@ -312,7 +315,7 @@ export function ManagementHome() {
           </p>
           {canOpenAccountingApprovals ? (
             <Link
-              to="/farm/accounting-approvals?tab=action"
+              to={`${companyHref("farm/accounting-approvals")}?tab=action`}
               className="shrink-0 font-medium text-[var(--primary-color)] underline decoration-[var(--primary-color)]/40 underline-offset-2 hover:decoration-[var(--primary-color)]"
             >
               Open Accounting approvals
@@ -496,7 +499,7 @@ export function ManagementHome() {
       {show("flock_table") && (
         <section className="mb-8 space-y-3">
           <SectionHeader num="06" label="Flock scanner" sub="Live status of all active flocks"
-            action={<Link to="/farm/flocks" className="text-xs text-[var(--primary-color)] hover:underline font-medium">View all →</Link>}
+            action={<Link to={companyHref("farm/flocks")} className="text-xs text-[var(--primary-color)] hover:underline font-medium">View all →</Link>}
           />
           <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]">
             <div className="overflow-x-auto">
@@ -529,7 +532,7 @@ export function ManagementHome() {
                     <tr key={f.flockId}
                       className="border-b border-[var(--border-color)] hover:bg-[var(--table-row-hover)] transition-colors group">
                       <td className="px-4 py-2.5">
-                        <Link to={`/farm/flocks/${f.flockId}`}
+                        <Link to={companyHref(`farm/flocks/${f.flockId}`)}
                           className="font-semibold text-[var(--text-primary)] group-hover:text-[var(--primary-color)] transition-colors">
                           {f.label}
                         </Link>

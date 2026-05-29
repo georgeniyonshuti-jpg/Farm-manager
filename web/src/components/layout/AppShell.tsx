@@ -9,11 +9,13 @@ import { SidebarNav } from "./SidebarNav";
 import { AnnouncementBanner } from "../AnnouncementBanner";
 import { PersistentAppPages } from "../../routes/PersistentAppPages";
 import { isAppShellPersistentPath } from "../../routes/persistentPaths";
+import { stripTenantPrefix } from "../../lib/tenancy";
 
 export function AppShell() {
   const location = useLocation();
   const { user } = useAuth();
-  const laborerLikeView = location.pathname.startsWith("/dashboard/laborer");
+  const appPath = stripTenantPrefix(location.pathname);
+  const laborerLikeView = appPath.startsWith("/dashboard/laborer");
   const juniorVetMode = user?.role === "vet" || user?.departmentKeys.includes("junior_vet");
   const fieldOpsMode = user?.role === "laborer" || user?.role === "dispatcher";
   // Nuclear removal: keep sidebar fully disabled for junior-vet/field-ops account experiences.

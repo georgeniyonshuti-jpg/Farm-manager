@@ -157,7 +157,8 @@ export function canAccessPageByKey(user: SessionUser | null, key: string): boole
 export function canAccessPathByPageVisibility(user: SessionUser | null, path: string): boolean {
   if (!user) return false;
   if (isSuperuser(user)) return true;
-  const match = PAGE_ACCESS_DEFS.find((d) => d.prefixes.some((p) => path.startsWith(p)));
+  const appPath = path.replace(/^\/app\/[^/]+/, "") || "/";
+  const match = PAGE_ACCESS_DEFS.find((d) => d.prefixes.some((p) => appPath.startsWith(p)));
   if (!match) return true;
   return canAccessPageByKey(user, match.key);
 }

@@ -205,6 +205,9 @@ function sanitizeUser(row) {
     canViewSensitiveFinancial: row.canViewSensitiveFinancial,
     departmentKeys: row.departmentKeys ?? [],
     pageAccess: row.pageAccess ?? [],
+    companyId: row.companyId ?? null,
+    companySlug: row.companySlug ?? null,
+    companyName: row.companyName ?? null,
   };
 }
 
@@ -438,17 +441,21 @@ async function syncUsersFromDbToMemory() {
   if (!hasDb()) return 0;
   const result = await dbQuery(
     `SELECT
-      id::text AS id,
-      COALESCE(email, '') AS email,
-      COALESCE(full_name, email, 'User') AS "displayName",
-      COALESCE(role, 'laborer') AS role,
-      COALESCE(password_hash, '') AS "passwordHash",
-      COALESCE(business_unit_access, 'farm') AS "businessUnitAccess",
-      COALESCE(can_view_sensitive_financial, false) AS "canViewSensitiveFinancial",
-      COALESCE(department_keys, '[]'::jsonb) AS "departmentKeys",
-      COALESCE(page_access, '[]'::jsonb) AS "pageAccess"
-    FROM users
-    ORDER BY created_at ASC NULLS LAST`
+      u.id::text AS id,
+      COALESCE(u.email, '') AS email,
+      COALESCE(u.full_name, u.email, 'User') AS "displayName",
+      COALESCE(u.role, 'laborer') AS role,
+      COALESCE(u.password_hash, '') AS "passwordHash",
+      COALESCE(u.business_unit_access, 'farm') AS "businessUnitAccess",
+      COALESCE(u.can_view_sensitive_financial, false) AS "canViewSensitiveFinancial",
+      COALESCE(u.department_keys, '[]'::jsonb) AS "departmentKeys",
+      COALESCE(u.page_access, '[]'::jsonb) AS "pageAccess",
+      u.company_id::text AS "companyId",
+      c.slug AS "companySlug",
+      c.name AS "companyName"
+    FROM users u
+    LEFT JOIN companies c ON c.id = u.company_id
+    ORDER BY u.created_at ASC NULLS LAST`
   );
   usersById.clear();
   usersByEmail.clear();
@@ -463,6 +470,9 @@ async function syncUsersFromDbToMemory() {
       canViewSensitiveFinancial: Boolean(row.canViewSensitiveFinancial),
       departmentKeys: parseStringArray(row.departmentKeys, []),
       pageAccess: normalizePageAccess(parseStringArray(row.pageAccess, []), PAGE_ACCESS_KEYS),
+      companyId: row.companyId ? String(row.companyId) : DEFAULT_COMPANY_ID,
+      companySlug: row.companySlug ? String(row.companySlug) : "default-farm",
+      companyName: row.companyName ? String(row.companyName) : "Default farm",
     });
   }
   return result.rowCount ?? 0;
@@ -608,6 +618,23 @@ function requireAuth(req, res, next) {
     return;
   }
   req.authUser = u;
+  next();
+}
+
+function requireSameCompany(req, res, next) {
+  const userCompanyId = req.authUser?.companyId ?? null;
+  const requested =
+    req.body?.company_id ??
+    req.body?.companyId ??
+    req.params?.company_id ??
+    req.params?.companyId ??
+    req.query?.company_id ??
+    req.query?.companyId ??
+    null;
+  if (requested && userCompanyId && String(requested) !== String(userCompanyId)) {
+    res.status(403).json({ error: "Forbidden: you cannot access another company's data" });
+    return;
+  }
   next();
 }
 

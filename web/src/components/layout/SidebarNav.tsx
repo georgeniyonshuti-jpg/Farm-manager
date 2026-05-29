@@ -5,6 +5,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { canAccessPageByKey, canFlockAction, farmCoreNavItems, hasPermission } from "../../auth/permissions";
 import { canEditFlockScheduleRole } from "../../farm/scheduleAccess";
 import { useLaborerT } from "../../i18n/laborerI18n";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
 
 function NavText({ text }: { text: string }) {
   const t = useLaborerT(text);
@@ -73,6 +74,8 @@ const CLEVA_NAV: NavItem[] = [
 
 export function SidebarNav({ onNavigate, collapsed = false }: Props) {
   const { activeWorkspace, user } = useAuth();
+  const { companyHref } = useCompanyNav();
+  const href = (path: string) => companyHref(path);
   const farmSectionTitle = useLaborerT("Farm operations");
   const clevaSectionTitle = useLaborerT("Clevafarm Finance");
 
@@ -301,7 +304,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
             {items.map((item) => (
               <NavLink
                 key={item.to}
-                to={item.to}
+                to={href(item.to)}
                 end={item.end}
                 onClick={onNavigate}
                 className={({ isActive }) =>
@@ -376,7 +379,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
             ? compactItems.map((item) => (
                 <NavLink
                   key={item.to}
-                  to={item.to}
+                  to={href(item.to)}
                   end={item.end}
                   onClick={onNavigate}
                   title={item.label}
@@ -408,7 +411,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
             nav.map((item) => (
               <NavLink
                 key={item.to}
-                to={item.to}
+                to={href(item.to)}
                 end={item.end}
                 onClick={onNavigate}
                 className={({ isActive }) =>
@@ -426,7 +429,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
           )}
           {adminLink && (
             <NavLink
-              to={adminLink.to}
+              to={href(adminLink.to)}
               onClick={onNavigate}
               className={({ isActive }) =>
                 [
@@ -442,7 +445,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
           )}
           {superAdminLink && (
             <NavLink
-              to={superAdminLink.to}
+              to={href(superAdminLink.to)}
               onClick={onNavigate}
               className={({ isActive }) =>
                 [
@@ -458,7 +461,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
           )}
           {typeLink && (!adminLink || typeLink.to !== adminLink.to) && (
             <NavLink
-              to={typeLink.to}
+              to={href(typeLink.to)}
               onClick={onNavigate}
               className={({ isActive }) =>
                 [

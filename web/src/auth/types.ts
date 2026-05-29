@@ -28,6 +28,10 @@ export type SessionUser = {
   departmentKeys: string[];
   /** Superuser-controlled page visibility keys (empty/missing means role defaults). */
   pageAccess?: string[];
+  /** Multi-tenant workspace */
+  companyId?: string;
+  companySlug?: string;
+  companyName?: string;
 };
 
 export type AuthState = {

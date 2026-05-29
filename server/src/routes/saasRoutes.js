@@ -123,6 +123,8 @@ export function createSaasRouter(deps) {
         ]
       );
 
+      row.companySlug = slug;
+      row.companyName = companyName;
       upsertUser(row);
       const token = newSessionId();
       sessions.set(token, { userId, exp: Date.now() + 1000 * 60 * 60 * 24 * 7 });
@@ -136,6 +138,35 @@ export function createSaasRouter(deps) {
       }
       console.error("[ERROR]", "[saas] signup:", msg);
       res.status(500).json({ error: "Could not create workspace. Please try again." });
+    }
+  });
+
+  router.get("/companies/resolve/:slug", requireAuth, async (req, res) => {
+    if (!hasDb()) {
+      res.status(503).json({ error: "Database unavailable." });
+      return;
+    }
+    const slug = String(req.params.slug ?? "").trim().toLowerCase();
+    if (!slug) {
+      res.status(400).json({ error: "Slug is required." });
+      return;
+    }
+    try {
+      const r = await dbQuery(
+        `SELECT id::text, name, slug, plan, is_active
+         FROM companies
+         WHERE slug = $1 AND is_active = true`,
+        [slug]
+      );
+      const company = r.rows[0] ?? null;
+      if (!company) {
+        res.status(404).json({ error: "Company not found" });
+        return;
+      }
+      res.json({ company });
+    } catch (e) {
+      console.error("[ERROR]", "[saas] companies/resolve:", e instanceof Error ? e.message : e);
+      res.status(500).json({ error: "Could not resolve company." });
     }
   });
 
