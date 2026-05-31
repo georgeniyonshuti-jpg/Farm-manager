@@ -1,4 +1,15 @@
 {
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "frame-ancestors 'self' http://localhost:8080 http://localhost:8000 https://erp.clevacredit.com;"
+        }
+      ]
+    }
+  ],
   "rewrites": [
     { "source": "/app/:slug/:path*", "destination": "/index.html" },
     { "source": "/login", "destination": "/index.html" },
