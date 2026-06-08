@@ -4928,6 +4928,57 @@ app.get("/api/check-ins", requireAuth, requireFarmAccess, requireAnyPageAccess([
   });
 });
 
+// Must be registered before /api/check-ins/:id (otherwise "pending" is treated as an id).
+app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireVetUp, async (req, res) => {
+  const flockId = req.query.flockId ? String(req.query.flockId) : null;
+  const memPending = roundCheckins.filter((c) => (c.submissionStatus ?? "approved") === "pending_review");
+  if (hasDb()) {
+    try {
+      let sql = `SELECT c.id::text AS id, c.flock_id::text AS "flockId", c.laborer_id::text AS "laborerId",
+                        c.at, c.submission_status AS "submissionStatus",
+                        c.photo_url AS "photoUrl",
+                        c.photo_urls AS "photoUrls",
+                        c.coop_temperature_c AS "coopTemperatureC",
+                        COALESCE(c.feed_kg, 0) AS "feedKg",
+                        COALESCE(c.water_l, 0) AS "waterL",
+                        COALESCE(c.mortality_at_checkin, 0) AS "mortalityAtCheckin",
+                        COALESCE(c.mortality_reported_in_mortality_log, false) AS "mortalityReportedInMortalityLog",
+                        COALESCE(c.feed_available, false) AS "feedAvailable",
+                        COALESCE(c.water_available, false) AS "waterAvailable",
+                        COALESCE(c.notes, '') AS notes,
+                        COALESCE(u.full_name, u.email, '') AS "laborerName",
+                        f.code AS "flockCode",
+                        c.reviewed_by_user_id::text AS "reviewedByUserId",
+                        c.reviewed_at AS "reviewedAt",
+                        c.review_notes AS "reviewNotes"
+                   FROM check_ins c
+                   LEFT JOIN users u ON u.id = c.laborer_id
+                   LEFT JOIN poultry_flocks f ON f.id = c.flock_id
+                  WHERE c.submission_status = 'pending_review'`;
+      const params = [];
+      if (flockId) {
+        params.push(flockId);
+        sql += ` AND c.flock_id = $${params.length}::uuid`;
+      }
+      sql += ` ORDER BY c.at DESC LIMIT 200`;
+      const r = await dbQuery(sql, params);
+      const merged = [...r.rows, ...memPending]
+        .filter((c) => (flockId ? String(c.flockId) === flockId : true))
+        .sort((a, b) => (String(a.at) < String(b.at) ? 1 : -1))
+        .slice(0, 200);
+      res.json({ checkins: merged });
+      return;
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET check-ins/pending:", e instanceof Error ? e.message : e);
+    }
+  }
+  let list = memPending;
+  if (flockId) list = list.filter((c) => String(c.flockId) === flockId);
+  res.json({
+    checkins: list.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 200),
+  });
+});
+
 app.get("/api/check-ins/:id", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_reports", "farm_checkin_review", "farm_checkin"]), requireVetUp, async (req, res) => {
   const checkinId = String(req.params.id);
   const scopedCompanyId = await companyIdForUser(req.authUser.id);
@@ -4986,56 +5037,6 @@ app.get("/api/check-ins/:id", requireAuth, requireFarmAccess, requireAnyPageAcce
       flockCode: flocksById.get(mem.flockId)?.code ?? null,
       notes: mem.notes ?? "",
     }),
-  });
-});
-
-app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireVetUp, async (req, res) => {
-  const flockId = req.query.flockId ? String(req.query.flockId) : null;
-  const memPending = roundCheckins.filter((c) => (c.submissionStatus ?? "approved") === "pending_review");
-  if (hasDb()) {
-    try {
-      let sql = `SELECT c.id::text AS id, c.flock_id::text AS "flockId", c.laborer_id::text AS "laborerId",
-                        c.at, c.submission_status AS "submissionStatus",
-                        c.photo_url AS "photoUrl",
-                        c.photo_urls AS "photoUrls",
-                        c.coop_temperature_c AS "coopTemperatureC",
-                        COALESCE(c.feed_kg, 0) AS "feedKg",
-                        COALESCE(c.water_l, 0) AS "waterL",
-                        COALESCE(c.mortality_at_checkin, 0) AS "mortalityAtCheckin",
-                        COALESCE(c.mortality_reported_in_mortality_log, false) AS "mortalityReportedInMortalityLog",
-                        COALESCE(c.feed_available, false) AS "feedAvailable",
-                        COALESCE(c.water_available, false) AS "waterAvailable",
-                        COALESCE(c.notes, '') AS notes,
-                        COALESCE(u.full_name, u.email, '') AS "laborerName",
-                        f.code AS "flockCode",
-                        c.reviewed_by_user_id::text AS "reviewedByUserId",
-                        c.reviewed_at AS "reviewedAt",
-                        c.review_notes AS "reviewNotes"
-                   FROM check_ins c
-                   LEFT JOIN users u ON u.id = c.laborer_id
-                   LEFT JOIN poultry_flocks f ON f.id = c.flock_id
-                  WHERE c.submission_status = 'pending_review'`;
-      const params = [];
-      if (flockId) {
-        params.push(flockId);
-        sql += ` AND c.flock_id = $${params.length}::uuid`;
-      }
-      sql += ` ORDER BY c.at DESC LIMIT 200`;
-      const r = await dbQuery(sql, params);
-      const merged = [...r.rows, ...memPending]
-        .filter((c) => (flockId ? String(c.flockId) === flockId : true))
-        .sort((a, b) => (String(a.at) < String(b.at) ? 1 : -1))
-        .slice(0, 200);
-      res.json({ checkins: merged });
-      return;
-    } catch (e) {
-      console.error("[ERROR]", "[db] GET check-ins/pending:", e instanceof Error ? e.message : e);
-    }
-  }
-  let list = memPending;
-  if (flockId) list = list.filter((c) => String(c.flockId) === flockId);
-  res.json({
-    checkins: list.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 200),
   });
 });
 
