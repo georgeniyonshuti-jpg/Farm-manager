@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { SubmissionStatusBadge } from "./SubmissionStatusBadge";
 
 export type SubmissionRow = {
@@ -14,9 +15,10 @@ type Props = {
   rows: SubmissionRow[];
   emptyLabel: string;
   loading?: boolean;
+  renderRowActions?: (row: SubmissionRow) => ReactNode;
 };
 
-export function SubmissionListTable({ rows, emptyLabel, loading = false }: Props) {
+export function SubmissionListTable({ rows, emptyLabel, loading = false, renderRowActions }: Props) {
   if (loading) {
     return <p className="text-sm text-[var(--text-muted)] animate-pulse">Loading submissions…</p>;
   }
@@ -35,6 +37,7 @@ export function SubmissionListTable({ rows, emptyLabel, loading = false }: Props
               <th>Status</th>
               <th>Details</th>
               <th className="tbl-actions">Open</th>
+              {renderRowActions ? <th className="tbl-actions">Review</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -59,6 +62,11 @@ export function SubmissionListTable({ rows, emptyLabel, loading = false }: Props
                     View report
                   </button>
                 </td>
+                {renderRowActions ? (
+                  <td className="tbl-actions" onClick={(e) => e.stopPropagation()}>
+                    {renderRowActions(row)}
+                  </td>
+                ) : null}
               </tr>
             ))}
           </tbody>

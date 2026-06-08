@@ -4932,12 +4932,17 @@ app.get("/api/check-ins", requireAuth, requireFarmAccess, requireAnyPageAccess([
 app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireVetUp, async (req, res) => {
   const flockId = req.query.flockId ? String(req.query.flockId) : null;
   const memPending = roundCheckins.filter((c) => (c.submissionStatus ?? "approved") === "pending_review");
+  const mapMemPendingRow = (c) =>
+    mapCheckinListRow({
+      ...c,
+      laborerName: usersById.get(c.laborerId)?.displayName ?? c.laborerId,
+      flockCode: flocksById.get(c.flockId)?.code ?? null,
+      notes: c.notes ?? "",
+    });
   if (hasDb()) {
     try {
       let sql = `SELECT c.id::text AS id, c.flock_id::text AS "flockId", c.laborer_id::text AS "laborerId",
                         c.at, c.submission_status AS "submissionStatus",
-                        c.photo_url AS "photoUrl",
-                        c.photo_urls AS "photoUrls",
                         c.coop_temperature_c AS "coopTemperatureC",
                         COALESCE(c.feed_kg, 0) AS "feedKg",
                         COALESCE(c.water_l, 0) AS "waterL",
@@ -4950,7 +4955,11 @@ app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAcc
                         f.code AS "flockCode",
                         c.reviewed_by_user_id::text AS "reviewedByUserId",
                         c.reviewed_at AS "reviewedAt",
-                        c.review_notes AS "reviewNotes"
+                        c.review_notes AS "reviewNotes",
+                        (
+                          (c.photo_url IS NOT NULL AND length(c.photo_url) > 20) OR
+                          (c.photo_urls IS NOT NULL AND c.photo_urls::text NOT IN ('null', '{}', '[]', '{"flockSign":[],"thermometer":[],"feed":[],"water":[]}'))
+                        ) AS "hasPhotos"
                    FROM check_ins c
                    LEFT JOIN users u ON u.id = c.laborer_id
                    LEFT JOIN poultry_flocks f ON f.id = c.flock_id
@@ -4962,11 +4971,11 @@ app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAcc
       }
       sql += ` ORDER BY c.at DESC LIMIT 200`;
       const r = await dbQuery(sql, params);
-      const merged = [...r.rows, ...memPending]
+      const merged = [...r.rows.map(mapCheckinListRow), ...memPending.map(mapMemPendingRow)]
         .filter((c) => (flockId ? String(c.flockId) === flockId : true))
         .sort((a, b) => (String(a.at) < String(b.at) ? 1 : -1))
         .slice(0, 200);
-      res.json({ checkins: merged });
+      res.json({ checkins: merged, total: merged.length });
       return;
     } catch (e) {
       console.error("[ERROR]", "[db] GET check-ins/pending:", e instanceof Error ? e.message : e);
@@ -4974,8 +4983,10 @@ app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAcc
   }
   let list = memPending;
   if (flockId) list = list.filter((c) => String(c.flockId) === flockId);
+  const mapped = list.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 200).map(mapMemPendingRow);
   res.json({
-    checkins: list.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 200),
+    checkins: mapped,
+    total: mapped.length,
   });
 });
 

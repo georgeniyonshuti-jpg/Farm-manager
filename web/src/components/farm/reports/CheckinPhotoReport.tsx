@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { PHOTO_SECTION_LABELS, toPhotoSlots, type CheckinPhotoSource } from "../../../farm/checkinPhotoUtils";
 import { SubmissionStatusBadge } from "./SubmissionStatusBadge";
 
@@ -24,9 +25,10 @@ export type CheckinReportData = CheckinPhotoSource & {
 type Props = {
   checkin: CheckinReportData;
   onClose?: () => void;
+  footer?: ReactNode;
 };
 
-export function CheckinPhotoReport({ checkin, onClose }: Props) {
+export function CheckinPhotoReport({ checkin, onClose, footer }: Props) {
   const slots = toPhotoSlots(checkin);
   const submitted = new Date(checkin.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" });
 
@@ -130,6 +132,12 @@ export function CheckinPhotoReport({ checkin, onClose }: Props) {
           );
         })}
       </div>
+
+      {footer ? (
+        <footer className="sticky bottom-0 border-t border-[var(--border-color)] bg-[var(--surface-card)]/95 px-4 py-3 backdrop-blur sm:px-6">
+          {footer}
+        </footer>
+      ) : null}
     </article>
   );
 }

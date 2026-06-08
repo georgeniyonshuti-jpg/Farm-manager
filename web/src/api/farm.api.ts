@@ -145,7 +145,9 @@ export async function fetchPendingMortality(token: string | null) {
   return legacyFetch("/api/mortality-events/pending", token);
 }
 
-export async function fetchPendingCheckins(token: string | null) {
+export async function fetchPendingCheckins(
+  token: string | null
+): Promise<{ checkins: CheckinListRow[]; total?: number }> {
   if (IS_FRAPPE_MODE) {
     return callFrappe("checkin.get_pending_checkins", { slug: tenantSlug() });
   }
