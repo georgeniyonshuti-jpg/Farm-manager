@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { API_BASE_URL } from "../api/config";
-import { readAuthHeaders } from "../lib/authHeaders";
 import type { CheckinStatus } from "../pages/farm/checkinStatusTypes";
+import {
+  fetchCheckinStatus,
+  fetchFlocks,
+  fetchPerformanceSummary,
+} from "../api/farm.api";
 
 export type FlockListRow = {
   id: string;
@@ -19,9 +22,6 @@ export type FieldPerformanceSummary = {
   mortalityToDate: number;
 };
 
-/**
- * Flock list + check-in status + performance summary for field-operation pages.
- */
 export type FlockSyncMeta = {
   stale: boolean;
   lastSyncedAt: string | null;
@@ -30,7 +30,6 @@ export type FlockSyncMeta = {
 };
 
 export type UseFlockFieldContextOptions = {
-  /** When `""`, flock list loads with no flock selected ("All flocks"). */
   defaultFlockId?: string;
 };
 
@@ -59,25 +58,7 @@ export function useFlockFieldContext(
     setError(null);
     setListLoading(true);
     try {
-      const r = await fetch(`${API_BASE_URL}/api/flocks`, { headers: readAuthHeaders(token) });
-      const d = (await r.json()) as {
-        flocks?: FlockListRow[];
-        error?: string;
-        code?: string;
-        flockSync?: FlockSyncMeta;
-      };
-      if (r.status === 503) {
-        setError(
-          d.code === "FLOCK_CACHE_UNAVAILABLE"
-            ? d.error ?? "Flock data is temporarily unavailable. Please retry in a few seconds."
-            : d.error ?? "Flocks could not be loaded. Try again."
-        );
-        setFlocks([]);
-        setFlockId("");
-        setFlockSync(d.flockSync ?? null);
-        return;
-      }
-      if (!r.ok) throw new Error(d.error ?? "Flocks failed");
+      const d = await fetchFlocks(token);
       const list = d.flocks ?? [];
       setFlocks(list);
       setFlockId((prev) => {
@@ -90,7 +71,7 @@ export function useFlockFieldContext(
           stale: false,
           lastSyncedAt: null,
           syncError: null,
-          hasLoadedFromDb: false,
+          hasLoadedFromDb: true,
         }
       );
     } catch (e) {
@@ -112,24 +93,16 @@ export function useFlockFieldContext(
     }
     setDetailLoading(true);
     try {
-      const [sr, pr] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/checkin-status`, {
-          headers: readAuthHeaders(token),
-        }),
-        fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/performance-summary`, {
-          headers: readAuthHeaders(token),
-        }),
+      const [sd, pd] = await Promise.all([
+        fetchCheckinStatus(token, flockId),
+        fetchPerformanceSummary(token, flockId),
       ]);
-      const sd = await sr.json();
-      const pd = await pr.json();
-      if (!sr.ok) throw new Error((sd as { error?: string }).error ?? "Status failed");
-      if (!pr.ok) throw new Error((pd as { error?: string }).error ?? "Performance failed");
-      setStatus(sd as CheckinStatus);
+      setStatus(sd);
       setPerformance({
-        birdsLiveEstimate: Number((pd as { birdsLiveEstimate?: number }).birdsLiveEstimate) || 0,
-        computedBirdsLiveEstimate: (pd as { computedBirdsLiveEstimate?: number }).computedBirdsLiveEstimate,
-        verifiedLiveCount: (pd as { verifiedLiveCount?: number | null }).verifiedLiveCount ?? null,
-        mortalityToDate: Number((pd as { mortalityToDate?: number }).mortalityToDate) || 0,
+        birdsLiveEstimate: Number(pd.birdsLiveEstimate) || 0,
+        computedBirdsLiveEstimate: pd.computedBirdsLiveEstimate as number | undefined,
+        verifiedLiveCount: (pd.verifiedLiveCount as number | null | undefined) ?? null,
+        mortalityToDate: Number(pd.mortalityToDate ?? pd.mortality) || 0,
       });
       setError(null);
     } catch (e) {

@@ -3,15 +3,17 @@ import { Link } from "react-router-dom";
 import { PhotoCaptureInput } from "../../components/farm/PhotoCaptureInput";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import { useAuth } from "../../auth/AuthContext";
-import { jsonAuthHeaders } from "../../lib/authHeaders";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
-import { API_BASE_URL } from "../../api/config";
+import { createMortalityEvent, IS_FRAPPE_MODE } from "../../api/farm.api";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import { SubmissionStageScreen } from "../../components/farm/SubmissionStageScreen";
+import { syncMortalityToERPNext } from "../../api/erpnext.api";
+import { getStoredErpnextCompany, getStoredErpnextCostCenter } from "../../lib/erpnextPrefs";
+import { useERPNextConnection } from "../../context/OdooConnectionContext";
 
 function MortalityPhotoBlock({
   busy,
@@ -35,6 +37,7 @@ function MortalityPhotoBlock({
 export function FarmMortalityLogPage() {
   const { token } = useAuth();
   const { showToast } = useToast();
+  const { status: erpnextStatus } = useERPNextConnection();
   const lblFlock = useLaborerT("Flock");
   const title = useLaborerT("Log mortality");
   const subtitle = useLaborerT(
@@ -72,6 +75,7 @@ export function FarmMortalityLogPage() {
   const [count, setCount] = useState("");
   const [isEmergency, setIsEmergency] = useState(false);
   const [notes, setNotes] = useState("");
+  const [valuePerBird, setValuePerBird] = useState("2500");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [submitCooldown, setSubmitCooldown] = useState(false);
@@ -99,24 +103,30 @@ export function FarmMortalityLogPage() {
     setBusy(true);
     setSubmitStage("submitting");
     try {
-      const res = await fetch(`${API_BASE_URL}/api/flocks/${flockId}/mortality-events`, {
-        method: "POST",
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify({
-          photos,
-          count: n,
-          isEmergency,
-          notes,
-        }),
+      await createMortalityEvent(token, flockId, {
+        photos,
+        deadCount: n,
+        count: n,
+        isEmergency,
+        notes,
+        valuePerBirdRwf: Number(valuePerBird) || 0,
       });
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 409) {
-        const hint = (data as { hint?: string }).hint ?? "";
-        throw new Error(
-          `${(data as { error?: string }).error ?? "Duplicate entry"}${hint ? ` — ${hint}` : ""}`,
-        );
+      const erpCompany = getStoredErpnextCompany() || erpnextStatus?.company;
+      const estValue = Number(valuePerBird) || 0;
+      if (!IS_FRAPPE_MODE && erpnextStatus?.connected && erpCompany && token && estValue > 0) {
+        try {
+          await syncMortalityToERPNext(token, {
+            company: erpCompany,
+            date: new Date().toISOString().slice(0, 10),
+            flockId,
+            count: n,
+            estimatedValuePerBird: estValue,
+            costCenter: getStoredErpnextCostCenter() || undefined,
+          });
+        } catch (syncErr) {
+          console.error("ERPNext mortality sync failed:", syncErr);
+        }
       }
-      if (!res.ok) throw new Error((data as { error?: string }).error ?? "Save failed");
       setSubmitCooldown(true);
       window.setTimeout(() => setSubmitCooldown(false), 5000);
       setPhotos([]);
@@ -230,6 +240,19 @@ export function FarmMortalityLogPage() {
               className="w-full min-h-[48px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 text-lg text-[var(--text-primary)]"
               value={count}
               onChange={(e) => setCount(e.target.value)}
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-sm font-medium text-[var(--text-secondary)]" htmlFor="val-bird">
+              Estimated value per bird (RWF)
+            </label>
+            <input
+              id="val-bird"
+              inputMode="numeric"
+              className="w-full min-h-[48px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 text-lg text-[var(--text-primary)]"
+              value={valuePerBird}
+              onChange={(e) => setValuePerBird(e.target.value)}
             />
           </div>
 

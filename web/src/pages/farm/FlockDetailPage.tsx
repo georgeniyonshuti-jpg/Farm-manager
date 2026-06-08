@@ -324,10 +324,10 @@ export function FlockDetailPage() {
                   )}
                   {id ? (
                     <Link
-                      to={`/farm/flocks/${id}/fcr`}
+                      to={`/farm/vet-logs?flockId=${encodeURIComponent(id ?? "")}`}
                       className="mt-2 inline-block text-xs font-medium text-emerald-800 hover:underline"
                     >
-                      Open FCR action center
+                      Open vet logs & FCR
                     </Link>
                   ) : null}
                 </div>

@@ -12,33 +12,38 @@ import { canViewOdooConnectionStatus } from "../auth/permissions";
 import { API_BASE_URL } from "../api/config";
 import { readAuthHeaders } from "../lib/authHeaders";
 
-export type OdooConnectionStatus = {
+export type ERPNextConnectionStatus = {
   connected: boolean;
-  uid?: number | null;
+  user?: string | null;
   error?: string;
+  company?: string;
+  companies?: number;
   customers?: number;
-  vendors?: number;
-  invoices?: number;
-  bills?: number;
-  journalEntries?: number;
-  products?: number;
+  loans?: number;
   accounts?: number;
+  erpnextUrl?: string;
+  authMode?: "session" | "api_key" | "none" | string;
+  /** @deprecated Odoo uid — kept for backward compatibility */
+  uid?: number | null;
 };
+
+/** @deprecated use ERPNextConnectionStatus */
+export type OdooConnectionStatus = ERPNextConnectionStatus;
 
 const POLL_MS = 7 * 60 * 1000;
 
-type OdooConnectionContextValue = {
-  status: OdooConnectionStatus | null;
+type ERPNextConnectionContextValue = {
+  status: ERPNextConnectionStatus | null;
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
 };
 
-const OdooConnectionContext = createContext<OdooConnectionContextValue | null>(null);
+const ERPNextConnectionContext = createContext<ERPNextConnectionContextValue | null>(null);
 
-export function OdooConnectionProvider({ children }: { children: ReactNode }) {
+export function ERPNextConnectionProvider({ children }: { children: ReactNode }) {
   const { token, user } = useAuth();
-  const [status, setStatus] = useState<OdooConnectionStatus | null>(null);
+  const [status, setStatus] = useState<ERPNextConnectionStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,19 +56,17 @@ export function OdooConnectionProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/odoo-setup/status`, {
+      const res = await fetch(`${API_BASE_URL}/api/erpnext/status`, {
         headers: readAuthHeaders(token),
       });
-      const data = (await res.json().catch(() => ({}))) as
-        | OdooConnectionStatus
-        | { error?: string };
+      const data = (await res.json().catch(() => ({}))) as ERPNextConnectionStatus & { error?: string };
       if (!res.ok) {
-        const msg = "error" in data && data.error ? String(data.error) : "Could not load Odoo status";
+        const msg = data.error ? String(data.error) : "Could not load ERPNext status";
         setStatus({ connected: false, error: msg, uid: null });
         setError(msg);
         return;
       }
-      setStatus(data as OdooConnectionStatus);
+      setStatus(data);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Network error";
       setStatus({ connected: false, error: msg, uid: null });
@@ -89,14 +92,20 @@ export function OdooConnectionProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <OdooConnectionContext.Provider value={value}>{children}</OdooConnectionContext.Provider>
+    <ERPNextConnectionContext.Provider value={value}>{children}</ERPNextConnectionContext.Provider>
   );
 }
 
-export function useOdooConnection(): OdooConnectionContextValue {
-  const ctx = useContext(OdooConnectionContext);
+export function useERPNextConnection(): ERPNextConnectionContextValue {
+  const ctx = useContext(ERPNextConnectionContext);
   if (!ctx) {
-    throw new Error("useOdooConnection must be used within OdooConnectionProvider");
+    throw new Error("useERPNextConnection must be used within ERPNextConnectionProvider");
   }
   return ctx;
+}
+
+/** Backward compatibility aliases */
+export const OdooConnectionProvider = ERPNextConnectionProvider;
+export function useOdooConnection(): ERPNextConnectionContextValue {
+  return useERPNextConnection();
 }

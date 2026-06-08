@@ -11,7 +11,15 @@ import {
   canAccessWorkspace,
   defaultWorkspaceForUser,
 } from "./permissions";
-import { API_BASE_URL } from "../api/config";
+import { readAuthHeaders } from "../lib/authHeaders";
+import { API_BASE_URL, IS_FRAPPE_MODE } from "../api/config";
+import { loginERPNextSession } from "../api/erpnext.api";
+import {
+  frappeGetMe,
+  frappeLogin,
+  frappeLogout,
+} from "../api/frappe.api";
+import { setErpnextSessionId } from "../lib/erpnextSession";
 
 const AUTH_STORAGE_KEY = "fm_auth_token";
 
@@ -32,7 +40,9 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 async function fetchMe(token: string): Promise<SessionUser> {
-  // ENV: moved to environment variable
+  if (IS_FRAPPE_MODE) {
+    return frappeGetMe() as Promise<SessionUser>;
+  }
   const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -75,6 +85,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
+        if (IS_FRAPPE_MODE) {
+          const me = await frappeGetMe();
+          if (cancelled) return;
+          setUser(me as SessionUser);
+          setToken("frappe-session");
+          setActiveWorkspaceState(defaultWorkspaceForUser(me as SessionUser));
+          return;
+        }
         const t = localStorage.getItem(AUTH_STORAGE_KEY);
         if (!t) {
           setUser(null);
@@ -104,7 +122,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(
     async (creds: LoginCredentials): Promise<SessionUser> => {
-      // ENV: moved to environment variable
+      if (IS_FRAPPE_MODE) {
+        await frappeLogin(creds.email, creds.password);
+        const u = (await frappeGetMe()) as SessionUser;
+        setTokenPersist("frappe-session");
+        setUser(u);
+        setActiveWorkspaceState(defaultWorkspaceForUser(u));
+        return u;
+      }
       const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -119,20 +144,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setTokenPersist(t);
       setUser(u);
       setActiveWorkspaceState(defaultWorkspaceForUser(u));
+
+      // Optional: establish ERPNext session with same credentials (non-fatal)
+      try {
+        const erp = await loginERPNextSession(t, creds.email, creds.password);
+        if (erp?.sid) setErpnextSessionId(erp.sid);
+      } catch {
+        /* ERPNext session optional — API key fallback on server */
+      }
+
       return u;
     },
     [setTokenPersist]
   );
 
   const logout = useCallback(async () => {
+    if (IS_FRAPPE_MODE) {
+      await frappeLogout();
+      setTokenPersist(null);
+      setUser(null);
+      setActiveWorkspaceState(null);
+      return;
+    }
     const t = token ?? localStorage.getItem(AUTH_STORAGE_KEY);
     if (t) {
-      // ENV: moved to environment variable
       await fetch(`${API_BASE_URL}/api/auth/logout`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${t}` },
+        headers: readAuthHeaders(t),
+      }).catch(() => {});
+      await fetch(`${API_BASE_URL}/api/erpnext/session/logout`, {
+        method: "POST",
+        headers: readAuthHeaders(t),
       }).catch(() => {});
     }
+    setErpnextSessionId(null);
     setTokenPersist(null);
     setUser(null);
     setActiveWorkspaceState(null);

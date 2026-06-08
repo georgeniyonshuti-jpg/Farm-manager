@@ -102,9 +102,9 @@ function OdooStatusPill() {
     return (
       <span
         className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-color)] bg-[var(--surface-card)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--text-muted)]"
-        title="Checking Odoo connection"
+        title="Checking ERPNext connection"
       >
-        Odoo…
+        ERPNext…
       </span>
     );
   }
@@ -112,16 +112,16 @@ function OdooStatusPill() {
   const err = status?.error?.trim() || null;
   return (
     <Link
-      to={companyHref("farm/odoo-setup")}
+      to={companyHref("farm/erpnext-setup")}
       className={
         ok
           ? "inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-400 transition-colors hover:bg-emerald-500/15"
           : "inline-flex max-w-[min(20rem,55vw)] items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-amber-200 transition-colors hover:bg-amber-500/15"
       }
-      title={ok ? "Odoo integration is connected" : err || "Odoo is not connected — open settings"}
+      title={ok ? "ERPNext integration is connected" : err || "ERPNext is not connected — open settings"}
     >
       <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${ok ? "bg-emerald-400" : "bg-amber-400"}`} />
-      <span className="min-w-0 truncate">{ok ? "Odoo connected" : "Odoo not connected"}</span>
+      <span className="min-w-0 truncate">{ok ? "ERPNext connected" : "ERPNext not connected"}</span>
     </Link>
   );
 }

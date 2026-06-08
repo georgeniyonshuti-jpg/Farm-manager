@@ -1,6 +1,7 @@
-import { API_BASE_URL } from "../api/config";
+import { API_BASE_URL, IS_FRAPPE_MODE } from "../api/config";
 import { readAuthHeaders } from "./authHeaders";
 import type { SessionUser } from "../auth/types";
+import { frappeGetCompanyBySlug } from "../api/frappe.api";
 
 /** Default workspace for legacy single-tenant DB rows (migration 044). */
 export const DEFAULT_COMPANY_SLUG = "default-farm";
@@ -55,6 +56,20 @@ export async function resolveCompanyBySlug(
   slug: string,
   token: string | null
 ): Promise<ResolvedCompany | null> {
+  if (IS_FRAPPE_MODE) {
+    try {
+      const row = await frappeGetCompanyBySlug(slug);
+      return {
+        id: row.id,
+        name: row.name,
+        slug: row.slug,
+        plan: "native",
+        is_active: true,
+      };
+    } catch {
+      return null;
+    }
+  }
   const res = await fetch(`${API_BASE_URL}/api/companies/resolve/${encodeURIComponent(slug)}`, {
     headers: readAuthHeaders(token),
   });

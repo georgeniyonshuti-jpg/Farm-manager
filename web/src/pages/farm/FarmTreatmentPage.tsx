@@ -10,6 +10,11 @@ import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import type { FieldPerformanceSummary } from "../../hooks/useFlockFieldContext";
 import type { CheckinStatus } from "./checkinStatusTypes";
 import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
+import { syncTreatmentToERPNext } from "../../api/erpnext.api";
+import {
+  getStoredErpnextCompany,
+  getStoredErpnextCostCenter,
+} from "../../lib/erpnextPrefs";
 
 type Flock = { id: string; label: string; code?: string | null; initialCount?: number };
 type Medicine = {
@@ -341,7 +346,22 @@ export function FarmTreatmentPage() {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Save failed");
+      const treatmentId = (d as { id?: string }).id;
       showToast("success", "Treatment logged.");
+
+      // Non-blocking ERPNext medicine expense sync
+      const company = getStoredErpnextCompany();
+      if (token && company && treatmentId) {
+        void syncTreatmentToERPNext(token, {
+          company,
+          supplier: "Farm Veterinary Supplier",
+          date: new Date().toISOString().slice(0, 10),
+          medicineName: form.medicineName || "Medicine",
+          amount: Number(form.dose) || 0,
+          costCenter: getStoredErpnextCostCenter() || undefined,
+          sourceId: treatmentId,
+        }).catch(() => {});
+      }
       setForm((v) => ({ ...v, diseaseOrReason: "", medicineName: "", dose: "", notes: "" }));
       setShowTreatmentForm(false);
       await load();

@@ -16,6 +16,7 @@ import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { API_BASE_URL } from "../../api/config";
 import { useToast } from "../../components/Toast";
 import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
+import { ERPNextSyncPanel } from "../../components/accounting/ERPNextSyncPanel";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -80,7 +81,7 @@ type ActionQueueItem = {
   fixableFields: FixableField[];
 };
 
-type Tab = "action" | "inbox" | "sync" | "advanced";
+type Tab = "action" | "inbox" | "sync" | "advanced" | "erpnext";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -148,7 +149,7 @@ export function AccountingApprovalsPage() {
 
   useEffect(() => {
     const t = searchParams.get("tab");
-    if (t === "action" || t === "inbox" || t === "sync" || t === "advanced") setTab(t);
+    if (t === "action" || t === "inbox" || t === "sync" || t === "advanced" || t === "erpnext") setTab(t);
   }, [searchParams]);
 
   // Action queue
@@ -430,6 +431,7 @@ export function AccountingApprovalsPage() {
     { id: "action", label: "Needs Action", badge: needsActionCount || undefined },
     { id: "inbox", label: "Approvals Inbox", badge: inboxTotal || undefined },
     { id: "sync", label: "Sync Log" },
+    { id: "erpnext", label: "ERPNext" },
     { id: "advanced", label: "Advanced" },
   ];
 
@@ -440,7 +442,7 @@ export function AccountingApprovalsPage() {
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-5 px-0 pb-12">
-      <PageHeader title="Accounting Approvals" subtitle="Review and send financial records to Odoo" />
+      <PageHeader title="Accounting Approvals" subtitle="Review farm records and sync to ERPNext (or legacy Odoo outbox)" />
 
       {/* ── Tab bar ── */}
       <div className="flex items-center gap-0.5 rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-subtle)] p-1">
@@ -741,6 +743,9 @@ export function AccountingApprovalsPage() {
           </div>
         </section>
       )}
+
+      {/* ══════════════ ERPNEXT ══════════════ */}
+      {tab === "erpnext" && <ERPNextSyncPanel />}
 
       {/* ══════════════ ADVANCED ══════════════ */}
       {tab === "advanced" && (

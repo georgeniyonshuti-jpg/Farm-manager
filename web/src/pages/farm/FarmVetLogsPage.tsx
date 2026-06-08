@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { PageHeader } from "../../components/PageHeader";
@@ -6,23 +7,15 @@ import { EmptyState } from "../../components/EmptyState";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { API_BASE_URL } from "../../api/config";
+import { fetchVetLogDetail, type VetLogListRow } from "../../api/farm.api";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import { roleAtLeast } from "../../auth/permissions";
+import { FlockPerformancePanel } from "../../components/farm/FlockPerformancePanel";
+import { VetLogReport } from "../../components/farm/reports/VetLogReport";
+import { SubmissionReportModal } from "../../components/farm/reports/SubmissionReportModal";
 
-type VetLog = {
-  id: string;
-  flockId: string;
-  authorUserId: string;
-  authorName?: string;
-  logDate: string;
-  observations?: string;
-  actionsTaken?: string;
-  recommendations?: string;
-  submissionStatus: string;
+type VetLog = VetLogListRow & {
   reviewedByUserId?: string;
-  reviewedAt?: string;
-  reviewNotes?: string;
-  createdAt: string;
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -34,6 +27,7 @@ function StatusBadge({ status }: { status: string }) {
 export function FarmVetLogsPage() {
   const { token, user } = useAuth();
   const { showToast } = useToast();
+  const [searchParams] = useSearchParams();
   const {
     flocks,
     flockId,
@@ -44,6 +38,10 @@ export function FarmVetLogsPage() {
   } = useFlockFieldContext(token, { defaultFlockId: "" });
 
   const isReviewer = user ? roleAtLeast(user, "vet_manager") : false;
+  const selectedFlock = useMemo(
+    () => flocks.find((f) => f.id === flockId) ?? null,
+    [flocks, flockId]
+  );
 
   const [logs, setLogs] = useState<VetLog[]>([]);
   const [total, setTotal] = useState(0);
@@ -59,6 +57,14 @@ export function FarmVetLogsPage() {
   const [logDate, setLogDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [busy, setBusy] = useState(false);
   const [showNewLog, setShowNewLog] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportLog, setReportLog] = useState<VetLogListRow | null>(null);
+
+  useEffect(() => {
+    const preselect = searchParams.get("flockId");
+    if (preselect) setFlockId(preselect);
+  }, [searchParams, setFlockId]);
 
   const loadLogs = useCallback(async () => {
     if (!token) return;
@@ -111,6 +117,22 @@ export function FarmVetLogsPage() {
     }
   }
 
+  async function openReport(logId: string) {
+    if (!token) return;
+    setReportOpen(true);
+    setReportLoading(true);
+    setReportLog(null);
+    try {
+      const d = await fetchVetLogDetail(token, logId);
+      setReportLog(d.log);
+    } catch (err) {
+      showToast("error", err instanceof Error ? err.message : "Could not load report");
+      setReportOpen(false);
+    } finally {
+      setReportLoading(false);
+    }
+  }
+
   async function handleReview(logId: string, action: "approve" | "reject") {
     try {
       const r = await fetch(`${API_BASE_URL}/api/vet-logs/${encodeURIComponent(logId)}/review`, {
@@ -146,6 +168,19 @@ export function FarmVetLogsPage() {
 
       {!listLoading && !ctxError && flocks.length > 0 ? (
         <>
+          {flockId ? (
+            <FlockPerformancePanel
+              flockId={flockId}
+              flockLabel={selectedFlock?.label}
+              flockCode={selectedFlock?.code}
+              placementDate={selectedFlock?.placementDate}
+            />
+          ) : (
+            <p className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] px-4 py-3 text-sm text-[var(--text-muted)]">
+              Select a flock to view cumulative FCR and performance context.
+            </p>
+          )}
+
           <div className="table-block">
             <div className="table-toolbar">
               <input
@@ -194,24 +229,37 @@ export function FarmVetLogsPage() {
                       <th>Actions taken</th>
                       <th>Recommendations</th>
                       <th>Status</th>
+                      <th className="tbl-actions">Report</th>
                       {isReviewer ? <th className="tbl-actions">Review</th> : null}
                     </tr>
                   </thead>
                   <tbody>
                     {logs.map((l) => (
-                      <tr key={l.id}>
+                      <tr key={l.id} className="cursor-pointer hover:bg-[var(--table-row-hover)]" onClick={() => void openReport(l.id)}>
                         <td className="tbl-mono">{l.logDate}</td>
                         <td className="whitespace-nowrap">{l.authorName ?? l.authorUserId?.slice(0, 8)}</td>
                         <td style={{ maxWidth: "16rem" }}>{l.observations || "—"}</td>
                         <td style={{ maxWidth: "16rem" }}>{l.actionsTaken || "—"}</td>
                         <td style={{ maxWidth: "16rem" }}>{l.recommendations || "—"}</td>
                         <td className="tbl-badge"><StatusBadge status={l.submissionStatus} /></td>
+                        <td className="tbl-actions">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void openReport(l.id);
+                            }}
+                            className="rounded-md border border-[var(--border-color)] px-2 py-1 text-xs font-semibold text-[var(--primary-color)]"
+                          >
+                            View
+                          </button>
+                        </td>
                         {isReviewer ? (
                           <td className="tbl-actions">
                             {l.submissionStatus === "pending_review" ? (
                               <span className="flex flex-wrap gap-1 justify-center">
-                                <button type="button" onClick={() => void handleReview(l.id, "approve")} className="rounded bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">Approve</button>
-                                <button type="button" onClick={() => void handleReview(l.id, "reject")} className="rounded bg-red-600 px-2 py-0.5 text-xs font-semibold text-white">Reject</button>
+                                <button type="button" onClick={(e) => { e.stopPropagation(); void handleReview(l.id, "approve"); }} className="rounded bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">Approve</button>
+                                <button type="button" onClick={(e) => { e.stopPropagation(); void handleReview(l.id, "reject"); }} className="rounded bg-red-600 px-2 py-0.5 text-xs font-semibold text-white">Reject</button>
                               </span>
                             ) : (
                               <span className="text-neutral-400">—</span>
@@ -271,6 +319,14 @@ export function FarmVetLogsPage() {
               </button>
             </form>
           ) : null}
+
+          <SubmissionReportModal open={reportOpen} onClose={() => setReportOpen(false)}>
+            {reportLoading ? (
+              <p className="p-8 text-center text-sm text-[var(--text-muted)] animate-pulse">Loading report…</p>
+            ) : reportLog ? (
+              <VetLogReport log={reportLog} onClose={() => setReportOpen(false)} />
+            ) : null}
+          </SubmissionReportModal>
         </>
       ) : null}
     </div>

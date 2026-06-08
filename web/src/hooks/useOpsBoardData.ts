@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { API_BASE_URL } from "../api/config";
-import { readAuthHeaders } from "../lib/authHeaders";
+import { fetchOpsBoard } from "../api/farm.api";
 import type { OpsBoardResponse } from "../lib/dashboardAdapters";
 
 type State = {
@@ -15,9 +14,7 @@ export function useOpsBoardData(token: string | null) {
   const load = useCallback(async () => {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      const res = await fetch(`${API_BASE_URL}/api/farm/ops-board`, { headers: readAuthHeaders(token) });
-      const body = (await res.json().catch(() => ({}))) as OpsBoardResponse & { error?: string };
-      if (!res.ok) throw new Error(body.error ?? "Could not load operations board");
+      const body = (await fetchOpsBoard(token)) as OpsBoardResponse & { error?: string };
       setState({ data: body, loading: false, error: null });
     } catch (e) {
       setState({

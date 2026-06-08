@@ -405,7 +405,7 @@ export function VetHome() {
           <h2 className="text-sm font-semibold text-neutral-800">{fcrTitle}</h2>
           <p className="mt-2 text-sm text-neutral-600">{fcrBody}</p>
           <Link
-            to={primaryFlockId ? `/farm/flocks/${encodeURIComponent(primaryFlockId)}/fcr` : "/farm/fcr"}
+            to={primaryFlockId ? `/farm/vet-logs?flockId=${encodeURIComponent(primaryFlockId)}` : "/farm/vet-logs"}
             className="bounce-tap mt-3 inline-block rounded-xl border border-[var(--primary-color)]/40 px-3 py-2 text-sm font-semibold text-[var(--primary-color-dark)] hover:bg-[var(--primary-color-soft)]"
           >
             {fcrLink}

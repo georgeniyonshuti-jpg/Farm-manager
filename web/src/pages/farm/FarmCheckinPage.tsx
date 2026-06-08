@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { PhotoCaptureInput } from "../../components/farm/PhotoCaptureInput";
 import { useAuth } from "../../auth/AuthContext";
-import { jsonAuthHeaders } from "../../lib/authHeaders";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { CheckinBandLine } from "./CheckinBandLine";
 import { CheckinUrgencyBadge } from "../../components/farm/CheckinUrgencyBadge";
@@ -10,7 +9,7 @@ import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
-import { API_BASE_URL } from "../../api/config";
+import { createRoundCheckin } from "../../api/farm.api";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import type { CheckinStatus } from "./checkinStatusTypes";
@@ -269,31 +268,22 @@ export function FarmCheckinPage() {
     setBusy(true);
     setSubmitStage("submitting");
     try {
-      // ENV: moved to environment variable
-      const res = await fetch(`${API_BASE_URL}/api/flocks/${flockId}/round-checkins`, {
-        method: "POST",
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify({
-          photosFlockSign,
-          photosThermometer,
-          photosFeed,
-          photosWater,
-          coopTemperatureC: Number(coopTemperatureC),
-          feedAvailable,
-          waterAvailable,
-          feedKg: 0,
-          waterL: 0,
-          mortalityAtCheckin: mortalityAtCheckin === "" ? 0 : Number(mortalityAtCheckin),
-          mortalityReportedInMortalityLog,
-          notes,
-        }),
+      const data = await createRoundCheckin(token, flockId, {
+        photosFlockSign,
+        photosThermometer,
+        photosFeed,
+        photosWater,
+        coopTemperatureC: Number(coopTemperatureC),
+        feedAvailable,
+        waterAvailable,
+        feedOk: feedAvailable,
+        waterOk: waterAvailable,
+        feedKg: 0,
+        waterL: 0,
+        mortalityAtCheckin: mortalityAtCheckin === "" ? 0 : Number(mortalityAtCheckin),
+        mortalityReportedInMortalityLog,
+        notes,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        // FIX: surface photo / server errors on check-in (no silent failure)
-        const msg = (data as { error?: string }).error ?? `Save failed (${res.status})`;
-        throw new Error(msg);
-      }
       setPhotosFlockSign([]);
       setPhotosThermometer([]);
       setPhotosFeed([]);
@@ -406,10 +396,10 @@ export function FarmCheckinPage() {
             <div className="flex gap-2">
               {flockId ? (
                 <Link
-                  to={`/farm/flocks/${encodeURIComponent(flockId)}/fcr`}
+                  to={`/farm/vet-logs?flockId=${encodeURIComponent(flockId)}`}
                   className="shrink-0 rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-1 text-xs font-semibold text-emerald-400 underline"
                 >
-                  FCR
+                  Vet logs & FCR
                 </Link>
               ) : null}
               <button

@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthContext";
 import { LaborerI18nProvider } from "./i18n/laborerI18n";
 import { AppShell } from "./components/layout/AppShell";
@@ -13,7 +13,6 @@ import { PricingPage } from "./pages/PricingPage";
 import { TrialExpiredPage } from "./pages/TrialExpiredPage";
 import { SuperAdminRoute } from "./routes/SuperAdminRoute";
 import { FlockDetailPage } from "./pages/farm/FlockDetailPage";
-import { FlockFcrPage } from "./pages/farm/FlockFcrPage";
 import { AccessDeniedRedirect } from "./routes/AccessDeniedRedirect";
 import { ToastProvider } from "./components/Toast";
 import { VersionBadge } from "./components/VersionBadge";
@@ -21,11 +20,18 @@ import { SystemStatus } from "./components/SystemStatus";
 import { InstallPromptBanner } from "./components/pwa/InstallPromptBanner";
 import { useAuth } from "./auth/AuthContext";
 import { AppLoadingScreen } from "./components/AppLoadingScreen";
+
+function FlockFcrLegacyRedirect() {
+  const { id } = useParams<{ id: string }>();
+  const q = id ? `?flockId=${encodeURIComponent(id)}` : "";
+  return <Navigate to={`../../../vet-logs${q}`} replace />;
+}
 import { ThemeProvider } from "./context/ThemeContext";
 import { useApiHealthStatus } from "./hooks/useApiHealthStatus";
 import { TenantProvider } from "./context/TenantContext";
 import { TenantGuard } from "./components/guards/TenantGuard";
 import { LegacyTenantRedirect } from "./routes/LegacyTenantRedirect";
+import { ERPNextOAuthCallbackPage } from "./pages/auth/ERPNextOAuthCallbackPage";
 import { RootRedirect } from "./routes/RootRedirect";
 
 function AppRoutes() {
@@ -36,6 +42,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      <Route path="/auth/erpnext/callback" element={<ERPNextOAuthCallbackPage />} />
       <Route path="/billing/pricing" element={<PricingPage />} />
       <Route path="/billing/trial-expired" element={<TrialExpiredPage />} />
 
@@ -80,17 +87,8 @@ function AppRoutes() {
                 </ProtectedRoute>
               }
             />
-            <Route
-              path="flocks/:id/fcr"
-              element={
-                <ProtectedRoute
-                  roles={["manager", "vet_manager", "vet", "superuser", "procurement_officer", "sales_coordinator"]}
-                >
-                  <FlockFcrPage />
-                </ProtectedRoute>
-              }
-            />
-            <Route path="fcr" element={null} />
+            <Route path="flocks/:id/fcr" element={<FlockFcrLegacyRedirect />} />
+            <Route path="fcr" element={<Navigate to="../vet-logs" replace />} />
             <Route path="checkin" element={null} />
             <Route path="mortality-log" element={null} />
             <Route path="daily-log" element={null} />
@@ -106,6 +104,8 @@ function AppRoutes() {
             <Route path="payroll" element={null} />
             <Route path="accounting-approvals" element={null} />
             <Route path="odoo-setup" element={null} />
+            <Route path="erpnext-setup" element={null} />
+            <Route path="erpnext" element={null} />
             <Route path="reports" element={null} />
           </Route>
 

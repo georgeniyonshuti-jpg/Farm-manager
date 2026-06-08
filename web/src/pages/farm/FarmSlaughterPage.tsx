@@ -9,6 +9,9 @@ import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
+import { syncSlaughterSaleToERPNext } from "../../api/erpnext.api";
+import { getStoredErpnextCompany, getStoredErpnextCostCenter } from "../../lib/erpnextPrefs";
+import { useERPNextConnection } from "../../context/OdooConnectionContext";
 
 type Flock = { id: string; label: string; birdsLiveEstimate?: number | null };
 type Slaughter = {
@@ -46,6 +49,7 @@ function slaughterReasonLabel(row: Slaughter, reasons: { value: string; label: s
 
 export function FarmSlaughterPage() {
   const { token, user } = useAuth();
+  const { status: erpnextStatus } = useERPNextConnection();
   const slaughterReasonOptions = useReferenceOptions("slaughter_reason", token, FALLBACK_SLAUGHTER_REASONS);
   const { showToast } = useToast();
   const canRecordSlaughter = canFlockAction(user, "slaughter.record");
@@ -202,7 +206,33 @@ export function FarmSlaughterPage() {
       const savedData = d as { birdsLive?: number | null; performance?: { birdsLiveEstimate?: number } };
       const updatedLive = savedData.birdsLive ?? savedData.performance?.birdsLiveEstimate ?? null;
       const liveMsg = updatedLive != null ? ` ${updatedLive} birds remaining in flock.` : "";
-      showToast("success", `Slaughter recorded.${liveMsg} Accounting entry sent to Odoo.`);
+      const birds = Number(form.birdsSlaughtered) || 0;
+      const liveKg = Number(form.avgLiveWeightKg) || 0;
+      const carcassKg = Number(form.avgCarcassWeightKg) || liveKg;
+      const priceKg = Number(form.pricePerKgRwf) || 0;
+      const totalWeight = birds * carcassKg;
+      const totalAmount = Number(form.fairValueRwf) || totalWeight * priceKg;
+      const erpCompany = getStoredErpnextCompany() || erpnextStatus?.company;
+      if (erpnextStatus?.connected && erpCompany && token && totalAmount > 0) {
+        try {
+          await syncSlaughterSaleToERPNext(token, {
+            company: erpCompany,
+            customer: "Farm Customer",
+            date: new Date().toISOString().slice(0, 10),
+            flockId,
+            weightKg: totalWeight,
+            pricePerKg: priceKg,
+            totalAmount,
+            costCenter: getStoredErpnextCostCenter() || undefined,
+          });
+          showToast("success", `Slaughter recorded.${liveMsg} Synced to ERPNext.`);
+        } catch (syncErr) {
+          console.error("ERPNext slaughter sync failed:", syncErr);
+          showToast("success", `Slaughter recorded.${liveMsg} ERPNext sync pending.`);
+        }
+      } else {
+        showToast("success", `Slaughter recorded.${liveMsg} Accounting entry sent to Odoo.`);
+      }
       setForm((v) => ({ ...v, birdsSlaughtered: "", avgLiveWeightKg: "", avgCarcassWeightKg: "", pricePerKgRwf: "", fairValueRwf: "", notes: "" }));
       setShowRecordSlaughter(false);
       await load();
@@ -269,8 +299,8 @@ export function FarmSlaughterPage() {
               <p className="text-xs text-neutral-600">
                 This screen focuses on harvest-oriented metrics. For full-cycle broiler FCR (feed ÷ flock weight gained),
                 open the{" "}
-                <Link className="font-medium text-emerald-800 underline" to={`/farm/flocks/${encodeURIComponent(flockId)}/fcr`}>
-                  Cycle FCR action center
+                <Link className="font-medium text-emerald-800 underline" to={`/farm/vet-logs?flockId=${encodeURIComponent(flockId)}`}>
+                  vet logs & flock FCR
                 </Link>{" "}
                 for this flock.
               </p>

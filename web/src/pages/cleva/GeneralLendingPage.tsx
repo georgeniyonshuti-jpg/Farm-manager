@@ -1,6 +1,11 @@
 import { useMemo, useState } from "react";
 import { PageHeader } from "../../components/PageHeader";
 import { Area, AreaChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useAuth } from "../../auth/AuthContext";
+import { useERPNextConnection } from "../../context/OdooConnectionContext";
+import { createLoanApplication } from "../../api/erpnext.api";
+import { getStoredErpnextCompany } from "../../lib/erpnextPrefs";
+import { useToast } from "../../components/Toast";
 
 type ScheduleRow = {
   month: number;
@@ -219,6 +224,79 @@ export function GeneralLendingPage() {
           <li>Use this alongside the PAYGO and budget tabs to compare risk-adjusted return across lending products.</li>
         </ul>
       </div>
+
+      <ERPNextLoanApplicationForm />
     </div>
+  );
+}
+
+function ERPNextLoanApplicationForm() {
+  const { token } = useAuth();
+  const { status } = useERPNextConnection();
+  const { showToast } = useToast();
+  const [applicant, setApplicant] = useState("");
+  const [loanType, setLoanType] = useState("Personal Loan");
+  const [amount, setAmount] = useState("");
+  const [periods, setPeriods] = useState("12");
+  const [busy, setBusy] = useState(false);
+  const [lastRef, setLastRef] = useState<string | null>(null);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const company = getStoredErpnextCompany() || status?.company;
+    if (!token || !company) return;
+    setBusy(true);
+    try {
+      const res = await createLoanApplication(token, {
+        company,
+        applicant,
+        loanType,
+        amount: Number(amount),
+        repaymentPeriods: Number(periods),
+      });
+      const ref = (res as { loan?: { name?: string }; name?: string }).loan?.name || (res as { name?: string }).name;
+      setLastRef(ref || null);
+      showToast("success", ref ? `Loan application ${ref} created in ERPNext.` : "Loan application submitted.");
+      setApplicant("");
+      setAmount("");
+    } catch (err) {
+      showToast("error", err instanceof Error ? err.message : "Could not create loan");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm space-y-3">
+      <h2 className="text-base font-semibold text-neutral-900">Create loan in ERPNext</h2>
+      {!status?.connected ? (
+        <p className="text-sm text-neutral-600">Connect ERPNext to submit loan applications to Frappe Lending.</p>
+      ) : (
+        <form onSubmit={(e) => void submit(e)} className="grid gap-3 sm:grid-cols-2">
+          <label className="text-sm sm:col-span-2">
+            Applicant (Customer name in ERPNext)
+            <input className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" value={applicant} onChange={(e) => setApplicant(e.target.value)} required />
+          </label>
+          <label className="text-sm">
+            Loan product
+            <input className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" value={loanType} onChange={(e) => setLoanType(e.target.value)} required />
+          </label>
+          <label className="text-sm">
+            Amount (RWF)
+            <input type="number" className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" value={amount} onChange={(e) => setAmount(e.target.value)} required />
+          </label>
+          <label className="text-sm">
+            Repayment periods (months)
+            <input type="number" className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" value={periods} onChange={(e) => setPeriods(e.target.value)} required />
+          </label>
+          <div className="sm:col-span-2 flex items-center gap-3">
+            <button type="submit" disabled={busy} className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+              {busy ? "Submitting…" : "Submit to ERPNext"}
+            </button>
+            {lastRef && <span className="text-xs font-mono text-emerald-700">Last: {lastRef}</span>}
+          </div>
+        </form>
+      )}
+    </section>
   );
 }

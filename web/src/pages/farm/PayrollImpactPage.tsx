@@ -8,6 +8,9 @@ import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { API_BASE_URL } from "../../api/config";
+import { getPayrollFromERPNext } from "../../api/erpnext.api";
+import { getStoredErpnextCompany } from "../../lib/erpnextPrefs";
+import { useERPNextConnection } from "../../context/OdooConnectionContext";
 
 type PayrollRow = {
   id: string;
@@ -48,6 +51,7 @@ type FieldPayrollRates = {
 export function PayrollImpactPage() {
   const { token, user } = useAuth();
   const { showToast } = useToast();
+  const { status: erpnextStatus } = useERPNextConnection();
   const canEditFieldRates = user?.role === "manager" || user?.role === "superuser";
   const canDecidePayments =
     user?.role === "superuser"
@@ -69,6 +73,7 @@ export function PayrollImpactPage() {
     missedFeedRwf: "",
     lateDeductionRwf: "",
   });
+  const [erpnextPayrollTotal, setErpnextPayrollTotal] = useState<number | null>(null);
 
   const loadFieldRates = useCallback(async () => {
     if (!canEditFieldRates || !token) return;
@@ -117,6 +122,24 @@ export function PayrollImpactPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const company = getStoredErpnextCompany() || erpnextStatus?.company;
+    if (!token || !erpnextStatus?.connected || !company) {
+      setErpnextPayrollTotal(null);
+      return;
+    }
+    void getPayrollFromERPNext(token, company, from, to)
+      .then((rows) => {
+        if (!Array.isArray(rows)) {
+          setErpnextPayrollTotal(null);
+          return;
+        }
+        const total = rows.reduce((s, r) => s + (Number(r.total_amount_paid) || 0), 0);
+        setErpnextPayrollTotal(total);
+      })
+      .catch(() => setErpnextPayrollTotal(null));
+  }, [token, erpnextStatus?.connected, erpnextStatus?.company, from, to]);
 
   const summary = useMemo(() => {
     let bonuses = 0;
@@ -389,7 +412,7 @@ export function PayrollImpactPage() {
       </div>
 
       {!loading && !error ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
             <p className="text-xs font-medium text-emerald-900">Total bonuses</p>
             <p className="mt-1 text-lg font-semibold text-emerald-950">{formatRwf(summary.bonuses)}</p>
@@ -405,6 +428,15 @@ export function PayrollImpactPage() {
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
             <p className="text-xs font-medium text-amber-900">Pending approvals</p>
             <p className="mt-1 text-lg font-semibold text-amber-950">{summary.pending}</p>
+          </div>
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+            <p className="text-xs font-medium text-indigo-900">ERPNext payroll (range)</p>
+            <p className="mt-1 text-lg font-semibold text-indigo-950">
+              {erpnextPayrollTotal != null ? formatRwf(erpnextPayrollTotal) : erpnextStatus?.connected ? "—" : "Not connected"}
+            </p>
+            {erpnextPayrollTotal != null && (
+              <p className="mt-1 text-[10px] text-indigo-800">Farm net delta: {formatRwf(summary.net)}</p>
+            )}
           </div>
         </div>
       ) : null}

@@ -18,7 +18,6 @@ import { FarmCheckinPage } from "../pages/farm/FarmCheckinPage";
 import { FarmCheckinReviewPage } from "../pages/farm/FarmCheckinReviewPage";
 import { FarmDailyLogPage } from "../pages/farm/FarmDailyLogPage";
 import { FarmFeedPage } from "../pages/farm/FarmFeedPage";
-import { FarmFcrRedirectPage } from "../pages/farm/FarmFcrRedirectPage";
 import { FarmInventoryPage } from "../pages/farm/FarmInventoryPage";
 import { FarmMortalityLogPage } from "../pages/farm/FarmMortalityLogPage";
 import { FarmMortalityPage } from "../pages/farm/FarmMortalityPage";
@@ -28,7 +27,8 @@ import { FarmVetLogsPage } from "../pages/farm/FarmVetLogsPage";
 import { FlockListPage } from "../pages/farm/FlockListPage";
 import { FlockScheduleSettingsPage } from "../pages/farm/FlockScheduleSettingsPage";
 import { LogScheduleSettingsPage } from "../pages/farm/LogScheduleSettingsPage";
-import { OdooSetupPage } from "../pages/farm/OdooSetupPage";
+import { ERPNextSetupPage } from "../pages/farm/ERPNextSetupPage";
+import { ERPNextEmbedPage } from "../pages/farm/ERPNextEmbedPage";
 import { PayrollImpactPage } from "../pages/farm/PayrollImpactPage";
 import { ReportsCenterPage } from "../pages/farm/ReportsCenterPage";
 import { LaborerEarningsPage } from "../pages/laborer/LaborerEarningsPage";
@@ -88,12 +88,6 @@ export function PersistentAppPages() {
         <PersistentPageSlot active={pathExact(p, "/farm/flocks")} mountDelayMs={0}>
           <PersistentRouteGuard roles={[...FLOCK_ROLES]}>
             <FlockListPage />
-          </PersistentRouteGuard>
-        </PersistentPageSlot>
-
-        <PersistentPageSlot active={pathExact(p, "/farm/fcr")} mountDelayMs={500}>
-          <PersistentRouteGuard roles={[...FLOCK_ROLES]}>
-            <FarmFcrRedirectPage />
           </PersistentRouteGuard>
         </PersistentPageSlot>
 
@@ -179,9 +173,15 @@ export function PersistentAppPages() {
           </PersistentRouteGuard>
         </PersistentPageSlot>
 
-        <PersistentPageSlot active={pathExact(p, "/farm/odoo-setup")} mountDelayMs={2000}>
+        <PersistentPageSlot active={pathExact(p, "/farm/odoo-setup") || pathExact(p, "/farm/erpnext-setup")} mountDelayMs={2000}>
           <PersistentRouteGuard roles={["manager", "superuser"]}>
-            <OdooSetupPage />
+            <ERPNextSetupPage />
+          </PersistentRouteGuard>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/farm/erpnext")} mountDelayMs={2050}>
+          <PersistentRouteGuard roles={["manager", "superuser"]}>
+            <ERPNextEmbedPage />
           </PersistentRouteGuard>
         </PersistentPageSlot>
 

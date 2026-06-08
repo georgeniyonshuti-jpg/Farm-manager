@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
-import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
+import { readAuthHeaders } from "../../lib/authHeaders";
+import { fetchFeedEntries, createFeedEntry, IS_FRAPPE_MODE } from "../../api/farm.api";
 import { API_BASE_URL } from "../../api/config";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
@@ -10,6 +11,9 @@ import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { SubmissionStageScreen } from "../../components/farm/SubmissionStageScreen";
+import { syncFeedPurchaseToERPNext } from "../../api/erpnext.api";
+import { getStoredErpnextCompany, getStoredErpnextCostCenter } from "../../lib/erpnextPrefs";
+import { useERPNextConnection } from "../../context/OdooConnectionContext";
 import { useLaborerT, TranslatedText } from "../../i18n/laborerI18n";
 
 type FeedEntry = {
@@ -32,6 +36,7 @@ function StatusBadge({ status }: { status?: string }) {
 
 export function FarmFeedPage() {
   const { token } = useAuth();
+  const { status: erpnextStatus } = useERPNextConnection();
   const { showToast } = useToast();
   const {
     flocks,
@@ -73,29 +78,28 @@ export function FarmFeedPage() {
       return;
     }
     try {
-      const [er, br] = await Promise.all([
-        fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/feed-entries?limit=25`, { headers: readAuthHeaders(token) }),
-        // Farm-wide balance for the selected feed type
-        fetch(
+      const ed = await fetchFeedEntries(token, flockId);
+      setEntries((ed.entries ?? []) as FeedEntry[]);
+      setEntriesError(null);
+      if (!IS_FRAPPE_MODE) {
+        const br = await fetch(
           `${API_BASE_URL}/api/inventory/stock-summary${feedType ? `?feed_type=${encodeURIComponent(feedType)}` : ""}`,
           { headers: readAuthHeaders(token) }
-        ),
-      ]);
-      const ed = await er.json();
-      if (!er.ok) throw new Error((ed as { error?: string }).error ?? "Entries failed");
-      setEntries(((ed as { entries?: FeedEntry[] }).entries) ?? []);
-      setEntriesError(null);
-      try {
-        const bd = await br.json();
-        const rows = (bd as { summary?: Array<{ feedType: string | null; balanceKg: number }> }).summary ?? [];
-        const matchedRow = feedType
-          ? rows.find((r) => r.feedType === feedType)
-          : rows.reduce(
-              (acc, r) => ({ feedType: null, balanceKg: acc.balanceKg + r.balanceKg }),
-              { feedType: null, balanceKg: 0 }
-            );
-        setInventoryBalanceKg(matchedRow?.balanceKg ?? null);
-      } catch {
+        );
+        try {
+          const bd = await br.json();
+          const rows = (bd as { summary?: Array<{ feedType: string | null; balanceKg: number }> }).summary ?? [];
+          const matchedRow = feedType
+            ? rows.find((r) => r.feedType === feedType)
+            : rows.reduce(
+                (acc, r) => ({ feedType: null, balanceKg: acc.balanceKg + r.balanceKg }),
+                { feedType: null, balanceKg: 0 }
+              );
+          setInventoryBalanceKg(matchedRow?.balanceKg ?? null);
+        } catch {
+          setInventoryBalanceKg(null);
+        }
+      } else {
         setInventoryBalanceKg(null);
       }
     } catch (e) {
@@ -126,17 +130,32 @@ export function FarmFeedPage() {
     setBusy(true);
     setSubmitStage("submitting");
     try {
-      const r = await fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/feed-entries`, {
-        method: "POST",
-        headers: jsonAuthHeaders(token),
-        body: JSON.stringify({
-          feedKg: kg,
-          notes: [`feed_type:${feedType}`, notes.trim()].filter(Boolean).join(" | "),
-        }),
+      await createFeedEntry(token, flockId, {
+        feedKg: kg,
+        feedType,
+        notes: notes.trim() || undefined,
       });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Save failed");
-      showToast("success", "Feed logged.");
+      const erpCompany = getStoredErpnextCompany() || erpnextStatus?.company;
+      if (!IS_FRAPPE_MODE && erpnextStatus?.connected && erpCompany && token) {
+        try {
+          await syncFeedPurchaseToERPNext(token, {
+            company: erpCompany,
+            supplier: "Farm Feed Supplier",
+            date: new Date().toISOString().slice(0, 10),
+            feedType,
+            quantity: kg,
+            unitPrice: 0,
+            totalAmount: 0,
+            costCenter: getStoredErpnextCostCenter() || undefined,
+          });
+          showToast("success", "Feed logged and synced to ERPNext.");
+        } catch (syncErr) {
+          console.error("ERPNext sync failed:", syncErr);
+          showToast("success", "Feed logged (ERPNext sync pending).");
+        }
+      } else {
+        showToast("success", "Feed logged.");
+      }
       setFeedKg("");
       setFeedType((feedTypeOptions[0]?.value ?? "starter"));
       setNotes("");

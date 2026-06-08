@@ -14,6 +14,7 @@
 
 import express from "express";
 import { getAuthenticatedUserId } from "../services/odoo/odooClient.js";
+import erpnextRouter from "./erpnext.routes.js";
 import {
   FARM_ACCOUNT_DEFS,
   checkFarmAccountStatus,
@@ -53,7 +54,10 @@ function canViewOdooConnectionStatus(user) {
  * GET /api/odoo-setup/status
  * Tests Odoo connection and returns summary counts.
  */
-router.get("/status", async (req, res) => {
+router.get("/status", async (req, res, next) => {
+  if (process.env.ERPNEXT_API_KEY && process.env.ERPNEXT_API_SECRET) {
+    return erpnextRouter.handle(req, res, next);
+  }
   if (!canViewOdooConnectionStatus(req.authUser)) return res.status(403).json({ error: "Not allowed to view Odoo status." });
   try {
     const uid = await getAuthenticatedUserId();

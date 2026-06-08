@@ -6,6 +6,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { API_BASE_URL } from "../../api/config";
+import { toPhotoSlots } from "../../farm/checkinPhotoUtils";
 
 type PendingCheckin = {
   id: string;
@@ -29,30 +30,6 @@ type PendingCheckin = {
   reviewedAt?: string | null;
   reviewNotes?: string | null;
 };
-
-type PhotoSlots = {
-  flockSign: string[];
-  thermometer: string[];
-  feed: string[];
-  water: string[];
-};
-
-function toPhotoSlots(checkin: PendingCheckin): PhotoSlots {
-  const toArray = (v: unknown) => (Array.isArray(v) ? v.map(String).filter((x) => x.length > 20) : []);
-  const urls = checkin.photoUrls;
-  const out: PhotoSlots = { flockSign: [], thermometer: [], feed: [], water: [] };
-  if (Array.isArray(urls)) {
-    out.flockSign = toArray(urls);
-  } else if (urls && typeof urls === "object") {
-    const rec = urls as Record<string, unknown>;
-    out.flockSign = toArray(rec.flockSign ?? rec.photos);
-    out.thermometer = toArray(rec.thermometer);
-    out.feed = toArray(rec.feed);
-    out.water = toArray(rec.water);
-  }
-  if (out.flockSign.length === 0 && checkin.photoUrl) out.flockSign = [String(checkin.photoUrl)];
-  return out;
-}
 
 export function FarmCheckinReviewPage() {
   const { token } = useAuth();
@@ -167,12 +144,20 @@ export function FarmCheckinReviewPage() {
         title="Review round check-ins"
         subtitle="Approve laborer and junior vet submissions. Payroll is approved separately under Payroll."
         action={
-          <Link
-            to="/farm/payroll"
-            className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
-          >
-            Payroll
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              to="/farm/reports?type=field_submissions&tab=checkins"
+              className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
+            >
+              View all in Reports
+            </Link>
+            <Link
+              to="/farm/payroll"
+              className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
+            >
+              Payroll
+            </Link>
+          </div>
         }
       />
 

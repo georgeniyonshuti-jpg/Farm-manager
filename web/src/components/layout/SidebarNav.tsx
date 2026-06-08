@@ -146,11 +146,6 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
     canSee("farm_slaughter")
       ? { to: "/farm/slaughter", label: "Slaughter & FCR" }
       : null;
-  const cycleFcrNavItem: NavItem | null =
-    activeWorkspace === "farm" && canFlockAction(user, "flock.view") && canSee("farm_flocks")
-      ? { to: "/farm/fcr", label: "Cycle FCR" }
-      : null;
-
   const laborerEarningsItem: NavItem | null =
     activeWorkspace === "farm" &&
     (user.role === "laborer" ||
@@ -167,10 +162,15 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
       ? { to: "/farm/accounting-approvals", label: "Accounting approvals" }
       : null;
 
-  const odooSetupNavItem: NavItem | null =
+  const erpnextSetupNavItem: NavItem | null =
     activeWorkspace === "farm" &&
     (user.role === "manager" || user.role === "superuser")
-      ? { to: "/farm/odoo-setup", label: "Odoo integration" }
+      ? { to: "/farm/erpnext-setup", label: "ERPNext integration" }
+      : null;
+  const erpnextDeskNavItem: NavItem | null =
+    activeWorkspace === "farm" &&
+    (user.role === "manager" || user.role === "superuser")
+      ? { to: "/farm/erpnext", label: "ERPNext desk" }
       : null;
   const reportsCenterNavItem: NavItem | null =
     activeWorkspace === "farm" &&
@@ -188,9 +188,9 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
     payrollNavItem,
     treatmentNavItem,
     slaughterNavItem,
-    cycleFcrNavItem,
     accountingApprovalsNavItem,
-    odooSetupNavItem,
+    erpnextSetupNavItem,
+    erpnextDeskNavItem,
     reportsCenterNavItem,
   ].filter(Boolean) as NavItem[];
   const farmCore = farmCoreNavItems(user).filter((item) => {
@@ -259,7 +259,6 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
         "/farm/vet-logs",
         "/farm/treatments",
         "/farm/slaughter",
-        "/farm/fcr",
       ]),
       planning_workforce: pick([
         "/farm/batch-schedule",
@@ -270,6 +269,8 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
       ]),
       integrations_admin: pick([
         "/farm/accounting-approvals",
+        "/farm/erpnext-setup",
+        "/farm/erpnext",
         "/farm/odoo-setup",
         "/farm/reports",
       ]),

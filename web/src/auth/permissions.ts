@@ -123,7 +123,7 @@ export const PAGE_ACCESS_DEFS: Array<{ key: string; label: string; prefixes: str
   { key: "farm_vet_logs", label: "Vet logs", prefixes: ["/farm/vet-logs"] },
   { key: "farm_mortality", label: "Mortality tracking", prefixes: ["/farm/mortality"] },
   { key: "farm_inventory", label: "Feed inventory", prefixes: ["/farm/inventory"] },
-  { key: "farm_flocks", label: "Flocks", prefixes: ["/farm/flocks", "/farm/fcr"] },
+  { key: "farm_flocks", label: "Flocks", prefixes: ["/farm/flocks"] },
   { key: "farm_batch_schedule", label: "Check-in schedule", prefixes: ["/farm/batch-schedule"] },
   { key: "farm_schedule_settings", label: "Schedule settings", prefixes: ["/farm/schedule-settings"] },
   { key: "farm_payroll", label: "Payroll", prefixes: ["/farm/payroll"] },

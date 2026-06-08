@@ -4,10 +4,13 @@ import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
 import { API_BASE_URL } from "../../api/config";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
+import { ERPNextReportsSection } from "../../components/accounting/ERPNextReportsSection";
 import { useToast } from "../../components/Toast";
+import { FieldSubmissionsSection } from "../../components/farm/reports/FieldSubmissionsSection";
 
 type FlockOption = { id: string; label: string };
-type ReportType = "flock_deep_dive" | "flock_comparison" | "farm_operations";
+type ReportType = "flock_deep_dive" | "flock_comparison" | "farm_operations" | "field_submissions";
+type SubmissionTab = "checkins" | "vet_logs";
 
 export function ReportsCenterPage() {
   const { token } = useAuth();
@@ -21,10 +24,32 @@ export function ReportsCenterPage() {
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<unknown>(null);
 
+  const submissionTab: SubmissionTab = useMemo(() => {
+    const tab = new URLSearchParams(location.search).get("tab");
+    return tab === "vet_logs" ? "vet_logs" : "checkins";
+  }, [location.search]);
+
+  const submissionFilters = useMemo(() => {
+    const sp = new URLSearchParams(location.search);
+    return {
+      flockId: sp.get("flockId") ?? "",
+      status: sp.get("status") ?? "all",
+      from: sp.get("from") ?? "",
+      to: sp.get("to") ?? "",
+    };
+  }, [location.search]);
+
   useEffect(() => {
     const sp = new URLSearchParams(location.search);
     const t = sp.get("type");
-    if (t === "flock_deep_dive" || t === "flock_comparison" || t === "farm_operations") setReportType(t);
+    if (
+      t === "flock_deep_dive" ||
+      t === "flock_comparison" ||
+      t === "farm_operations" ||
+      t === "field_submissions"
+    ) {
+      setReportType(t);
+    }
     const preselect = sp.get("flockId");
     if (preselect) setSelectedIds([preselect]);
   }, [location.search]);
@@ -105,15 +130,27 @@ export function ReportsCenterPage() {
     }
   }
 
-  const canPreview = reportType === "farm_operations"
-    ? true
-    : reportType === "flock_deep_dive"
-      ? selectedIds.length === 1
-      : selectedIds.length >= 2;
+  const canPreview = reportType === "field_submissions"
+    ? false
+    : reportType === "farm_operations"
+      ? true
+      : reportType === "flock_deep_dive"
+        ? selectedIds.length === 1
+        : selectedIds.length >= 2;
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
       <PageHeader title="Reports Center" subtitle="Generate beautiful farm intelligence PDFs with analytics, tables, and insights." />
+      {reportType === "field_submissions" ? (
+        <FieldSubmissionsSection
+          flocks={flocks}
+          initialTab={submissionTab}
+          initialFlockId={submissionFilters.flockId}
+          initialStatus={submissionFilters.status}
+          initialFrom={submissionFilters.from}
+          initialTo={submissionFilters.to}
+        />
+      ) : null}
       <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4">
         <div className="grid gap-3 md:grid-cols-4">
           <div className="md:col-span-2">
@@ -122,6 +159,7 @@ export function ReportsCenterPage() {
               <option value="flock_deep_dive">Flock deep dive</option>
               <option value="flock_comparison">Flock comparison (2+)</option>
               <option value="farm_operations">Farm operations overview</option>
+              <option value="field_submissions">Field submissions</option>
             </select>
           </div>
           <div>
@@ -134,7 +172,7 @@ export function ReportsCenterPage() {
           </div>
         </div>
 
-        {reportType !== "farm_operations" && (
+        {reportType !== "farm_operations" && reportType !== "field_submissions" && (
           <div className="mt-3">
             <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">Select flock(s)</label>
             <select
@@ -153,32 +191,38 @@ export function ReportsCenterPage() {
           </div>
         )}
 
-        <div className="mt-4 flex gap-2">
-          <button
-            type="button"
-            disabled={loading || !canPreview}
-            onClick={() => void runPreview()}
-            className="rounded-lg border border-[var(--border-color)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)] disabled:opacity-60"
-          >
-            {loading ? "Working..." : "Preview JSON"}
-          </button>
-          <button
-            type="button"
-            disabled={loading || !canPreview}
-            onClick={() => void downloadPdf()}
-            className="rounded-lg bg-[var(--primary-color)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-          >
-            {loading ? "Working..." : "Download PDF"}
-          </button>
-        </div>
+        {reportType !== "field_submissions" ? (
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              disabled={loading || !canPreview}
+              onClick={() => void runPreview()}
+              className="rounded-lg border border-[var(--border-color)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)] disabled:opacity-60"
+            >
+              {loading ? "Working..." : "Preview JSON"}
+            </button>
+            <button
+              type="button"
+              disabled={loading || !canPreview}
+              onClick={() => void downloadPdf()}
+              className="rounded-lg bg-[var(--primary-color)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {loading ? "Working..." : "Download PDF"}
+            </button>
+          </div>
+        ) : null}
       </section>
 
-      <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4">
-        <p className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Preview output</p>
-        <pre className="max-h-[420px] overflow-auto rounded border border-[var(--border-color)] bg-[var(--surface-input)] p-3 text-xs text-[var(--text-secondary)]">
-          {preview ? JSON.stringify(preview, null, 2) : "No preview yet."}
-        </pre>
-      </section>
+      {reportType !== "field_submissions" ? (
+        <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4">
+          <p className="mb-2 text-sm font-semibold text-[var(--text-primary)]">Preview output</p>
+          <pre className="max-h-[420px] overflow-auto rounded border border-[var(--border-color)] bg-[var(--surface-input)] p-3 text-xs text-[var(--text-secondary)]">
+            {preview ? JSON.stringify(preview, null, 2) : "No preview yet."}
+          </pre>
+        </section>
+      ) : null}
+
+      <ERPNextReportsSection />
     </div>
   );
 }

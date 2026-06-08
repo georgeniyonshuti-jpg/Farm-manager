@@ -7,3 +7,4 @@ dist
 server/data/*.sqlite
 server/data/*.sqlite-wal
 server/data/*.sqlite-shm
+server/data/erpnext-sync-log.json
