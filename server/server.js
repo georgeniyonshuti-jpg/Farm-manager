@@ -52,8 +52,11 @@ import ias41Router, { initIas41Service } from "./src/routes/ias41Routes.js";
 import reconciliationRouter, { initReconciliationRouter } from "./src/routes/accountingReconciliation.js";
 import odooSetupRouter from "./src/routes/odooSetupRoute.js";
 import erpnextRouter from "./src/routes/erpnext.routes.js";
-import erpnextWebhookRouter from "./src/routes/erpnext-webhooks.routes.js";
+import erpnextWebhookRouter, { initErpnextWebhookRouter } from "./src/routes/erpnext-webhooks.routes.js";
+import clevafarmEntitiesRouter, { initClevaFarmEntitiesRouter } from "./src/routes/clevafarmEntities.routes.js";
 import { initErpnextDb } from "./src/services/erpnext/erpnext.syncLog.js";
+import { initClevaFarmSyncWorker, processClevaFarmOutbox } from "./src/services/clevafarm/syncOutbox.js";
+import { emitEntitySync, initClevaFarmEmit } from "./src/services/clevafarm/emitEntitySync.js";
 import { initErpnextConfigDb } from "./src/services/erpnext/erpnext.config.js";
 import { createSaasRouter } from "./src/routes/saasRoutes.js";
 import { initOdooSyncWorker, processOdooSyncOutbox, enqueueOdooSync } from "./src/services/odoo/odooSyncWorker.js";
@@ -69,6 +72,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+function clevaSync(entityType, entityId) {
+  void emitEntitySync(entityType, entityId).catch((e) => {
+    console.error(
+      "[clevafarm-sync] emit failed:",
+      entityType,
+      entityId,
+      e instanceof Error ? e.message : e
+    );
+  });
+}
 const ENABLE_DEMO_USERS = String(process.env.ENABLE_DEMO_USERS ?? "").toLowerCase() === "true";
 const DEMO_USERS_ENABLED = !IS_PRODUCTION && ENABLE_DEMO_USERS;
 // FIX: move hardcoded values to environment variables
@@ -1459,6 +1473,10 @@ async function dbQuery(sql, params = []) {
 
 if (dbPool) {
   initErpnextDb(dbQuery);
+  initClevaFarmSyncWorker(dbQuery, hasDb);
+  initClevaFarmEmit(dbQuery, hasDb);
+  initClevaFarmEntitiesRouter(dbQuery);
+  initErpnextWebhookRouter(dbQuery);
   initErpnextConfigDb(dbQuery);
 }
 
@@ -2230,6 +2248,7 @@ async function upsertSupplierByName(rawName) {
       if (row?.id) {
         const rec = { id: String(row.id), name: String(row.name), normalizedName: String(row.normalizedName) };
         suppliersByNormalized.set(rec.normalizedName, rec);
+        clevaSync("farm_supplier", rec.id);
         return rec;
       }
     } catch {
@@ -2296,6 +2315,7 @@ async function upsertBarnByName(rawName) {
       if (row?.id) {
         const rec = { id: String(row.id), name: String(row.name), normalizedName: String(row.normalizedName) };
         barnNamesByNormalized.set(rec.normalizedName, rec);
+        clevaSync("farm_barn", rec.id);
         return rec;
       }
     } catch {
@@ -3561,6 +3581,7 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
       status,
       barnName: barn.name,
     });
+    clevaSync("flock", createdId);
     res.status(201).json({ flock: flockRow });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -3860,6 +3881,7 @@ app.patch("/api/flocks/:id", requireAuth, requireFarmAccess, requireSuperuser, r
       placementDate,
       barnName: barn.name,
     });
+    clevaSync("flock", id);
     res.json({ flock: refreshed ?? flocksById.get(id) });
   } catch (e) {
     console.error("[ERROR]", "[db] PATCH /api/flocks/:id:", e instanceof Error ? e.message : e);
@@ -3934,6 +3956,7 @@ app.patch("/api/flocks/:id/archive", requireAuth, requireFarmAccess, requireSupe
   const next = { ...f, status: "archived" };
   flocksById.set(id, next);
   appendAudit(req.authUser.id, req.authUser.role, "flock.manual_archive", "flock", id, {});
+  clevaSync("flock", id);
   res.json({ ok: true, flock: next });
 });
 
@@ -4340,6 +4363,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
       if (rid) {
         id = String(rid);
         row.id = id;
+        clevaSync("farm_checkin", id);
       }
       try {
         await syncCheckInsFromDb();
@@ -4408,6 +4432,7 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
         if (mr) {
           mid = String(mr);
           mortRow.id = mid;
+          clevaSync("mortality_log", mid);
         }
         linkedMortalitySavedToDb = true;
       } catch (e) {
@@ -4556,6 +4581,7 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
     feedKg,
     submissionStatus,
   });
+  if (feedSavedToDb) clevaSync("feed_log", id);
   const summary = await buildFlockPerformanceSummary(f.id);
   res.json({
     ok: true,
@@ -4667,6 +4693,7 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
       if (rid) {
         id = String(rid);
         row.id = id;
+        clevaSync("mortality_log", id);
       }
       mortalitySavedToDb = true;
     } catch (e) {
@@ -5151,6 +5178,7 @@ app.patch("/api/check-ins/:id/review", requireAuth, requireFarmAccess, requirePa
     }
   }
   appendAudit(req.authUser.id, req.authUser.role, `farm.check_in.${action}`, "check_in", checkinId, { reviewNotes });
+  clevaSync("farm_checkin", checkinId);
   res.json({ ok: true, status: newStatus });
 });
 
@@ -5227,6 +5255,7 @@ app.patch("/api/feed-entries/:id/review", requireAuth, requireFarmAccess, requir
     mem.reviewedAt = new Date().toISOString();
     mem.reviewNotes = reviewNotes;
   }
+  clevaSync("feed_log", entryId);
 
   // Auto-deduct inventory when a feed log is approved (idempotent via feed_entry_id unique index)
   if (action === "approve" && hasDb() && isPersistableUuid(entryId) && isPersistableUuid(req.authUser.id)) {
@@ -5446,6 +5475,7 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
     vetLogs.push(row);
   }
   appendAudit(req.authUser.id, req.authUser.role, "farm.vet_log.create", "flock", flockId, { vetLogId: id, submissionStatus });
+  if (vetLogSavedToDb) clevaSync("farm_vet_log", id);
   res.json({ ok: true, log: row });
 });
 
@@ -5578,6 +5608,7 @@ app.patch("/api/vet-logs/:id/review", requireAuth, requireFarmAccess, requireLea
     mem.updatedAt = new Date().toISOString();
   }
   appendAudit(req.authUser.id, req.authUser.role, `farm.vet_log.${action}`, "vet_log", logId, { reviewNotes });
+  clevaSync("farm_vet_log", logId);
   res.json({ ok: true, status: newStatus });
 });
 
@@ -6249,6 +6280,7 @@ app.post("/api/flocks/:id/treatments", requireAuth, requireFarmAccess, requirePa
     return;
   }
   appendAudit(req.authUser.id, req.authUser.role, "flock.treatment.create", "flock", f.id, { treatmentId: row.id });
+  clevaSync("farm_treatment", row.id);
   res.status(201).json({ treatment: row });
 });
 
@@ -6367,6 +6399,7 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
     perf = null;
   }
   appendAudit(req.authUser.id, req.authUser.role, "flock.slaughter.create", "flock", f.id, { slaughterId: row.id });
+  clevaSync("slaughter_record", row.id);
   await maybeAutoArchiveFlock(f.id, { userId: req.authUser.id, role: req.authUser.role });
 
   // Accounting: auto-post slaughter conversion to Odoo.
@@ -6692,6 +6725,7 @@ app.post("/api/weigh-ins/:flockId", requireAuth, requireFarmAccess, requirePageA
       avgWeightKg,
       sampleSize,
     });
+    if (row?.id) clevaSync("farm_weigh_in", String(row.id));
     res.status(201).json({ weighIn: row ? mapWeighInRow(row) : null });
   } catch (e) {
     console.error("[ERROR]", "[db] POST weigh-ins:", e instanceof Error ? e.message : e);
@@ -7132,6 +7166,7 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     quantityKg,
     requestedApproverUserId,
   });
+  if (procurementSavedToDb && row?.id) clevaSync("feed_inventory_transaction", row.id);
 
   // Accounting: post procurement directly to Odoo when cost is available.
   if (hasDb() && procurementSavedToDb && row.id) {
@@ -7269,6 +7304,7 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
     flockId,
     quantityKg,
   });
+  if (feedConsumptionSavedToDb && row?.id) clevaSync("feed_inventory_transaction", row.id);
   res.status(201).json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(flockId) });
 });
 
@@ -7371,6 +7407,7 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
     feedType,
     deltaKg,
   });
+  if (adjustmentSavedToDb && row?.id) clevaSync("feed_inventory_transaction", row.id);
   res.status(201).json({ row: inventoryRowPayload(row), summary: computeInventoryStockSummary() });
 });
 
@@ -7552,6 +7589,7 @@ app.post("/api/daily-logs", requireAuth, requireFarmAccess, requirePageAccess("f
       }
       dlId = String(rid);
       dailySavedToDb = true;
+      clevaSync("daily_farm_log", dlId);
     } catch (e) {
       console.error("[ERROR]", "[db] POST daily-logs:", e instanceof Error ? e.message : e);
       res.status(503).json({ error: "Could not save daily log." });
@@ -8415,6 +8453,7 @@ app.post("/api/log-schedule", requireAuth, requireFarmAccess, requirePageAccess(
   }
   logSchedules.push(row);
   appendAudit(req.authUser.id, req.authUser.role, "log_schedule.create", "flock", flockId, { scheduleId: id });
+  clevaSync("farm_checkin_schedule", id);
   res.status(201).json({ schedule: row });
 });
 
@@ -8467,6 +8506,7 @@ app.patch("/api/log-schedule/:id", requireAuth, requireFarmAccess, requirePageAc
     }
   }
   appendAudit(req.authUser.id, req.authUser.role, "log_schedule.update", "flock", s.flockId, { scheduleId: s.id });
+  clevaSync("farm_checkin_schedule", s.id);
   res.json({ schedule: s });
 });
 
@@ -8564,6 +8604,7 @@ app.post("/api/payroll-impact", requireAuth, requireFarmAccess, requirePageAcces
     userId,
     rwfDelta,
   });
+  clevaSync("farm_payroll_impact", row.id);
   res.status(201).json({ entry: row });
 });
 
@@ -8874,6 +8915,7 @@ app.post("/api/medicine", requireAuth, requireFarmAccess, requirePageAccess("far
       name,
       quantity,
     });
+    if (r.rows[0]?.id) clevaSync("farm_medicine_item", String(r.rows[0].id));
     res.status(201).json({ medicine: r.rows[0] });
   } catch (e) {
     console.error("[ERROR]", "[db] POST /api/medicine:", e instanceof Error ? e.message : e);
@@ -8989,6 +9031,7 @@ app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requirePageAccess
       }
     }
 
+    if (medLotId) clevaSync("farm_medicine_lot", medLotId);
     res.status(201).json({ lot: ins.rows[0] });
   } catch (e) {
     try { await client.query("ROLLBACK"); } catch {}
@@ -9153,6 +9196,7 @@ app.post("/api/treatment-rounds", requireAuth, requireFarmAccess, requirePageAcc
       flockId,
       plannedFor,
     });
+    if (r.rows[0]?.id) clevaSync("farm_treatment_round", String(r.rows[0].id));
     res.status(201).json({ round: r.rows[0] });
   } catch (e) {
     console.error("[ERROR]", "[db] POST /api/treatment-rounds:", e instanceof Error ? e.message : e);
@@ -9230,6 +9274,7 @@ app.patch("/api/treatment-rounds/:id/status", requireAuth, requireFarmAccess, re
     }
     await client.query("COMMIT");
     appendAudit(req.authUser.id, req.authUser.role, "treatment.round.status", "treatment_round", id, { status });
+    clevaSync("farm_treatment_round", id);
     res.json({ ok: true });
   } catch (e) {
     try { await client.query("ROLLBACK"); } catch {}
@@ -9702,6 +9747,7 @@ app.use("/api/accounting-approvals", requireAuth, accountingApprovalsRouter);
 app.use("/api/ias41", requireAuth, ias41Router);
 app.use("/api/accounting-reconciliation", requireAuth, reconciliationRouter);
 app.use("/api/odoo-setup", requireAuth, odooSetupRouter);
+app.use("/api/entities", clevafarmEntitiesRouter);
 app.use("/api/webhooks/erpnext", erpnextWebhookRouter);
 app.use("/api/erpnext", requireAuth, erpnextRouter);
 
@@ -9779,6 +9825,13 @@ app.use((err, _req, res, _next) => {
       });
     }
   }, 5 * 60 * 1000);
+  setInterval(() => {
+    if (hasDb()) {
+      processClevaFarmOutbox(25).catch((e) => {
+        console.error("[ERROR]", "[clevafarm-worker] background run:", e instanceof Error ? e.message : e);
+      });
+    }
+  }, 45 * 1000);
 
   if (hasDb()) {
     try {

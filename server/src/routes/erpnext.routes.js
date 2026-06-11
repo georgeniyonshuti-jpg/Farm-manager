@@ -17,6 +17,8 @@ import {
   upsertWarehouseMapping,
   getUserCompanyId,
 } from "../services/erpnext/erpnext.config.js";
+import { isClevaFarmSecretConfigured } from "../services/clevafarm/clevafarmSecret.js";
+import { getClevaFarmOutboxStats } from "../services/clevafarm/syncOutbox.js";
 
 const router = express.Router();
 
@@ -137,10 +139,15 @@ router.get("/health", async (req, res) => {
   try {
     const ping = await erp.pingHealth(sessionCookie);
     const stats = await getErpnextSyncStats(companyId);
+    const outbox = await getClevaFarmOutboxStats();
     res.json({
       ok: true,
       responseMs: ping.responseMs,
       authMode: sessionCookie ? "session" : erp.hasApiKeyCredentials() ? "api_key" : "none",
+      clevafarm_secret_configured: isClevaFarmSecretConfigured(),
+      outbox_pending: outbox.pending,
+      outbox_failed: outbox.failed,
+      last_outbound_success_at: outbox.lastOutboundSuccessAt,
       ...stats,
     });
   } catch (e) {

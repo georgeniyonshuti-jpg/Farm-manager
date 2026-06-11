@@ -2,6 +2,12 @@ import { API_BASE_URL } from "./config";
 import { readAuthHeaders, jsonAuthHeaders } from "../lib/authHeaders";
 import { getStoredErpnextAccountMappings } from "../lib/erpnextPrefs";
 
+/**
+ * Farm entity registry sync (flocks, feed logs, mortality, check-ins, etc.) is pushed
+ * server-side via clevafarm_sync_outbox → ERPNext clevafarm_integration.webhooks.receive.
+ * Client helpers below remain for optional accounting document creation (PI/SI/stock entry).
+ */
+
 export type ErpnextConfigPayload = {
   erpnextBaseUrl?: string;
   erpnextCompany?: string;

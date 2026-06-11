@@ -16,6 +16,7 @@
 
 import { enqueueOdooSync } from "./odoo/odooSyncWorker.js";
 import { mapValuationSnapshotToJournalEntry } from "./odoo/odooFarmMappers.js";
+import { emitEntitySync } from "./clevafarm/emitEntitySync.js";
 
 let _dbQuery = null;
 let _hasDb = null;
@@ -137,6 +138,9 @@ export async function buildValuationSnapshot({ flockId, snapshotDate, marketPric
   );
 
   const snapshotId = ins.rows[0]?.id;
+  if (snapshotId) {
+    void emitEntitySync("farm_valuation_snapshot", String(snapshotId)).catch(() => {});
+  }
   return {
     id: snapshotId,
     flockId,
@@ -177,6 +181,7 @@ export async function approveValuationSnapshot({ snapshotId, approvedBy, approve
   );
   if ((r.rowCount ?? 0) === 0) throw new Error("Snapshot not found or already approved.");
   const snapshot = r.rows[0];
+  void emitEntitySync("farm_valuation_snapshot", snapshotId).catch(() => {});
 
   // Fetch flock code for labels
   let flockCode = null;

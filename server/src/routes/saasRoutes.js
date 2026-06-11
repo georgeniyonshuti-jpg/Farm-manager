@@ -4,6 +4,7 @@
 
 import express from "express";
 import crypto from "node:crypto";
+import { emitEntitySync } from "../services/clevafarm/emitEntitySync.js";
 
 const PLANS = [
   { id: "starter", name: "Starter", stripePriceId: process.env.STRIPE_PRICE_STARTER },
@@ -88,6 +89,7 @@ export function createSaasRouter(deps) {
          VALUES ($1::uuid, $2, $3, 'trial', $4::timestamptz, true)`,
         [companyId, companyName, slug, trialEndsInDays(14)]
       );
+      void emitEntitySync("farm_company", companyId).catch(() => {});
       await dbQuery(
         `INSERT INTO billing_subscriptions (company_id, status, plan, trial_ends_at)
          VALUES ($1::uuid, 'trialing', 'trial', $2::timestamptz)`,
