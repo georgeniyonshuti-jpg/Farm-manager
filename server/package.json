@@ -9,7 +9,7 @@
     "verify:migration-047": "node scripts/verifyMigration047.js",
     "test:clevafarm": "node scripts/testClevafarmConnection.js",
     "diagnose:clevafarm": "node scripts/diagnoseClevaFarmSync.js",
-    "backfill:migration-map": "node ../scripts/backfill-migration-map.js",
+    "backfill:migration-map": "node scripts/backfill-migration-map.js",
     "export:clevafarm-registry": "node ../scripts/export-clevafarm-registry.js",
     "diff:clevafarm-registry": "node ../scripts/diff-clevafarm-registry.js"
   },

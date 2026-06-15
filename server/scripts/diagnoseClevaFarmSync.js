@@ -346,7 +346,7 @@ async function main() {
   if (gaps.length && hasDb) {
     console.log("\nBackfill gaps:");
     console.log("  DATABASE_URL=... node ../scripts/backfill-clevafarm-sync.js --since=2020-01-01T00:00:00Z");
-    console.log("  DATABASE_URL=... node ../scripts/backfill-migration-map.js");
+    console.log("  npm run backfill:migration-map -- --env-file=/path/to/Farm-manager.env");
   }
 }
 
