@@ -8,6 +8,7 @@ import { appendErpnextSyncLog, updateEntitySyncStatus } from "../services/erpnex
 import { requireClevaFarmSecret, verifyClevaFarmSecret } from "../services/clevafarm/clevafarmSecret.js";
 import { withInboundSync } from "../services/clevafarm/inboundContext.js";
 import { upsertEntityFromPayload } from "../services/clevafarm/inboundUpsert.js";
+import { isInboundValidationError } from "../services/clevafarm/inboundErrors.js";
 import { isValidEntityType } from "../services/clevafarm/entityRegistry.js";
 import { enqueueClevaFarmSync } from "../services/clevafarm/syncOutbox.js";
 
@@ -46,6 +47,7 @@ async function recordWebhook(eventType, body, status = "success", extra = {}) {
     sourceId: extra.sourceId || body.farm_entity_id || body.name || body.payload?.id || null,
     erpnextRef: body.name || null,
     status,
+    error: extra.error || null,
     payload: body,
   });
 }
@@ -92,8 +94,24 @@ router.post("/entity", async (req, res) => {
     res.json({ received: true, entityType, id: payload.id, action: result.action });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    await recordWebhook("entity", req.body, "failed", { entityType, sourceId: payload?.id });
-    console.error("[clevafarm-sync] inbound entity failed:", msg);
+    await recordWebhook("entity", req.body, "failed", { entityType, sourceId: payload?.id, error: msg });
+    if (isInboundValidationError(err)) {
+      console.error(
+        "[clevafarm-sync]",
+        `direction=inbound entityType=${entityType} id=${payload?.id} status=validation_error code=${err.code} error=${msg}`
+      );
+      res.status(422).json({
+        error: msg,
+        code: err.code,
+        missingFields: err.missingFields,
+        invalidFkFields: err.invalidFkFields,
+      });
+      return;
+    }
+    console.error(
+      "[clevafarm-sync]",
+      `direction=inbound entityType=${entityType} id=${payload?.id} status=failed error=${msg}`
+    );
     res.status(500).json({ error: msg });
   }
 });

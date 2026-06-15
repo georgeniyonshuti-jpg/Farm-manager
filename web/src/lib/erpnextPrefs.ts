@@ -2,6 +2,13 @@
 
 import type { ErpnextConfigPayload } from "../api/erpnext.api";
 
+/**
+ * Entity registry sync (flocks, feed, mortality, etc.) runs server-side via clevafarm_sync_outbox.
+ * Set VITE_CLIENT_ERPNEXT_ENTITY_SYNC=true only for legacy double-post debugging.
+ */
+export const CLIENT_ERPNEXT_ENTITY_SYNC =
+  import.meta.env.VITE_CLIENT_ERPNEXT_ENTITY_SYNC === "true";
+
 const LS_COMPANY = "clevafarm.erpnext.company";
 const LS_COST_CENTER = "clevafarm.erpnext.costCenter";
 const LS_ACCOUNTS = "clevafarm.erpnext.accountMappings";

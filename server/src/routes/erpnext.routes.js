@@ -9,6 +9,7 @@ import {
   listErpnextSyncLog,
   listFailedErpnextSyncLog,
   getErpnextSyncStats,
+  getClevaFarmInboundStats,
 } from "../services/erpnext/erpnext.syncLog.js";
 import {
   getErpnextConfig,
@@ -140,6 +141,7 @@ router.get("/health", async (req, res) => {
     const ping = await erp.pingHealth(sessionCookie);
     const stats = await getErpnextSyncStats(companyId);
     const outbox = await getClevaFarmOutboxStats();
+    const inbound = await getClevaFarmInboundStats();
     res.json({
       ok: true,
       responseMs: ping.responseMs,
@@ -148,6 +150,8 @@ router.get("/health", async (req, res) => {
       outbox_pending: outbox.pending,
       outbox_failed: outbox.failed,
       last_outbound_success_at: outbox.lastOutboundSuccessAt,
+      inbound_failed_24h: inbound.inbound_failed_24h,
+      last_inbound_errors: inbound.last_inbound_errors,
       ...stats,
     });
   } catch (e) {

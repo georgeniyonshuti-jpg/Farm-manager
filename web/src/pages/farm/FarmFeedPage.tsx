@@ -12,7 +12,7 @@ import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { SubmissionStageScreen } from "../../components/farm/SubmissionStageScreen";
 import { syncFeedPurchaseToERPNext } from "../../api/erpnext.api";
-import { getStoredErpnextCompany, getStoredErpnextCostCenter } from "../../lib/erpnextPrefs";
+import { getStoredErpnextCompany, getStoredErpnextCostCenter, CLIENT_ERPNEXT_ENTITY_SYNC } from "../../lib/erpnextPrefs";
 import { useERPNextConnection } from "../../context/OdooConnectionContext";
 import { useLaborerT, TranslatedText } from "../../i18n/laborerI18n";
 
@@ -136,7 +136,13 @@ export function FarmFeedPage() {
         notes: notes.trim() || undefined,
       });
       const erpCompany = getStoredErpnextCompany() || erpnextStatus?.company;
-      if (!IS_FRAPPE_MODE && erpnextStatus?.connected && erpCompany && token) {
+      if (
+        CLIENT_ERPNEXT_ENTITY_SYNC &&
+        !IS_FRAPPE_MODE &&
+        erpnextStatus?.connected &&
+        erpCompany &&
+        token
+      ) {
         try {
           await syncFeedPurchaseToERPNext(token, {
             company: erpCompany,

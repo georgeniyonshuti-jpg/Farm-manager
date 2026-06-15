@@ -10,7 +10,7 @@ import { useToast } from "../../components/Toast";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
 import { syncSlaughterSaleToERPNext } from "../../api/erpnext.api";
-import { getStoredErpnextCompany, getStoredErpnextCostCenter } from "../../lib/erpnextPrefs";
+import { getStoredErpnextCompany, getStoredErpnextCostCenter, CLIENT_ERPNEXT_ENTITY_SYNC } from "../../lib/erpnextPrefs";
 import { useERPNextConnection } from "../../context/OdooConnectionContext";
 
 type Flock = { id: string; label: string; birdsLiveEstimate?: number | null };
@@ -213,7 +213,7 @@ export function FarmSlaughterPage() {
       const totalWeight = birds * carcassKg;
       const totalAmount = Number(form.fairValueRwf) || totalWeight * priceKg;
       const erpCompany = getStoredErpnextCompany() || erpnextStatus?.company;
-      if (erpnextStatus?.connected && erpCompany && token && totalAmount > 0) {
+      if (CLIENT_ERPNEXT_ENTITY_SYNC && erpnextStatus?.connected && erpCompany && token && totalAmount > 0) {
         try {
           await syncSlaughterSaleToERPNext(token, {
             company: erpCompany,

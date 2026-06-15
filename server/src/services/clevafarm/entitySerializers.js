@@ -90,6 +90,8 @@ export function rowToPayload(entityType, row) {
 }
 
 /**
+ * Legacy naive camelCase → snake_case (outbound reconciliation and non-ERPNext entity types only).
+ * Inbound ERPNext webhooks use mapInboundPayload in inboundMappers.js.
  * @param {string} entityType
  * @param {Record<string, unknown>} payload
  */

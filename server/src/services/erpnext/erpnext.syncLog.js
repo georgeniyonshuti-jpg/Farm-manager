@@ -182,6 +182,41 @@ export async function getErpnextSyncStats(companyId = null) {
   return stats;
 }
 
+export async function getClevaFarmInboundStats() {
+  const stats = {
+    inbound_failed_24h: 0,
+    last_inbound_errors: [],
+  };
+  if (!_dbQuery) return stats;
+
+  try {
+    const failed = await _dbQuery(
+      `SELECT COUNT(*)::int AS c FROM erpnext_sync_log
+       WHERE status = 'failed'
+         AND event_type = 'webhook_entity'
+         AND created_at > now() - interval '24 hours'`
+    );
+    stats.inbound_failed_24h = failed.rows[0]?.c ?? 0;
+
+    const recent = await _dbQuery(
+      `SELECT entity_type, entity_id, error_message, created_at
+         FROM erpnext_sync_log
+        WHERE status = 'failed' AND event_type = 'webhook_entity'
+        ORDER BY created_at DESC
+        LIMIT 5`
+    );
+    stats.last_inbound_errors = recent.rows.map((r) => ({
+      entityType: r.entity_type,
+      entityId: r.entity_id,
+      error: r.error_message,
+      at: r.created_at,
+    }));
+  } catch (e) {
+    console.error("[erpnext] inbound stats failed:", e instanceof Error ? e.message : e);
+  }
+  return stats;
+}
+
 export async function updateEntitySyncStatus({ table, entityId, erpnextRef, status, pendingRef }) {
   if (!_dbQuery || !table || !entityId) return;
   const allowed = new Set([

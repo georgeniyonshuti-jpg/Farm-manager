@@ -60,6 +60,8 @@ X-ClevaFarm-Secret: ...
 
 Runs inside loop guard — no outbound enqueue for ERPNext-originated writes.
 
+**Inbound field contract:** See [`ERPNEXT_OUTBOUND_CONTRACT.md`](./ERPNEXT_OUTBOUND_CONTRACT.md) for per-entity JSON samples, column whitelists, FK resolution, and 422 error codes.
+
 ### Reconciliation pull
 
 ```
@@ -122,6 +124,7 @@ node ../scripts/backfill-clevafarm-sync.js --since=2026-01-01T00:00:00Z
 
 - `clevafarm_secret_configured`
 - `outbox_pending`, `outbox_failed`, `last_outbound_success_at`
+- `inbound_failed_24h`, `last_inbound_errors` (failed `webhook_entity` rows)
 
 Logs: `[clevafarm-sync] direction=outbound|inbound entityType=... id=... status=...`
 
@@ -146,6 +149,106 @@ curl -s -X POST -H "Content-Type: application/json" -H "X-ClevaFarm-Secret: $SEC
 | Symptom | Check |
 |---------|--------|
 | 403 on webhooks | `CLEVAFARM_API_SECRET` matches ERPNext `site_config` |
+| 503 "secret not configured" on Farm API | Set `CLEVAFARM_API_SECRET` on Render and redeploy |
+| Inbound 422 | See [`ERPNEXT_OUTBOUND_CONTRACT.md`](./ERPNEXT_OUTBOUND_CONTRACT.md) — missing fields, bad FK, or desk-only keys |
+| Inbound 500 on desk save | Usually unmapped column before fix; check Render logs for `[clevafarm-sync] direction=inbound` |
 | Outbox stuck | `SELECT * FROM clevafarm_sync_outbox WHERE status IN ('pending','failed')` |
 | Loop / duplicates | Inbound writes should not enqueue outbound; verify Farm Sync Log direction |
 | Missing entities | Run backfill; confirm migration `047_clevafarm_entity_sync.sql` applied |
+
+---
+
+## Production connect checklist
+
+Use this when connecting [farmapi.clevacredit.com](https://farmapi.clevacredit.com) to [erp.clevacredit.com](https://erp.clevacredit.com).
+
+### 1. Verify migration 047
+
+```bash
+cd server
+DATABASE_URL=<prod> npm run verify:migration-047
+```
+
+If tables are missing, redeploy Render (migrations run on startup) or apply [`database/migrations/047_clevafarm_entity_sync.sql`](../database/migrations/047_clevafarm_entity_sync.sql).
+
+### 2. Align shared secret
+
+```bash
+bash scripts/print-clevafarm-prod-setup.sh
+```
+
+Copy the output into:
+
+- **Render** → Environment → `CLEVAFARM_API_SECRET`, `ERPNEXT_BASE_URL=https://erp.clevacredit.com`, plus `ERPNEXT_API_KEY` / `ERPNEXT_API_SECRET` / `ERPNEXT_COMPANY`
+- **Hetzner** → `sites/erp.clevacredit.com/site_config.json` → `clevafarm_api_secret`, `clevafarm_api_url`
+
+If ERPNext already has a secret configured, copy that value to Render instead of generating a new one.
+
+Redeploy Render after env changes. On Hetzner: `bench --site erp.clevacredit.com clear-cache` and restart workers.
+
+### 3. Run connection tests
+
+Create `server/.env` locally (never commit) with prod secrets for one-off checks:
+
+```env
+CLEVAFARM_API_SECRET=<same-as-both-sides>
+ERPNEXT_BASE_URL=https://erp.clevacredit.com
+FARM_API_BASE_URL=https://farmapi.clevacredit.com
+ERPNEXT_API_KEY=
+ERPNEXT_API_SECRET=
+DATABASE_URL=
+```
+
+```bash
+cd server && npm run test:clevafarm
+```
+
+### 3b. Full sync diagnostics (all 23 entity types)
+
+Compares Postgres row counts, outbox sent/pending/failed, and reconciliation API record counts per entity type.
+
+On Hetzner (with gitops env):
+
+```bash
+cd /path/to/Farm-manager-Legacy/server   # or clone repo on server
+npm run diagnose:clevafarm -- --env-file=/home/deploy/gitops/clevafarm-render.env
+```
+
+JSON output for dashboards:
+
+```bash
+npm run diagnose:clevafarm -- --env-file=~/gitops/clevafarm-render.env --json
+```
+
+**Legend:** `OK` = sent + reconciliation reachable | `GAP` = data in Postgres but never enqueued (run backfill) | `WAIT` = outbox pending | `FAIL` = outbox failed (see `last_error`)
+
+Quick SQL on Postgres:
+
+```sql
+SELECT entity_type, status, COUNT(*) FROM clevafarm_sync_outbox
+ WHERE direction = 'outbound' GROUP BY 1, 2 ORDER BY 1, 2;
+
+SELECT entity_type, COUNT(*) FROM clevafarm_sync_outbox
+ WHERE direction = 'outbound' AND status = 'failed'
+ GROUP BY 1;
+```
+
+### 4. Backfill historical entities
+
+```bash
+DATABASE_URL=<prod> node scripts/backfill-clevafarm-sync.js --dry-run
+DATABASE_URL=<prod> node scripts/backfill-clevafarm-sync.js
+```
+
+### 5. PWA client sync (disabled by default)
+
+Entity registry sync is server-side. Field pages no longer call ERPNext PI/SI helpers unless `VITE_CLIENT_ERPNEXT_ENTITY_SYNC=true` is set at build time (legacy debugging only).
+
+### Current prod signals (automated checks)
+
+| Endpoint | Expected when connected |
+|----------|-------------------------|
+| `GET /api/entities/flock` without secret | 403 or 503 (not 404) |
+| Same with correct secret | 200 + `{ records: [...] }` |
+| `POST …/clevafarm_integration.api.webhooks.receive` without secret | 401 Invalid ClevaFarm secret |
+| Render without `CLEVAFARM_API_SECRET` | 503 on reconciliation routes |

@@ -14,6 +14,7 @@ import { syncTreatmentToERPNext } from "../../api/erpnext.api";
 import {
   getStoredErpnextCompany,
   getStoredErpnextCostCenter,
+  CLIENT_ERPNEXT_ENTITY_SYNC,
 } from "../../lib/erpnextPrefs";
 
 type Flock = { id: string; label: string; code?: string | null; initialCount?: number };
@@ -351,7 +352,7 @@ export function FarmTreatmentPage() {
 
       // Non-blocking ERPNext medicine expense sync
       const company = getStoredErpnextCompany();
-      if (token && company && treatmentId) {
+      if (CLIENT_ERPNEXT_ENTITY_SYNC && token && company && treatmentId) {
         void syncTreatmentToERPNext(token, {
           company,
           supplier: "Farm Veterinary Supplier",

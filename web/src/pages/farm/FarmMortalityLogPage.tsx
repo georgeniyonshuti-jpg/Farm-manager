@@ -12,7 +12,7 @@ import { createMortalityEvent, IS_FRAPPE_MODE } from "../../api/farm.api";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import { SubmissionStageScreen } from "../../components/farm/SubmissionStageScreen";
 import { syncMortalityToERPNext } from "../../api/erpnext.api";
-import { getStoredErpnextCompany, getStoredErpnextCostCenter } from "../../lib/erpnextPrefs";
+import { getStoredErpnextCompany, getStoredErpnextCostCenter, CLIENT_ERPNEXT_ENTITY_SYNC } from "../../lib/erpnextPrefs";
 import { useERPNextConnection } from "../../context/OdooConnectionContext";
 
 function MortalityPhotoBlock({
@@ -113,7 +113,14 @@ export function FarmMortalityLogPage() {
       });
       const erpCompany = getStoredErpnextCompany() || erpnextStatus?.company;
       const estValue = Number(valuePerBird) || 0;
-      if (!IS_FRAPPE_MODE && erpnextStatus?.connected && erpCompany && token && estValue > 0) {
+      if (
+        CLIENT_ERPNEXT_ENTITY_SYNC &&
+        !IS_FRAPPE_MODE &&
+        erpnextStatus?.connected &&
+        erpCompany &&
+        token &&
+        estValue > 0
+      ) {
         try {
           await syncMortalityToERPNext(token, {
             company: erpCompany,

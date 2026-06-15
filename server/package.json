@@ -5,7 +5,10 @@
   "scripts": {
     "dev": "node --watch server.js",
     "start": "node server.js",
-    "test": "node --test tests/"
+    "test": "node --test tests/*.test.js",
+    "verify:migration-047": "node scripts/verifyMigration047.js",
+    "test:clevafarm": "node scripts/testClevafarmConnection.js",
+    "diagnose:clevafarm": "node scripts/diagnoseClevaFarmSync.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0",
