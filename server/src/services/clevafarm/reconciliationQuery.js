@@ -1,4 +1,4 @@
-import { getEntityDef, isValidEntityType } from "./entityRegistry.js";
+import { getEntityDef, isValidEntityType, isTextPkEntity } from "./entityRegistry.js";
 import { rowToPayload } from "./entitySerializers.js";
 
 /**
@@ -7,9 +7,11 @@ import { rowToPayload } from "./entitySerializers.js";
 export async function loadEntityRow(entityType, entityId, dbQuery) {
   const def = getEntityDef(entityType);
   if (!def) return null;
-  const r = await dbQuery(`SELECT * FROM ${def.table} WHERE ${def.idColumn} = $1::uuid LIMIT 1`, [
-    String(entityId),
-  ]);
+  const id = String(entityId);
+  const sql = isTextPkEntity(entityType)
+    ? `SELECT * FROM ${def.table} WHERE ${def.idColumn} = $1 LIMIT 1`
+    : `SELECT * FROM ${def.table} WHERE ${def.idColumn} = $1::uuid LIMIT 1`;
+  const r = await dbQuery(sql, [id]);
   return r.rows[0] || null;
 }
 

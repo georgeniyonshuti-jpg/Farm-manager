@@ -159,3 +159,10 @@ export function isValidEntityType(entityType) {
 export function listEntityTypes() {
   return Object.keys(ENTITY_DEFS);
 }
+
+/** Entities with TEXT primary keys (not UUID). */
+export const TEXT_PK_ENTITIES = new Set(["farm_treatment", "slaughter_record"]);
+
+export function isTextPkEntity(entityType) {
+  return TEXT_PK_ENTITIES.has(entityType);
+}

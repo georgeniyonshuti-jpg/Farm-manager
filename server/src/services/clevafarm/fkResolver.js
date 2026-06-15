@@ -1,6 +1,7 @@
 import { isUuidString } from "./inboundMappers.js";
+import { ENTITY_ERPNEXT_DOCTYPE } from "./migrationMap.js";
 
-/** ERPNext DocType hints for farm_migration_map lookups */
+/** ERPNext DocType hints for farm_migration_map lookups by FK column */
 const COLUMN_DOCTYPE = {
   flock_id: "Flock",
   medicine_id: "Farm Medicine Item",
@@ -13,6 +14,31 @@ const COLUMN_DOCTYPE = {
   feed_entry_id: "Feed Log",
   linked_checkin_id: "Farm Checkin",
 };
+
+const UUID_FK_COLUMNS = new Set(Object.keys(COLUMN_DOCTYPE));
+
+async function lookupMigrationMap(doctype, value, dbQuery) {
+  try {
+    const r = await dbQuery(
+      `SELECT legacy_id::text AS legacy_id
+         FROM farm_migration_map
+        WHERE erpnext_doctype = $1
+          AND (erpnext_name = $2 OR legacy_id = $2)
+        LIMIT 1`,
+      [doctype, value]
+    );
+    const legacy = r.rows[0]?.legacy_id;
+    return legacy ? String(legacy) : null;
+  } catch {
+    return null;
+  }
+}
+
+function acceptLegacyForField(field, legacyId) {
+  if (!legacyId) return false;
+  if (UUID_FK_COLUMNS.has(field)) return isUuidString(legacyId);
+  return true;
+}
 
 /**
  * @param {{ field: string, value: unknown, dbQuery?: (sql: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> }} opts
@@ -27,23 +53,14 @@ export async function resolvePostgresId({ field, value, dbQuery }) {
 
   const doctype = COLUMN_DOCTYPE[field];
   if (doctype) {
-    try {
-      const r = await dbQuery(
-        `SELECT legacy_id::text AS legacy_id
-           FROM farm_migration_map
-          WHERE erpnext_doctype = $1
-            AND (erpnext_name = $2 OR legacy_id = $2)
-          LIMIT 1`,
-        [doctype, s]
-      );
-      const legacy = r.rows[0]?.legacy_id;
-      if (legacy && isUuidString(String(legacy))) return String(legacy);
-    } catch {
-      /* table may be empty */
-    }
+    const legacy = await lookupMigrationMap(doctype, s, dbQuery);
+    if (legacy && acceptLegacyForField(field, legacy)) return legacy;
   }
 
   if (field === "flock_id") {
+    const flockLegacy = await lookupMigrationMap(ENTITY_ERPNEXT_DOCTYPE.flock || "Flock", s, dbQuery);
+    if (flockLegacy && isUuidString(flockLegacy)) return flockLegacy;
+
     try {
       const r = await dbQuery(
         `SELECT id::text AS id FROM poultry_flocks WHERE id::text = $1 OR code = $1 LIMIT 1`,
@@ -56,6 +73,13 @@ export async function resolvePostgresId({ field, value, dbQuery }) {
   }
 
   if (field === "medicine_id") {
+    const medLegacy = await lookupMigrationMap(
+      ENTITY_ERPNEXT_DOCTYPE.farm_medicine_item || "Farm Medicine Item",
+      s,
+      dbQuery
+    );
+    if (medLegacy && isUuidString(medLegacy)) return medLegacy;
+
     try {
       const r = await dbQuery(
         `SELECT id::text AS id FROM medicine_inventory WHERE id::text = $1 OR lower(name) = lower($1) LIMIT 1`,

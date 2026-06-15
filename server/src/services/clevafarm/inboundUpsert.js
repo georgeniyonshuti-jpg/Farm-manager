@@ -1,4 +1,4 @@
-import { getEntityDef } from "./entityRegistry.js";
+import { getEntityDef, TEXT_PK_ENTITIES } from "./entityRegistry.js";
 import {
   mapInboundPayload,
   applyInsertDefaults,
@@ -9,9 +9,6 @@ import { resolveInboundForeignKeys } from "./fkResolver.js";
 import { InboundValidationError, sanitizePostgresInboundError } from "./inboundErrors.js";
 
 const NO_UPDATED_AT = new Set(["farm_treatment_round_event"]);
-
-/** Tables using TEXT primary keys (not UUID). */
-const TEXT_PK_ENTITIES = new Set(["farm_treatment", "slaughter_record"]);
 
 function coerceDbValue(val) {
   if (val === null || val === undefined) return null;

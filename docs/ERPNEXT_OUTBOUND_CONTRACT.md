@@ -15,7 +15,7 @@ X-ClevaFarm-Secret: <shared secret>
 
 Farm Manager maps payloads with **`mapInboundPayload`** (not naive `camelToSnake`). Only whitelisted Postgres columns are written. See [`server/src/services/clevafarm/inboundMappers.js`](../server/src/services/clevafarm/inboundMappers.js).
 
-Cross-links: [`INTEGRATION.md`](./INTEGRATION.md) (architecture, secrets, health).
+Cross-links: [`INTEGRATION.md`](./INTEGRATION.md) (architecture, secrets, health). Canonical Postgres table names: [`clevafarm-entity-registry.json`](./clevafarm-entity-registry.json) (`npm run export:clevafarm-registry` from `server/`).
 
 ## Nine ERPNext outbound entity types
 

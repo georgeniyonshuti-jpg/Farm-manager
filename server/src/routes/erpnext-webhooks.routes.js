@@ -166,6 +166,29 @@ router.post("/purchase-invoice", async (req, res) => {
   res.json({ received: true, name, supplier, grand_total });
 });
 
+router.post("/stock-entry", async (req, res) => {
+  const { name, farm_entity_id: farmEntityId, stock_entry_type: stockEntryType, posting_date: postingDate } =
+    req.body ?? {};
+  if (farmEntityId && _dbQuery) {
+    await _dbQuery(
+      `UPDATE farm_inventory_transactions
+          SET reference = COALESCE($2, reference),
+              accounting_status = CASE
+                WHEN accounting_status = 'pending_approval' THEN 'approved'
+                ELSE accounting_status
+              END,
+              updated_at = now()
+        WHERE id::text = $1`,
+      [String(farmEntityId), name || null]
+    ).catch(() => {});
+  }
+  await recordWebhook("stock_entry", req.body, "success", {
+    sourceId: farmEntityId || null,
+    entityType: "feed_inventory_transaction",
+  });
+  res.json({ received: true, name, farmEntityId, stockEntryType, postingDate });
+});
+
 router.post("/loan-application", async (req, res) => {
   const { name, status, applicant, loan_amount, id, company_id: companyId, flock_id: flockId } = req.body ?? {};
   if (_dbQuery && id) {

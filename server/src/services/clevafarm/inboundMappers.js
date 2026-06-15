@@ -165,6 +165,18 @@ function pickTimestamp(val) {
   return undefined;
 }
 
+/** Prefer explicit Postgres UUID for flock FK when ERPNext sends Frappe flock link separately. */
+function mapFlockIdField(payload, row) {
+  const legacy = payload.flockLegacyId ?? payload.flock_legacy_id;
+  if (legacy != null) {
+    row.flock_id = String(legacy);
+    return row;
+  }
+  if (payload.flockId != null) row.flock_id = String(payload.flockId);
+  if (payload.flock_id != null) row.flock_id = String(payload.flock_id);
+  return row;
+}
+
 function stripToAllowed(entityType, row) {
   const allowed = INBOUND_ALLOWED_COLUMNS[entityType];
   if (!allowed) return {};
@@ -211,8 +223,7 @@ function mapNameMasterInbound(entityType, payload) {
 
 function mapFeedLogInbound(payload) {
   const row = {};
-  if (payload.flockId != null) row.flock_id = String(payload.flockId);
-  if (payload.flock_id != null) row.flock_id = String(payload.flock_id);
+  mapFlockIdField(payload, row);
   const ts =
     pickTimestamp(payload.recordedAt) ||
     pickTimestamp(payload.logDate) ||
@@ -232,8 +243,7 @@ function mapFeedLogInbound(payload) {
 
 function mapMortalityLogInbound(payload) {
   const row = {};
-  if (payload.flockId != null) row.flock_id = String(payload.flockId);
-  if (payload.flock_id != null) row.flock_id = String(payload.flock_id);
+  mapFlockIdField(payload, row);
   const count = payload.deadCount ?? payload.count ?? payload.dead_count;
   if (count != null && Number.isFinite(Number(count))) row.count = Math.max(1, Math.floor(Number(count)));
   const ts =
@@ -255,8 +265,7 @@ function mapMortalityLogInbound(payload) {
 
 function mapSlaughterInbound(payload) {
   const row = {};
-  if (payload.flockId != null) row.flock_id = String(payload.flockId);
-  if (payload.flock_id != null) row.flock_id = String(payload.flock_id);
+  mapFlockIdField(payload, row);
   const birds = payload.birdsSlaughtered ?? payload.birds_slaughtered;
   if (birds != null) row.birds_slaughtered = Math.floor(Number(birds));
   const liveKg = payload.avgLiveWeightKg ?? payload.avg_live_weight_kg;
@@ -278,8 +287,7 @@ function mapSlaughterInbound(payload) {
 
 function mapTreatmentInbound(payload) {
   const row = {};
-  if (payload.flockId != null) row.flock_id = String(payload.flockId);
-  if (payload.flock_id != null) row.flock_id = String(payload.flock_id);
+  mapFlockIdField(payload, row);
   if (payload.medicineName != null) row.medicine_name = String(payload.medicineName);
   if (payload.diseaseOrReason != null) row.disease_or_reason = String(payload.diseaseOrReason);
   if (payload.reasonCode != null) row.reason_code = String(payload.reasonCode);
@@ -298,7 +306,7 @@ function mapTreatmentInbound(payload) {
 
 function mapInventoryTxnInbound(payload) {
   const row = {};
-  if (payload.flockId != null) row.flock_id = String(payload.flockId);
+  mapFlockIdField(payload, row);
   if (payload.transactionType != null) row.transaction_type = String(payload.transactionType);
   if (payload.transaction_type != null) row.transaction_type = String(payload.transaction_type);
   const ts = pickTimestamp(payload.recordedAt) || pickTimestamp(payload.recorded_at);

@@ -1,5 +1,6 @@
 import { appendErpnextSyncLog } from "../erpnext/erpnext.syncLog.js";
 import { pushEntityToErpnext } from "./outboundClient.js";
+import { getErpnextDoctypeForEntity, upsertMigrationMapEntry } from "./migrationMap.js";
 
 const MAX_ATTEMPTS = 8;
 const BACKOFF_BASE_MS = 30_000;
@@ -139,25 +140,52 @@ export async function processClevaFarmOutbox(limit = 25) {
     }
 
     try {
-      const result = await pushEntityToErpnext(entityType, payload);
+      const correlationId = row.id;
+      const result = await pushEntityToErpnext(entityType, payload, {
+        correlationId,
+        outboxId: row.id,
+        entityType,
+        entityId,
+      });
+      const erpnextDoctype = getErpnextDoctypeForEntity(entityType, result.doctype);
       await dbQuery(
         `UPDATE clevafarm_sync_outbox
             SET status = 'sent', last_error = NULL, erpnext_ref = $2, erpnext_doctype = $3, updated_at = now()
           WHERE id = $1::uuid`,
-        [row.id, result.name, result.doctype]
+        [row.id, result.name, erpnextDoctype]
       );
+      if (result.name && erpnextDoctype) {
+        try {
+          await upsertMigrationMapEntry({
+            legacyId: entityId,
+            erpnextDoctype,
+            erpnextName: result.name,
+            dbQuery,
+          });
+          console.log(
+            "[clevafarm-sync]",
+            `migration_map entityType=${entityType} legacyId=${entityId} erpnextName=${result.name}`
+          );
+        } catch (mapErr) {
+          console.error(
+            "[clevafarm-sync]",
+            `migration_map failed entityType=${entityType} id=${entityId}:`,
+            mapErr instanceof Error ? mapErr.message : mapErr
+          );
+        }
+      }
       await appendErpnextSyncLog({
         eventType: "outbound_entity",
         entityType,
         sourceId: entityId,
         erpnextRef: result.name,
-        erpnextDoctype: result.doctype,
+        erpnextDoctype,
         status: "success",
-        payload,
+        payload: { ...payload, _meta: { correlationId, outboxId: row.id } },
       });
       console.log(
         "[clevafarm-sync]",
-        `direction=outbound entityType=${entityType} id=${entityId} status=success`
+        `direction=outbound entityType=${entityType} id=${entityId} correlationId=${correlationId} erpnextRef=${result.name || ""} status=success`
       );
       succeeded += 1;
     } catch (err) {

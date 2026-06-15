@@ -13,16 +13,36 @@ function receiveUrl() {
 }
 
 /**
- * Push entity payload to ERPNext clevafarm_integration receive webhook.
+ * Build outbound webhook JSON body (exported for tests).
  * @param {string} entityType
  * @param {Record<string, unknown>} payload
+ * @param {{ correlationId?: string, outboxId?: string, entityId?: string }} [meta]
  */
-export async function pushEntityToErpnext(entityType, payload) {
-  const body = {
+export function buildOutboundRequestBody(entityType, payload, meta = {}) {
+  const correlationId = meta.correlationId || meta.outboxId || null;
+  return {
     entityType,
     event: "on_update",
     payload,
+    correlationId,
+    correlation_id: correlationId,
+    meta: {
+      correlationId,
+      outboxId: meta.outboxId || null,
+      entityType,
+      entityId: meta.entityId || payload?.id || null,
+    },
   };
+}
+
+/**
+ * Push entity payload to ERPNext clevafarm_integration receive webhook.
+ * @param {string} entityType
+ * @param {Record<string, unknown>} payload
+ * @param {{ correlationId?: string, outboxId?: string, entityId?: string }} [meta]
+ */
+export async function pushEntityToErpnext(entityType, payload, meta = {}) {
+  const body = buildOutboundRequestBody(entityType, payload, meta);
 
   const res = await fetch(receiveUrl(), {
     method: "POST",

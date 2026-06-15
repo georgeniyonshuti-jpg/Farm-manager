@@ -22,6 +22,9 @@ import {
 import { emitEntitySync, initClevaFarmEmit } from "../src/services/clevafarm/emitEntitySync.js";
 import { InboundValidationError } from "../src/services/clevafarm/inboundErrors.js";
 import { upsertEntityFromPayload } from "../src/services/clevafarm/inboundUpsert.js";
+import { upsertMigrationMapEntry, getErpnextDoctypeForEntity } from "../src/services/clevafarm/migrationMap.js";
+import { loadEntityRow } from "../src/services/clevafarm/reconciliationQuery.js";
+import { buildOutboundRequestBody } from "../src/services/clevafarm/outboundClient.js";
 
 const FLOCK_ID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11";
 const USER_ID = "b1eebc99-9c0b-4ef8-bb6d-6bb9bd380a12";
@@ -134,6 +137,25 @@ describe("clevafarm serializers", () => {
     assert.equal(payload.flockId, USER_ID);
   });
 
+  it("check-in outbound includes feed, water, temperature, updatedAt", () => {
+    const payload = rowToPayload("farm_checkin", {
+      id: FLOCK_ID,
+      flock_id: USER_ID,
+      feed_kg: 12.5,
+      water_l: 40,
+      coop_temperature_c: 28.2,
+      photo_urls: ["slot1"],
+      updated_at: "2026-02-01T10:00:00.000Z",
+    });
+    assert.equal(payload.feedKg, 12.5);
+    assert.equal(payload.waterL, 40);
+    assert.equal(payload.coopTemperatureC, 28.2);
+    assert.equal(payload.hasPhotos, true);
+    assert.equal(payload.photoUrl, undefined);
+    assert.equal(payload.updatedAt, "2026-02-01T10:00:00.000Z");
+    assert.ok(typeof payload.contentHash === "string" && payload.contentHash.length === 64);
+  });
+
   it("round-trips flock status inbound via legacy payloadToRow", () => {
     const row = payloadToRow("flock", { id: "x", status: "Completed" });
     assert.equal(row.status, "archived");
@@ -182,6 +204,16 @@ describe("clevafarm inbound mappers (golden)", () => {
     assert.equal(row.entered_by_user_id, USER_ID);
     assert.equal(row.flockLabel, undefined);
     assertOnlyAllowedKeys("feed_log", row);
+  });
+
+  it("maps feed_log flockLegacyId to flock_id", () => {
+    const row = mapInboundPayload("feed_log", {
+      id: "x",
+      flockLegacyId: FLOCK_ID,
+      flockId: "frappe-hash-ignored-when-legacy-set",
+      feedKg: 1,
+    });
+    assert.equal(row.flock_id, FLOCK_ID);
   });
 
   it("maps mortality_log: deadCount → count, not dead_count", () => {
@@ -249,7 +281,7 @@ describe("clevafarm fk resolver", () => {
     });
     const id = await resolvePostgresId({
       field: "flock_id",
-      value: "FLOCK-00042",
+      value: "iicied5vn3",
       dbQuery,
     });
     assert.equal(id, FLOCK_ID);
@@ -311,6 +343,59 @@ describe("clevafarm inbound context", () => {
     dbCalled = false;
     await emitEntitySync("flock", FLOCK_ID);
     assert.equal(dbCalled, true, "loads row for normal outbound emit path");
+  });
+});
+
+describe("clevafarm migration map", () => {
+  it("getErpnextDoctypeForEntity prefers response doctype", () => {
+    assert.equal(getErpnextDoctypeForEntity("flock", "Flock"), "Flock");
+    assert.equal(getErpnextDoctypeForEntity("flock", null), "Flock");
+  });
+
+  it("upsertMigrationMapEntry runs INSERT ON CONFLICT", async () => {
+    const calls = [];
+    const dbQuery = async (sql, params) => {
+      calls.push({ sql, params });
+      return { rows: [] };
+    };
+    await upsertMigrationMapEntry({
+      legacyId: FLOCK_ID,
+      erpnextDoctype: "Flock",
+      erpnextName: "FLOCK-00042",
+      dbQuery,
+    });
+    assert.equal(calls.length, 1);
+    assert.ok(calls[0].sql.includes("farm_migration_map"));
+    assert.equal(calls[0].params[0], FLOCK_ID);
+    assert.equal(calls[0].params[2], "FLOCK-00042");
+  });
+});
+
+describe("clevafarm reconciliation TEXT PK", () => {
+  it("loadEntityRow queries without uuid cast for slaughter_record", async () => {
+    let sql = "";
+    const dbQuery = async (q) => {
+      sql = q;
+      return { rows: [{ id: "sl-1", flock_id: FLOCK_ID }] };
+    };
+    const row = await loadEntityRow("slaughter_record", "sl-1", dbQuery);
+    assert.equal(row.id, "sl-1");
+    assert.ok(!sql.includes("::uuid"));
+  });
+});
+
+describe("clevafarm outbound correlation id", () => {
+  it("includes top-level correlationId for ERPNext Farm Sync Log", () => {
+    const outboxId = "b2eebc99-9c0b-4ef8-bb6d-6bb9bd380a20";
+    const body = buildOutboundRequestBody(
+      "flock",
+      { id: FLOCK_ID, code: "X" },
+      { correlationId: outboxId, outboxId, entityId: FLOCK_ID }
+    );
+    assert.equal(body.correlationId, outboxId);
+    assert.equal(body.correlation_id, outboxId);
+    assert.equal(body.meta.correlationId, outboxId);
+    assert.equal(body.meta.outboxId, outboxId);
   });
 });
 

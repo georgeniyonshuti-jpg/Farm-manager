@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { getEntityDef } from "./entityRegistry.js";
 
 /** @typedef {{ table: string; idColumn: string; updatedSinceSql: string; omitPayloadFields?: string[] }} EntityDef */
@@ -55,6 +56,22 @@ export function pgRowToCamelPayload(row, { omit = [] } = {}) {
   return out;
 }
 
+function pickUpdatedAtIso(row) {
+  const candidates = [row.updated_at, row.created_at, row.recorded_at, row.at, row.log_date, row.weighed_at];
+  for (const val of candidates) {
+    if (val == null) continue;
+    const d = val instanceof Date ? val : new Date(String(val));
+    if (!Number.isNaN(d.getTime())) return d.toISOString();
+  }
+  return null;
+}
+
+function hashPayload(payload) {
+  const keys = Object.keys(payload).sort();
+  const stable = JSON.stringify(payload, keys);
+  return crypto.createHash("sha256").update(stable).digest("hex");
+}
+
 /**
  * @param {string} entityType
  * @param {Record<string, unknown>} row
@@ -85,6 +102,10 @@ export function rowToPayload(entityType, row) {
   if (entityType === "farm_migration_map" && row.legacy_id != null) {
     payload.legacyId = String(row.legacy_id);
   }
+
+  const updatedAt = pickUpdatedAtIso(row);
+  if (updatedAt) payload.updatedAt = updatedAt;
+  payload.contentHash = hashPayload(payload);
 
   return payload;
 }

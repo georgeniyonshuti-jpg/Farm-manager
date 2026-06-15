@@ -3,7 +3,7 @@
  * Enqueue all registry entities for outbound ClevaFarm → ERPNext sync (dependency order).
  *
  * Usage:
- *   node scripts/backfill-clevafarm-sync.js [--dry-run] [--since=2026-01-01T00:00:00Z]
+ *   node scripts/backfill-clevafarm-sync.js [--dry-run] [--since=2026-01-01T00:00:00Z] [--entity-type=flock] [--entity-type=farm_checkin]
  *
  * Requires DATABASE_URL and migration 047 applied.
  */
@@ -19,6 +19,10 @@ const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const sinceArg = args.find((a) => a.startsWith("--since="));
 const since = sinceArg ? sinceArg.split("=")[1] : null;
+const entityTypeFilters = args
+  .filter((a) => a.startsWith("--entity-type="))
+  .map((a) => a.slice("--entity-type=".length))
+  .filter(Boolean);
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -56,7 +60,24 @@ async function main() {
   }
 
   let total = 0;
-  for (const entityType of ENTITY_DEPENDENCY_ORDER) {
+  const types = entityTypeFilters.length
+    ? ENTITY_DEPENDENCY_ORDER.filter((t) => entityTypeFilters.includes(t))
+    : ENTITY_DEPENDENCY_ORDER;
+
+  if (entityTypeFilters.length) {
+    const unknown = entityTypeFilters.filter((t) => !ENTITY_DEFS[t]);
+    if (unknown.length) {
+      console.error(`Unknown entity type(s): ${unknown.join(", ")}`);
+      process.exit(1);
+    }
+    if (types.length === 0) {
+      console.error("No matching entity types in dependency order");
+      process.exit(1);
+    }
+    console.log(`Filtering to: ${types.join(", ")}`);
+  }
+
+  for (const entityType of types) {
     const rows = await rowsForType(entityType);
     console.log(`[${entityType}] ${rows.length} row(s)`);
     for (const row of rows) {

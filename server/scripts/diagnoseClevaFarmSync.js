@@ -104,6 +104,32 @@ async function recentOutboxFailures(pool, limit = 15) {
   }
 }
 
+async function migrationMapDiagnostics(pool) {
+  try {
+    const counts = await pool.query(
+      `SELECT erpnext_doctype, COUNT(*)::int AS c
+         FROM farm_migration_map
+        GROUP BY erpnext_doctype
+        ORDER BY erpnext_doctype`
+    );
+    const missing = await pool.query(
+      `SELECT o.entity_type, COUNT(*)::int AS c
+         FROM clevafarm_sync_outbox o
+        WHERE o.direction = 'outbound'
+          AND o.status = 'sent'
+          AND o.erpnext_ref IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM farm_migration_map m WHERE m.legacy_id = o.entity_id
+          )
+        GROUP BY o.entity_type
+        ORDER BY o.entity_type`
+    );
+    return { counts: counts.rows, missingByType: missing.rows };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e), counts: [], missingByType: [] };
+  }
+}
+
 async function recentSyncLogFailures(pool, limit = 10) {
   try {
     const r = await pool.query(
@@ -227,11 +253,12 @@ async function main() {
 
   const failures = pool ? await recentOutboxFailures(pool) : [];
   const logFails = pool ? await recentSyncLogFailures(pool) : [];
+  const migrationMap = pool ? await migrationMapDiagnostics(pool) : null;
 
   if (pool) await pool.end();
 
   if (json) {
-    console.log(JSON.stringify({ farmBase, hasSecret, hasDb, rows, failures, logFails }, null, 2));
+    console.log(JSON.stringify({ farmBase, hasSecret, hasDb, rows, failures, logFails, migrationMap }, null, 2));
     return;
   }
 
@@ -297,6 +324,21 @@ async function main() {
     }
   }
 
+  if (migrationMap && !migrationMap.error) {
+    console.log("\nfarm_migration_map by DocType:");
+    for (const row of migrationMap.counts) {
+      console.log(`   ${row.erpnext_doctype}: ${row.c}`);
+    }
+    if (migrationMap.missingByType.length) {
+      console.log("\n⚠️  Sent outbox rows missing migration map entry (run backfill-migration-map):");
+      for (const m of migrationMap.missingByType) {
+        console.log(`   ${m.entity_type}: ${m.c}`);
+      }
+    }
+  } else if (migrationMap?.error) {
+    console.log(`\nfarm_migration_map: query failed (${migrationMap.error})`);
+  }
+
   if (!hasSecret) {
     console.log("\nTip: run with secret loaded:");
     console.log("  npm run diagnose:clevafarm -- --env-file=~/gitops/clevafarm-render.env");
@@ -304,6 +346,7 @@ async function main() {
   if (gaps.length && hasDb) {
     console.log("\nBackfill gaps:");
     console.log("  DATABASE_URL=... node ../scripts/backfill-clevafarm-sync.js --since=2020-01-01T00:00:00Z");
+    console.log("  DATABASE_URL=... node ../scripts/backfill-migration-map.js");
   }
 }
 

@@ -1,0 +1,262 @@
+{
+  "version": 1,
+  "generatedAt": "2026-06-15T17:20:10.242Z",
+  "entities": [
+    {
+      "entityType": "farm_company",
+      "postgresTable": "companies",
+      "erpnextDoctype": "Company",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": false,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "poultry_breed_standard",
+      "postgresTable": "poultry_breed_standards",
+      "erpnextDoctype": "Poultry Breed Standard",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": false,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "farm_barn",
+      "postgresTable": "poultry_barn_names",
+      "erpnextDoctype": "Farm Barn",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": true,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "farm_supplier",
+      "postgresTable": "farm_suppliers",
+      "erpnextDoctype": "Farm Supplier",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": true,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "flock",
+      "postgresTable": "poultry_flocks",
+      "erpnextDoctype": "Flock",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": true,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "farm_medicine_item",
+      "postgresTable": "medicine_inventory",
+      "erpnextDoctype": "Farm Medicine Item",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": false,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "farm_medicine_lot",
+      "postgresTable": "medicine_lots",
+      "erpnextDoctype": "Farm Medicine Lot",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": true,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "feed_log",
+      "postgresTable": "flock_feed_entries",
+      "erpnextDoctype": "Feed Log",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": true,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, recorded_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "feed_inventory_transaction",
+      "postgresTable": "farm_inventory_transactions",
+      "erpnextDoctype": "Feed Inventory Transaction",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": true,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "mortality_log",
+      "postgresTable": "flock_mortality_events",
+      "erpnextDoctype": "Mortality Log",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": true,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "farm_checkin",
+      "postgresTable": "check_ins",
+      "erpnextDoctype": "Farm Checkin",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": false,
+      "outboundSupported": true,
+      "updatedSinceSql": "GREATEST(at, COALESCE(reviewed_at, at), COALESCE(updated_at, at))",
+      "omitPayloadFields": [
+        "photo_url",
+        "photo_urls"
+      ]
+    },
+    {
+      "entityType": "farm_checkin_schedule",
+      "postgresTable": "log_schedule",
+      "erpnextDoctype": "Farm Checkin Schedule",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": false,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "farm_treatment",
+      "postgresTable": "flock_treatments",
+      "erpnextDoctype": "Farm Treatment",
+      "idColumn": "id",
+      "idType": "text",
+      "inboundSupported": true,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "slaughter_record",
+      "postgresTable": "flock_slaughter_events",
+      "erpnextDoctype": "Slaughter Record",
+      "idColumn": "id",
+      "idType": "text",
+      "inboundSupported": true,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "daily_farm_log",
+      "postgresTable": "poultry_daily_logs",
+      "erpnextDoctype": "Daily Farm Log",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": false,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, log_date, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "farm_vet_log",
+      "postgresTable": "farm_vet_logs",
+      "erpnextDoctype": "Farm Vet Log",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": false,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "farm_treatment_round",
+      "postgresTable": "treatment_rounds",
+      "erpnextDoctype": "Farm Treatment Round",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": false,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "farm_treatment_round_event",
+      "postgresTable": "treatment_round_events",
+      "erpnextDoctype": "Farm Treatment Round Event",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": false,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(created_at, now())",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "farm_weigh_in",
+      "postgresTable": "weigh_ins",
+      "erpnextDoctype": "Farm Weigh In",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": false,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, weighed_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "farm_valuation_snapshot",
+      "postgresTable": "flock_valuation_snapshots",
+      "erpnextDoctype": "Farm Valuation Snapshot",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": false,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "farm_payroll_impact",
+      "postgresTable": "payroll_impact",
+      "erpnextDoctype": "Farm Payroll Impact",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": false,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "farm_loan_application",
+      "postgresTable": "farm_loan_applications",
+      "erpnextDoctype": "Farm Loan Application",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": false,
+      "outboundSupported": true,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    },
+    {
+      "entityType": "farm_migration_map",
+      "postgresTable": "farm_migration_map",
+      "erpnextDoctype": "Farm Migration Map",
+      "idColumn": "id",
+      "idType": "uuid",
+      "inboundSupported": false,
+      "outboundSupported": false,
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": []
+    }
+  ]
+}

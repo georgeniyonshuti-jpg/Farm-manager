@@ -71,10 +71,32 @@ X-ClevaFarm-Secret: ...
 Response: { "records": [ ... ] }
 ```
 
+Each record includes `updatedAt` (ISO timestamp) and `contentHash` (sha256 of payload fields) for ERPNext idempotent upsert comparisons.
+
+**Important:** Farm returns **all rows changed since `updatedSince`**. ERPNext reconciliation must **always upsert** by `payload.id` — skipping rows that were ever synced successfully is an ERPNext-side bug. Real-time outbound outbox remains the primary update path.
+
+After deploy, backfill UUID ↔ Frappe name links:
+
+```bash
+DATABASE_URL=... node scripts/backfill-migration-map.js --dry-run
+DATABASE_URL=... node scripts/backfill-migration-map.js
+```
+
+Canonical entity/table mapping: [`clevafarm-entity-registry.json`](./clevafarm-entity-registry.json) (generate via `cd server && npm run export:clevafarm-registry`).
+
+Compare with ERPNext `clevafarm_integration/setup/entity_registry.json`:
+
+```bash
+cd server && npm run diff:clevafarm-registry -- --erpnext=/path/to/clevafarm_integration/setup/entity_registry.json
+```
+
+Outbound pushes include top-level `correlationId` (clevafarm outbox UUID) for ERPNext Farm Sync Log cross-reference, plus `meta.correlationId` for forward compatibility.
+
 ### Accounting webhooks (existing)
 
 - `POST /api/webhooks/erpnext/purchase-invoice` — sets `opening_recorded` on flock when `farm_entity_id` present
 - `POST /api/webhooks/erpnext/sales-invoice`
+- `POST /api/webhooks/erpnext/stock-entry` — sets `reference` on `farm_inventory_transactions` when `farm_entity_id` present
 - `POST /api/webhooks/erpnext/payment-entry`
 - `POST /api/webhooks/erpnext/loan-application`
 
@@ -116,7 +138,41 @@ Legacy Frappe HMAC (`x-frappe-webhook-signature`) is accepted when `ERPNEXT_WEBH
 cd server && DATABASE_URL=... node ../scripts/backfill-clevafarm-sync.js --dry-run
 node ../scripts/backfill-clevafarm-sync.js
 node ../scripts/backfill-clevafarm-sync.js --since=2026-01-01T00:00:00Z
+# Target one entity type (e.g. re-push check-ins for ERPNext water/feed mapper):
+node ../scripts/backfill-clevafarm-sync.js --entity-type=farm_checkin --dry-run
+node ../scripts/backfill-clevafarm-sync.js --entity-type=farm_checkin
 ```
+
+## Joint deploy order (Farm + ERPNext)
+
+Run after both codebases have the sync glue fixes:
+
+1. **Deploy Farm Manager** (Render) — migration map writer, correlation ID, stock-entry inbound
+2. **Backfill migration map** (one-time on prod Postgres):
+   ```bash
+   DATABASE_URL=<prod> npm run backfill:migration-map --prefix server
+   ```
+3. **Deploy ERPNext** — `bench --site erp.clevacredit.com migrate` (adds `correlation_id` on Farm Sync Log)
+4. **Repair inbound drafts** on ERPNext:
+   ```bash
+   bench --site erp.clevacredit.com execute clevafarm_integration.tasks.repair_inbound_drafts.run
+   ```
+5. **Optional check-in water/feed backfill** — re-enqueue check-ins so ERPNext upsert receives `feedKg` / `waterL`:
+   ```bash
+   DATABASE_URL=<prod> node scripts/backfill-clevafarm-sync.js --entity-type=farm_checkin
+   ```
+   Or trigger ERPNext reconciliation for `farm_checkin` with an early `updatedSince`.
+6. **Verify**:
+   ```bash
+   cd server && npm run diagnose:clevafarm -- --env-file=~/gitops/clevafarm-render.env
+   npm run diff:clevafarm-registry -- --erpnext=/path/to/entity_registry.json
+   ```
+
+**Smoke checks:**
+
+- Desk edit mortality/feed on synced flock → Farm `200` (not `422 INVALID_FK`)
+- Outbound push → ERPNext Farm Sync Log `correlation_id` matches Farm outbox row id
+- Stock Entry with `farm_entity_id` = inventory txn UUID → Farm `farm_inventory_transactions.reference` updated
 
 ## Health / observability
 

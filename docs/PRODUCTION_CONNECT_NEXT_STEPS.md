@@ -50,7 +50,10 @@ cd server && npm run test:clevafarm
 ```bash
 DATABASE_URL=<prod> bash scripts/run-prod-backfill.sh --dry-run
 DATABASE_URL=<prod> bash scripts/run-prod-backfill.sh
+DATABASE_URL=<prod> npm run backfill:migration-map --prefix server
 ```
+
+See **[Joint deploy order (Farm + ERPNext)](./INTEGRATION.md#joint-deploy-order-farm--erpnext)** in INTEGRATION.md for the full sequence (migration map, correlation ID, check-in resync, registry diff).
 
 Or trigger ERPNext reconciliation pull on Hetzner:
 
