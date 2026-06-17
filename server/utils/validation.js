@@ -43,4 +43,25 @@ export const vetLogSchema = z.object({
   observations: z.string().max(8000).optional(),
   actionsTaken: z.string().max(8000).optional(),
   recommendations: z.string().max(8000).optional(),
+  weightSample: z
+    .object({
+      sampleSize: z.coerce.number().int().positive(),
+      avgWeightKg: z.coerce.number().positive(),
+      totalFeedUsedKg: z.coerce.number().nonnegative().optional(),
+      cvPct: z.coerce.number().optional(),
+      underweightPct: z.coerce.number().optional(),
+      targetWeightKg: z.coerce.number().positive().optional(),
+    })
+    .optional(),
+  medicine: z
+    .object({
+      medicineId: z.string().uuid().optional(),
+      medicineName: z.string().min(1).max(200),
+      dose: z.coerce.number().positive(),
+      doseUnit: z.string().min(1).max(32),
+      route: z.enum(["drinking_water", "feed_additive", "injection", "topical"]),
+      diseaseOrReason: z.string().max(500).optional(),
+      notes: z.string().max(2000).optional(),
+    })
+    .optional(),
 });

@@ -24,6 +24,7 @@ export function LaborerHome() {
   const linkCheckin = useLaborerT("Round check-in");
   const linkMort = useLaborerT("Log mortality");
   const linkFeed = useLaborerT("Feed log");
+  const linkVetLogs = useLaborerT("Vet logs");
   const linkEarnings = useLaborerT("My earnings");
   const noFlockTitle = useLaborerT("No flock available");
   const noFlockBody = useLaborerT("Round status appears when a flock is assigned to your site.");
@@ -41,6 +42,7 @@ export function LaborerHome() {
   const tabRounds = useLaborerT("Rounds");
   const tabMort = useLaborerT("Mortality");
   const tabFeed = useLaborerT("Feed");
+  const tabVetLogs = useLaborerT("Vet logs");
   const [showDetailedCard, setShowDetailedCard] = useState(false);
 
   const [status, setStatus] = useState<CheckinStatus | null>(null);
@@ -221,6 +223,21 @@ export function LaborerHome() {
         </svg>
       ),
     },
+    ...(isJuniorVet
+      ? [
+          {
+            to: "/farm/vet-logs",
+            label: tabVetLogs,
+            icon: (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" strokeLinejoin="round" />
+                <rect x="9" y="3" width="6" height="4" rx="1" />
+                <path d="M9 12h6M9 16h6" strokeLinecap="round" />
+              </svg>
+            ),
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -277,6 +294,14 @@ export function LaborerHome() {
           >
             {linkFeed}
           </Link>
+          {isJuniorVet ? (
+            <Link
+              to="/farm/vet-logs"
+              className="bounce-tap flex min-h-[60px] items-center justify-center rounded-2xl border-2 border-emerald-600/35 bg-emerald-600/10 px-4 text-lg font-semibold text-emerald-800 hover:bg-emerald-600/15 dark:text-emerald-300"
+            >
+              {linkVetLogs}
+            </Link>
+          ) : null}
         </div>
         <div className="grid gap-3">
           <Link

@@ -21,6 +21,27 @@ export function roleAtLeast(user: SessionUser | null, minRole: UserRole): boolea
   return u >= m;
 }
 
+/** Submit vet logs: vet (incl. junior), vet_manager, manager, superuser. */
+export function canSubmitVetLog(user: SessionUser | null): boolean {
+  if (!user) return false;
+  const r = user.role;
+  return r === "vet" || r === "vet_manager" || r === "manager" || r === "superuser";
+}
+
+/** Approve/reject pending vet logs: vet_manager, manager, superuser. */
+export function canReviewVetLog(user: SessionUser | null): boolean {
+  if (!user) return false;
+  const r = user.role;
+  return r === "vet_manager" || r === "manager" || r === "superuser";
+}
+
+/** Junior vet submissions need lead-vet approval; vet_manager+ save as approved. */
+export function vetLogNeedsManagerReview(user: SessionUser | null): boolean {
+  if (!user || !canSubmitVetLog(user)) return false;
+  if (canReviewVetLog(user)) return false;
+  return user.role === "vet" && user.departmentKeys.includes("junior_vet");
+}
+
 export function isSuperuser(user: SessionUser | null): boolean {
   return user?.role === "superuser";
 }
@@ -64,7 +85,7 @@ export function farmCoreNavItems(user: SessionUser | null): FarmNavItem[] {
   if (!user || !canAccessWorkspace(user, "farm")) return [];
   if (farmFieldOpsNavEligible(user)) {
     const items: FarmNavItem[] = [...FARM_CORE_FULL];
-    if (roleAtLeast(user, "vet")) {
+    if (canSubmitVetLog(user)) {
       items.push({ to: "/farm/vet-logs", label: "Vet logs" });
     }
     items.push({ to: "/farm/mortality", label: "Mortality tracking" });

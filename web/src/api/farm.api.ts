@@ -284,6 +284,15 @@ export type VetLogListRow = {
   fcrStatus?: string | null;
   fcrTargetMin?: number | null;
   fcrTargetMax?: number | null;
+  weighInId?: string | null;
+  sampleSize?: number | null;
+  avgWeightKg?: number | null;
+  cvPct?: number | null;
+  underweightPct?: number | null;
+  totalFeedUsedKg?: number | null;
+  hasWeightSample?: boolean;
+  treatmentId?: string | null;
+  medicineName?: string | null;
 };
 
 export async function fetchVetLogsList(

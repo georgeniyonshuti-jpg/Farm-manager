@@ -124,7 +124,7 @@ export const ENTITY_DEFS = {
   farm_weigh_in: {
     table: "weigh_ins",
     idColumn: "id",
-    updatedSinceSql: "COALESCE(updated_at, weighed_at, created_at)",
+    updatedSinceSql: "COALESCE(updated_at, created_at)",
   },
   farm_valuation_snapshot: {
     table: "flock_valuation_snapshots",

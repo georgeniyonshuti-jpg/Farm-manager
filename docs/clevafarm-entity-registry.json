@@ -146,7 +146,8 @@
       "inboundSupported": true,
       "outboundSupported": true,
       "updatedSinceSql": "COALESCE(updated_at, created_at)",
-      "omitPayloadFields": []
+      "omitPayloadFields": [],
+      "erpnextOutboundNotes": "vetLogId when medicine logged during a vet visit; feeds flock_accumulated_spend in IAS 41."
     },
     {
       "entityType": "slaughter_record",
@@ -179,7 +180,8 @@
       "inboundSupported": false,
       "outboundSupported": true,
       "updatedSinceSql": "COALESCE(updated_at, created_at)",
-      "omitPayloadFields": []
+      "omitPayloadFields": [],
+      "erpnextOutboundNotes": "Includes weighInId, sampleSize, avgWeightKg, cvPct, underweightPct, totalFeedUsedKg, authorUserId, submissionStatus. Vet log with weight triggers ERPNext valuation draft on approve."
     },
     {
       "entityType": "farm_treatment_round",
@@ -211,8 +213,9 @@
       "idType": "uuid",
       "inboundSupported": false,
       "outboundSupported": true,
-      "updatedSinceSql": "COALESCE(updated_at, weighed_at, created_at)",
-      "omitPayloadFields": []
+      "updatedSinceSql": "COALESCE(updated_at, created_at)",
+      "omitPayloadFields": [],
+      "erpnextOutboundNotes": "Includes vetLogId, source (standalone|vet_log), recordedBy. Linked vet_log weight drives IAS 41 carrying value."
     },
     {
       "entityType": "farm_valuation_snapshot",

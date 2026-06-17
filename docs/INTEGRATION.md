@@ -128,6 +128,18 @@ Legacy Frappe HMAC (`x-frappe-webhook-signature`) is accepted when `ERPNEXT_WEBH
 22. `farm_loan_application` → `farm_loan_applications`
 23. `farm_migration_map` → `farm_migration_map`
 
+### Vet log → ERPNext value sync (outbound)
+
+Vet visits can include an optional **weight sample** and **medicine** (migration `048_vet_log_weight_medicine.sql`):
+
+| Farm action | Postgres | ERPNext DocType | Notes |
+|-------------|----------|-----------------|-------|
+| Vet log save (approved) | `farm_vet_logs` | Farm Vet Log | `weighInId`, `sampleSize`, `avgWeightKg`, `cvPct`, `underweightPct`, `totalFeedUsedKg`, `submissionStatus` |
+| Auto weigh-in from vet log | `weigh_ins` (`source=vet_log`) | Farm Weigh In | `vetLogId`, `recordedBy` — ERPNext may create IAS 41 valuation draft |
+| Medicine on visit | `flock_treatments` (`vet_log_id`) | Farm Treatment | `vetLogId` — medicine spend in `flock_accumulated_spend` |
+
+**Junior vet** submissions stay `pending_review` until **vet manager, manager, or superuser** approves; ClevaFarm outbox sync runs only on **approved** logs (and linked weigh-in / treatment). Vet manager and senior vets submit as **approved** immediately.
+
 ## Loop guard
 
 `AsyncLocalStorage` in inbound handlers sets `isClevaFarmInboundSync()`. `emitEntitySync` skips enqueue during inbound writes. Backfill uses `skipClevaFarmSync` or direct outbox enqueue without re-reading.

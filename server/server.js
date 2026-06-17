@@ -57,6 +57,17 @@ import clevafarmEntitiesRouter, { initClevaFarmEntitiesRouter } from "./src/rout
 import { initErpnextDb } from "./src/services/erpnext/erpnext.syncLog.js";
 import { initClevaFarmSyncWorker, processClevaFarmOutbox } from "./src/services/clevafarm/syncOutbox.js";
 import { emitEntitySync, initClevaFarmEmit } from "./src/services/clevafarm/emitEntitySync.js";
+import {
+  VET_LOG_LIST_EXTRA_SELECT,
+  VET_LOG_LIST_EXTRA_JOINS,
+  shouldSyncVetLogOnCreate,
+  shouldSyncVetLogOnReview,
+  syncApprovedVetLogEntities,
+  attachWeightSampleToVetLog,
+  attachMedicineToVetLog,
+  canCreateVetLog,
+  needsVetLogApproval,
+} from "./src/services/vetLogService.js";
 import { initErpnextConfigDb } from "./src/services/erpnext/erpnext.config.js";
 import { createSaasRouter } from "./src/routes/saasRoutes.js";
 import { initOdooSyncWorker, processOdooSyncOutbox, enqueueOdooSync } from "./src/services/odoo/odooSyncWorker.js";
@@ -5389,8 +5400,8 @@ app.patch("/api/mortality-events/:id/review", requireAuth, requireFarmAccess, re
 // ── Vet logs (replaces daily logs for vet+ roles) ──
 
 app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("farm_vet_logs"), async (req, res) => {
-  if (!isVetOrAbove(req.authUser)) {
-    res.status(403).json({ error: "Only vet or above can create vet logs" });
+  if (!canCreateVetLog(req.authUser)) {
+    res.status(403).json({ error: "Only vet, vet manager, manager, or superuser can create vet logs" });
     return;
   }
   const parsed = vetLogSchema.safeParse(req.body ?? {});
@@ -5398,17 +5409,18 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid vet log payload" });
     return;
   }
-  const { flockId, logDate, observations, actionsTaken, recommendations } = parsed.data;
+  const { flockId, logDate, observations, actionsTaken, recommendations, weightSample, medicine } = parsed.data;
   const f = await getFlockByIdForUser(flockId, req.authUser, res);
   if (!f) return;
   if (!assertFlockNotArchivedForMutation(f, res)) return;
-  const submissionStatus = needsApproval(req.authUser) ? "pending_review" : "approved";
-  let id = `vl_${crypto.randomBytes(8).toString("hex")}`;
+  const submissionStatus = needsVetLogApproval(req.authUser) ? "pending_review" : "approved";
   const now = new Date().toISOString();
   let fcrAtLogTime = null;
   let fcrStatus = null;
   let fcrTargetMin = null;
   let fcrTargetMax = null;
+  let defaultFeedKg = 0;
+  let ageDays = flockAgeDays(f, new Date(logDate));
   try {
     const perf = await buildFlockPerformanceSummary(flockId);
     const broiler = perf?.fcrBroiler;
@@ -5418,9 +5430,22 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
       fcrTargetMin = broiler.fcrTargetMin != null ? Number(broiler.fcrTargetMin) : null;
       fcrTargetMax = broiler.fcrTargetMax != null ? Number(broiler.fcrTargetMax) : null;
     }
+    defaultFeedKg = perf?.feedToDateKg != null ? Number(perf.feedToDateKg) : 0;
+    if (perf?.ageDays != null) ageDays = Number(perf.ageDays);
   } catch (e) {
     console.warn("[WARN] vet-log FCR snapshot:", e instanceof Error ? e.message : e);
   }
+
+  if (weightSample && (!hasDb() || !isPersistableUuid(flockId) || !isPersistableUuid(req.authUser.id))) {
+    res.status(503).json({ error: "Weight samples require database persistence." });
+    return;
+  }
+  if (medicine && (!hasDb() || !isPersistableUuid(flockId) || !isPersistableUuid(req.authUser.id))) {
+    res.status(503).json({ error: "Medicine logging requires database persistence." });
+    return;
+  }
+
+  let id = `vl_${crypto.randomBytes(8).toString("hex")}`;
   const row = {
     id,
     flockId,
@@ -5436,11 +5461,18 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
     fcrTargetMax,
     createdAt: now,
     updatedAt: now,
+    weighInId: null,
+    treatmentId: null,
+    hasWeightSample: Boolean(weightSample),
+    medicineName: medicine?.medicineName ?? null,
   };
+
   let vetLogSavedToDb = false;
   if (hasDb() && isPersistableUuid(flockId) && isPersistableUuid(req.authUser.id)) {
+    const client = await dbPool.connect();
     try {
-      const ins = await dbQuery(
+      await client.query("BEGIN");
+      const ins = await client.query(
         `INSERT INTO farm_vet_logs (
            flock_id, author_user_id, log_date, observations, actions_taken, recommendations, submission_status,
            fcr_at_log_time, fcr_status, fcr_target_min, fcr_target_max
@@ -5462,20 +5494,63 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
         ]
       );
       const r0 = ins.rows[0];
-      if (r0?.id) { row.id = String(r0.id); id = row.id; }
-      if (r0?.createdAt) row.createdAt = r0.createdAt instanceof Date ? r0.createdAt.toISOString() : String(r0.createdAt);
+      if (!r0?.id) throw new Error("Vet log insert failed");
+      row.id = String(r0.id);
+      id = row.id;
+      if (r0.createdAt) row.createdAt = r0.createdAt instanceof Date ? r0.createdAt.toISOString() : String(r0.createdAt);
+
+      if (weightSample) {
+        row.weighInId = await attachWeightSampleToVetLog({
+          client,
+          vetLogId: id,
+          flockId,
+          authorUserId: req.authUser.id,
+          logDate: row.logDate,
+          weightSample,
+          ageDays,
+          defaultFeedKg,
+        });
+      }
+
+      if (medicine) {
+        row.treatmentId = await attachMedicineToVetLog({
+          client,
+          vetLogId: id,
+          flockId,
+          authorUserId: req.authUser.id,
+          medicine,
+          systemConfig,
+          treatmentReasonCodes: TREATMENT_REASON_CODES,
+        });
+      }
+
+      await client.query("COMMIT");
       vetLogSavedToDb = true;
     } catch (e) {
-      console.error("[ERROR]", "[db] POST /api/vet-logs:", e instanceof Error ? e.message : e);
-      res.status(503).json({ error: "Could not save vet log." });
+      await client.query("ROLLBACK");
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[ERROR]", "[db] POST /api/vet-logs:", msg);
+      res.status(400).json({ error: msg.includes("required") || msg.includes("Invalid") ? msg : "Could not save vet log." });
       return;
+    } finally {
+      client.release();
     }
-  }
-  if (!vetLogSavedToDb) {
+  } else if (!vetLogSavedToDb) {
     vetLogs.push(row);
   }
-  appendAudit(req.authUser.id, req.authUser.role, "farm.vet_log.create", "flock", flockId, { vetLogId: id, submissionStatus });
-  if (vetLogSavedToDb) clevaSync("farm_vet_log", id);
+
+  appendAudit(req.authUser.id, req.authUser.role, "farm.vet_log.create", "flock", flockId, {
+    vetLogId: id,
+    submissionStatus,
+    weighInId: row.weighInId,
+    treatmentId: row.treatmentId,
+  });
+
+  if (vetLogSavedToDb && shouldSyncVetLogOnCreate(submissionStatus)) {
+    const client = { query: (...args) => dbQuery(...args) };
+    await syncApprovedVetLogEntities(clevaSync, client, id);
+  }
+
   res.json({ ok: true, log: row });
 });
 
@@ -5497,8 +5572,10 @@ app.get("/api/vet-logs", requireAuth, requireFarmAccess, requireAnyPageAccess(["
                         v.review_notes AS "reviewNotes", v.created_at AS "createdAt",
                         v.fcr_at_log_time AS "fcrAtLogTime", v.fcr_status AS "fcrStatus",
                         v.fcr_target_min AS "fcrTargetMin", v.fcr_target_max AS "fcrTargetMax",
+                        ${VET_LOG_LIST_EXTRA_SELECT},
                         u.full_name AS "authorName", f.code AS "flockCode"
                    FROM farm_vet_logs v
+                   ${VET_LOG_LIST_EXTRA_JOINS}
                    LEFT JOIN users u ON u.id = v.author_user_id
                    LEFT JOIN poultry_flocks f ON f.id = v.flock_id
                   WHERE 1=1`;
@@ -5541,8 +5618,10 @@ app.get("/api/vet-logs/:id", requireAuth, requireFarmAccess, requireAnyPageAcces
                 v.review_notes AS "reviewNotes", v.created_at AS "createdAt",
                 v.fcr_at_log_time AS "fcrAtLogTime", v.fcr_status AS "fcrStatus",
                 v.fcr_target_min AS "fcrTargetMin", v.fcr_target_max AS "fcrTargetMax",
+                ${VET_LOG_LIST_EXTRA_SELECT},
                 u.full_name AS "authorName", f.code AS "flockCode"
            FROM farm_vet_logs v
+           ${VET_LOG_LIST_EXTRA_JOINS}
            LEFT JOIN users u ON u.id = v.author_user_id
            LEFT JOIN poultry_flocks f ON f.id = v.flock_id
           WHERE v.id = $1::uuid`,
@@ -5608,7 +5687,10 @@ app.patch("/api/vet-logs/:id/review", requireAuth, requireFarmAccess, requireLea
     mem.updatedAt = new Date().toISOString();
   }
   appendAudit(req.authUser.id, req.authUser.role, `farm.vet_log.${action}`, "vet_log", logId, { reviewNotes });
-  clevaSync("farm_vet_log", logId);
+  if (shouldSyncVetLogOnReview(action) && hasDb()) {
+    const client = { query: (...args) => dbQuery(...args) };
+    await syncApprovedVetLogEntities(clevaSync, client, logId);
+  }
   res.json({ ok: true, status: newStatus });
 });
 
@@ -6697,8 +6779,8 @@ app.post("/api/weigh-ins/:flockId", requireAuth, requireFarmAccess, requirePageA
     const ins = await dbQuery(
       `INSERT INTO weigh_ins
         (flock_id, weigh_date, age_days, sample_size, avg_weight_kg, total_feed_used_kg,
-         target_weight_kg, cv_pct, underweight_pct, notes, recorded_by)
-       VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         target_weight_kg, cv_pct, underweight_pct, notes, recorded_by, source, updated_at)
+       VALUES ($1, $2::date, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'standalone', now())
        RETURNING id,
                  weigh_date::text AS "weighDate",
                  avg_weight_kg AS "avgWeightKg",
@@ -8857,7 +8939,7 @@ app.post("/api/payroll-impact/bulk-approve", requireAuth, requireFarmAccess, req
 // Medicine ops v2
 // -------------------------
 
-app.get("/api/medicine", requireAuth, requireFarmAccess, requirePageAccess("farm_treatments"), requireAction("flock.view"), requireTreatmentLogger, async (_req, res) => {
+app.get("/api/medicine", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_treatments", "farm_vet_logs"]), requireAction("flock.view"), requireTreatmentLogger, async (_req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
