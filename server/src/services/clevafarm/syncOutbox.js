@@ -22,9 +22,13 @@ function hasDb() {
   return typeof _hasDb === "function" ? _hasDb() : false;
 }
 
-export async function enqueueClevaFarmSync({ entityType, entityId, payload, direction = "outbound" }) {
+export async function enqueueClevaFarmSync({ entityType, entityId, payload, direction = "outbound", event = "on_update" }) {
   if (!hasDb()) return;
   const id = String(entityId);
+  const stored = { ...payload };
+  if (event && event !== "on_update") {
+    stored.__syncEvent = event;
+  }
   try {
     if (direction === "inbound_logged") {
       await dbQuery(
@@ -32,7 +36,7 @@ export async function enqueueClevaFarmSync({ entityType, entityId, payload, dire
            (entity_type, entity_id, payload, direction, status, next_retry_at)
          VALUES ($1, $2, $3::jsonb, 'inbound_logged', 'sent', now())
          ON CONFLICT (entity_type, entity_id) DO NOTHING`,
-        [entityType, id, JSON.stringify(payload)]
+        [entityType, id, JSON.stringify(stored)]
       );
       return;
     }
@@ -50,7 +54,7 @@ export async function enqueueClevaFarmSync({ entityType, entityId, payload, dire
              next_retry_at = now(),
              updated_at = now()
        WHERE clevafarm_sync_outbox.direction = 'outbound'`,
-      [entityType, id, JSON.stringify(payload)]
+      [entityType, id, JSON.stringify(stored)]
     );
   } catch (err) {
     console.error(
@@ -125,7 +129,10 @@ export async function processClevaFarmOutbox(limit = 25) {
 
   for (const row of rows) {
     processed += 1;
-    const { entityType, entityId, payload } = row;
+    const { entityType, entityId } = row;
+    const rawPayload = row.payload && typeof row.payload === "object" ? row.payload : {};
+    const syncEvent = typeof rawPayload.__syncEvent === "string" ? rawPayload.__syncEvent : "on_update";
+    const { __syncEvent: _ignored, ...payload } = rawPayload;
 
     try {
       await dbQuery(
@@ -146,6 +153,7 @@ export async function processClevaFarmOutbox(limit = 25) {
         outboxId: row.id,
         entityType,
         entityId,
+        event: syncEvent,
       });
       const erpnextDoctype = getErpnextDoctypeForEntity(entityType, result.doctype);
       await dbQuery(

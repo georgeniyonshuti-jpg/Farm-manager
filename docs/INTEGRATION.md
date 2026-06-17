@@ -140,6 +140,27 @@ Vet visits can include an optional **weight sample** and **medicine** (migration
 
 **Junior vet** submissions stay `pending_review` until **vet manager, manager, or superuser** approves; ClevaFarm outbox sync runs only on **approved** logs (and linked weigh-in / treatment). Vet manager and senior vets submit as **approved** immediately.
 
+### Flock lifecycle → ERPNext (outbound)
+
+| Farm action | Farm DB | Outbound event | ERPNext status | GL impact |
+|-------------|---------|----------------|----------------|-----------|
+| Manual archive | `status = archived` | `on_update` | **Completed** | None |
+| Auto-archive (0 live birds) | `status = archived` | `on_update` | **Completed** | None |
+| Purge (superuser) | row deleted after tombstone | `on_delete` | **Closed** | None |
+| Failed flock delete | row deleted after tombstone | `on_delete` | **Closed** | None |
+| Slaughter record | `flock_slaughter_events` | `on_update` | Flock may stay **Completed** via auto-archive; slaughter doc posts IAS 41 derecognition in ERPNext | Yes (via slaughter doc) |
+
+Tombstone payloads (`purge`, `failed_delete`) include `farmRecordDeleted: true`, `lifecycleReason`, and `status: Closed`. ERPNext must upsert by `payload.id` / migration map — **do not** skip reconcile when a prior sync succeeded but `contentHash` changed.
+
+**Operational closure ≠ accounting derecognition.** Mortality, slaughter, and approved valuation snapshots remain the paths that adjust Biological Assets GL in ERPNext.
+
+#### ERPNext-side requirements (separate `clevafarm_integration` repo)
+
+1. **Status map** — align with Farm outbound: `archived`/`completed` → `Completed`, `failed`/`closed`/`purged`/`deleted` → `Closed`, `slaughtered` → `Slaughtered`. Never title-case unknown values to invalid select options.
+2. **`resolve_flock_status(raw)`** — return only valid Flock select values (`Planned | Active | Completed | Closed | Slaughtered`).
+3. **Tombstone handler** — on `event == "on_delete"` or `payload.farmRecordDeleted == true`: upsert existing Flock to `Closed`; no-op if no migration-map match; do not delete the ERPNext doc.
+4. **Reconciliation** — always upsert when `contentHash` or `updatedAt` differs from last applied; only skip when hash unchanged.
+
 ## Loop guard
 
 `AsyncLocalStorage` in inbound handlers sets `isClevaFarmInboundSync()`. `emitEntitySync` skips enqueue during inbound writes. Backfill uses `skipClevaFarmSync` or direct outbox enqueue without re-reading.

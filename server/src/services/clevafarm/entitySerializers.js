@@ -72,6 +72,20 @@ function hashPayload(payload) {
   return crypto.createHash("sha256").update(stable).digest("hex");
 }
 
+/** @param {string} farmStatus */
+export function resolveFlockStatusOut(farmStatus) {
+  const s = String(farmStatus ?? "").toLowerCase();
+  return FLOCK_STATUS_OUT[s] || "Closed";
+}
+
+/** Stable sha256 for outbound payloads; strips internal sync-only fields. */
+export function computePayloadContentHash(payload) {
+  const copy = { ...payload };
+  delete copy.__syncEvent;
+  delete copy.contentHash;
+  return hashPayload(copy);
+}
+
 /**
  * @param {string} entityType
  * @param {Record<string, unknown>} row
@@ -83,8 +97,7 @@ export function rowToPayload(entityType, row) {
   const payload = pgRowToCamelPayload(row, { omit });
 
   if (entityType === "flock" && row.status != null) {
-    const s = String(row.status).toLowerCase();
-    payload.status = FLOCK_STATUS_OUT[s] || row.status;
+    payload.status = resolveFlockStatusOut(row.status);
   }
 
   if (entityType === "farm_checkin") {
@@ -105,7 +118,7 @@ export function rowToPayload(entityType, row) {
 
   const updatedAt = pickUpdatedAtIso(row);
   if (updatedAt) payload.updatedAt = updatedAt;
-  payload.contentHash = hashPayload(payload);
+  payload.contentHash = computePayloadContentHash(payload);
 
   return payload;
 }

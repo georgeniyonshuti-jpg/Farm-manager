@@ -478,7 +478,13 @@ export function FlockListPage() {
 
   async function archiveFlock(flockId: string, label: string) {
     if (user?.role !== "superuser") return;
-    if (!window.confirm(`Archive flock ${label}? It will be hidden from field staff selectors.`)) return;
+    if (
+      !window.confirm(
+        `Archive flock ${label}? It will be hidden from field staff selectors. In ERPNext the flock status becomes Completed (operational close only — does not clear Biological Assets GL).`
+      )
+    ) {
+      return;
+    }
     setArchiveBusyId(flockId);
     try {
       const r = await fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/archive`, {
@@ -498,7 +504,9 @@ export function FlockListPage() {
 
   async function purgeFlock(flockId: string, label: string) {
     if (user?.role !== "superuser") return;
-    const confirmPhrase = window.prompt(`Type PURGE to permanently delete ${label}`);
+    const confirmPhrase = window.prompt(
+      `Type PURGE to permanently delete ${label} from Farm Manager.\n\nERPNext will mark this flock Closed and remove it from ops lists. This does NOT clear Biological Assets GL — use slaughter, mortality, or valuation in ERPNext for accounting derecognition.`
+    );
     if (confirmPhrase !== "PURGE") return;
     setPurgeBusyId(flockId);
     try {

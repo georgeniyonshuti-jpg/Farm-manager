@@ -57,6 +57,7 @@ import clevafarmEntitiesRouter, { initClevaFarmEntitiesRouter } from "./src/rout
 import { initErpnextDb } from "./src/services/erpnext/erpnext.syncLog.js";
 import { initClevaFarmSyncWorker, processClevaFarmOutbox } from "./src/services/clevafarm/syncOutbox.js";
 import { emitEntitySync, initClevaFarmEmit } from "./src/services/clevafarm/emitEntitySync.js";
+import { enqueueFlockTombstoneSync, initFlockLifecycleSync } from "./src/services/clevafarm/flockLifecycleSync.js";
 import {
   VET_LOG_LIST_EXTRA_SELECT,
   VET_LOG_LIST_EXTRA_JOINS,
@@ -1486,6 +1487,7 @@ if (dbPool) {
   initErpnextDb(dbQuery);
   initClevaFarmSyncWorker(dbQuery, hasDb);
   initClevaFarmEmit(dbQuery, hasDb);
+  initFlockLifecycleSync(dbQuery, hasDb);
   initClevaFarmEntitiesRouter(dbQuery);
   initErpnextWebhookRouter(dbQuery);
   initErpnextConfigDb(dbQuery);
@@ -1765,7 +1767,7 @@ async function maybeAutoArchiveFlock(flockId, auditCtx = null) {
   if (live > 0) return;
   if (hasDb() && isPersistableUuid(id)) {
     try {
-      await dbQuery(`UPDATE poultry_flocks SET status = 'archived' WHERE id = $1::uuid AND status <> 'archived'`, [id]);
+      await dbQuery(`UPDATE poultry_flocks SET status = 'archived', updated_at = now() WHERE id = $1::uuid AND status <> 'archived'`, [id]);
     } catch (e) {
       console.error("[ERROR]", "[flock] auto-archive db:", e instanceof Error ? e.message : e);
       return;
@@ -1775,6 +1777,7 @@ async function maybeAutoArchiveFlock(flockId, auditCtx = null) {
   appendAudit(auditCtx?.userId ?? "system", auditCtx?.role ?? "system", "flock.auto_archive", "flock", id, {
     reason: "zero_live_birds",
   });
+  clevaSync("flock", id);
 }
 
 async function syncFlockFeedEntriesFromDb() {
@@ -3907,12 +3910,22 @@ app.delete("/api/flocks/:id/failed", requireAuth, requireFarmAccess, requireSupe
     res.status(404).json({ error: "Failed flock not found" });
     return;
   }
-  if (hasDb() && isPersistableUuid(id)) {
-    await dbQuery(`DELETE FROM poultry_flocks WHERE id::text = $1 AND status::text = 'failed'`, [id]);
+  try {
+    await enqueueFlockTombstoneSync(id, {
+      terminalStatus: "closed",
+      reason: "failed_delete",
+      event: "on_delete",
+    });
+    if (hasDb() && isPersistableUuid(id)) {
+      await dbQuery(`DELETE FROM poultry_flocks WHERE id::text = $1 AND status::text = 'failed'`, [id]);
+    }
+    flocksById.delete(id);
+    appendAudit(req.authUser.id, req.authUser.role, "flock.failed_delete", "flock", id, {});
+    res.json({ ok: true, deletedFailedFlockId: id });
+  } catch (e) {
+    console.error("[ERROR]", "[flock] DELETE /api/flocks/:id/failed:", e instanceof Error ? e.message : e);
+    res.status(500).json({ error: "Unable to delete failed flock." });
   }
-  flocksById.delete(id);
-  appendAudit(req.authUser.id, req.authUser.role, "flock.failed_delete", "flock", id, {});
-  res.json({ ok: true, deletedFailedFlockId: id });
 });
 
 app.delete("/api/flocks/:id/purge", requireAuth, requireFarmAccess, requireSuperuser, requirePageAccess("farm_flocks"), async (req, res) => {
@@ -3929,6 +3942,11 @@ app.delete("/api/flocks/:id/purge", requireAuth, requireFarmAccess, requireSuper
     return;
   }
   try {
+    await enqueueFlockTombstoneSync(id, {
+      terminalStatus: "closed",
+      reason: "purged",
+      event: "on_delete",
+    });
     if (hasDb()) {
       await dbQuery(`DELETE FROM poultry_flocks WHERE id::text = $1`, [id]);
     }

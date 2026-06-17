@@ -55,7 +55,8 @@
       "inboundSupported": true,
       "outboundSupported": true,
       "updatedSinceSql": "COALESCE(updated_at, created_at)",
-      "omitPayloadFields": []
+      "omitPayloadFields": [],
+      "erpnextOutboundNotes": "archive/auto-archive → Completed (on_update); purge/failed_delete → Closed tombstone (on_delete, farmRecordDeleted, lifecycleReason). Status sync does not post GL — mortality/slaughter/valuation handle IAS 41."
     },
     {
       "entityType": "farm_medicine_item",

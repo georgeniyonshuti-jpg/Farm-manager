@@ -20,9 +20,10 @@ function receiveUrl() {
  */
 export function buildOutboundRequestBody(entityType, payload, meta = {}) {
   const correlationId = meta.correlationId || meta.outboxId || null;
+  const event = meta.event || "on_update";
   return {
     entityType,
-    event: "on_update",
+    event,
     payload,
     correlationId,
     correlation_id: correlationId,
