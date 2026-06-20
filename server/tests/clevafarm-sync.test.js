@@ -245,7 +245,7 @@ describe("clevafarm inbound mappers (golden)", () => {
 
   it("maps feed_inventory_transaction without desk keys", () => {
     const row = mapInboundPayload("feed_inventory_transaction", GOLDEN_INBOUND.feed_inventory_transaction);
-    assert.equal(row.transaction_type, "purchase");
+    assert.equal(row.transaction_type, "procurement_receipt");
     assert.equal(row.quantity_kg, 1000);
     assert.equal(row.delta_kg, 1000);
     assert.equal(row.actor_user_id, USER_ID);

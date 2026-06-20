@@ -33,6 +33,7 @@ export const checkinSchema = z.object({
 /** Feed-only entry (no round check-in photos); used for cycle FCR feed sum. */
 export const feedEntrySchema = z.object({
   feedKg: z.coerce.number().min(0.001).max(100000),
+  feedType: z.string().min(1).max(64),
   notes: z.string().max(4000).optional(),
   recordedAt: z.string().max(40).optional(),
 });

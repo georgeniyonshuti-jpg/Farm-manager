@@ -64,10 +64,12 @@ function hasOdooSendAccess(user) {
 
 let _dbQuery = null;
 let _hasDb = null;
+let _clevaSync = null;
 
-export function initAccountingApprovalsRouter(dbQueryFn, hasDbFn) {
+export function initAccountingApprovalsRouter(dbQueryFn, hasDbFn, clevaSyncFn = null) {
   _dbQuery = dbQueryFn;
   _hasDb = hasDbFn;
+  _clevaSync = typeof clevaSyncFn === "function" ? clevaSyncFn : null;
 }
 
 function dbQuery(...args) {
@@ -76,6 +78,10 @@ function dbQuery(...args) {
 }
 
 function hasDb() { return typeof _hasDb === "function" ? _hasDb() : false; }
+
+function clevaSyncInventoryTxn(id) {
+  if (_clevaSync && id) _clevaSync("feed_inventory_transaction", String(id));
+}
 
 router.use((req, res, next) => {
   if (!isManagerOrAbove(req.authUser)) {
@@ -165,6 +171,7 @@ router.patch("/feed-procurements/:id/approve", requireOdooSendAccess, async (req
     });
     // Kick off worker async (don't await to keep response fast)
     processOdooSyncOutbox(5).catch(() => {});
+    clevaSyncInventoryTxn(id);
     res.json({ ok: true, row });
   } catch (e) {
     res.status(503).json({ error: e instanceof Error ? e.message : "Approval failed." });
@@ -1410,6 +1417,7 @@ router.patch("/action-queue/feed/:id", requireOdooSendAccess, async (req, res) =
     const payload = mapFeedProcurementToBill({ ...row, at: row.recordedAt });
     await upsertAndResetOutbox({ sourceTable: "farm_inventory_transactions", sourceId: id, eventType: "feed_purchase", payload, userId: req.authUser.id, role: req.authUser.role });
     processOdooSyncOutbox(1).catch(() => {});
+    clevaSyncInventoryTxn(id);
     res.json({ ok: true, row });
   } catch (e) {
     res.status(503).json({ error: e instanceof Error ? e.message : "Update failed." });

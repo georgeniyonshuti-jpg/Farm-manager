@@ -89,7 +89,8 @@
       "inboundSupported": true,
       "outboundSupported": true,
       "updatedSinceSql": "COALESCE(updated_at, recorded_at, created_at)",
-      "omitPayloadFields": []
+      "omitPayloadFields": [],
+      "erpnextOutboundNotes": "Requires feedType (stock-backed). Consumption posts feed_inventory_transaction with feedEntryId on approve or auto-approved create."
     },
     {
       "entityType": "feed_inventory_transaction",

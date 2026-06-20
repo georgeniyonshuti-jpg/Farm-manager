@@ -58,6 +58,8 @@ import { initErpnextDb } from "./src/services/erpnext/erpnext.syncLog.js";
 import { initClevaFarmSyncWorker, processClevaFarmOutbox } from "./src/services/clevafarm/syncOutbox.js";
 import { emitEntitySync, initClevaFarmEmit } from "./src/services/clevafarm/emitEntitySync.js";
 import { enqueueFlockTombstoneSync, initFlockLifecycleSync } from "./src/services/clevafarm/flockLifecycleSync.js";
+import { registerInboundEntityRefresh } from "./src/services/clevafarm/inboundEntityRefresh.js";
+import { assertFeedStockAvailable, filterAvailableFeedStock } from "./src/services/feedStockService.js";
 import {
   VET_LOG_LIST_EXTRA_SELECT,
   VET_LOG_LIST_EXTRA_JOINS,
@@ -1488,6 +1490,8 @@ if (dbPool) {
   initClevaFarmSyncWorker(dbQuery, hasDb);
   initClevaFarmEmit(dbQuery, hasDb);
   initFlockLifecycleSync(dbQuery, hasDb);
+  registerInboundEntityRefresh("feed_log", syncFlockFeedEntriesFromDb);
+  registerInboundEntityRefresh("feed_inventory_transaction", syncInventoryTransactionsFromDb);
   initClevaFarmEntitiesRouter(dbQuery);
   initErpnextWebhookRouter(dbQuery);
   initErpnextConfigDb(dbQuery);
@@ -1788,6 +1792,7 @@ async function syncFlockFeedEntriesFromDb() {
             flock_id::text AS "flockId",
             recorded_at AS "recordedAt",
             feed_kg AS "feedKg",
+            feed_type AS "feedType",
             COALESCE(notes, '') AS notes,
             entered_by_user_id::text AS "enteredByUserId",
             COALESCE(submission_status, 'approved') AS "submissionStatus",
@@ -1805,6 +1810,7 @@ async function syncFlockFeedEntriesFromDb() {
       flockId: String(row.flockId),
       recordedAt: ra instanceof Date ? ra.toISOString() : String(ra),
       feedKg: Number(row.feedKg) || 0,
+      feedType: row.feedType != null ? String(row.feedType) : null,
       notes: String(row.notes ?? ""),
       enteredByUserId: String(row.enteredByUserId),
       submissionStatus: String(row.submissionStatus ?? "approved"),
@@ -4550,7 +4556,19 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid feed entry" });
     return;
   }
-  const { feedKg, notes } = parsed.data;
+  const { feedKg, notes, feedType: feedTypeRaw } = parsed.data;
+  const feedType = String(feedTypeRaw ?? "").trim();
+  if (!systemConfig.validateAgainstCategory("feed_type", feedType)) {
+    res.status(400).json({ error: "Invalid feedType" });
+    return;
+  }
+  if (hasDb()) {
+    const stockCheck = assertFeedStockAvailable(feedType, feedKg, await getAvailableFeedStockRows());
+    if (!stockCheck.ok) {
+      res.status(400).json({ error: stockCheck.error });
+      return;
+    }
+  }
   let atIso = new Date().toISOString();
   const recRaw = parsed.data.recordedAt;
   if (recRaw) {
@@ -4564,6 +4582,7 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
     flockId: f.id,
     recordedAt: atIso,
     feedKg,
+    feedType,
     notes: notes ?? "",
     enteredByUserId: req.authUser.id,
     submissionStatus,
@@ -4572,10 +4591,10 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
   if (hasDb()) {
     try {
       const ins = await dbQuery(
-        `INSERT INTO flock_feed_entries (flock_id, recorded_at, feed_kg, notes, entered_by_user_id, submission_status)
-         VALUES ($1::uuid, $2::timestamptz, $3::numeric, $4, $5::uuid, $6)
+        `INSERT INTO flock_feed_entries (flock_id, recorded_at, feed_kg, feed_type, notes, entered_by_user_id, submission_status)
+         VALUES ($1::uuid, $2::timestamptz, $3::numeric, $4, $5, $6::uuid, $7)
          RETURNING id::text AS id, recorded_at AS "recordedAt"`,
-        [f.id, atIso, feedKg, notes && String(notes).trim() ? String(notes).slice(0, 4000) : null, req.authUser.id, submissionStatus]
+        [f.id, atIso, feedKg, feedType, notes && String(notes).trim() ? String(notes).slice(0, 4000) : null, req.authUser.id, submissionStatus]
       );
       const r0 = ins.rows[0];
       id = String(r0?.id ?? id);
@@ -4608,13 +4627,24 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
   appendAudit(req.authUser.id, req.authUser.role, "farm.feed_entry.create", "flock", f.id, {
     feedEntryId: row.id,
     feedKg,
+    feedType,
     submissionStatus,
   });
   if (feedSavedToDb) clevaSync("feed_log", id);
+  if (feedSavedToDb && submissionStatus === "approved") {
+    await deductFeedStockForEntry(row, req.authUser.id);
+  }
   const summary = await buildFlockPerformanceSummary(f.id);
   res.json({
     ok: true,
-    entry: { id: row.id, recordedAt: row.recordedAt, feedKg: row.feedKg, notes: row.notes, submissionStatus },
+    entry: {
+      id: row.id,
+      recordedAt: row.recordedAt,
+      feedKg: row.feedKg,
+      feedType: row.feedType,
+      notes: row.notes,
+      submissionStatus,
+    },
     feedToDateKg: summary?.feedToDateKg ?? Number(totalFeedKgForFlock(f.id).toFixed(2)),
     payrollImpact,
     payrollSaved,
@@ -4625,6 +4655,13 @@ app.get("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requireP
   const flockId = String(req.params.id ?? "").trim();
   const f = await getFlockByIdForUser(flockId, req.authUser, res);
   if (!f) return;
+  if (hasDb()) {
+    try {
+      await syncFlockFeedEntriesFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET feed-entries sync:", e instanceof Error ? e.message : e);
+    }
+  }
   const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 40));
   const list = flockFeedEntries
     .filter((e) => sameFlockId(e.flockId, flockId))
@@ -4634,6 +4671,7 @@ app.get("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requireP
       id: e.id,
       recordedAt: e.recordedAt,
       feedKg: e.feedKg,
+      feedType: e.feedType ?? null,
       notes: e.notes,
       submissionStatus: e.submissionStatus ?? "approved",
     }));
@@ -5219,8 +5257,15 @@ app.get("/api/feed-entries/pending", requireAuth, requireFarmAccess, requireLead
   const to = req.query.to ? String(req.query.to) : null;
   if (hasDb()) {
     try {
+      await syncFlockFeedEntriesFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET feed-entries/pending sync:", e instanceof Error ? e.message : e);
+    }
+  }
+  if (hasDb()) {
+    try {
       let sql = `SELECT e.id::text AS id, e.flock_id AS "flockId", e.recorded_at AS "recordedAt",
-                        e.feed_kg AS "feedKg", e.notes, e.entered_by_user_id AS "enteredByUserId",
+                        e.feed_kg AS "feedKg", e.feed_type AS "feedType", e.notes, e.entered_by_user_id AS "enteredByUserId",
                         e.submission_status AS "submissionStatus", u.full_name AS "enteredByName"
                    FROM flock_feed_entries e
                    LEFT JOIN users u ON u.id = e.entered_by_user_id
@@ -5251,6 +5296,36 @@ app.patch("/api/feed-entries/:id/review", requireAuth, requireFarmAccess, requir
   }
   const reviewNotes = String(req.body?.reviewNotes ?? "").slice(0, 4000) || null;
   const newStatus = action === "approve" ? "approved" : "rejected";
+
+  if (hasDb()) {
+    try {
+      await syncFlockFeedEntriesFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "syncFlockFeedEntriesFromDb before review:", e instanceof Error ? e.message : e);
+    }
+  }
+  const entryBefore = flockFeedEntries.find((e) => String(e.id) === entryId);
+  if (!entryBefore || (entryBefore.submissionStatus ?? "approved") !== "pending_review") {
+    res.status(404).json({ error: "Entry not found or already reviewed" });
+    return;
+  }
+
+  if (action === "approve") {
+    const feedType = entryBefore.feedType != null ? String(entryBefore.feedType).trim() : null;
+    const feedKg = Number(entryBefore.feedKg ?? 0);
+    if (!feedType) {
+      res.status(400).json({ error: "Feed entry is missing feedType; cannot approve without stock type." });
+      return;
+    }
+    if (feedKg > 0) {
+      const stockCheck = assertFeedStockAvailable(feedType, feedKg, await getAvailableFeedStockRows());
+      if (!stockCheck.ok) {
+        res.status(400).json({ error: stockCheck.error });
+        return;
+      }
+    }
+  }
+
   if (hasDb()) {
     try {
       const r = await dbQuery(
@@ -5277,7 +5352,7 @@ app.patch("/api/feed-entries/:id/review", requireAuth, requireFarmAccess, requir
       console.error("[ERROR]", "syncFlockFeedEntriesFromDb after review:", e instanceof Error ? e.message : e);
     }
   }
-  const mem = flockFeedEntries.find((e) => String(e.id) === entryId);
+  const mem = flockFeedEntries.find((e) => String(e.id) === entryId) ?? entryBefore;
   if (mem) {
     mem.submissionStatus = newStatus;
     mem.reviewedByUserId = req.authUser.id;
@@ -5286,36 +5361,8 @@ app.patch("/api/feed-entries/:id/review", requireAuth, requireFarmAccess, requir
   }
   clevaSync("feed_log", entryId);
 
-  // Auto-deduct inventory when a feed log is approved (idempotent via feed_entry_id unique index)
   if (action === "approve" && hasDb() && isPersistableUuid(entryId) && isPersistableUuid(req.authUser.id)) {
-    const entry = mem ?? flockFeedEntries.find((e) => String(e.id) === entryId);
-    if (entry) {
-      const feedKg = Number(entry.feedKg ?? 0);
-      // Feed type is encoded in notes as "feed_type:starter | ..."
-      const ftMatch = String(entry.notes ?? "").match(/^feed_type:(\w+)/);
-      const feedType = ftMatch ? ftMatch[1] : null;
-      const flockId = entry.flockId && isPersistableUuid(String(entry.flockId)) ? String(entry.flockId) : null;
-      if (feedKg > 0) {
-        try {
-          await dbQuery(
-            `INSERT INTO farm_inventory_transactions (
-               flock_id, transaction_type, recorded_at, quantity_kg, delta_kg,
-               reason, reference, actor_user_id, approved_by_user_id, approved_at,
-               feed_type, feed_entry_id
-             )
-             VALUES ($1::uuid, 'feed_consumption', now(), $2::numeric, $3::numeric,
-                     'approved_feed_log', $4, $5::uuid, $5::uuid, now(),
-                     $6, $7::uuid)
-             ON CONFLICT (feed_entry_id) WHERE feed_entry_id IS NOT NULL DO NOTHING`,
-            [flockId, feedKg, -feedKg, `feed_log:${entryId}`, req.authUser.id, feedType, entryId]
-          );
-          await syncInventoryTransactionsFromDb();
-        } catch (autoErr) {
-          console.error("[ERROR]", "[db] auto-consume inventory on feed-entry approval:", autoErr instanceof Error ? autoErr.message : autoErr);
-          // Non-fatal: review was already saved, don't roll back
-        }
-      }
-    }
+    await deductFeedStockForEntry(mem ?? entryBefore, req.authUser.id);
   }
 
   appendAudit(req.authUser.id, req.authUser.role, `farm.feed_entry.${action}`, "feed_entry", entryId, { reviewNotes });
@@ -6996,7 +7043,78 @@ function computeInventoryStockSummary(feedTypeFilter = null) {
   return summary;
 }
 
-app.get("/api/inventory/stock-summary", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
+async function getAvailableFeedStockRows() {
+  if (hasDb()) {
+    try {
+      await syncInventoryTransactionsFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[feed] sync inventory for stock check:", e instanceof Error ? e.message : e);
+    }
+  }
+  return filterAvailableFeedStock(computeInventoryStockSummary());
+}
+
+/**
+ * Idempotent stock deduction for an approved feed log entry.
+ * @param {{ id: string, flockId?: string, feedKg?: number, feedType?: string | null }} entry
+ * @param {string} actorUserId
+ * @returns {Promise<string | null>} inventory transaction id when created or already linked
+ */
+async function deductFeedStockForEntry(entry, actorUserId) {
+  if (!hasDb() || !entry?.id) return null;
+  const entryId = String(entry.id);
+  if (!isPersistableUuid(entryId) || !isPersistableUuid(actorUserId)) return null;
+  const feedKg = Number(entry.feedKg ?? 0);
+  if (feedKg <= 0) return null;
+
+  const feedType = entry.feedType != null ? String(entry.feedType).trim() || null : null;
+  const flockId =
+    entry.flockId && isPersistableUuid(String(entry.flockId)) ? String(entry.flockId) : null;
+
+  try {
+    const existing = await dbQuery(
+      `SELECT id::text AS id FROM farm_inventory_transactions
+        WHERE feed_entry_id = $1::uuid LIMIT 1`,
+      [entryId]
+    );
+    if (existing.rows[0]?.id) {
+      return String(existing.rows[0].id);
+    }
+
+    const ins = await dbQuery(
+      `INSERT INTO farm_inventory_transactions (
+         flock_id, transaction_type, recorded_at, quantity_kg, delta_kg,
+         reason, reference, actor_user_id, approved_by_user_id, approved_at,
+         feed_type, feed_entry_id
+       )
+       VALUES ($1::uuid, 'feed_consumption', now(), $2::numeric, $3::numeric,
+               'approved_feed_log', $4, $5::uuid, $5::uuid, now(),
+               $6, $7::uuid)
+       ON CONFLICT (feed_entry_id) WHERE feed_entry_id IS NOT NULL DO NOTHING
+       RETURNING id::text AS id`,
+      [flockId, feedKg, -feedKg, `feed_log:${entryId}`, actorUserId, feedType, entryId]
+    );
+    let txnId = ins.rows[0]?.id ? String(ins.rows[0].id) : null;
+    if (!txnId) {
+      const again = await dbQuery(
+        `SELECT id::text AS id FROM farm_inventory_transactions
+          WHERE feed_entry_id = $1::uuid LIMIT 1`,
+        [entryId]
+      );
+      txnId = again.rows[0]?.id ? String(again.rows[0].id) : null;
+    }
+    if (txnId) {
+      await syncInventoryTransactionsFromDb();
+      clevaSync("feed_inventory_transaction", txnId);
+    }
+    return txnId;
+  } catch (e) {
+    console.error("[ERROR]", "[feed] deductFeedStockForEntry:", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
+app.get("/api/inventory/stock-summary", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_inventory", "farm_feed"]), async (req, res) => {
   if (hasDb()) {
     try {
       await syncInventoryTransactionsFromDb();
@@ -7266,7 +7384,6 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     quantityKg,
     requestedApproverUserId,
   });
-  if (procurementSavedToDb && row?.id) clevaSync("feed_inventory_transaction", row.id);
 
   // Accounting: post procurement directly to Odoo when cost is available.
   if (hasDb() && procurementSavedToDb && row.id) {
@@ -7298,6 +7415,8 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
       }).then(() => processOdooSyncOutbox(3)).catch(() => {});
     }
   }
+
+  if (procurementSavedToDb && row?.id) clevaSync("feed_inventory_transaction", row.id);
 
   res.status(201).json({ row: inventoryRowPayload(row), summary: computeInventoryStockSummary() });
 });
@@ -7574,6 +7693,9 @@ app.patch("/api/inventory/:id", requireAuth, requireFarmAccess, requirePageAcces
     row.reference = nextReference;
   }
   appendAudit(req.authUser.id, req.authUser.role, "inventory.row.update", "inventory", row.id, {});
+  if (hasDb() && isPersistableUuid(String(row.id))) {
+    clevaSync("feed_inventory_transaction", String(row.id));
+  }
   res.json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(row.flockId) });
 });
 
@@ -9914,7 +10036,7 @@ app.use((err, _req, res, _next) => {
 
   // Init Odoo sync worker and accounting approvals router with DB access
   initOdooSyncWorker(dbQuery, hasDb);
-  initAccountingApprovalsRouter(dbQuery, hasDb);
+  initAccountingApprovalsRouter(dbQuery, hasDb, clevaSync);
   initIas41Service(dbQuery, hasDb);
   initReconciliationRouter(dbQuery, hasDb);
   // Background worker: process any unprocessed outbox rows every 5 minutes

@@ -1,4 +1,5 @@
 import { FLOCK_STATUS_IN } from "./entitySerializers.js";
+import { normalizeInventoryTxnType } from "../feedStockService.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -28,6 +29,7 @@ export const INBOUND_ALLOWED_COLUMNS = {
     "flock_id",
     "recorded_at",
     "feed_kg",
+    "feed_type",
     "notes",
     "entered_by_user_id",
     "submission_status",
@@ -236,6 +238,8 @@ function mapFeedLogInbound(payload) {
   if (payload.enteredByUserId != null) row.entered_by_user_id = String(payload.enteredByUserId);
   if (payload.entered_by_user_id != null) row.entered_by_user_id = String(payload.entered_by_user_id);
   if (payload.submissionStatus != null) row.submission_status = String(payload.submissionStatus);
+  if (payload.feedType != null) row.feed_type = String(payload.feedType);
+  if (payload.feed_type != null) row.feed_type = String(payload.feed_type);
   if (payload.erpnextRef != null) row.erpnext_ref = String(payload.erpnextRef);
   if (payload.erpnextSyncStatus != null) row.erpnext_sync_status = String(payload.erpnextSyncStatus);
   return stripToAllowed("feed_log", row);
@@ -307,8 +311,8 @@ function mapTreatmentInbound(payload) {
 function mapInventoryTxnInbound(payload) {
   const row = {};
   mapFlockIdField(payload, row);
-  if (payload.transactionType != null) row.transaction_type = String(payload.transactionType);
-  if (payload.transaction_type != null) row.transaction_type = String(payload.transaction_type);
+  const rawType = payload.transactionType ?? payload.transaction_type;
+  if (rawType != null) row.transaction_type = normalizeInventoryTxnType(rawType);
   const ts = pickTimestamp(payload.recordedAt) || pickTimestamp(payload.recorded_at);
   if (ts) row.recorded_at = ts;
   const qty = payload.quantityKg ?? payload.quantity_kg;

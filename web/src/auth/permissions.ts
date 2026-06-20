@@ -35,6 +35,11 @@ export function canReviewVetLog(user: SessionUser | null): boolean {
   return r === "vet_manager" || r === "manager" || r === "superuser";
 }
 
+/** Approve/reject pending feed logs: vet_manager, manager, superuser. */
+export function canReviewFeedEntry(user: SessionUser | null): boolean {
+  return canReviewVetLog(user);
+}
+
 /** Junior vet submissions need lead-vet approval; vet_manager+ save as approved. */
 export function vetLogNeedsManagerReview(user: SessionUser | null): boolean {
   if (!user || !canSubmitVetLog(user)) return false;

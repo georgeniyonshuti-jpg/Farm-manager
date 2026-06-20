@@ -11,6 +11,7 @@ import { upsertEntityFromPayload } from "../services/clevafarm/inboundUpsert.js"
 import { isInboundValidationError } from "../services/clevafarm/inboundErrors.js";
 import { isValidEntityType } from "../services/clevafarm/entityRegistry.js";
 import { enqueueClevaFarmSync } from "../services/clevafarm/syncOutbox.js";
+import { refreshAfterInboundEntity } from "../services/clevafarm/inboundEntityRefresh.js";
 
 const router = express.Router();
 router.use(express.json());
@@ -77,6 +78,7 @@ router.post("/entity", async (req, res) => {
 
   try {
     const result = await withInboundSync(() => upsertEntityFromPayload(entityType, payload, _dbQuery));
+    await refreshAfterInboundEntity(entityType);
     await recordWebhook("entity", req.body, "success", {
       entityType,
       sourceId: String(payload.id),

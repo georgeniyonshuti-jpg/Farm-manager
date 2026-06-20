@@ -164,16 +164,16 @@ export async function fetchOpsBoard(token: string | null) {
 export async function reviewFeedEntry(
   token: string | null,
   name: string,
-  status: string,
-  notes?: string
+  action: "approve" | "reject",
+  reviewNotes?: string
 ) {
   if (IS_FRAPPE_MODE) {
-    return postFrappe("feed.review_feed_entry", { name, status, notes });
+    return postFrappe("feed.review_feed_entry", { name, action, reviewNotes });
   }
   return legacyFetch(`/api/feed-entries/${encodeURIComponent(name)}/review`, token, {
     method: "PATCH",
     headers: jsonAuthHeaders(token),
-    body: JSON.stringify({ status, notes }),
+    body: JSON.stringify({ action, reviewNotes }),
   });
 }
 

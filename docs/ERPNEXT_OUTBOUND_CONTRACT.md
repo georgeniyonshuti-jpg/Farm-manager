@@ -82,6 +82,7 @@ These are the entity types ERPNext currently pushes on desk save. Each must use 
   "id": "…",
   "flockId": "<uuid>",
   "feedKg": 120.5,
+  "feedType": "starter",
   "logDate": "2026-02-01T08:00:00Z",
   "enteredByUserId": "<uuid>"
 }
@@ -91,6 +92,7 @@ These are the entity types ERPNext currently pushes on desk save. Each must use 
 |-------------|-------------------|
 | `flockId` | `flock_id` |
 | `feedKg` | `feed_kg` |
+| `feedType` | `feed_type` |
 | `logDate` / `recordedAt` | `recorded_at` |
 | `enteredByUserId` | `entered_by_user_id` |
 
