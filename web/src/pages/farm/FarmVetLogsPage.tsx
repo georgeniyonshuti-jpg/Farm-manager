@@ -165,7 +165,7 @@ export function FarmVetLogsPage() {
     e.preventDefault();
     if (!flockId || !form.logDate) return;
     if (!mortalityReviewValid || !mortalityReview) {
-      showToast("error", "Confirm live bird count in the mortality review section.");
+      showToast("error", "Complete the mortality review section before saving.");
       return;
     }
     setBusy(true);

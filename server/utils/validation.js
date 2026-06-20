@@ -67,7 +67,7 @@ export const vetLogSchema = z.object({
     .optional(),
   mortalityReview: z
     .object({
-      confirmedLiveCount: z.coerce.number().int().nonnegative(),
+      loggedSinceLastVisit: z.coerce.number().int().nonnegative(),
       mortalityAdjustments: z
         .array(
           z.object({
@@ -76,7 +76,7 @@ export const vetLogSchema = z.object({
           })
         )
         .optional(),
-      loggedSinceLastVisit: z.coerce.number().int().nonnegative().optional(),
+      confirmedSinceLastVisit: z.coerce.number().int().nonnegative().optional(),
     })
     .optional(),
 });

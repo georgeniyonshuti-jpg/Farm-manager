@@ -5494,7 +5494,6 @@ app.get("/api/flocks/:id/vet-log-mortality-review", requireAuth, requireFarmAcce
       initialCount: f.initialCount ?? 0,
       slaughterToDate: perf?.slaughterToDate ?? 0,
       mortalityToDate: perf?.mortalityToDate ?? 0,
-      verifiedLiveCount: f.verifiedLiveCount ?? null,
     });
     res.json({ review: context });
   } catch (e) {
@@ -5629,23 +5628,8 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
         });
       }
 
-      let mortalitySyncIdsLocal = [];
       if (mortalityReview) {
         const perfBefore = await buildFlockPerformanceSummary(flockId);
-        const ctxClient = { query: (...args) => client.query(...args) };
-        const ctx = await buildMortalityReviewContext({
-          client: ctxClient,
-          flockId,
-          beforeDate: row.logDate,
-          initialCount: f.initialCount ?? 0,
-          slaughterToDate: perfBefore?.slaughterToDate ?? 0,
-          mortalityToDate: perfBefore?.mortalityToDate ?? 0,
-          verifiedLiveCount: f.verifiedLiveCount ?? null,
-        });
-        const loggedBaseline =
-          mortalityReview.loggedSinceLastVisit != null
-            ? Math.floor(Number(mortalityReview.loggedSinceLastVisit))
-            : ctx.loggedSinceLastVisit;
         const applied = await applyMortalityReview({
           client,
           flockId,
@@ -5653,12 +5637,13 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
           authorUserId: req.authUser.id,
           logDate: row.logDate,
           mortalityReview,
-          loggedSinceLastVisit: loggedBaseline,
+          initialCount: f.initialCount ?? 0,
+          slaughterToDate: perfBefore?.slaughterToDate ?? 0,
         });
-        mortalitySyncIdsLocal = applied.adjustedEventIds;
-        mortalitySyncIds = mortalitySyncIdsLocal;
+        mortalitySyncIds = applied.syncedMortalityIds;
         row.confirmedLiveCount = applied.confirmedLiveCount;
         row.mortalityConfirmedSinceLastVisit = applied.mortalityConfirmedSinceLastVisit;
+        row.mortalityToDate = applied.mortalityToDate;
       }
 
       await client.query("COMMIT");

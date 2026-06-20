@@ -11,4 +11,4 @@ CREATE INDEX IF NOT EXISTS idx_farm_vet_logs_previous
 
 COMMENT ON COLUMN farm_vet_logs.mortality_logged_since_last_visit IS 'Sum of approved mortality events since previous approved vet log at save time.';
 COMMENT ON COLUMN farm_vet_logs.mortality_confirmed_since_last_visit IS 'Vet-confirmed death count since previous visit (may differ after corrections).';
-COMMENT ON COLUMN farm_vet_logs.confirmed_live_count IS 'Vet-confirmed live birds at visit — written to poultry_flocks.verified_live_count.';
+COMMENT ON COLUMN farm_vet_logs.confirmed_live_count IS 'Computed live birds at visit (initial - mortality - slaughter) — ERPNext snapshot, not user input.';

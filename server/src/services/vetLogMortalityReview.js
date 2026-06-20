@@ -1,6 +1,22 @@
 /**
- * Mortality review since last approved vet log — vet-confirmed live count is source of truth.
+ * Mortality review since last approved vet log — corrected mortality drives live bird count.
  */
+
+/**
+ * @param {import('pg').PoolClient | { query: Function }} client
+ * @param {string} flockId
+ */
+export async function queryMortalityToDate(client, flockId) {
+  const r = await client.query(
+    `SELECT COALESCE(SUM(count), 0)::int AS total
+       FROM flock_mortality_events
+      WHERE flock_id = $1::uuid
+        AND submission_status = 'approved'
+        AND affects_live_count IS NOT FALSE`,
+    [flockId]
+  );
+  return Number(r.rows[0]?.total) || 0;
+}
 
 /**
  * @param {import('pg').PoolClient | { query: Function }} client
@@ -79,7 +95,6 @@ export async function fetchMortalityEventsSince(client, flockId, sinceAt) {
  * @param {number} opts.initialCount
  * @param {number} opts.slaughterToDate
  * @param {number} opts.mortalityToDate
- * @param {number|null} [opts.verifiedLiveCount]
  */
 export async function buildMortalityReviewContext({
   client,
@@ -88,7 +103,6 @@ export async function buildMortalityReviewContext({
   initialCount,
   slaughterToDate,
   mortalityToDate,
-  verifiedLiveCount,
 }) {
   const previous = await findPreviousApprovedVetLog(client, flockId, beforeDate);
   const sinceAt = previous?.createdAt
@@ -99,14 +113,10 @@ export async function buildMortalityReviewContext({
 
   const events = await fetchMortalityEventsSince(client, flockId, sinceAt);
   const loggedSinceLastVisit = events.reduce((s, e) => s + e.count, 0);
-  const computedBirdsLive = Math.max(
-    0,
-    Math.floor(Number(initialCount) || 0) - Math.floor(Number(mortalityToDate) || 0) - Math.floor(Number(slaughterToDate) || 0)
-  );
-  const birdsLiveEstimate =
-    verifiedLiveCount != null && Number.isFinite(Number(verifiedLiveCount))
-      ? Math.max(0, Math.floor(Number(verifiedLiveCount)))
-      : computedBirdsLive;
+  const initial = Math.floor(Number(initialCount) || 0);
+  const slaughter = Math.floor(Number(slaughterToDate) || 0);
+  const mortality = Math.floor(Number(mortalityToDate) || 0);
+  const computedBirdsLive = Math.max(0, initial - mortality - slaughter);
 
   return {
     previousVetLogId: previous?.id ?? null,
@@ -114,28 +124,24 @@ export async function buildMortalityReviewContext({
     sinceAt: sinceAt ? sinceAt.toISOString() : null,
     events,
     loggedSinceLastVisit,
-    initialCount: Math.floor(Number(initialCount) || 0),
-    slaughterToDate: Math.floor(Number(slaughterToDate) || 0),
-    mortalityToDate: Math.floor(Number(mortalityToDate) || 0),
+    initialCount: initial,
+    slaughterToDate: slaughter,
+    mortalityToDate: mortality,
     computedBirdsLive,
-    birdsLiveEstimate,
-    verifiedLiveCount:
-      verifiedLiveCount != null && Number.isFinite(Number(verifiedLiveCount))
-        ? Math.floor(Number(verifiedLiveCount))
-        : null,
-    suggestedLiveCount: computedBirdsLive,
   };
 }
 
 /**
  * @param {object} mortalityReview
- * @param {number} mortalityReview.confirmedLiveCount
+ * @param {number} mortalityReview.loggedSinceLastVisit
  * @param {{ eventId: string, count: number }[]} [mortalityReview.mortalityAdjustments]
+ * @param {number} [mortalityReview.confirmedSinceLastVisit]
+ * @param {boolean} [hasEventsInWindow]
  */
-export function validateMortalityReview(mortalityReview) {
-  const confirmedLiveCount = Math.floor(Number(mortalityReview?.confirmedLiveCount));
-  if (!Number.isFinite(confirmedLiveCount) || confirmedLiveCount < 0) {
-    throw new Error("confirmedLiveCount must be a non-negative integer.");
+export function validateMortalityReview(mortalityReview, hasEventsInWindow = true) {
+  const loggedSinceLastVisit = Math.floor(Number(mortalityReview?.loggedSinceLastVisit));
+  if (!Number.isFinite(loggedSinceLastVisit) || loggedSinceLastVisit < 0) {
+    throw new Error("loggedSinceLastVisit must be a non-negative integer.");
   }
   const adjustments = mortalityReview?.mortalityAdjustments ?? [];
   for (const adj of adjustments) {
@@ -144,11 +150,22 @@ export function validateMortalityReview(mortalityReview) {
       throw new Error("Each mortality adjustment requires eventId and count ≥ 1.");
     }
   }
-  return { confirmedLiveCount, adjustments };
+  let confirmedSinceLastVisit = loggedSinceLastVisit;
+  if (!hasEventsInWindow) {
+    const raw = mortalityReview?.confirmedSinceLastVisit;
+    if (raw == null) {
+      throw new Error("confirmedSinceLastVisit is required when no mortality events exist in the review window.");
+    }
+    confirmedSinceLastVisit = Math.floor(Number(raw));
+    if (!Number.isFinite(confirmedSinceLastVisit) || confirmedSinceLastVisit < 0) {
+      throw new Error("confirmedSinceLastVisit must be a non-negative integer.");
+    }
+  }
+  return { loggedSinceLastVisit, adjustments, confirmedSinceLastVisit };
 }
 
 /**
- * Apply vet mortality review — updates events, flock verified count, vet log snapshot.
+ * Apply vet mortality review — updates events, clears verified override, stores computed live snapshot.
  * @param {object} opts
  * @param {import('pg').PoolClient} opts.client
  * @param {string} opts.flockId
@@ -156,8 +173,9 @@ export function validateMortalityReview(mortalityReview) {
  * @param {string} opts.authorUserId
  * @param {string} opts.logDate
  * @param {object} opts.mortalityReview
- * @param {number} opts.loggedSinceLastVisit baseline before adjustments
- * @returns {Promise<{ adjustedEventIds: string[], confirmedLiveCount: number, mortalityConfirmedSinceLastVisit: number }>}
+ * @param {number} opts.initialCount
+ * @param {number} opts.slaughterToDate
+ * @returns {Promise<{ syncedMortalityIds: string[], confirmedLiveCount: number, mortalityConfirmedSinceLastVisit: number, mortalityToDate: number }>}
  */
 export async function applyMortalityReview({
   client,
@@ -166,23 +184,28 @@ export async function applyMortalityReview({
   authorUserId,
   logDate,
   mortalityReview,
-  loggedSinceLastVisit,
+  initialCount,
+  slaughterToDate,
 }) {
-  const { confirmedLiveCount, adjustments } = validateMortalityReview(mortalityReview);
   const previous = await findPreviousApprovedVetLog(client, flockId, logDate);
+  const sinceAt = previous?.createdAt
+    ? previous.createdAt instanceof Date
+      ? previous.createdAt
+      : new Date(previous.createdAt)
+    : null;
+  const eventsInWindow = await fetchMortalityEventsSince(client, flockId, sinceAt);
+  const loggedSinceLastVisit = eventsInWindow.reduce((s, e) => s + e.count, 0);
 
-  const adjustedEventIds = [];
-  let confirmedSinceLast = loggedSinceLastVisit;
+  const { adjustments, confirmedSinceLastVisit: clientConfirmedSince } = validateMortalityReview(
+    mortalityReview,
+    eventsInWindow.length > 0
+  );
 
-  if (adjustments.length > 0) {
-    const sinceAt = previous?.createdAt
-      ? previous.createdAt instanceof Date
-        ? previous.createdAt
-        : new Date(previous.createdAt)
-      : null;
-    const events = await fetchMortalityEventsSince(client, flockId, sinceAt);
-    const eventMap = new Map(events.map((e) => [e.id, e]));
+  const syncedMortalityIds = [];
+  let mortalityConfirmedSinceLastVisit = loggedSinceLastVisit;
 
+  if (eventsInWindow.length > 0) {
+    const eventMap = new Map(eventsInWindow.map((e) => [e.id, e]));
     for (const adj of adjustments) {
       const eventId = String(adj.eventId);
       const newCount = Math.floor(Number(adj.count));
@@ -190,36 +213,64 @@ export async function applyMortalityReview({
       if (!existing) {
         throw new Error(`Mortality event ${eventId} not found in review window.`);
       }
-      if (existing.count === newCount) continue;
-
-      await client.query(
-        `UPDATE flock_mortality_events
-            SET count = $2,
-                notes = COALESCE(notes, '') || $3
-          WHERE id = $1::uuid AND flock_id = $4::uuid`,
-        [
-          eventId,
-          newCount,
-          `\n[Vet log ${vetLogId.slice(0, 8)}] Count corrected ${existing.count} → ${newCount}.`,
-          flockId,
-        ]
-      );
-      confirmedSinceLast += newCount - existing.count;
-      adjustedEventIds.push(eventId);
+      if (existing.count !== newCount) {
+        await client.query(
+          `UPDATE flock_mortality_events
+              SET count = $2,
+                  notes = COALESCE(notes, '') || $3
+            WHERE id = $1::uuid AND flock_id = $4::uuid`,
+          [
+            eventId,
+            newCount,
+            `\n[Vet log ${vetLogId.slice(0, 8)}] Count corrected ${existing.count} → ${newCount}.`,
+            flockId,
+          ]
+        );
+        mortalityConfirmedSinceLastVisit += newCount - existing.count;
+        syncedMortalityIds.push(eventId);
+      }
     }
+    // Re-sum in case adjustments weren't sent for unchanged rows
+    if (adjustments.length > 0) {
+      const refreshed = await fetchMortalityEventsSince(client, flockId, sinceAt);
+      mortalityConfirmedSinceLastVisit = refreshed.reduce((s, e) => s + e.count, 0);
+    }
+  } else if (clientConfirmedSince > 0) {
+    const at = `${logDate}T12:00:00.000Z`;
+    const ins = await client.query(
+      `INSERT INTO flock_mortality_events
+         (flock_id, laborer_id, at, count, is_emergency, photos, notes, source, submission_status, affects_live_count)
+       VALUES ($1::uuid, $2::uuid, $3::timestamptz, $4, false, '[]'::jsonb, $5, 'vet_log_reconciliation', 'approved', true)
+       RETURNING id::text AS id`,
+      [
+        flockId,
+        authorUserId,
+        at,
+        clientConfirmedSince,
+        `Mortality reconciled at vet log ${vetLogId.slice(0, 8)} on ${logDate}.`,
+      ]
+    );
+    const newId = ins.rows[0]?.id;
+    if (!newId) throw new Error("Failed to create vet reconciliation mortality event.");
+    syncedMortalityIds.push(String(newId));
+    mortalityConfirmedSinceLastVisit = clientConfirmedSince;
   } else {
-    confirmedSinceLast = loggedSinceLastVisit;
+    mortalityConfirmedSinceLastVisit = 0;
   }
 
-  const note = `Vet log ${logDate}: confirmed ${confirmedLiveCount} live birds (${confirmedSinceLast} deaths since last visit).`;
+  const mortalityToDate = await queryMortalityToDate(client, flockId);
+  const initial = Math.floor(Number(initialCount) || 0);
+  const slaughter = Math.floor(Number(slaughterToDate) || 0);
+  const confirmedLiveCount = Math.max(0, initial - mortalityToDate - slaughter);
+
   await client.query(
     `UPDATE poultry_flocks
-        SET verified_live_count = $2,
-            verified_live_note = $3,
-            verified_live_at = now(),
+        SET verified_live_count = NULL,
+            verified_live_note = NULL,
+            verified_live_at = NULL,
             updated_at = now()
       WHERE id = $1::uuid`,
-    [flockId, confirmedLiveCount, note.slice(0, 2000)]
+    [flockId]
   );
 
   await client.query(
@@ -234,27 +285,27 @@ export async function applyMortalityReview({
       vetLogId,
       previous?.id ?? null,
       loggedSinceLastVisit,
-      confirmedSinceLast,
+      mortalityConfirmedSinceLastVisit,
       confirmedLiveCount,
     ]
   );
 
-  void authorUserId;
   return {
-    adjustedEventIds,
+    syncedMortalityIds,
     confirmedLiveCount,
-    mortalityConfirmedSinceLastVisit: confirmedSinceLast,
+    mortalityConfirmedSinceLastVisit,
+    mortalityToDate,
   };
 }
 
 /**
  * @param {(entityType: string, entityId: string) => void} clevaSync
  * @param {string} flockId
- * @param {string[]} adjustedEventIds
+ * @param {string[]} mortalityEventIds
  */
-export function syncMortalityReviewToErp(clevaSync, flockId, adjustedEventIds) {
+export function syncMortalityReviewToErp(clevaSync, flockId, mortalityEventIds) {
   clevaSync("flock", flockId);
-  for (const id of adjustedEventIds) {
+  for (const id of mortalityEventIds) {
     clevaSync("mortality_log", id);
   }
 }

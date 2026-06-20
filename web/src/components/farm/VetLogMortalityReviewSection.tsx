@@ -21,15 +21,12 @@ export type MortalityReviewContext = {
   slaughterToDate: number;
   mortalityToDate: number;
   computedBirdsLive: number;
-  birdsLiveEstimate: number;
-  verifiedLiveCount: number | null;
-  suggestedLiveCount: number;
 };
 
 export type MortalityReviewPayload = {
-  confirmedLiveCount: number;
   loggedSinceLastVisit: number;
   mortalityAdjustments?: { eventId: string; count: number }[];
+  confirmedSinceLastVisit?: number;
 };
 
 type Props = {
@@ -44,7 +41,7 @@ export function VetLogMortalityReviewSection({ token, flockId, logDate, onChange
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editedCounts, setEditedCounts] = useState<Record<string, string>>({});
-  const [confirmedLive, setConfirmedLive] = useState("");
+  const [noEventTotal, setNoEventTotal] = useState("0");
 
   const load = useCallback(async () => {
     if (!token || !flockId) return;
@@ -63,7 +60,7 @@ export function VetLogMortalityReviewSection({ token, flockId, logDate, onChange
       const counts: Record<string, string> = {};
       for (const ev of review.events) counts[ev.id] = String(ev.count);
       setEditedCounts(counts);
-      setConfirmedLive(String(review.suggestedLiveCount));
+      setNoEventTotal("0");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Load failed");
       setCtx(null);
@@ -76,50 +73,79 @@ export function VetLogMortalityReviewSection({ token, flockId, logDate, onChange
     void load();
   }, [load]);
 
-  const mortalityDelta = useMemo(() => {
+  const deathsSinceVisit = useMemo(() => {
     if (!ctx) return 0;
-    let newSum = 0;
+    if (ctx.events.length === 0) {
+      const n = Math.floor(Number(noEventTotal));
+      return Number.isFinite(n) && n >= 0 ? n : 0;
+    }
+    let sum = 0;
     for (const ev of ctx.events) {
       const raw = editedCounts[ev.id] ?? String(ev.count);
       const n = Math.floor(Number(raw));
-      newSum += Number.isFinite(n) && n >= 1 ? n : ev.count;
+      sum += Number.isFinite(n) && n >= 1 ? n : ev.count;
     }
-    return newSum - ctx.loggedSinceLastVisit;
-  }, [ctx, editedCounts]);
+    return sum;
+  }, [ctx, editedCounts, noEventTotal]);
 
-  const suggestedLive = useMemo(() => {
+  const mortalityDelta = useMemo(() => {
     if (!ctx) return 0;
-    return Math.max(0, ctx.computedBirdsLive - mortalityDelta);
+    return deathsSinceVisit - ctx.loggedSinceLastVisit;
+  }, [ctx, deathsSinceVisit]);
+
+  const derivedMortalityToDate = useMemo(() => {
+    if (!ctx) return 0;
+    return Math.max(0, ctx.mortalityToDate + mortalityDelta);
   }, [ctx, mortalityDelta]);
+
+  const derivedLiveBirds = useMemo(() => {
+    if (!ctx) return 0;
+    return Math.max(0, ctx.initialCount - derivedMortalityToDate - ctx.slaughterToDate);
+  }, [ctx, derivedMortalityToDate]);
 
   useEffect(() => {
     if (!ctx) {
       onChange(null, false);
       return;
     }
-    const live = Math.floor(Number(confirmedLive));
-    const valid = Number.isFinite(live) && live >= 0;
-    if (!valid) {
-      onChange(null, false);
+
+    if (ctx.events.length === 0) {
+      const total = Math.floor(Number(noEventTotal));
+      const valid = Number.isFinite(total) && total >= 0;
+      if (!valid) {
+        onChange(null, false);
+        return;
+      }
+      onChange(
+        {
+          loggedSinceLastVisit: ctx.loggedSinceLastVisit,
+          confirmedSinceLastVisit: total,
+        },
+        true
+      );
       return;
     }
+
     const adjustments: { eventId: string; count: number }[] = [];
     for (const ev of ctx.events) {
       const raw = editedCounts[ev.id] ?? String(ev.count);
       const n = Math.floor(Number(raw));
-      if (Number.isFinite(n) && n >= 1 && n !== ev.count) {
+      if (!Number.isFinite(n) || n < 1) {
+        onChange(null, false);
+        return;
+      }
+      if (n !== ev.count) {
         adjustments.push({ eventId: ev.id, count: n });
       }
     }
     onChange(
       {
-        confirmedLiveCount: live,
         loggedSinceLastVisit: ctx.loggedSinceLastVisit,
         mortalityAdjustments: adjustments.length ? adjustments : undefined,
       },
       true
     );
-  }, [ctx, confirmedLive, editedCounts, onChange]); // eslint-disable-line react-hooks/exhaustive-deps -- onChange is stable from parent useCallback
+  }, [ctx, editedCounts, noEventTotal, onChange]);
 
   if (loading) {
     return (
@@ -142,8 +168,6 @@ export function VetLogMortalityReviewSection({ token, flockId, logDate, onChange
 
   if (!ctx) return null;
 
-  const newLoggedSum = ctx.loggedSinceLastVisit + mortalityDelta;
-
   return (
     <fieldset className="space-y-3 rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4">
       <legend className="px-1 text-sm font-semibold text-[var(--text-primary)]">
@@ -151,49 +175,37 @@ export function VetLogMortalityReviewSection({ token, flockId, logDate, onChange
       </legend>
       <p className="text-xs text-[var(--text-muted)]">
         {ctx.previousVetLogDate
-          ? `Last approved vet log: ${ctx.previousVetLogDate}. Review deaths logged since then and confirm live bird count — your confirmation becomes the flock source of truth for ERPNext.`
-          : "No prior approved vet log — review all mortality logged for this flock and confirm live birds."}
+          ? `Last approved vet log: ${ctx.previousVetLogDate}. Correct deaths logged since then — live birds are calculated automatically and sync to ERPNext.`
+          : "No prior approved vet log. Confirm deaths logged for this flock or enter missed mortality below."}
       </p>
 
-      <div className="grid gap-2 sm:grid-cols-4">
+      <div className="grid gap-2 sm:grid-cols-3">
         <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-subtle)] px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Logged since visit</p>
-          <p className="font-mono-data text-lg font-semibold text-[var(--text-primary)]">{newLoggedSum}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+            Deaths since visit
+          </p>
+          <p className="font-mono-data text-lg font-semibold text-[var(--text-primary)]">{deathsSinceVisit}</p>
         </div>
         <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-subtle)] px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Computed live</p>
-          <p className="font-mono-data text-lg font-semibold text-[var(--text-primary)]">{suggestedLive}</p>
-        </div>
-        <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-subtle)] px-3 py-2">
-          <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Mortality to date</p>
-          <p className="font-mono-data text-lg font-semibold text-[var(--text-primary)]">{ctx.mortalityToDate + mortalityDelta}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+            Mortality to date
+          </p>
+          <p className="font-mono-data text-lg font-semibold text-[var(--text-primary)]">{derivedMortalityToDate}</p>
         </div>
         <div className="rounded-lg border border-[var(--primary-color)]/30 bg-[var(--primary-color-soft)] px-3 py-2">
-          <label className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
-            Confirmed live birds *
-          </label>
-          <input
-            type="number"
-            min={0}
-            className="mt-0.5 w-full rounded border border-[var(--border-input)] bg-[var(--surface-input)] px-2 py-1 font-mono-data text-lg font-semibold"
-            value={confirmedLive}
-            onChange={(e) => setConfirmedLive(e.target.value)}
-            required
-          />
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+            Live birds now
+          </p>
+          <p className="font-mono-data text-lg font-semibold text-[var(--text-primary)]">{derivedLiveBirds}</p>
         </div>
       </div>
 
       {ctx.events.length > 0 ? (
         <div className="table-block">
           <div className="table-toolbar">
-            <span className="text-xs text-[var(--text-muted)]">{ctx.events.length} mortality event(s) in window</span>
-            <button
-              type="button"
-              className="ml-auto text-xs text-[var(--primary-color)] hover:underline"
-              onClick={() => setConfirmedLive(String(suggestedLive))}
-            >
-              Use computed live ({suggestedLive})
-            </button>
+            <span className="text-xs text-[var(--text-muted)]">
+              {ctx.events.length} mortality event(s) — edit counts if field logs were wrong
+            </span>
           </div>
           <div className="institutional-table-wrapper">
             <table className="institutional-table min-w-[40rem]">
@@ -202,8 +214,8 @@ export function VetLogMortalityReviewSection({ token, flockId, logDate, onChange
                   <th>Date</th>
                   <th>Recorded by</th>
                   <th>Source</th>
-                  <th className="tbl-num">Logged count</th>
-                  <th className="tbl-num">Confirmed count</th>
+                  <th className="tbl-num">Logged</th>
+                  <th className="tbl-num">Confirmed</th>
                 </tr>
               </thead>
               <tbody>
@@ -240,7 +252,24 @@ export function VetLogMortalityReviewSection({ token, flockId, logDate, onChange
           </div>
         </div>
       ) : (
-        <p className="text-sm text-[var(--text-muted)]">No approved mortality events since the last vet visit.</p>
+        <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-subtle)] p-3">
+          <p className="mb-2 text-sm text-[var(--text-muted)]">
+            No approved mortality events since the last vet visit.
+          </p>
+          <label className="block text-sm font-medium text-[var(--text-secondary)]">
+            Deaths since last visit
+            <input
+              type="number"
+              min={0}
+              className="mt-1 block w-32 rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-1.5 font-mono-data text-sm"
+              value={noEventTotal}
+              onChange={(e) => setNoEventTotal(e.target.value)}
+            />
+          </label>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            Enter deaths missed by field logs. A reconciliation mortality record is created when you save.
+          </p>
+        </div>
       )}
     </fieldset>
   );

@@ -4,15 +4,15 @@ import { vetLogSchema } from "../utils/validation.js";
 import {
   validateMortalityReview,
   buildMortalityReviewContext,
+  queryMortalityToDate,
 } from "../src/services/vetLogMortalityReview.js";
 
 describe("vetLogSchema mortalityReview", () => {
-  it("accepts mortality review with confirmed live count", () => {
+  it("accepts mortality review with adjustments only", () => {
     const r = vetLogSchema.safeParse({
       flockId: "flock-1",
       logDate: "2026-06-15",
       mortalityReview: {
-        confirmedLiveCount: 4850,
         loggedSinceLastVisit: 12,
         mortalityAdjustments: [{ eventId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", count: 10 }],
       },
@@ -20,33 +20,53 @@ describe("vetLogSchema mortalityReview", () => {
     assert.equal(r.success, true);
   });
 
-  it("rejects negative confirmed live count", () => {
+  it("accepts confirmedSinceLastVisit when no events", () => {
     const r = vetLogSchema.safeParse({
       flockId: "flock-1",
       logDate: "2026-06-15",
-      mortalityReview: { confirmedLiveCount: -1 },
+      mortalityReview: {
+        loggedSinceLastVisit: 0,
+        confirmedSinceLastVisit: 5,
+      },
+    });
+    assert.equal(r.success, true);
+  });
+
+  it("requires loggedSinceLastVisit", () => {
+    const r = vetLogSchema.safeParse({
+      flockId: "flock-1",
+      logDate: "2026-06-15",
+      mortalityReview: { confirmedSinceLastVisit: 5 },
     });
     assert.equal(r.success, false);
   });
 });
 
 describe("validateMortalityReview", () => {
-  it("validates confirmed live count and adjustments", () => {
-    const out = validateMortalityReview({
-      confirmedLiveCount: 100,
-      mortalityAdjustments: [{ eventId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", count: 5 }],
-    });
-    assert.equal(out.confirmedLiveCount, 100);
+  it("validates adjustments when events exist", () => {
+    const out = validateMortalityReview(
+      {
+        loggedSinceLastVisit: 8,
+        mortalityAdjustments: [{ eventId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", count: 5 }],
+      },
+      true
+    );
+    assert.equal(out.loggedSinceLastVisit, 8);
     assert.equal(out.adjustments.length, 1);
   });
 
-  it("throws on invalid adjustment", () => {
+  it("requires confirmedSinceLastVisit when no events in window", () => {
     assert.throws(() =>
-      validateMortalityReview({
-        confirmedLiveCount: 100,
-        mortalityAdjustments: [{ eventId: "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11", count: 0 }],
-      })
+      validateMortalityReview({ loggedSinceLastVisit: 0 }, false)
     );
+  });
+
+  it("accepts confirmedSinceLastVisit when no events", () => {
+    const out = validateMortalityReview(
+      { loggedSinceLastVisit: 0, confirmedSinceLastVisit: 15 },
+      false
+    );
+    assert.equal(out.confirmedSinceLastVisit, 15);
   });
 });
 
@@ -96,16 +116,23 @@ describe("buildMortalityReviewContext", () => {
       initialCount: 5000,
       slaughterToDate: 0,
       mortalityToDate: 150,
-      verifiedLiveCount: null,
     });
     assert.equal(ctx.loggedSinceLastVisit, 8);
     assert.equal(ctx.events.length, 2);
     assert.equal(ctx.computedBirdsLive, 4850);
-    assert.equal(ctx.suggestedLiveCount, 4850);
   });
 });
 
-describe("syncApprovedVetLogEntities with confirmed live", () => {
+describe("queryMortalityToDate", () => {
+  it("sums approved affecting mortality", async () => {
+    const client = {
+      query: async () => ({ rows: [{ total: 142 }] }),
+    };
+    assert.equal(await queryMortalityToDate(client, "flock-1"), 142);
+  });
+});
+
+describe("syncApprovedVetLogEntities with computed live snapshot", () => {
   it("enqueues flock when vet log has confirmed live count", async () => {
     const { syncApprovedVetLogEntities } = await import("../src/services/vetLogService.js");
     const calls = [];
