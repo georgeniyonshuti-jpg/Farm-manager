@@ -229,9 +229,9 @@ export function GlobalHeader({
   const showLang = isLaborerLocaleUser(user);
   const appPath = stripTenantPrefix(location.pathname);
   const showActionCenter =
-    (user.role === "laborer" || user.role === "dispatcher") && appPath !== "/dashboard/laborer";
-  const showVetHubActions =
-    (user.role === "vet" || user.role === "vet_manager") && appPath === "/dashboard/vet";
+    ((user.role === "laborer" || user.role === "dispatcher") && appPath !== "/dashboard/laborer") ||
+    (user.role === "vet" && appPath !== "/dashboard/vet");
+  const showVetHubActions = user.role === "vet_manager" && appPath === "/dashboard/vet";
 
   const workspaces: { id: ActiveWorkspace; label: string }[] = [
     { id: "farm", label: farmWorkspace },
@@ -258,11 +258,14 @@ export function GlobalHeader({
     </select>
   ) : null;
 
+  const actionCenterHref =
+    user.role === "vet" ? companyHref("dashboard/vet") : companyHref("dashboard/laborer");
+
   const actionCluster = (
     <>
       {showActionCenter ? (
         <Link
-          to={companyHref("dashboard/laborer")}
+          to={actionCenterHref}
           className="bounce-tap inline-flex min-h-[36px] items-center justify-center rounded-xl border border-[var(--border-color)] bg-[var(--surface-color)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)] md:min-h-[44px] md:py-2 md:text-sm"
         >
           {homeLabel}

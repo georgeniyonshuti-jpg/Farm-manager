@@ -10,15 +10,18 @@ import { useFieldOpsHubStatus } from "../../hooks/useFieldOpsHubStatus";
 import { MobileFieldBottomNav, type MobileFieldNavItem } from "../../components/layout/MobileFieldBottomNav";
 import { FieldOpsActionLink } from "../../components/field/FieldOpsActionLink";
 
-export function LaborerHome() {
+export function VetFieldHub() {
   const { token } = useAuth();
   const [showDetailedCard, setShowDetailedCard] = useState(false);
 
-  const hTitle = useLaborerT("Field operations hub");
-  const hSub = useLaborerT("Daily tasks optimized for your phone.");
+  const hTitle = useLaborerT("Vet hub");
+  const hSub = useLaborerT("Track rounds, flock health, and urgent work.");
   const linkCheckin = useLaborerT("Round check-in");
   const linkMort = useLaborerT("Log mortality");
   const linkFeed = useLaborerT("Feed log");
+  const linkVetLogs = useLaborerT("Vet logs");
+  const linkMedicine = useLaborerT("Medicine tracking");
+  const linkSlaughter = useLaborerT("Slaughter & FCR");
   const linkEarnings = useLaborerT("My earnings");
   const noFlockTitle = useLaborerT("No flock available");
   const noFlockBody = useLaborerT("Round status appears when a flock is assigned to your site.");
@@ -27,6 +30,7 @@ export function LaborerHome() {
   const tabRounds = useLaborerT("Rounds");
   const tabMort = useLaborerT("Mortality");
   const tabFeed = useLaborerT("Feed");
+  const tabVetLogs = useLaborerT("Vet logs");
 
   const tLoadingBanner = useLaborerT("Preparing round check-in status…");
   const tErrBanner = useLaborerT("Could not load round check-in. Try again.");
@@ -68,7 +72,7 @@ export function LaborerHome() {
 
   const bottomNav: MobileFieldNavItem[] = [
     {
-      to: "/dashboard/laborer",
+      to: "/dashboard/vet",
       label: tabHome,
       end: true,
       icon: (
@@ -104,6 +108,17 @@ export function LaborerHome() {
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
           <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" strokeLinecap="round" />
+        </svg>
+      ),
+    },
+    {
+      to: "/farm/vet-logs",
+      label: tabVetLogs,
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2" strokeLinejoin="round" />
+          <rect x="9" y="3" width="6" height="4" rx="1" />
+          <path d="M9 12h6M9 16h6" strokeLinecap="round" />
         </svg>
       ),
     },
@@ -149,6 +164,15 @@ export function LaborerHome() {
           </FieldOpsActionLink>
           <FieldOpsActionLink to="/farm/feed" variant="neutral">
             {linkFeed}
+          </FieldOpsActionLink>
+          <FieldOpsActionLink to="/farm/vet-logs" variant="emerald">
+            {linkVetLogs}
+          </FieldOpsActionLink>
+          <FieldOpsActionLink to="/farm/treatments" variant="purple">
+            {linkMedicine}
+          </FieldOpsActionLink>
+          <FieldOpsActionLink to="/farm/slaughter" variant="neutral">
+            {linkSlaughter}
           </FieldOpsActionLink>
         </div>
         <div className="grid gap-3">

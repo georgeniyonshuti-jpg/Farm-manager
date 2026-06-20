@@ -61,7 +61,7 @@ export function PersistentAppPages() {
   return (
     <div className="relative isolate w-full min-h-0">
       <PersistentPageSlot active={pathExact(p, "/dashboard/laborer")} mountDelayMs={0}>
-        <PersistentRouteGuard roles={["laborer", "dispatcher", "vet"]}>
+        <PersistentRouteGuard roles={["laborer", "dispatcher"]}>
           <LaborerHome />
         </PersistentRouteGuard>
       </PersistentPageSlot>

@@ -15,11 +15,12 @@ export function AppShell() {
   const location = useLocation();
   const { user } = useAuth();
   const appPath = stripTenantPrefix(location.pathname);
-  const laborerLikeView = appPath.startsWith("/dashboard/laborer");
-  const juniorVetMode = user?.role === "vet" || user?.departmentKeys.includes("junior_vet");
+  const laborerLikeView =
+    appPath.startsWith("/dashboard/laborer") ||
+    (appPath.startsWith("/dashboard/vet") && user?.role === "vet");
+  const fieldVetMode = user?.role === "vet";
   const fieldOpsMode = user?.role === "laborer" || user?.role === "dispatcher";
-  // Nuclear removal: keep sidebar fully disabled for junior-vet/field-ops account experiences.
-  const compactFieldView = laborerLikeView || juniorVetMode || fieldOpsMode;
+  const compactFieldView = laborerLikeView || fieldVetMode || fieldOpsMode;
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
   const hideOutlet = isAppShellPersistentPath(location.pathname);

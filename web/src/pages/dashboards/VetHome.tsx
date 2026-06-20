@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
-import { readAuthHeaders } from "../../lib/authHeaders";
 import { CheckinStatusBlock, type CheckinStatus, type OpsGlanceSummary } from "../farm/FarmCheckinPage";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { PageHeader } from "../../components/PageHeader";
@@ -20,6 +19,8 @@ import {
 } from "../../lib/dashboardAdapters";
 import { BlockersStacked, FcrTargetBars, MortalityTrendLine, SimpleCategoryBars, TopRiskBars } from "../../components/dashboard/charts/OpsCharts";
 import { MobileFieldBottomNav, type MobileFieldNavItem } from "../../components/layout/MobileFieldBottomNav";
+import { VetFieldHub } from "./VetFieldHub";
+import { readAuthHeaders } from "../../lib/authHeaders";
 
 type VetHubFlockRow = {
   flockId: string;
@@ -44,6 +45,14 @@ function vetChip(label: string, ok: boolean) {
 }
 
 export function VetHome() {
+  const { user } = useAuth();
+  if (user?.role === "vet") {
+    return <VetFieldHub />;
+  }
+  return <VetManagerDashboard />;
+}
+
+function VetManagerDashboard() {
   const { token } = useAuth();
   const vetDash = useVetDashboardData(token);
   const [status, setStatus] = useState<CheckinStatus | null>(null);
