@@ -58,6 +58,7 @@ import { initErpnextDb } from "./src/services/erpnext/erpnext.syncLog.js";
 import { initClevaFarmSyncWorker, processClevaFarmOutbox } from "./src/services/clevafarm/syncOutbox.js";
 import { emitEntitySync, initClevaFarmEmit } from "./src/services/clevafarm/emitEntitySync.js";
 import { enqueueFlockTombstoneSync, initFlockLifecycleSync } from "./src/services/clevafarm/flockLifecycleSync.js";
+import { buildFlockCode, formatPlacementYymmdd } from "./src/services/flockCode.js";
 import { registerInboundEntityRefresh } from "./src/services/clevafarm/inboundEntityRefresh.js";
 import { assertFeedStockAvailable, filterAvailableFeedStock } from "./src/services/feedStockService.js";
 import {
@@ -3526,22 +3527,23 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
   const flockCompanyId = await companyIdForUser(req.authUser.id);
 
   let createdId = `flk_${crypto.randomBytes(6).toString("hex")}`;
-  let createdCode = `FM-MEM-${createdId.slice(4)}`;
+  let createdCode = `FM-MEM-${formatPlacementYymmdd(placementDate)}-${createdId.slice(4, 7)}`;
   let createdLabel = createdCode;
   try {
     if (hasDb()) {
       await ensurePoultryFlockCodeSequence();
+      const seqRow = await dbQuery(`SELECT nextval('poultry_flock_code_seq') AS seq`);
+      const flockCode = buildFlockCode(placementDate, Number(seqRow.rows[0]?.seq ?? 1));
       const inserted = await dbQuery(
         `INSERT INTO poultry_flocks
           (breed_code, placement_date, initial_count, target_weight_kg, status, code,
            purchase_cost_rwf, cost_per_chick_rwf, purchase_supplier, purchase_date, barn_name_id, company_id)
-         VALUES ($1, $2::date, $3, $4, $5,
-                 'FM-' || lpad(nextval('poultry_flock_code_seq')::text, 3, '0'),
-                 $6, $7, $8, $9::date, $10::uuid, $11::uuid)
+         VALUES ($1, $2::date, $3, $4, $5, $6,
+                 $7, $8, $9, $10::date, $11::uuid, $12::uuid)
          RETURNING id::text AS id,
                    COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
                    code`,
-        [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, status,
+        [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, status, flockCode,
          purchaseCostRwf, costPerChickRwf, purchaseSupplier, purchaseDate, barn.id, flockCompanyId]
       );
       createdId = String(inserted.rows[0]?.id ?? createdId);
@@ -3751,17 +3753,19 @@ app.post("/api/flocks/:id/retry-create", requireAuth, requireFarmAccess, require
   }
   try {
     await ensurePoultryFlockCodeSequence();
+    const seqRow = await dbQuery(`SELECT nextval('poultry_flock_code_seq') AS seq`);
+    const flockCode = buildFlockCode(placementDate, Number(seqRow.rows[0]?.seq ?? 1));
     const inserted = await dbQuery(
       `INSERT INTO poultry_flocks
         (breed_code, placement_date, initial_count, target_weight_kg, status, code,
          purchase_cost_rwf, cost_per_chick_rwf, purchase_supplier, purchase_date, barn_name_id)
-       VALUES ($1, $2::date, $3, $4, 'active',
-               'FM-' || lpad(nextval('poultry_flock_code_seq')::text, 3, '0'),
-               $5, $6, $7, $8::date, $9::uuid)
+       VALUES ($1, $2::date, $3, $4, 'active', $5,
+               $6, $7, $8, $9::date, $10::uuid)
        RETURNING id::text AS id,
                  COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
                  code`,
-      [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, purchaseCostRwf, costPerChickRwf, purchaseSupplier, purchaseDate, barnRetry.id]
+      [breedCode, placementDate, Math.floor(initialCount), targetWeightKg, flockCode,
+       purchaseCostRwf, costPerChickRwf, purchaseSupplier, purchaseDate, barnRetry.id]
     );
     const createdId = String(inserted.rows[0]?.id ?? "");
     const createdCode = inserted.rows[0]?.code != null ? String(inserted.rows[0].code) : null;
