@@ -17,6 +17,10 @@ import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import { canReviewVetLog, canSubmitVetLog, vetLogNeedsManagerReview } from "../../auth/permissions";
 import { FlockPerformancePanel } from "../../components/farm/FlockPerformancePanel";
 import { VetLogValuePreview } from "../../components/farm/VetLogValuePreview";
+import {
+  VetLogMortalityReviewSection,
+  type MortalityReviewPayload,
+} from "../../components/farm/VetLogMortalityReviewSection";
 import { VetLogReport } from "../../components/farm/reports/VetLogReport";
 import { SubmissionReportModal } from "../../components/farm/reports/SubmissionReportModal";
 
@@ -95,6 +99,13 @@ export function FarmVetLogsPage() {
   const [reportOpen, setReportOpen] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportLog, setReportLog] = useState<VetLogListRow | null>(null);
+  const [mortalityReview, setMortalityReview] = useState<MortalityReviewPayload | null>(null);
+  const [mortalityReviewValid, setMortalityReviewValid] = useState(false);
+
+  const handleMortalityReviewChange = useCallback((payload: MortalityReviewPayload | null, valid: boolean) => {
+    setMortalityReview(payload);
+    setMortalityReviewValid(valid);
+  }, []);
 
   useEffect(() => {
     const preselect = searchParams.get("flockId");
@@ -153,6 +164,10 @@ export function FarmVetLogsPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!flockId || !form.logDate) return;
+    if (!mortalityReviewValid || !mortalityReview) {
+      showToast("error", "Confirm live bird count in the mortality review section.");
+      return;
+    }
     setBusy(true);
     try {
       const body: Record<string, unknown> = {
@@ -161,6 +176,7 @@ export function FarmVetLogsPage() {
         observations: form.observations,
         actionsTaken: form.actionsTaken,
         recommendations: form.recommendations,
+        mortalityReview,
       };
 
       if (form.includeWeight) {
@@ -429,6 +445,15 @@ export function FarmVetLogsPage() {
                 />
               ) : null}
 
+              {flockId ? (
+                <VetLogMortalityReviewSection
+                  token={token ?? ""}
+                  flockId={flockId}
+                  logDate={form.logDate}
+                  onChange={handleMortalityReviewChange}
+                />
+              ) : null}
+
               <label className="block text-sm font-medium text-neutral-700">
                 Log date
                 <input
@@ -561,7 +586,7 @@ export function FarmVetLogsPage() {
                 )}
               </fieldset>
 
-              <button type="submit" disabled={busy || !flockId} className="rounded-xl bg-emerald-700 px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+              <button type="submit" disabled={busy || !flockId || !mortalityReviewValid} className="rounded-xl bg-emerald-700 px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
                 {busy ? "Saving…" : needsManagerReview ? "Submit for review" : "Save vet log"}
               </button>
             </form>

@@ -111,6 +111,8 @@ describe("fetchVetLogRelatedEntityIds + syncApprovedVetLogEntities", () => {
         rows: [
           {
             weighInId: "wi-1",
+            flockId: "flock-1",
+            confirmedLiveCount: null,
             treatmentIds: ["trt_a", "trt_b"],
           },
         ],

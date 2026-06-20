@@ -74,6 +74,8 @@ export function needsVetLogApproval(user) {
 export async function fetchVetLogRelatedEntityIds(client, vetLogId) {
   const r = await client.query(
     `SELECT v.weigh_in_id::text AS "weighInId",
+            v.flock_id::text AS "flockId",
+            v.confirmed_live_count AS "confirmedLiveCount",
             (SELECT array_agg(ft.id ORDER BY ft.at)
                FROM flock_treatments ft
               WHERE ft.vet_log_id = v.id) AS "treatmentIds"
@@ -82,12 +84,14 @@ export async function fetchVetLogRelatedEntityIds(client, vetLogId) {
     [vetLogId]
   );
   const row = r.rows[0];
-  if (!row) return { weighInId: null, treatmentIds: [] };
+  if (!row) return { weighInId: null, flockId: null, confirmedLiveCount: null, treatmentIds: [] };
   const treatmentIds = Array.isArray(row.treatmentIds)
     ? row.treatmentIds.filter(Boolean).map(String)
     : [];
   return {
     weighInId: row.weighInId ? String(row.weighInId) : null,
+    flockId: row.flockId ? String(row.flockId) : null,
+    confirmedLiveCount: row.confirmedLiveCount != null ? Number(row.confirmedLiveCount) : null,
     treatmentIds,
   };
 }
@@ -99,9 +103,13 @@ export async function fetchVetLogRelatedEntityIds(client, vetLogId) {
  */
 export async function syncApprovedVetLogEntities(clevaSync, client, vetLogId) {
   clevaSync("farm_vet_log", vetLogId);
-  const { weighInId, treatmentIds } = await fetchVetLogRelatedEntityIds(client, vetLogId);
+  const { weighInId, flockId, confirmedLiveCount, treatmentIds } =
+    await fetchVetLogRelatedEntityIds(client, vetLogId);
   if (weighInId) clevaSync("farm_weigh_in", weighInId);
   for (const tid of treatmentIds) clevaSync("farm_treatment", tid);
+  if (flockId && confirmedLiveCount != null) {
+    clevaSync("flock", flockId);
+  }
 }
 
 /**

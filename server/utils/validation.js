@@ -65,4 +65,18 @@ export const vetLogSchema = z.object({
       notes: z.string().max(2000).optional(),
     })
     .optional(),
+  mortalityReview: z
+    .object({
+      confirmedLiveCount: z.coerce.number().int().nonnegative(),
+      mortalityAdjustments: z
+        .array(
+          z.object({
+            eventId: z.string().uuid(),
+            count: z.coerce.number().int().positive(),
+          })
+        )
+        .optional(),
+      loggedSinceLastVisit: z.coerce.number().int().nonnegative().optional(),
+    })
+    .optional(),
 });

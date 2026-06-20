@@ -71,6 +71,11 @@ import {
   canCreateVetLog,
   needsVetLogApproval,
 } from "./src/services/vetLogService.js";
+import {
+  buildMortalityReviewContext,
+  applyMortalityReview,
+  syncMortalityReviewToErp,
+} from "./src/services/vetLogMortalityReview.js";
 import { initErpnextConfigDb } from "./src/services/erpnext/erpnext.config.js";
 import { createSaasRouter } from "./src/routes/saasRoutes.js";
 import { initOdooSyncWorker, processOdooSyncOutbox, enqueueOdooSync } from "./src/services/odoo/odooSyncWorker.js";
@@ -5464,6 +5469,40 @@ app.patch("/api/mortality-events/:id/review", requireAuth, requireFarmAccess, re
 
 // ── Vet logs (replaces daily logs for vet+ roles) ──
 
+app.get("/api/flocks/:id/vet-log-mortality-review", requireAuth, requireFarmAccess, requirePageAccess("farm_vet_logs"), requireVetUp, async (req, res) => {
+  const flockId = String(req.params.id ?? "").trim();
+  const beforeDate = req.query.beforeDate ? String(req.query.beforeDate).slice(0, 10) : null;
+  const f = await getFlockByIdForUser(flockId, req.authUser, res);
+  if (!f) return;
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable." });
+    return;
+  }
+  try {
+    await syncFlocksFromDbToMemory();
+    await syncMortalityEventsFromDb();
+  } catch {
+    /* ignore cache refresh errors */
+  }
+  try {
+    const perf = await buildFlockPerformanceSummary(flockId);
+    const client = { query: (...args) => dbQuery(...args) };
+    const context = await buildMortalityReviewContext({
+      client,
+      flockId,
+      beforeDate: beforeDate ?? undefined,
+      initialCount: f.initialCount ?? 0,
+      slaughterToDate: perf?.slaughterToDate ?? 0,
+      mortalityToDate: perf?.mortalityToDate ?? 0,
+      verifiedLiveCount: f.verifiedLiveCount ?? null,
+    });
+    res.json({ review: context });
+  } catch (e) {
+    console.error("[ERROR]", "[db] GET vet-log-mortality-review:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Could not load mortality review context." });
+  }
+});
+
 app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("farm_vet_logs"), async (req, res) => {
   if (!canCreateVetLog(req.authUser)) {
     res.status(403).json({ error: "Only vet, vet manager, manager, or superuser can create vet logs" });
@@ -5474,7 +5513,7 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid vet log payload" });
     return;
   }
-  const { flockId, logDate, observations, actionsTaken, recommendations, weightSample, medicine } = parsed.data;
+  const { flockId, logDate, observations, actionsTaken, recommendations, weightSample, medicine, mortalityReview } = parsed.data;
   const f = await getFlockByIdForUser(flockId, req.authUser, res);
   if (!f) return;
   if (!assertFlockNotArchivedForMutation(f, res)) return;
@@ -5533,6 +5572,7 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
   };
 
   let vetLogSavedToDb = false;
+  let mortalitySyncIds = [];
   if (hasDb() && isPersistableUuid(flockId) && isPersistableUuid(req.authUser.id)) {
     const client = await dbPool.connect();
     try {
@@ -5589,6 +5629,38 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
         });
       }
 
+      let mortalitySyncIdsLocal = [];
+      if (mortalityReview) {
+        const perfBefore = await buildFlockPerformanceSummary(flockId);
+        const ctxClient = { query: (...args) => client.query(...args) };
+        const ctx = await buildMortalityReviewContext({
+          client: ctxClient,
+          flockId,
+          beforeDate: row.logDate,
+          initialCount: f.initialCount ?? 0,
+          slaughterToDate: perfBefore?.slaughterToDate ?? 0,
+          mortalityToDate: perfBefore?.mortalityToDate ?? 0,
+          verifiedLiveCount: f.verifiedLiveCount ?? null,
+        });
+        const loggedBaseline =
+          mortalityReview.loggedSinceLastVisit != null
+            ? Math.floor(Number(mortalityReview.loggedSinceLastVisit))
+            : ctx.loggedSinceLastVisit;
+        const applied = await applyMortalityReview({
+          client,
+          flockId,
+          vetLogId: id,
+          authorUserId: req.authUser.id,
+          logDate: row.logDate,
+          mortalityReview,
+          loggedSinceLastVisit: loggedBaseline,
+        });
+        mortalitySyncIdsLocal = applied.adjustedEventIds;
+        mortalitySyncIds = mortalitySyncIdsLocal;
+        row.confirmedLiveCount = applied.confirmedLiveCount;
+        row.mortalityConfirmedSinceLastVisit = applied.mortalityConfirmedSinceLastVisit;
+      }
+
       await client.query("COMMIT");
       vetLogSavedToDb = true;
     } catch (e) {
@@ -5609,7 +5681,19 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
     submissionStatus,
     weighInId: row.weighInId,
     treatmentId: row.treatmentId,
+    confirmedLiveCount: row.confirmedLiveCount ?? null,
   });
+
+  if (vetLogSavedToDb && mortalityReview) {
+    try {
+      await syncFlocksFromDbToMemory();
+      await syncMortalityEventsFromDb();
+    } catch (e) {
+      console.warn("[WARN] post vet-log mortality review cache refresh:", e instanceof Error ? e.message : e);
+    }
+    const adjustedIds = mortalitySyncIds ?? [];
+    syncMortalityReviewToErp(clevaSync, flockId, adjustedIds);
+  }
 
   if (vetLogSavedToDb && shouldSyncVetLogOnCreate(submissionStatus)) {
     const client = { query: (...args) => dbQuery(...args) };
@@ -6354,6 +6438,7 @@ async function buildFlockPerformanceSummary(flockId, atIso = null) {
     ageDays: ageDaysNow,
     feedToDateKg: Number(feedToDate.toFixed(2)),
     mortalityToDate,
+    slaughterToDate,
     birdsLiveEstimate,
     computedBirdsLiveEstimate: computedBirdsLive,
     verifiedLiveCount: flock.verifiedLiveCount != null ? Math.floor(Number(flock.verifiedLiveCount)) : null,

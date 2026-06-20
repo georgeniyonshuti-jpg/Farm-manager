@@ -134,7 +134,9 @@ Vet visits can include an optional **weight sample** and **medicine** (migration
 
 | Farm action | Postgres | ERPNext DocType | Notes |
 |-------------|----------|-----------------|-------|
-| Vet log save (approved) | `farm_vet_logs` | Farm Vet Log | `weighInId`, `sampleSize`, `avgWeightKg`, `cvPct`, `underweightPct`, `totalFeedUsedKg`, `submissionStatus` |
+| Vet log save (approved) | `farm_vet_logs` | Farm Vet Log | `weighInId`, weight fields, `confirmedLiveCount`, `mortalityConfirmedSinceLastVisit`, `submissionStatus` |
+| Vet confirms live birds | `poultry_flocks.verified_live_count` | Flock (outbound) | Synced on approve when vet log includes mortality review |
+| Mortality count corrected on visit | `flock_mortality_events` | Mortality Log | Re-synced when vet adjusts event counts during log save |
 | Auto weigh-in from vet log | `weigh_ins` (`source=vet_log`) | Farm Weigh In | `vetLogId`, `recordedBy` — ERPNext may create IAS 41 valuation draft |
 | Medicine on visit | `flock_treatments` (`vet_log_id`) | Farm Treatment | `vetLogId` — medicine spend in `flock_accumulated_spend` |
 
