@@ -11,6 +11,7 @@
 import pg from "pg";
 import { ENTITY_DEPENDENCY_ORDER, ENTITY_DEFS } from "../server/src/services/clevafarm/entityRegistry.js";
 import { rowToPayload } from "../server/src/services/clevafarm/entitySerializers.js";
+import { enrichOutboundUserFields } from "../server/src/services/clevafarm/outboundUserEnrichment.js";
 import { enqueueClevaFarmSync } from "../server/src/services/clevafarm/syncOutbox.js";
 import { initClevaFarmSyncWorker } from "../server/src/services/clevafarm/syncOutbox.js";
 import { initClevaFarmEmit } from "../server/src/services/clevafarm/emitEntitySync.js";
@@ -82,8 +83,9 @@ async function main() {
     console.log(`[${entityType}] ${rows.length} row(s)`);
     for (const row of rows) {
       const id = String(row[ENTITY_DEFS[entityType].idColumn] ?? row.id);
-      const payload = rowToPayload(entityType, row);
+      let payload = rowToPayload(entityType, row);
       if (!payload.id) payload.id = id;
+      payload = await enrichOutboundUserFields(entityType, row, payload, dbQuery);
       total += 1;
       if (dryRun) {
         console.log(`  dry-run enqueue ${entityType} ${id}`);

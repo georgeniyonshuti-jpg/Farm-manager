@@ -84,7 +84,10 @@ These are the entity types ERPNext currently pushes on desk save. Each must use 
   "feedKg": 120.5,
   "feedType": "starter",
   "logDate": "2026-02-01T08:00:00Z",
-  "enteredByUserId": "<uuid>"
+  "recordedAt": "2026-02-01T08:00:00Z",
+  "enteredByUserId": "<uuid>",
+  "recordedBy": "<uuid>",
+  "enteredByEmail": "user@example.com"
 }
 ```
 
@@ -95,6 +98,10 @@ These are the entity types ERPNext currently pushes on desk save. Each must use 
 | `feedType` | `feed_type` |
 | `logDate` / `recordedAt` | `recorded_at` |
 | `enteredByUserId` | `entered_by_user_id` |
+| `recordedBy` | same UUID as `enteredByUserId` (ERPNext alias) |
+| `enteredByEmail` | looked up from `users.email` (helps `resolve_user`) |
+
+Farm never sends literal `"user"` or empty strings for user fields. Both `logDate` and `recordedAt` are emitted when `recorded_at` is set.
 
 **Not mapped:** `dead_count`, `flockLabel`, `name`.
 

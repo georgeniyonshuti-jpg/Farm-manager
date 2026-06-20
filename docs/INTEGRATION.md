@@ -144,8 +144,8 @@ Vet visits can include an optional **weight sample** and **medicine** (migration
 
 | Entity | Farm table | Direction | Notes |
 |--------|------------|-----------|-------|
-| `feed_log` | `flock_feed_entries` | Both | Requires `feedType`, `feedKg`, `flockId`, `enteredByUserId`. Stock deducted on approve (or immediately when auto-approved). |
-| `feed_inventory_transaction` | `farm_inventory_transactions` | Both | Procurement (`procurement_receipt`), consumption (`feed_consumption`), adjustment. Farm maps ERPNext `purchase` → `procurement_receipt`. |
+| `feed_log` | `flock_feed_entries` | Both | Requires `feedType`, `feedKg`, `flockId`, `enteredByUserId`. Outbound also sends `recordedBy`, `logDate`, and optional `enteredByEmail` for ERPNext user resolution. Stock deducted on approve (or immediately when auto-approved). |
+| `feed_inventory_transaction` | `farm_inventory_transactions` | Both | Procurement (`procurement_receipt`), consumption (`feed_consumption`), adjustment. Farm maps ERPNext `purchase` → `procurement_receipt`. Outbound sends `actorUserEmail` and `recordedBy` alias when actor is a Farm user UUID. |
 
 **Stock-backed logging:** Field feed logs may only use feed types with `balanceKg > 0` in `farm_inventory_transactions`. Consumption rows link to feed logs via `feed_entry_id` and sync outbound as `feed_inventory_transaction`.
 
@@ -208,7 +208,13 @@ Run after both codebases have the sync glue fixes:
    DATABASE_URL=<prod> node scripts/backfill-clevafarm-sync.js --entity-type=farm_checkin
    ```
    Or trigger ERPNext reconciliation for `farm_checkin` with an early `updatedSince`.
-6. **Verify**:
+6. **Retry failed feed logs** (after ERPNext user-mapper fix on `resolve_user` / `_map_feed_log`):
+   ```bash
+   cd server && npm run diagnose:clevafarm -- --env-file=~/gitops/clevafarm-render.env
+   DATABASE_URL=<prod> node scripts/backfill-clevafarm-sync.js --entity-type=feed_log --entity-type=feed_inventory_transaction
+   ```
+   The outbox worker (`processClevaFarmOutbox`, ~45s) also retries `failed` rows automatically.
+7. **Verify**:
    ```bash
    cd server && npm run diagnose:clevafarm -- --env-file=~/gitops/clevafarm-render.env
    npm run diff:clevafarm-registry -- --erpnext=/path/to/entity_registry.json
