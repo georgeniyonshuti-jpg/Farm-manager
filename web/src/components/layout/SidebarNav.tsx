@@ -251,9 +251,9 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
         "/farm/feed",
         "/farm/mortality-log",
         "/farm/daily-log",
-        "/farm/inventory",
       ]),
       flocks_health: pick([
+        "/farm/inventory",
         "/farm/flocks",
         "/farm/mortality",
         "/farm/vet-logs",
@@ -404,7 +404,7 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
             <>
               <GroupSection id="overview" title="Overview" icon={<IconOverview />} items={groupedFarmNav.overview} />
               <GroupSection id="operations" title="Daily operations" icon={<IconOperations />} items={groupedFarmNav.operations} />
-              <GroupSection id="flocks_health" title="Flocks & health" icon={<IconFlocksHealth />} items={groupedFarmNav.flocks_health} />
+              <GroupSection id="flocks_health" title="Management" icon={<IconFlocksHealth />} items={groupedFarmNav.flocks_health} />
               <GroupSection id="planning_workforce" title="Planning & workforce" icon={<IconPlanning />} items={groupedFarmNav.planning_workforce} />
               <GroupSection id="integrations_admin" title="Integrations & admin" icon={<IconIntegrations />} items={groupedFarmNav.integrations_admin} />
             </>

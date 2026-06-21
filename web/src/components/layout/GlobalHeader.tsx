@@ -80,6 +80,7 @@ function routeTitleKey(pathname: string): string | null {
   if (p.startsWith("/dashboard/laborer")) return "Field operations hub";
   if (p.startsWith("/dashboard/vet")) return "Vet hub";
   if (p.startsWith("/dashboard/management")) return "Command center";
+  if (p.startsWith("/farm/inventory")) return "Feed inventory";
   if (p.startsWith("/farm")) return "Farm";
   if (p.startsWith("/cleva")) return "Clevafarm Finance";
   if (p.startsWith("/admin")) return "Admin";

@@ -141,6 +141,7 @@ const RW_DICTIONARY: Record<string, string> = {
   "Finisher": "Finisher",
   "Supplement": "Supplement",
   "Feed inventory": "Ibiryo bihari (Inventory)",
+  "Management": "Management",
   "Role-based stock controls for procurement, feeding, and adjustments.": "Igenzura rya stock rishingiye ku nshingano mu kugura, kugaburira, no guhindura imibare.",
   "Current balance (kg)": "Ibisigaye ubu (kg)",
   "Records": "Amakuru yanditswe",
