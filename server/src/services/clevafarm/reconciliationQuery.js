@@ -1,6 +1,7 @@
 import { getEntityDef, isValidEntityType, isTextPkEntity } from "./entityRegistry.js";
 import { rowToPayload } from "./entitySerializers.js";
 import { enrichOutboundUserFields } from "./outboundUserEnrichment.js";
+import { enrichOutboundInventoryFields } from "./outboundInventoryEnrichment.js";
 
 /**
  * @param {(sql: string, params?: unknown[]) => Promise<{ rows: Record<string, unknown>[] }>} dbQuery
@@ -44,6 +45,7 @@ export async function listEntitiesSince(entityType, updatedSince, dbQuery) {
   for (const row of r.rows) {
     let payload = rowToPayload(entityType, row);
     payload = await enrichOutboundUserFields(entityType, row, payload, dbQuery);
+    payload = await enrichOutboundInventoryFields(entityType, row, payload, dbQuery);
     records.push(payload);
   }
   return records;

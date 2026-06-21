@@ -147,13 +147,15 @@ Vet visits can include an optional **weight sample** and **medicine** (migration
 | Entity | Farm table | Direction | Notes |
 |--------|------------|-----------|-------|
 | `feed_log` | `flock_feed_entries` | Both | Requires `feedType`, `feedKg`, `flockId`, `enteredByUserId`. Outbound also sends `recordedBy`, `logDate`, and optional `enteredByEmail` for ERPNext user resolution. Stock deducted on approve (or immediately when auto-approved). |
-| `feed_inventory_transaction` | `farm_inventory_transactions` | Both | Procurement (`procurement_receipt`), consumption (`feed_consumption`), adjustment. Farm maps ERPNext `purchase` → `procurement_receipt`. Outbound sends `actorUserEmail` and `recordedBy` alias when actor is a Farm user UUID. |
+| `feed_inventory_transaction` | `farm_inventory_transactions` | Both | Procurement (`procurement_receipt`), consumption (`feed_consumption`), adjustment. Farm maps ERPNext `purchase` → `procurement_receipt`. Outbound sends ERPNext Select labels for `transactionType` (`Procurement Receipt`, `Feed Consumption`, `Adjustment`), title-case `feedType`, `feedLogId` (alias of `feedEntryId`), `companyId` (flock → actor user), plus `actorUserEmail` and `recordedBy` when actor is a Farm user UUID. Manual consumption requires `feedType`. |
 
-**Stock-backed logging:** Field feed logs may only use feed types with `balanceKg > 0` in `farm_inventory_transactions`. Consumption rows link to feed logs via `feed_entry_id` and sync outbound as `feed_inventory_transaction`.
+**Stock-backed logging:** Field feed logs may only use feed types with `balanceKg > 0` in `farm_inventory_transactions`. Consumption rows link to feed logs via `feed_entry_id` and sync outbound as `feed_inventory_transaction`. On feed log approve (or auto-approved create), consumption is written before the feed log outbox enqueue so ERPNext receives the ledger row first.
 
 **Inbound visibility:** After ERPNext webhook upsert, Farm refreshes in-memory feed/inventory caches. `GET /api/flocks/:id/feed-entries` syncs from Postgres on each request.
 
-**ERPNext-side requirements:** Webhook on Feed Log + Feed Inventory Transaction save; include `feedType` on feed logs; send `transactionType: procurement_receipt` (or `purchase`, mapped by Farm); reconcile by `contentHash` when status changes.
+**ERPNext-side requirements:** Webhook on Feed Log + Feed Inventory Transaction save; include `feedType` on feed logs; inbound may send `transactionType: procurement_receipt` or `purchase` (mapped by Farm); reconcile by `contentHash` when status changes.
+
+**Post-deploy backfill (existing rows):** `node scripts/backfill-clevafarm-sync.js --entity-type=feed_inventory_transaction`
 
 ### Flock lifecycle → ERPNext (outbound)
 

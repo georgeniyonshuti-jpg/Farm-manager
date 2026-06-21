@@ -160,6 +160,22 @@ Primary key is **TEXT**.
 
 ### feed_inventory_transaction
 
+Outbound payloads are enriched after `rowToPayload` for ERPNext Select labels and scoping:
+
+| Farm Postgres `transaction_type` | Outbound `transactionType` (ERPNext Select) |
+|----------------------------------|---------------------------------------------|
+| `procurement_receipt` | `Procurement Receipt` |
+| `feed_consumption` | `Feed Consumption` |
+| `adjustment` | `Adjustment` |
+
+| Field | Rule |
+|-------|------|
+| `feedType` | Title-case per token (`starter` → `Starter`) |
+| `feedLogId` | Set to same UUID as `feedEntryId` when linked to a feed log |
+| `companyId` | From `poultry_flocks.company_id` when `flockId` set; else `users.company_id` for `actorUserId` |
+
+Postgres values in the database are unchanged; enrichment runs in `emitEntitySync` and reconciliation `GET /api/entities/feed_inventory_transaction`.
+
 Desk ledger rows may include `flockLabel`, `supplierName`, etc. Only inventory columns in `INBOUND_ALLOWED_COLUMNS` are persisted.
 
 ### farm_medicine_lot

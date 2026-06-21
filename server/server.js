@@ -4639,10 +4639,10 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
     feedType,
     submissionStatus,
   });
-  if (feedSavedToDb) clevaSync("feed_log", id);
   if (feedSavedToDb && submissionStatus === "approved") {
     await deductFeedStockForEntry(row, req.authUser.id);
   }
+  if (feedSavedToDb) clevaSync("feed_log", id);
   const summary = await buildFlockPerformanceSummary(f.id);
   res.json({
     ok: true,
@@ -5368,11 +5368,10 @@ app.patch("/api/feed-entries/:id/review", requireAuth, requireFarmAccess, requir
     mem.reviewedAt = new Date().toISOString();
     mem.reviewNotes = reviewNotes;
   }
-  clevaSync("feed_log", entryId);
-
   if (action === "approve" && hasDb() && isPersistableUuid(entryId) && isPersistableUuid(req.authUser.id)) {
     await deductFeedStockForEntry(mem ?? entryBefore, req.authUser.id);
   }
+  clevaSync("feed_log", entryId);
 
   appendAudit(req.authUser.id, req.authUser.role, `farm.feed_entry.${action}`, "feed_entry", entryId, { reviewNotes });
   res.json({ ok: true, status: newStatus });
@@ -7502,10 +7501,15 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
   }
   const body = req.body ?? {};
   const flockId = String(body.flockId ?? "").trim();
+  const feedType = String(body.feedType ?? "").trim();
   const quantityKg = Number(body.quantityKg);
   const reasonCode = String(body.reasonCode ?? "").trim() || "round_feed";
   if (!systemConfig.validateAgainstCategory("inventory_consumption_reason", reasonCode, INVENTORY_REASON_CODES.consumption)) {
     res.status(400).json({ error: "Invalid reasonCode for feed consumption" });
+    return;
+  }
+  if (!systemConfig.validateAgainstCategory("feed_type", feedType)) {
+    res.status(400).json({ error: "Valid feedType is required" });
     return;
   }
   const reason = String(body.reason ?? reasonCode).slice(0, 400);
@@ -7525,16 +7529,23 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
       res.status(503).json({ error: "Inventory balances unavailable. Please retry shortly." });
       return;
     }
-  }
-  const currentBalance = computeInventoryBalances(flockId)[0]?.balanceKg ?? 0;
-  if (currentBalance - quantityKg < 0 && !canCreateInventoryAdjustment(req.authUser)) {
-    res.status(400).json({ error: "Insufficient stock for this flock" });
-    return;
+    const stockCheck = assertFeedStockAvailable(feedType, quantityKg, await getAvailableFeedStockRows());
+    if (!stockCheck.ok) {
+      res.status(400).json({ error: stockCheck.error });
+      return;
+    }
+  } else {
+    const currentBalance = computeInventoryBalances(flockId)[0]?.balanceKg ?? 0;
+    if (currentBalance - quantityKg < 0 && !canCreateInventoryAdjustment(req.authUser)) {
+      res.status(400).json({ error: "Insufficient stock for this flock" });
+      return;
+    }
   }
   let row = {
     id: `inv_${crypto.randomBytes(6).toString("hex")}`,
     type: "feed_consumption",
     flockId,
+    feedType,
     at: new Date().toISOString(),
     quantityKg,
     deltaKg: -quantityKg,
@@ -7551,9 +7562,10 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
       const ins = await dbQuery(
         `INSERT INTO farm_inventory_transactions (
            flock_id, transaction_type, recorded_at, quantity_kg, delta_kg,
-           unit_cost_rwf_per_kg, reason, reference, actor_user_id, approved_by_user_id, approved_at
+           unit_cost_rwf_per_kg, reason, reference, actor_user_id, approved_by_user_id, approved_at,
+           feed_type
          )
-         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, NULL, $6, '', $7::uuid, NULL, NULL)
+         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, NULL, $6, '', $7::uuid, NULL, NULL, $8)
          RETURNING id::text AS id,
                    transaction_type AS type,
                    flock_id::text AS "flockId",
@@ -7565,7 +7577,8 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
                    reference,
                    actor_user_id::text AS "actorUserId",
                    approved_by_user_id::text AS "approvedByUserId",
-                   approved_at AS "approvedAt"`,
+                   approved_at AS "approvedAt",
+                   feed_type AS "feedType"`,
         [
           flockId,
           "feed_consumption",
@@ -7574,6 +7587,7 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
           -quantityKg,
           reason,
           req.authUser.id,
+          feedType,
         ]
       );
       row = mapInventoryRowFromDb(ins.rows[0]);
@@ -7595,6 +7609,7 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
   }
   appendAudit(req.authUser.id, req.authUser.role, "inventory.feed.create", "inventory", row.id, {
     flockId,
+    feedType,
     quantityKg,
   });
   if (feedConsumptionSavedToDb && row?.id) clevaSync("feed_inventory_transaction", row.id);

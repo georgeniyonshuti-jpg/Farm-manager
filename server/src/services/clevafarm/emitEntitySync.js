@@ -2,6 +2,7 @@ import { isClevaFarmInboundSync } from "./inboundContext.js";
 import { loadEntityRow } from "./reconciliationQuery.js";
 import { rowToPayload } from "./entitySerializers.js";
 import { enrichOutboundUserFields } from "./outboundUserEnrichment.js";
+import { enrichOutboundInventoryFields } from "./outboundInventoryEnrichment.js";
 import { isValidEntityType } from "./entityRegistry.js";
 import { enqueueClevaFarmSync } from "./syncOutbox.js";
 
@@ -35,5 +36,6 @@ export async function emitEntitySync(entityType, entityId, opts = {}) {
   let payload = rowToPayload(entityType, row);
   if (!payload.id) payload.id = id;
   payload = await enrichOutboundUserFields(entityType, row, payload, _dbQuery);
+  payload = await enrichOutboundInventoryFields(entityType, row, payload, _dbQuery);
   await enqueueClevaFarmSync({ entityType, entityId: id, payload });
 }
