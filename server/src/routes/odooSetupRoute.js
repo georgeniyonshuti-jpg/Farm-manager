@@ -34,7 +34,7 @@ const router = express.Router();
 
 const ROLE_RANK = {
   laborer: 1, dispatcher: 1, procurement_officer: 1, sales_coordinator: 1,
-  vet: 2, vet_manager: 3, manager: 3, investor: 0, superuser: 99,
+  vet: 2, vet_manager: 3, manager: 3, company_admin: 4, investor: 0, superuser: 99,
 };
 
 function isManagerOrAbove(user) {

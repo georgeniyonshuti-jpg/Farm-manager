@@ -21,7 +21,7 @@ const router = express.Router();
 export { initIas41Service };
 
 function isManagerOrAbove(user) {
-  return user?.role === "manager" || user?.role === "superuser";
+  return user?.role === "manager" || user?.role === "company_admin" || user?.role === "superuser";
 }
 
 /**

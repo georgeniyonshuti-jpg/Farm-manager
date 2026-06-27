@@ -1,6 +1,7 @@
 /** Application roles — extend as org grows */
 export type UserRole =
   | "superuser"
+  | "company_admin"
   | "manager"
   | "vet"
   | "vet_manager"

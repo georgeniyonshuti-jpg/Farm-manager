@@ -31,6 +31,7 @@ const ROLE_RANK = {
   vet: 2,
   vet_manager: 3,
   manager: 3,
+  company_admin: 4,
   investor: 0,
   superuser: 99,
 };

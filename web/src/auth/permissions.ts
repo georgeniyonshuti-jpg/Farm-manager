@@ -9,6 +9,7 @@ const ROLE_ORDER: UserRole[] = [
   "vet_manager",
   "investor",
   "manager",
+  "company_admin",
   "superuser",
 ];
 
@@ -21,18 +22,26 @@ export function roleAtLeast(user: SessionUser | null, minRole: UserRole): boolea
   return u >= m;
 }
 
+export function isCompanyAdmin(user: SessionUser | null): boolean {
+  return user?.role === "company_admin";
+}
+
+export function canManageUsers(user: SessionUser | null): boolean {
+  return isSuperuser(user) || isCompanyAdmin(user);
+}
+
 /** Submit vet logs: vet (incl. junior), vet_manager, manager, superuser. */
 export function canSubmitVetLog(user: SessionUser | null): boolean {
   if (!user) return false;
   const r = user.role;
-  return r === "vet" || r === "vet_manager" || r === "manager" || r === "superuser";
+  return r === "vet" || r === "vet_manager" || r === "manager" || r === "company_admin" || r === "superuser";
 }
 
-/** Approve/reject pending vet logs: vet_manager, manager, superuser. */
+/** Approve/reject pending vet logs: vet_manager, manager, company_admin, superuser. */
 export function canReviewVetLog(user: SessionUser | null): boolean {
   if (!user) return false;
   const r = user.role;
-  return r === "vet_manager" || r === "manager" || r === "superuser";
+  return r === "vet_manager" || r === "manager" || r === "company_admin" || r === "superuser";
 }
 
 /** Approve/reject pending feed logs: vet_manager, manager, superuser. */
@@ -65,6 +74,7 @@ export const FARM_FIELD_OPS_ROLES: UserRole[] = [
   "vet",
   "vet_manager",
   "manager",
+  "company_admin",
   "superuser",
 ];
 
@@ -117,7 +127,7 @@ export function canViewClevaSensitive(user: SessionUser | null): boolean {
 /** Mirrors server: manager / vet_manager / superuser, or Command Center read roles. */
 export function canViewOdooConnectionStatus(user: SessionUser | null): boolean {
   if (!user) return false;
-  if (user.role === "superuser" || user.role === "manager" || user.role === "vet_manager") return true;
+  if (user.role === "superuser" || user.role === "manager" || user.role === "company_admin" || user.role === "vet_manager") return true;
   if (user.role === "procurement_officer" || user.role === "sales_coordinator") return true;
   return false;
 }
@@ -174,6 +184,7 @@ const PAGE_KEYS = new Set(PAGE_ACCESS_DEFS.map((d) => d.key));
 export function canAccessPageByKey(user: SessionUser | null, key: string): boolean {
   if (!user) return false;
   if (isSuperuser(user)) return true;
+  if (isCompanyAdmin(user) && key === "admin_users") return true;
   if (!PAGE_KEYS.has(key)) return true;
   const access = Array.isArray(user.pageAccess) ? user.pageAccess : [];
   if (access.length === 0) return true;

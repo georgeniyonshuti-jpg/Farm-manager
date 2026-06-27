@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import type { SessionUser } from "../../auth/types";
+import { isSuperuser, canManageUsers } from "../../auth/permissions";
 import { PageHeader } from "../../components/PageHeader";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
@@ -30,6 +31,7 @@ const AUDIT_ACTION_QUICK_FILTERS: Array<{ label: string; value: string }> = [
 
 const USER_ROLE_OPTIONS: SessionUser["role"][] = [
   "superuser",
+  "company_admin",
   "manager",
   "vet",
   "vet_manager",
@@ -43,7 +45,7 @@ const USER_ROLE_OPTIONS: SessionUser["role"][] = [
 const BU_OPTIONS: SessionUser["businessUnitAccess"][] = ["farm", "clevacredit", "both"];
 
 export function UserManagementPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { showToast } = useToast();
   const [users, setUsers] = useState<SessionUser[]>([]);
   const [audit, setAudit] = useState<AuditRow[]>([]);
@@ -159,6 +161,11 @@ export function UserManagementPage() {
     return [...s].sort();
   }, [audit, users]);
 
+  const editableRoleOptions = useMemo(
+    () => (isSuperuser(user) ? USER_ROLE_OPTIONS : USER_ROLE_OPTIONS.filter((r) => r !== "superuser")),
+    [user],
+  );
+
   const totalPages = Math.max(1, Math.ceil(auditTotal / pageSize));
   const auditBusy = (loading && !loadError) || auditLoading;
 
@@ -259,8 +266,12 @@ export function UserManagementPage() {
   return (
     <div className="mx-auto w-full max-w-7xl space-y-8">
       <PageHeader
-        title="User management"
-        subtitle="Superuser only — invites, roles, and audit trail."
+        title={canManageUsers(user) && !isSuperuser(user) ? "Company users" : "User management"}
+        subtitle={
+          isSuperuser(user)
+            ? "Superuser — invites, roles, and audit trail across companies."
+            : "Manage users, roles, and audit trail for your company."
+        }
         action={
           <Link
             to="/admin/system-config"
@@ -375,7 +386,7 @@ export function UserManagementPage() {
                 value={editForm.role}
                 onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value as SessionUser["role"] }))}
               >
-                {USER_ROLE_OPTIONS.map((r) => (
+                {editableRoleOptions.map((r) => (
                   <option key={r} value={r}>
                     {r}
                   </option>

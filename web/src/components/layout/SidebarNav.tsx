@@ -2,7 +2,7 @@ import { NavLink } from "react-router-dom";
 import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useAuth } from "../../auth/AuthContext";
-import { canAccessPageByKey, canFlockAction, farmCoreNavItems, hasPermission } from "../../auth/permissions";
+import { canAccessPageByKey, canFlockAction, canManageUsers, farmCoreNavItems, hasPermission } from "../../auth/permissions";
 import { canEditFlockScheduleRole } from "../../farm/scheduleAccess";
 import { useLaborerT } from "../../i18n/laborerI18n";
 import { useCompanyNav } from "../../hooks/useCompanyNav";
@@ -232,11 +232,11 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
           : dashLink;
 
   const adminLink =
-    user.role === "superuser" && canSee("admin_users") ? { to: "/admin/users", label: "User management" } : null;
+    canManageUsers(user) && canSee("admin_users") ? { to: "/admin/users", label: "User management" } : null;
   const superAdminLink =
     user.role === "superuser" ? { to: "/admin/super", label: "Super admin" } : null;
   const typeLink =
-    user.role === "vet_manager" || user.role === "manager" || user.role === "superuser"
+    user.role === "vet_manager" || user.role === "manager" || user.role === "company_admin" || user.role === "superuser"
       ? (canSee("admin_system_config") ? { to: "/admin/system-config", label: "Type settings" } : null)
       : null;
 

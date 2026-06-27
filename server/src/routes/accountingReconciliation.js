@@ -36,7 +36,7 @@ function dbQuery(...args) {
 function hasDb() { return typeof _hasDb === "function" ? _hasDb() : false; }
 
 function isManagerOrAbove(user) {
-  return user?.role === "manager" || user?.role === "superuser";
+  return user?.role === "manager" || user?.role === "company_admin" || user?.role === "superuser";
 }
 
 /** Same business roles as Command Center — read-only Odoo outbox backlog for sync-health. */

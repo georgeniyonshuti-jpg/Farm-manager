@@ -103,7 +103,7 @@ export function createSaasRouter(deps) {
         email,
         displayName: fullName,
         passwordHash: hashPassword(password),
-        role: "manager",
+        role: "company_admin",
         businessUnitAccess: "both",
         canViewSensitiveFinancial: true,
         departmentKeys: [],
@@ -120,7 +120,7 @@ export function createSaasRouter(deps) {
           userId,
           email,
           fullName,
-          "manager",
+          "company_admin",
           row.passwordHash,
           "both",
           companyId,
@@ -132,7 +132,7 @@ export function createSaasRouter(deps) {
       upsertUser(row);
       const token = newSessionId();
       sessions.set(token, { userId, exp: Date.now() + 1000 * 60 * 60 * 24 * 7 });
-      appendAudit(userId, "manager", "auth.signup", "company", companyId, { email, companyName });
+      appendAudit(userId, "company_admin", "auth.signup", "company", companyId, { email, companyName });
       res.status(201).json({ token, user: sanitizeUser(row) });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Signup failed";

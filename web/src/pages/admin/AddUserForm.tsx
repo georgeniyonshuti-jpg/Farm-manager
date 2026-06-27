@@ -1,6 +1,7 @@
 import { useState } from "react";
-import type { BusinessUnitAccess, UserRole } from "../../auth/types";
 import { useAuth } from "../../auth/AuthContext";
+import type { BusinessUnitAccess, UserRole } from "../../auth/types";
+import { isSuperuser } from "../../auth/permissions";
 import { useApiFetch } from "../../api/fetchClient";
 import { useToast } from "../../components/Toast";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
@@ -24,6 +25,7 @@ const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: "vet_manager", label: "Vet manager" },
   { value: "investor", label: "Investor (read-oriented)" },
   { value: "manager", label: "Manager" },
+  { value: "company_admin", label: "Company admin" },
   { value: "superuser", label: "Superuser" },
 ];
 
@@ -42,13 +44,13 @@ type Props = {
  * and explicit Clevafarm finance sensitive-data toggle.
  */
 export function AddUserForm({ onCreated }: Props) {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { showToast } = useToast();
   const roleLabelOptions = useReferenceOptions(
     "role_label",
     token,
     ROLE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
-  );
+  ).filter((o) => isSuperuser(user) || o.value !== "superuser");
   const departmentRefOptions = useReferenceOptions(
     "department_key",
     token,

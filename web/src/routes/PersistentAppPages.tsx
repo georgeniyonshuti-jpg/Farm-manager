@@ -215,13 +215,13 @@ export function PersistentAppPages() {
       </PersistentWorkspaceGate>
 
       <PersistentPageSlot active={pathExact(p, "/admin/users")} mountDelayMs={2600}>
-        <PersistentRouteGuard superuserOnly>
+        <PersistentRouteGuard userManagementAccess>
           <UserManagementPage />
         </PersistentRouteGuard>
       </PersistentPageSlot>
 
       <PersistentPageSlot active={pathExact(p, "/admin/system-config")} mountDelayMs={2700}>
-        <PersistentRouteGuard roles={["vet_manager", "manager", "superuser"]}>
+        <PersistentRouteGuard roles={["vet_manager", "manager", "company_admin", "superuser"]}>
           <SystemConfigPage />
         </PersistentRouteGuard>
       </PersistentPageSlot>

@@ -85,6 +85,13 @@ import {
   filterFlocksForUser,
   memoryFlockIdVisible,
 } from "./src/services/tenant/companyIsolation.js";
+import {
+  isCompanyAdmin,
+  isUserManagementAdmin,
+  actorCanAssignRole,
+  actorCanManageUser,
+  resolveAssignCompanyId,
+} from "./src/services/tenant/companyAdmin.js";
 import { createSaasRouter } from "./src/routes/saasRoutes.js";
 import { initOdooSyncWorker, processOdooSyncOutbox, enqueueOdooSync } from "./src/services/odoo/odooSyncWorker.js";
 import {
@@ -299,6 +306,7 @@ function normalizePageAccess(input, fallback) {
 function hasUserPageAccess(user, key) {
   if (!user) return false;
   if (user.role === "superuser") return true;
+  if (user.role === "company_admin" && String(key) === "admin_users") return true;
   if (!PAGE_ACCESS_KEY_SET.has(String(key))) return true;
   const access = Array.isArray(user.pageAccess) ? user.pageAccess.map(String) : [];
   if (access.length === 0) {
@@ -780,9 +788,28 @@ function requireSuperuser(req, res, next) {
   next();
 }
 
+function requireUserManagementAccess(req, res, next) {
+  if (!isUserManagementAdmin(req.authUser)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  next();
+}
+
+function requireCompanyAdminUp(req, res, next) {
+  if (isPlatformSuperuser(req.authUser) || isCompanyAdmin(req.authUser)) {
+    next();
+    return;
+  }
+  res.status(403).json({ error: "Forbidden" });
+}
+
+function isManagerTierRole(role) {
+  return role === "superuser" || role === "manager" || role === "company_admin";
+}
+
 function requireManagerOrSuperuser(req, res, next) {
-  const r = req.authUser?.role;
-  if (r === "superuser" || r === "manager") {
+  if (isManagerTierRole(req.authUser?.role)) {
     next();
     return;
   }
@@ -791,7 +818,7 @@ function requireManagerOrSuperuser(req, res, next) {
 
 function requireLeadVetUp(req, res, next) {
   const r = req.authUser?.role;
-  if (r === "vet_manager" || r === "manager" || r === "superuser") {
+  if (r === "vet_manager" || isManagerTierRole(r)) {
     next();
     return;
   }
@@ -800,7 +827,7 @@ function requireLeadVetUp(req, res, next) {
 
 function requireVetUp(req, res, next) {
   const r = req.authUser?.role;
-  if (r === "vet" || r === "vet_manager" || r === "manager" || r === "superuser") {
+  if (r === "vet" || r === "vet_manager" || isManagerTierRole(r)) {
     next();
     return;
   }
@@ -925,6 +952,7 @@ const ROLE_RANK = {
   vet: 2,
   vet_manager: 3,
   manager: 3,
+  company_admin: 4,
   investor: 0,
   superuser: 99,
 };
@@ -969,7 +997,7 @@ function needsApproval(user) {
 function canDirectPostAccountingToOdoo(user) {
   if (!user) return false;
   if (user.role === "superuser") return true;
-  if (user.role !== "manager") return false;
+  if (user.role !== "manager" && user.role !== "company_admin") return false;
   return hasUserPageAccess(user, "odoo_send");
 }
 
@@ -990,7 +1018,7 @@ function needsFieldCheckinApproval(user) {
 
 function canEditCheckinSchedule(user) {
   if (!user) return false;
-  return ["superuser", "manager", "vet_manager", "vet"].includes(user.role);
+  return ["superuser", "manager", "company_admin", "vet_manager", "vet"].includes(user.role);
 }
 
 function requireCheckinScheduleEditor(req, res, next) {
@@ -1003,7 +1031,7 @@ function requireCheckinScheduleEditor(req, res, next) {
 
 function canManageLogScheduleAndPayroll(user) {
   if (!user) return false;
-  return ["superuser", "manager", "vet_manager"].includes(user.role);
+  return ["superuser", "manager", "company_admin", "vet_manager"].includes(user.role);
 }
 
 function requireLogScheduleEditor(req, res, next) {
@@ -1477,22 +1505,22 @@ function canLogTreatments(user) {
 
 function canCreateProcurement(user) {
   if (!user) return false;
-  return ["superuser", "manager", "vet_manager", "procurement_officer"].includes(user.role);
+  return ["superuser", "manager", "company_admin", "vet_manager", "procurement_officer"].includes(user.role);
 }
 
 function canCreateFeedConsumption(user) {
   if (!user) return false;
-  return ["superuser", "manager", "vet_manager", "laborer", "dispatcher"].includes(user.role);
+  return ["superuser", "manager", "company_admin", "vet_manager", "laborer", "dispatcher"].includes(user.role);
 }
 
 function canCreateInventoryAdjustment(user) {
   if (!user) return false;
-  return ["superuser", "manager"].includes(user.role);
+  return ["superuser", "manager", "company_admin"].includes(user.role);
 }
 
 function canEditInventoryRow(user, row) {
   if (!user || !row) return false;
-  if (user.role === "superuser" || user.role === "manager") return true;
+  if (isManagerTierRole(user.role)) return true;
   if (user.role === "procurement_officer" && row.type === "procurement_receipt" && row.actorUserId === user.id) {
     const sameKigaliDay = kigaliYmd(new Date(row.at)) === kigaliYmd(new Date());
     return sameKigaliDay;
@@ -1798,7 +1826,7 @@ function effectiveBirdsLiveEstimate(flock) {
 function canViewArchivedFlocks(user) {
   if (!user) return false;
   const r = user.role;
-  return r === "superuser" || r === "manager" || r === "vet_manager";
+  return r === "superuser" || r === "manager" || r === "company_admin" || r === "vet_manager";
 }
 
 async function getFlockByIdForUser(flockId, user, res) {
@@ -2715,7 +2743,7 @@ app.get("/api/auth/me", requireAuth, async (req, res) => {
   res.json({ user: sanitizeUser(u) });
 });
 
-app.get("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_users"), async (req, res) => {
+app.get("/api/users", requireAuth, requireUserManagementAccess, requirePageAccess("admin_users"), async (req, res) => {
   if (hasDb()) {
     try {
       await syncUsersFromDbToMemory();
@@ -2724,9 +2752,12 @@ app.get("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_us
       console.error("[ERROR]", "[db] GET /api/users sync:", e instanceof Error ? e.message : e);
     }
   }
+  const scopedCompanyId = await userCompanyId(req);
   const filterCompanyId = String(req.query.companyId ?? req.query.company_id ?? "").trim() || null;
   let users = [...usersById.values()];
-  if (filterCompanyId) {
+  if (isCompanyAdmin(req.authUser)) {
+    users = users.filter((u) => String(u.companyId ?? "") === String(scopedCompanyId));
+  } else if (filterCompanyId) {
     users = users.filter((u) => String(u.companyId ?? "") === filterCompanyId);
   }
   res.json({ users: users.map(sanitizeUser) });
@@ -2753,7 +2784,7 @@ app.get("/api/users/odoo-approvers", requireAuth, requireFarmAccess, async (_req
   res.json({ approvers });
 });
 
-app.post("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_users"), async (req, res) => {
+app.post("/api/users", requireAuth, requireUserManagementAccess, requirePageAccess("admin_users"), async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -2778,15 +2809,26 @@ app.post("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_u
     res.status(400).json({ error: "email, displayName, password required" });
     return;
   }
+  if (!actorCanAssignRole(req.authUser, role)) {
+    res.status(403).json({ error: "Cannot assign this role" });
+    return;
+  }
   if (usersByEmail.has(email)) {
     res.status(409).json({ error: "User already exists" });
     return;
   }
 
   const id = crypto.randomUUID();
-  const assignCompanyId =
-    String(body.companyId ?? body.company_id ?? "").trim() ||
-    (await userCompanyId(req));
+  const scopedCompanyId = await userCompanyId(req);
+  const assignCompanyId = resolveAssignCompanyId(
+    req.authUser,
+    String(body.companyId ?? body.company_id ?? "").trim() || null,
+    scopedCompanyId
+  );
+  if (!assignCompanyId) {
+    res.status(400).json({ error: "companyId required" });
+    return;
+  }
   const row = {
     id,
     email,
@@ -2816,7 +2858,7 @@ app.post("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_u
   res.json({ user: sanitizeUser(row) });
 });
 
-app.put("/api/users/:id", requireAuth, requireSuperuser, requirePageAccess("admin_users"), async (req, res) => {
+app.put("/api/users/:id", requireAuth, requireUserManagementAccess, requirePageAccess("admin_users"), async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -2827,7 +2869,16 @@ app.put("/api/users/:id", requireAuth, requireSuperuser, requirePageAccess("admi
     res.status(404).json({ error: "User not found" });
     return;
   }
+  const scopedCompanyId = await userCompanyId(req);
+  if (!actorCanManageUser(req.authUser, existing, scopedCompanyId)) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
   const body = req.body ?? {};
+  if (body.companyId != null || body.company_id != null) {
+    res.status(400).json({ error: "companyId cannot be changed" });
+    return;
+  }
   const email = String(body.email ?? existing.email).trim().toLowerCase();
   const displayName = String(body.displayName ?? existing.displayName).trim();
   const role = String(body.role ?? existing.role);
@@ -2843,6 +2894,10 @@ app.put("/api/users/:id", requireAuth, requireSuperuser, requirePageAccess("admi
   }
   if (!email || !displayName) {
     res.status(400).json({ error: "email and displayName are required" });
+    return;
+  }
+  if (!actorCanAssignRole(req.authUser, role)) {
+    res.status(403).json({ error: "Cannot assign this role" });
     return;
   }
   const existingByEmail = usersByEmail.get(email);
@@ -2878,7 +2933,7 @@ app.put("/api/users/:id", requireAuth, requireSuperuser, requirePageAccess("admi
   res.json({ user: sanitizeUser(updated) });
 });
 
-app.patch("/api/users/:id/page-access", requireAuth, requireSuperuser, requirePageAccess("admin_users"), async (req, res) => {
+app.patch("/api/users/:id/page-access", requireAuth, requireUserManagementAccess, requirePageAccess("admin_users"), async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
@@ -2886,6 +2941,11 @@ app.patch("/api/users/:id/page-access", requireAuth, requireSuperuser, requirePa
   const id = String(req.params.id ?? "");
   const existing = usersById.get(id);
   if (!existing) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  const scopedCompanyId = await userCompanyId(req);
+  if (!actorCanManageUser(req.authUser, existing, scopedCompanyId)) {
     res.status(404).json({ error: "User not found" });
     return;
   }
@@ -2909,17 +2969,27 @@ app.patch("/api/users/:id/page-access", requireAuth, requireSuperuser, requirePa
   res.json({ user: sanitizeUser(updated) });
 });
 
-app.get("/api/audit", requireAuth, requireSuperuser, async (req, res) => {
+app.get("/api/audit", requireAuth, requireUserManagementAccess, async (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
   const roleFilter = String(req.query.role ?? "").trim();
   const actionFilter = String(req.query.action ?? "").trim();
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
 
   if (hasDb()) {
     try {
       const where = [];
       const params = [];
       let idx = 1;
+      if (!isSuper) {
+        where.push(`EXISTS (
+          SELECT 1 FROM users u
+           WHERE u.id::text = audit_events.actor_id
+             AND u.company_id = $${idx++}::uuid
+        )`);
+        params.push(scopedCompanyId);
+      }
       if (roleFilter) {
         where.push(`role = $${idx++}`);
         params.push(roleFilter);
@@ -2958,6 +3028,12 @@ app.get("/api/audit", requireAuth, requireSuperuser, async (req, res) => {
   }
 
   let list = auditEvents;
+  if (!isSuper) {
+    list = list.filter((e) => {
+      const actor = e.actor_id ? usersById.get(String(e.actor_id)) : null;
+      return actor && String(actor.companyId ?? "") === String(scopedCompanyId);
+    });
+  }
   if (roleFilter) list = list.filter((e) => e.role === roleFilter);
   if (actionFilter) list = list.filter((e) => e.action.includes(actionFilter));
 
@@ -3424,7 +3500,7 @@ app.get("/api/flocks", requireAuth, requireFarmAccess, requireAnyPageAccess(["fa
   const includeArchived = String(req.query.includeArchived ?? "").toLowerCase() === "true";
   const includeFailed = String(req.query.includeFailed ?? "").toLowerCase() === "true";
   const canArch = canViewArchivedFlocks(req.authUser);
-  const canSeeFailed = req.authUser?.role === "superuser";
+  const canSeeFailed = req.authUser?.role === "superuser" || req.authUser?.role === "company_admin";
   const scopedCompanyId = await userCompanyId(req);
   // FIX: embed check-in urgency per flock for list + detail views
   const flocks = filterFlocksForUser(flocksById.values(), req.authUser, scopedCompanyId)
@@ -3467,11 +3543,15 @@ app.get("/api/flocks", requireAuth, requireFarmAccess, requireAnyPageAccess(["fa
   });
 });
 
-app.get("/api/flocks/recovery-overview", requireAuth, requireFarmAccess, requireSuperuser, requirePageAccess("farm_flocks"), async (_req, res) => {
+app.get("/api/flocks/recovery-overview", requireAuth, requireFarmAccess, requireCompanyAdminUp, requirePageAccess("farm_flocks"), async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
   }
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
+  const companyClause = isSuper ? "" : " AND company_id = $1::uuid";
+  const companyParams = isSuper ? [] : [scopedCompanyId];
   try {
     const failed = await dbQuery(
       `SELECT id::text AS id,
@@ -3481,9 +3561,10 @@ app.get("/api/flocks/recovery-overview", requireAuth, requireFarmAccess, require
               failed_at::text AS "failedAt",
               create_draft AS "createDraft"
          FROM poultry_flocks
-        WHERE status::text = 'failed'
+        WHERE status::text = 'failed'${companyClause}
         ORDER BY failed_at DESC NULLS LAST, updated_at DESC
-        LIMIT 200`
+        LIMIT 200`,
+      companyParams
     ).catch(() => ({ rows: [] }));
     const expectedIn = FLOCK_STATUS_RECOVERY_EXPECTED.map((s) => `'${s}'`).join(",");
     const unexpected = await dbQuery(
@@ -3491,9 +3572,10 @@ app.get("/api/flocks/recovery-overview", requireAuth, requireFarmAccess, require
               COALESCE(code, CONCAT('Flock ', LEFT(id::text, 8))) AS label,
               status::text AS status
          FROM poultry_flocks
-        WHERE status::text NOT IN (${expectedIn})
+        WHERE status::text NOT IN (${expectedIn})${companyClause}
         ORDER BY updated_at DESC
-        LIMIT 200`
+        LIMIT 200`,
+      companyParams
     ).catch(() => ({ rows: [] }));
     const orphanSources = [
       { tableName: "flock_feed_entries", columnName: "flock_id" },
@@ -3784,7 +3866,7 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
   }
 });
 
-app.post("/api/flocks/:id/retry-create", requireAuth, requireFarmAccess, requireSuperuser, requirePageAccess("farm_flocks"), requireAction("flock.create"), async (req, res) => {
+app.post("/api/flocks/:id/retry-create", requireAuth, requireFarmAccess, requireCompanyAdminUp, requirePageAccess("farm_flocks"), requireAction("flock.create"), async (req, res) => {
   const id = String(req.params.id ?? "").trim();
   const f = flocksById.get(id) ?? await loadFlockByIdFromDbToMemory(id);
   if (!f || String(f.status) !== "failed") {
@@ -3890,7 +3972,7 @@ app.post("/api/flocks/:id/retry-create", requireAuth, requireFarmAccess, require
   }
 });
 
-app.patch("/api/flocks/:id", requireAuth, requireFarmAccess, requireSuperuser, requirePageAccess("farm_flocks"), async (req, res) => {
+app.patch("/api/flocks/:id", requireAuth, requireFarmAccess, requireCompanyAdminUp, requirePageAccess("farm_flocks"), async (req, res) => {
   const id = String(req.params.id ?? "").trim();
   if (!isPersistableUuid(id)) {
     res.status(400).json({ error: "Invalid flock id" });
@@ -4007,7 +4089,7 @@ app.patch("/api/flocks/:id", requireAuth, requireFarmAccess, requireSuperuser, r
   }
 });
 
-app.delete("/api/flocks/:id/failed", requireAuth, requireFarmAccess, requireSuperuser, requirePageAccess("farm_flocks"), async (req, res) => {
+app.delete("/api/flocks/:id/failed", requireAuth, requireFarmAccess, requireCompanyAdminUp, requirePageAccess("farm_flocks"), async (req, res) => {
   const id = String(req.params.id ?? "").trim();
   const f = flocksById.get(id) ?? await loadFlockByIdFromDbToMemory(id);
   if (!f || String(f.status) !== "failed") {
@@ -4032,7 +4114,7 @@ app.delete("/api/flocks/:id/failed", requireAuth, requireFarmAccess, requireSupe
   }
 });
 
-app.delete("/api/flocks/:id/purge", requireAuth, requireFarmAccess, requireSuperuser, requirePageAccess("farm_flocks"), async (req, res) => {
+app.delete("/api/flocks/:id/purge", requireAuth, requireFarmAccess, requireCompanyAdminUp, requirePageAccess("farm_flocks"), async (req, res) => {
   const id = String(req.params.id ?? "").trim();
   if (!id) {
     res.status(400).json({ error: "Invalid flock id" });
@@ -4069,7 +4151,7 @@ app.delete("/api/flocks/:id/purge", requireAuth, requireFarmAccess, requireSuper
   }
 });
 
-app.patch("/api/flocks/:id/archive", requireAuth, requireFarmAccess, requireSuperuser, requirePageAccess("farm_flocks"), async (req, res) => {
+app.patch("/api/flocks/:id/archive", requireAuth, requireFarmAccess, requireCompanyAdminUp, requirePageAccess("farm_flocks"), async (req, res) => {
   const id = String(req.params.id ?? "").trim();
   const f = await getFlockByIdForUser(id, req.authUser, res);
   if (!f) return;
@@ -5985,7 +6067,7 @@ function reportDateValue(raw) {
 
 function canGenerateFarmReports(user) {
   const r = String(user?.role ?? "");
-  return r === "vet" || r === "vet_manager" || r === "manager" || r === "superuser";
+  return r === "vet" || r === "vet_manager" || r === "manager" || r === "company_admin" || r === "superuser";
 }
 
 async function collectReportRowsForFlockSet(flockIds, fromIso, toIso) {
@@ -6925,7 +7007,7 @@ app.patch("/api/flocks/:id/live-verification", requireAuth, requireFarmAccess, a
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
   }
-  if (req.authUser.role !== "manager" && req.authUser.role !== "superuser") {
+  if (!isManagerTierRole(req.authUser.role)) {
     res.status(403).json({ error: "Only managers can set verified head count." });
     return;
   }
