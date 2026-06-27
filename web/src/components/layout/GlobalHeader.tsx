@@ -14,6 +14,7 @@ import { stripTenantPrefix } from "../../lib/tenancy";
 
 const ROLE_LABEL_EN: Record<UserRole, string> = {
   superuser: "Superuser",
+  company_admin: "Company admin",
   manager: "Manager",
   vet: "Vet",
   vet_manager: "Vet Manager",
@@ -46,6 +47,7 @@ function avatarStyle(role: UserRole): CSSProperties {
     case "vet_manager":
       return { background: "var(--role-vet)" };
     case "manager":
+    case "company_admin":
       return { background: "var(--role-manager)" };
     default:
       return { background: "var(--text-muted)" };
@@ -65,6 +67,7 @@ function rolePillStyle(role: UserRole): CSSProperties {
     case "vet_manager":
       return { background: "var(--role-vet-bg)", color: "var(--role-vet-text)" };
     case "manager":
+    case "company_admin":
       return { background: "var(--role-manager-bg)", color: "var(--role-manager-text)" };
     default:
       return { background: "var(--surface-subtle)", color: "var(--text-secondary)" };
