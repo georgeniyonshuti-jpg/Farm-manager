@@ -113,3 +113,35 @@ export async function getUserCompanyId(userId) {
   const r = await _dbQuery(`SELECT company_id::text AS id FROM users WHERE id = $1::uuid`, [userId]);
   return r.rows[0]?.id || null;
 }
+
+export async function setErpnextCompanyLink(companyId, erpnextCompany) {
+  if (!_dbQuery || !companyId) {
+    throw new Error("Database unavailable for ERPNext company link.");
+  }
+  const name = String(erpnextCompany ?? "").trim();
+  if (!name) {
+    throw new Error("erpnextCompany is required.");
+  }
+  const r = await _dbQuery(
+    `INSERT INTO erpnext_config (company_id, erpnext_base_url, erpnext_company, updated_at)
+     VALUES ($1::uuid, $2, $3, now())
+     ON CONFLICT (company_id) DO UPDATE SET
+       erpnext_company = EXCLUDED.erpnext_company,
+       updated_at = now()
+     RETURNING company_id::text AS company_id, erpnext_company`,
+    [companyId, "https://erp.clevacredit.com", name]
+  );
+  const row = r.rows[0];
+  return { companyId: row.company_id, erpnextCompany: row.erpnext_company };
+}
+
+export async function getErpnextCompanyLinks() {
+  if (!_dbQuery) return [];
+  const r = await _dbQuery(
+    `SELECT company_id::text AS "companyId", erpnext_company AS "erpnextCompany"
+     FROM erpnext_config
+     WHERE erpnext_company IS NOT NULL AND erpnext_company <> ''
+     ORDER BY company_id`
+  );
+  return r.rows;
+}

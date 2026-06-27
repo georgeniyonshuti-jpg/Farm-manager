@@ -9,15 +9,20 @@ type CompanyUsage = {
   trial_ends_at: string | null;
   is_active: boolean;
   payment_overdue: boolean;
+  erpnext_company: string | null;
   users: number;
   flocks: number;
 };
+
+type ErpnextCompanyOption = { name: string; company_name?: string };
 
 type Filter = "all" | "trial" | "active" | "suspended";
 
 export function SuperAdminPanelPage() {
   const { token } = useAuth();
   const [rows, setRows] = useState<CompanyUsage[]>([]);
+  const [erpnextCompanies, setErpnextCompanies] = useState<ErpnextCompanyOption[]>([]);
+  const [linkDrafts, setLinkDrafts] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState<Filter>("all");
   const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
@@ -33,7 +38,13 @@ export function SuperAdminPanelPage() {
       });
       const body = (await res.json()) as { companies?: CompanyUsage[]; error?: string };
       if (!res.ok) throw new Error(body.error ?? "Failed to load companies.");
-      setRows(body.companies ?? []);
+      const companies = body.companies ?? [];
+      setRows(companies);
+      setLinkDrafts(
+        Object.fromEntries(
+          companies.map((c) => [c.id, c.erpnext_company ?? ""])
+        )
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Load failed.");
     } finally {
@@ -44,6 +55,49 @@ export function SuperAdminPanelPage() {
   useEffect(() => {
     void loadCompanies();
   }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    void (async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/super-admin/erpnext/companies`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const body = (await res.json()) as { companies?: ErpnextCompanyOption[]; error?: string };
+        if (!res.ok) throw new Error(body.error ?? "Failed to load ERPNext companies.");
+        setErpnextCompanies(body.companies ?? []);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not load ERPNext companies.");
+      }
+    })();
+  }, [token]);
+
+  async function saveErpnextLink(companyId: string): Promise<void> {
+    const erpnextCompany = linkDrafts[companyId]?.trim();
+    if (!erpnextCompany) {
+      setError("Select an ERPNext company before linking.");
+      return;
+    }
+    setBusyId(companyId);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/super-admin/companies/${companyId}/erpnext-link`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ erpnextCompany }),
+      });
+      const body = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !body.ok) throw new Error(body.error ?? "Failed to save ERPNext link.");
+      await loadCompanies();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save ERPNext link.");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   async function extendTrial(companyId: string): Promise<void> {
     setBusyId(companyId);
@@ -160,6 +214,7 @@ export function SuperAdminPanelPage() {
               <thead>
                 <tr className="border-b border-[var(--border-color)] text-[var(--text-muted)]">
                   <th className="py-2">Company</th>
+                  <th className="py-2">ERPNext company</th>
                   <th className="py-2">Plan</th>
                   <th className="py-2">Users</th>
                   <th className="py-2">Flocks</th>
@@ -172,6 +227,37 @@ export function SuperAdminPanelPage() {
                 {filtered.map((row) => (
                   <tr key={row.id} className="border-b border-[var(--border-color)]/60">
                     <td className="py-2 font-medium text-[var(--text-primary)]">{row.name}</td>
+                    <td className="py-2">
+                      <div className="flex min-w-[14rem] flex-wrap items-center gap-2">
+                        <select
+                          value={linkDrafts[row.id] ?? row.erpnext_company ?? ""}
+                          onChange={(e) =>
+                            setLinkDrafts((prev) => ({ ...prev, [row.id]: e.target.value }))
+                          }
+                          disabled={busyId === row.id || erpnextCompanies.length === 0}
+                          className="min-w-[10rem] rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-2 py-1 text-xs"
+                        >
+                          <option value="">Not linked</option>
+                          {erpnextCompanies.map((c) => (
+                            <option key={c.name} value={c.name}>
+                              {c.company_name || c.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={
+                            busyId === row.id ||
+                            !(linkDrafts[row.id] ?? row.erpnext_company ?? "").trim() ||
+                            (linkDrafts[row.id] ?? row.erpnext_company ?? "") === (row.erpnext_company ?? "")
+                          }
+                          className="text-xs underline disabled:opacity-40"
+                          onClick={() => void saveErpnextLink(row.id)}
+                        >
+                          Link
+                        </button>
+                      </div>
+                    </td>
                     <td className="py-2">{row.plan}</td>
                     <td className="py-2">{row.users}</td>
                     <td className="py-2">{row.flocks}</td>

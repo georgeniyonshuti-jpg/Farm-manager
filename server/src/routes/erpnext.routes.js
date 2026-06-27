@@ -149,6 +149,7 @@ router.get("/health", async (req, res) => {
       clevafarm_secret_configured: isClevaFarmSecretConfigured(),
       outbox_pending: outbox.pending,
       outbox_failed: outbox.failed,
+      outbox_held_no_link: outbox.heldNoLink ?? 0,
       last_outbound_success_at: outbox.lastOutboundSuccessAt,
       inbound_failed_24h: inbound.inbound_failed_24h,
       last_inbound_errors: inbound.last_inbound_errors,
@@ -181,7 +182,16 @@ router.put("/config", async (req, res) => {
   const companyId = await getUserCompanyId(req.authUser?.id);
   if (!companyId) return res.status(400).json({ error: "User has no company." });
   try {
-    const config = await upsertErpnextConfig(companyId, req.body ?? {});
+    const body = { ...(req.body ?? {}) };
+    if (req.authUser?.role !== "superuser") {
+      const existing = await getErpnextConfig(companyId);
+      if (existing?.erpnextCompany) {
+        body.erpnextCompany = existing.erpnextCompany;
+      } else {
+        delete body.erpnextCompany;
+      }
+    }
+    const config = await upsertErpnextConfig(companyId, body);
     res.json({ config });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });

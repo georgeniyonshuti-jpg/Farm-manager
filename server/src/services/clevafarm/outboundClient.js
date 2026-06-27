@@ -21,10 +21,12 @@ function receiveUrl() {
 export function buildOutboundRequestBody(entityType, payload, meta = {}) {
   const correlationId = meta.correlationId || meta.outboxId || null;
   const event = meta.event || "on_update";
+  const erpnextCompany = meta.erpnextCompany || null;
   return {
     entityType,
     event,
     payload,
+    erpnextCompany,
     correlationId,
     correlation_id: correlationId,
     meta: {
@@ -32,6 +34,7 @@ export function buildOutboundRequestBody(entityType, payload, meta = {}) {
       outboxId: meta.outboxId || null,
       entityType,
       entityId: meta.entityId || payload?.id || null,
+      erpnextCompany,
     },
   };
 }

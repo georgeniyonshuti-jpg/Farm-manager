@@ -5,6 +5,7 @@ import { enrichOutboundUserFields } from "./outboundUserEnrichment.js";
 import { enrichOutboundInventoryFields } from "./outboundInventoryEnrichment.js";
 import { isValidEntityType } from "./entityRegistry.js";
 import { enqueueClevaFarmSync } from "./syncOutbox.js";
+import { resolveCompanyIdForEntity } from "./companyResolver.js";
 
 let _dbQuery = null;
 let _hasDb = null;
@@ -37,5 +38,6 @@ export async function emitEntitySync(entityType, entityId, opts = {}) {
   if (!payload.id) payload.id = id;
   payload = await enrichOutboundUserFields(entityType, row, payload, _dbQuery);
   payload = await enrichOutboundInventoryFields(entityType, row, payload, _dbQuery);
-  await enqueueClevaFarmSync({ entityType, entityId: id, payload });
+  const companyId = await resolveCompanyIdForEntity(entityType, row, _dbQuery);
+  await enqueueClevaFarmSync({ entityType, entityId: id, payload, companyId });
 }

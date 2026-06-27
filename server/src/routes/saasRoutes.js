@@ -5,6 +5,8 @@
 import express from "express";
 import crypto from "node:crypto";
 import { emitEntitySync } from "../services/clevafarm/emitEntitySync.js";
+import * as erp from "../services/erpnext/erpnext.client.js";
+import { setErpnextCompanyLink } from "../services/erpnext/erpnext.config.js";
 
 const PLANS = [
   { id: "starter", name: "Starter", stripePriceId: process.env.STRIPE_PRICE_STARTER },
@@ -341,10 +343,12 @@ export function createSaasRouter(deps) {
     try {
       const companies = await dbQuery(
         `SELECT c.id::text, c.name, c.plan, c.trial_ends_at, c.is_active, c.payment_overdue,
+                ec.erpnext_company,
                 (SELECT COUNT(*)::int FROM users u WHERE u.company_id = c.id) AS users,
                 (SELECT COUNT(*)::int FROM poultry_flocks f
                   WHERE f.company_id = c.id AND f.status <> 'archived') AS flocks
          FROM companies c
+         LEFT JOIN erpnext_config ec ON ec.company_id = c.id
          ORDER BY c.created_at DESC`
       );
       res.json({ companies: companies.rows });
@@ -387,6 +391,43 @@ export function createSaasRouter(deps) {
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ error: "Could not update company status." });
+    }
+  });
+
+  router.get("/super-admin/erpnext/companies", requireAuth, requireSuperuser, async (_req, res) => {
+    try {
+      const companies = await erp.getCompanyList();
+      res.json({ companies: Array.isArray(companies) ? companies : [] });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Could not load ERPNext companies." });
+    }
+  });
+
+  router.post("/super-admin/companies/:id/erpnext-link", requireAuth, requireSuperuser, async (req, res) => {
+    const id = String(req.params.id ?? "");
+    const erpnextCompany = String(req.body?.erpnextCompany ?? "").trim();
+    if (!id) {
+      res.status(400).json({ error: "Company id is required." });
+      return;
+    }
+    if (!erpnextCompany) {
+      res.status(400).json({ error: "erpnextCompany is required." });
+      return;
+    }
+    if (!hasDb()) {
+      res.status(503).json({ error: "Database unavailable." });
+      return;
+    }
+    try {
+      const exists = await dbQuery(`SELECT id FROM companies WHERE id = $1::uuid`, [id]);
+      if (!exists.rows[0]) {
+        res.status(404).json({ error: "Company not found." });
+        return;
+      }
+      const link = await setErpnextCompanyLink(id, erpnextCompany);
+      res.json({ ok: true, link });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Could not save ERPNext company link." });
     }
   });
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
+import { isSuperuser } from "../../auth/permissions";
 import { useERPNextConnection } from "../../context/OdooConnectionContext";
 import { useToast } from "../../components/Toast";
 import {
@@ -30,7 +31,8 @@ type BarnMapping = { barnName: string; erpnextWarehouse: string };
 const BARN_NAMES = ["Barn A", "Barn B", "Barn C", "Main House"];
 
 export function ERPNextSetupPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const canEditErpnextCompany = isSuperuser(user);
   const { status, loading, error, refetch } = useERPNextConnection();
   const { showToast } = useToast();
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -241,18 +243,29 @@ export function ERPNextSetupPage() {
         {saving && <p className="text-xs text-neutral-500">Saving…</p>}
         <label className="block text-sm">
           <span className="text-neutral-600">ERPNext company</span>
-          <select
-            className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-            value={selectedCompany}
-            onChange={(e) => saveCompany(e.target.value)}
-          >
-            <option value="">Select company…</option>
-            {companies.map((c) => (
-              <option key={c.name} value={c.name}>
-                {c.company_name || c.name}
-              </option>
-            ))}
-          </select>
+          {canEditErpnextCompany ? (
+            <select
+              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
+              value={selectedCompany}
+              onChange={(e) => saveCompany(e.target.value)}
+            >
+              <option value="">Select company…</option>
+              {companies.map((c) => (
+                <option key={c.name} value={c.name}>
+                  {c.company_name || c.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <>
+              <p className="mt-1 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-neutral-700">
+                {selectedCompany || "Not linked yet"}
+              </p>
+              <p className="mt-1 text-xs text-neutral-500">
+                Linked by the platform administrator. Contact support to change this mapping.
+              </p>
+            </>
+          )}
         </label>
         <label className="block text-sm">
           <span className="text-neutral-600">Default cost center</span>
