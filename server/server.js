@@ -78,6 +78,13 @@ import {
   syncMortalityReviewToErp,
 } from "./src/services/vetLogMortalityReview.js";
 import { initErpnextConfigDb } from "./src/services/erpnext/erpnext.config.js";
+import {
+  isPlatformSuperuser,
+  assertSameCompany,
+  appendSqlFlockCompanyFilter,
+  filterFlocksForUser,
+  memoryFlockIdVisible,
+} from "./src/services/tenant/companyIsolation.js";
 import { createSaasRouter } from "./src/routes/saasRoutes.js";
 import { initOdooSyncWorker, processOdooSyncOutbox, enqueueOdooSync } from "./src/services/odoo/odooSyncWorker.js";
 import {
@@ -437,6 +444,73 @@ async function companyIdForUser(userId) {
   if (!hasDb()) return DEFAULT_COMPANY_ID;
   const r = await dbQuery(`SELECT company_id::text AS id FROM users WHERE id = $1::uuid`, [userId]);
   return r.rows[0]?.id ?? DEFAULT_COMPANY_ID;
+}
+
+async function userCompanyId(req) {
+  if (req.authUser?.companyId) return req.authUser.companyId;
+  const id = await companyIdForUser(req.authUser?.id);
+  if (req.authUser) req.authUser.companyId = id;
+  return id;
+}
+
+function authIsSuperuser(req) {
+  return isPlatformSuperuser(req.authUser);
+}
+
+/** Verify a DB row exists in a flock-scoped table and belongs to the caller's company. */
+async function verifyResourceByFlockTable(table, recordId, req, res, opts = {}) {
+  if (authIsSuperuser(req)) return true;
+  const companyId = await userCompanyId(req);
+  const idColumn = opts.idColumn ?? "id";
+  const flockColumn = opts.flockColumn ?? "flock_id";
+  const flockJoin =
+    opts.flockJoin ??
+    (opts.textFlockId ? `f.id::text = t.${flockColumn}` : `f.id = t.${flockColumn}`);
+  const r = await dbQuery(
+    `SELECT t.${idColumn}::text AS id FROM ${table} t
+     JOIN poultry_flocks f ON ${flockJoin}
+     WHERE t.${idColumn} = $1::uuid AND f.company_id = $2::uuid
+     LIMIT 1`,
+    [recordId, companyId]
+  );
+  if (!r.rows[0]) {
+    res.status(404).json({ error: "Not found" });
+    return false;
+  }
+  return true;
+}
+
+async function verifyPayrollImpactCompany(recordId, req, res) {
+  if (authIsSuperuser(req)) return true;
+  const companyId = await userCompanyId(req);
+  const r = await dbQuery(
+    `SELECT p.id::text AS id FROM payroll_impact p
+     LEFT JOIN users u ON u.id = p.user_id
+     LEFT JOIN poultry_flocks f ON f.id = p.flock_id
+     WHERE p.id = $1::uuid
+       AND (u.company_id = $2::uuid OR (p.flock_id IS NOT NULL AND f.company_id = $2::uuid))
+     LIMIT 1`,
+    [recordId, companyId]
+  );
+  if (!r.rows[0]) {
+    res.status(404).json({ error: "Not found" });
+    return false;
+  }
+  return true;
+}
+
+async function requireFlockForReport(req, res, flockId) {
+  const id = String(flockId ?? "").trim();
+  if (!id) {
+    res.status(400).json({ error: "flockId is required." });
+    return null;
+  }
+  const f = flocksById.get(id) ?? (await loadFlockByIdFromDbToMemory(id));
+  if (!f || !assertSameCompany(f, req.authUser)) {
+    res.status(404).json({ error: "Flock not found." });
+    return null;
+  }
+  return f;
 }
 
 async function hydrateUserCompanyFromDb(userRow) {
@@ -1753,6 +1827,10 @@ async function getFlockByIdForUser(flockId, user, res) {
     res.status(404).json({ error: "Flock not found" });
     return null;
   }
+  if (!assertSameCompany(f, user)) {
+    res.status(404).json({ error: "Flock not found" });
+    return null;
+  }
   return f;
 }
 
@@ -2637,7 +2715,7 @@ app.get("/api/auth/me", requireAuth, async (req, res) => {
   res.json({ user: sanitizeUser(u) });
 });
 
-app.get("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_users"), async (_req, res) => {
+app.get("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_users"), async (req, res) => {
   if (hasDb()) {
     try {
       await syncUsersFromDbToMemory();
@@ -2646,7 +2724,12 @@ app.get("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_us
       console.error("[ERROR]", "[db] GET /api/users sync:", e instanceof Error ? e.message : e);
     }
   }
-  res.json({ users: [...usersById.values()].map(sanitizeUser) });
+  const filterCompanyId = String(req.query.companyId ?? req.query.company_id ?? "").trim() || null;
+  let users = [...usersById.values()];
+  if (filterCompanyId) {
+    users = users.filter((u) => String(u.companyId ?? "") === filterCompanyId);
+  }
+  res.json({ users: users.map(sanitizeUser) });
 });
 
 app.get("/api/users/odoo-approvers", requireAuth, requireFarmAccess, async (_req, res) => {
@@ -2701,6 +2784,9 @@ app.post("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_u
   }
 
   const id = crypto.randomUUID();
+  const assignCompanyId =
+    String(body.companyId ?? body.company_id ?? "").trim() ||
+    (await userCompanyId(req));
   const row = {
     id,
     email,
@@ -2711,6 +2797,7 @@ app.post("/api/users", requireAuth, requireSuperuser, requirePageAccess("admin_u
     canViewSensitiveFinancial,
     departmentKeys,
     pageAccess,
+    companyId: assignCompanyId,
   };
   try {
     await persistUserToDb(row);
@@ -3177,6 +3264,7 @@ function mapDbFlockRowToMemory(row, prev = {}) {
       row.purchaseDate != null && String(row.purchaseDate).trim() !== ""
         ? String(row.purchaseDate).slice(0, 10)
         : (prev.purchaseDate ?? null),
+    companyId: row.companyId != null ? String(row.companyId) : (prev.companyId ?? null),
   };
 }
 
@@ -3208,7 +3296,8 @@ async function loadFlockByIdFromDbToMemory(flockId) {
             f.purchase_cost_rwf AS "purchaseCostRwf",
             f.cost_per_chick_rwf AS "costPerChickRwf",
             f.purchase_supplier AS "purchaseSupplier",
-            f.purchase_date::text AS "purchaseDate"
+            f.purchase_date::text AS "purchaseDate",
+            f.company_id::text AS "companyId"
        FROM poultry_flocks f
        LEFT JOIN poultry_barn_names bn ON bn.id = f.barn_name_id
       WHERE f.id::text = $1
@@ -3336,10 +3425,9 @@ app.get("/api/flocks", requireAuth, requireFarmAccess, requireAnyPageAccess(["fa
   const includeFailed = String(req.query.includeFailed ?? "").toLowerCase() === "true";
   const canArch = canViewArchivedFlocks(req.authUser);
   const canSeeFailed = req.authUser?.role === "superuser";
-  const scopedCompanyId = await companyIdForUser(req.authUser.id);
+  const scopedCompanyId = await userCompanyId(req);
   // FIX: embed check-in urgency per flock for list + detail views
-  const flocks = [...flocksById.values()]
-    .filter((f) => !f.companyId || f.companyId === scopedCompanyId)
+  const flocks = filterFlocksForUser(flocksById.values(), req.authUser, scopedCompanyId)
     .map((f) => {
       const birdsLiveEstimate = effectiveBirdsLiveEstimate(f);
       return { ...f, birdsLiveEstimate };
@@ -3599,6 +3687,7 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
       targetSlaughterDayMax: 50,
       checkinBands: null,
       photosRequiredPerRound: 1,
+      companyId: flockCompanyId,
     };
     flocksById.set(createdId, flockRow);
     appendAudit(req.authUser.id, req.authUser.role, "flock.create", "flock", createdId, {
@@ -4012,6 +4101,8 @@ app.get("/api/flocks/:id/checkin-status", requireAuth, requireFarmAccess, requir
       /* ignore */
     }
   }
+  const flock = await getFlockByIdForUser(req.params.id, req.authUser, res);
+  if (!flock) return;
   const payload = await checkinStatusPayloadWithFcrHint(req.params.id, req.authUser?.role ?? null, req.authUser);
   if (!payload) {
     res.status(404).json({ error: "Flock not found" });
@@ -4030,7 +4121,8 @@ app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requ
       }
     }
     const now = Date.now();
-    const flocks = [...flocksById.values()].filter(
+    const scopedCompanyId = await userCompanyId(req);
+    const flocks = filterFlocksForUser(flocksById.values(), req.authUser, scopedCompanyId).filter(
       (f) => !(String(f.status) === "archived" && !canViewArchivedFlocks(req.authUser))
     );
     const perFlock = flocks.map((f) => {
@@ -4932,8 +5024,8 @@ app.get("/api/check-ins", requireAuth, requireFarmAccess, requireAnyPageAccess([
   const page = Math.max(1, Number(req.query.page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 30));
   const offset = (page - 1) * pageSize;
-  const scopedCompanyId = await companyIdForUser(req.authUser.id);
-  const isSuper = req.authUser.role === "superuser";
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
 
   if (hasDb()) {
     try {
@@ -4962,8 +5054,7 @@ app.get("/api/check-ins", requireAuth, requireFarmAccess, requireAnyPageAccess([
                   WHERE 1=1`;
       const params = [];
       if (!isSuper) {
-        params.push(scopedCompanyId);
-        sql += ` AND (f.company_id IS NULL OR f.company_id = $${params.length}::uuid)`;
+        sql = appendSqlFlockCompanyFilter(sql, params, scopedCompanyId, "f");
       }
       if (flockId) {
         params.push(flockId);
@@ -5002,6 +5093,9 @@ app.get("/api/check-ins", requireAuth, requireFarmAccess, requireAnyPageAccess([
   }
 
   let list = [...roundCheckins];
+  if (!authIsSuperuser(req)) {
+    list = list.filter((c) => memoryFlockIdVisible(c.flockId, flocksById, req.authUser, scopedCompanyId));
+  }
   if (flockId) list = list.filter((c) => sameFlockId(c.flockId, flockId));
   if (statusRaw && statusRaw !== "all") {
     list = list.filter((c) => (c.submissionStatus ?? "approved") === statusRaw);
@@ -5034,7 +5128,13 @@ app.get("/api/check-ins", requireAuth, requireFarmAccess, requireAnyPageAccess([
 // Must be registered before /api/check-ins/:id (otherwise "pending" is treated as an id).
 app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAccess("farm_checkin_review"), requireVetUp, async (req, res) => {
   const flockId = req.query.flockId ? String(req.query.flockId) : null;
-  const memPending = roundCheckins.filter((c) => (c.submissionStatus ?? "approved") === "pending_review");
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
+  const memPending = roundCheckins.filter(
+    (c) =>
+      (c.submissionStatus ?? "approved") === "pending_review" &&
+      (isSuper || memoryFlockIdVisible(c.flockId, flocksById, req.authUser, scopedCompanyId))
+  );
   const mapMemPendingRow = (c) =>
     mapCheckinListRow({
       ...c,
@@ -5068,6 +5168,9 @@ app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAcc
                    LEFT JOIN poultry_flocks f ON f.id = c.flock_id
                   WHERE c.submission_status = 'pending_review'`;
       const params = [];
+      if (!isSuper) {
+        sql = appendSqlFlockCompanyFilter(sql, params, scopedCompanyId, "f");
+      }
       if (flockId) {
         params.push(flockId);
         sql += ` AND c.flock_id = $${params.length}::uuid`;
@@ -5095,8 +5198,8 @@ app.get("/api/check-ins/pending", requireAuth, requireFarmAccess, requirePageAcc
 
 app.get("/api/check-ins/:id", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_reports", "farm_checkin_review", "farm_checkin"]), requireVetUp, async (req, res) => {
   const checkinId = String(req.params.id);
-  const scopedCompanyId = await companyIdForUser(req.authUser.id);
-  const isSuper = req.authUser.role === "superuser";
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
 
   if (hasDb() && isPersistableUuid(checkinId)) {
     try {
@@ -5122,8 +5225,7 @@ app.get("/api/check-ins/:id", requireAuth, requireFarmAccess, requireAnyPageAcce
                   WHERE c.id = $1::uuid`;
       const params = [checkinId];
       if (!isSuper) {
-        params.push(scopedCompanyId);
-        sql += ` AND (f.company_id IS NULL OR f.company_id = $${params.length}::uuid)`;
+        sql = appendSqlFlockCompanyFilter(sql, params, scopedCompanyId, "f");
       }
       const r = await dbQuery(sql, params);
       if (!r.rows[0]) {
@@ -5141,6 +5243,10 @@ app.get("/api/check-ins/:id", requireAuth, requireFarmAccess, requireAnyPageAcce
 
   const mem = roundCheckins.find((c) => String(c.id) === checkinId);
   if (!mem) {
+    res.status(404).json({ error: "Check-in not found" });
+    return;
+  }
+  if (!memoryFlockIdVisible(mem.flockId, flocksById, req.authUser, scopedCompanyId)) {
     res.status(404).json({ error: "Check-in not found" });
     return;
   }
@@ -5164,6 +5270,7 @@ app.patch("/api/check-ins/:id/review", requireAuth, requireFarmAccess, requirePa
   const reviewNotes = String(req.body?.reviewNotes ?? "").slice(0, 4000) || null;
   const newStatus = action === "approve" ? "approved" : "rejected";
   if (hasDb() && isPersistableUuid(checkinId)) {
+    if (!(await verifyResourceByFlockTable("check_ins", checkinId, req, res))) return;
     try {
       const r = await dbQuery(
         `UPDATE check_ins
@@ -5264,6 +5371,8 @@ app.get("/api/feed-entries/pending", requireAuth, requireFarmAccess, requireLead
   const flockId = req.query.flockId ? String(req.query.flockId) : null;
   const from = req.query.from ? String(req.query.from) : null;
   const to = req.query.to ? String(req.query.to) : null;
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
   if (hasDb()) {
     try {
       await syncFlockFeedEntriesFromDb();
@@ -5278,8 +5387,12 @@ app.get("/api/feed-entries/pending", requireAuth, requireFarmAccess, requireLead
                         e.submission_status AS "submissionStatus", u.full_name AS "enteredByName"
                    FROM flock_feed_entries e
                    LEFT JOIN users u ON u.id = e.entered_by_user_id
+                   JOIN poultry_flocks f ON f.id = e.flock_id
                   WHERE e.submission_status = 'pending_review'`;
       const params = [];
+      if (!isSuper) {
+        sql = appendSqlFlockCompanyFilter(sql, params, scopedCompanyId, "f");
+      }
       if (flockId) { params.push(flockId); sql += ` AND e.flock_id = $${params.length}::uuid`; }
       if (from) { params.push(from); sql += ` AND e.recorded_at >= $${params.length}::timestamptz`; }
       if (to) { params.push(to); sql += ` AND e.recorded_at <= $${params.length}::timestamptz`; }
@@ -5291,7 +5404,11 @@ app.get("/api/feed-entries/pending", requireAuth, requireFarmAccess, requireLead
       console.error("[ERROR]", "[db] GET feed-entries/pending:", e instanceof Error ? e.message : e);
     }
   }
-  let entries = flockFeedEntries.filter((e) => (e.submissionStatus ?? "approved") === "pending_review");
+  let entries = flockFeedEntries.filter(
+    (e) =>
+      (e.submissionStatus ?? "approved") === "pending_review" &&
+      (isSuper || memoryFlockIdVisible(e.flockId, flocksById, req.authUser, scopedCompanyId))
+  );
   if (flockId) entries = entries.filter((e) => sameFlockId(e.flockId, flockId));
   res.json({ entries: entries.sort((a, b) => (a.recordedAt < b.recordedAt ? 1 : -1)).slice(0, 200) });
 });
@@ -5318,6 +5435,13 @@ app.patch("/api/feed-entries/:id/review", requireAuth, requireFarmAccess, requir
     res.status(404).json({ error: "Entry not found or already reviewed" });
     return;
   }
+  if (
+    !authIsSuperuser(req) &&
+    !memoryFlockIdVisible(entryBefore.flockId, flocksById, req.authUser, await userCompanyId(req))
+  ) {
+    res.status(404).json({ error: "Entry not found or already reviewed" });
+    return;
+  }
 
   if (action === "approve") {
     const feedType = entryBefore.feedType != null ? String(entryBefore.feedType).trim() : null;
@@ -5336,6 +5460,7 @@ app.patch("/api/feed-entries/:id/review", requireAuth, requireFarmAccess, requir
   }
 
   if (hasDb()) {
+    if (!(await verifyResourceByFlockTable("flock_feed_entries", entryId, req, res))) return;
     try {
       const r = await dbQuery(
         `UPDATE flock_feed_entries
@@ -5383,6 +5508,8 @@ app.get("/api/mortality-events/pending", requireAuth, requireFarmAccess, require
   const flockId = req.query.flockId ? String(req.query.flockId) : null;
   const from = req.query.from ? String(req.query.from) : null;
   const to = req.query.to ? String(req.query.to) : null;
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
   if (hasDb()) {
     try {
       let sql = `SELECT e.id::text AS id, e.flock_id AS "flockId", e.laborer_id AS "laborerId",
@@ -5390,8 +5517,12 @@ app.get("/api/mortality-events/pending", requireAuth, requireFarmAccess, require
                         e.submission_status AS "submissionStatus", u.full_name AS "reportedByName"
                    FROM flock_mortality_events e
                    LEFT JOIN users u ON u.id = e.laborer_id
+                   JOIN poultry_flocks f ON f.id = e.flock_id
                   WHERE e.submission_status = 'pending_review'`;
       const params = [];
+      if (!isSuper) {
+        sql = appendSqlFlockCompanyFilter(sql, params, scopedCompanyId, "f");
+      }
       if (flockId) { params.push(flockId); sql += ` AND e.flock_id = $${params.length}::uuid`; }
       if (from) { params.push(from); sql += ` AND e.at >= $${params.length}::timestamptz`; }
       if (to) { params.push(to); sql += ` AND e.at <= $${params.length}::timestamptz`; }
@@ -5403,7 +5534,11 @@ app.get("/api/mortality-events/pending", requireAuth, requireFarmAccess, require
       console.error("[ERROR]", "[db] GET mortality-events/pending:", e instanceof Error ? e.message : e);
     }
   }
-  let events = mortalityEvents.filter((e) => (e.submissionStatus ?? "approved") === "pending_review");
+  let events = mortalityEvents.filter(
+    (e) =>
+      (e.submissionStatus ?? "approved") === "pending_review" &&
+      (isSuper || memoryFlockIdVisible(e.flockId, flocksById, req.authUser, scopedCompanyId))
+  );
   if (flockId) events = events.filter((e) => sameFlockId(e.flockId, flockId));
   res.json({ events: events.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 200) });
 });
@@ -5420,6 +5555,7 @@ app.patch("/api/mortality-events/:id/review", requireAuth, requireFarmAccess, re
   const affectsLiveCount = action === "approve";
   let reviewedFlockId = null;
   if (hasDb()) {
+    if (!(await verifyResourceByFlockTable("flock_mortality_events", eventId, req, res))) return;
     try {
       const r = await dbQuery(
         `UPDATE flock_mortality_events
@@ -5700,6 +5836,8 @@ app.get("/api/vet-logs", requireAuth, requireFarmAccess, requireAnyPageAccess(["
   const page = Math.max(1, Number(req.query.page) || 1);
   const pageSize = Math.min(200, Math.max(1, Number(req.query.pageSize) || 40));
   const offset = (page - 1) * pageSize;
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
   if (hasDb()) {
     try {
       let sql = `SELECT v.id::text AS id, v.flock_id AS "flockId", v.author_user_id AS "authorUserId",
@@ -5717,6 +5855,9 @@ app.get("/api/vet-logs", requireAuth, requireFarmAccess, requireAnyPageAccess(["
                    LEFT JOIN poultry_flocks f ON f.id = v.flock_id
                   WHERE 1=1`;
       const params = [];
+      if (!isSuper) {
+        sql = appendSqlFlockCompanyFilter(sql, params, scopedCompanyId, "f");
+      }
       if (flockId) { params.push(flockId); sql += ` AND v.flock_id = $${params.length}::uuid`; }
       if (status) { params.push(status); sql += ` AND v.submission_status = $${params.length}`; }
       if (from) { params.push(from); sql += ` AND v.log_date >= $${params.length}::date`; }
@@ -5735,6 +5876,9 @@ app.get("/api/vet-logs", requireAuth, requireFarmAccess, requireAnyPageAccess(["
     }
   }
   let logs = [...vetLogs];
+  if (!isSuper) {
+    logs = logs.filter((l) => memoryFlockIdVisible(l.flockId, flocksById, req.authUser, scopedCompanyId));
+  }
   if (flockId) logs = logs.filter((l) => sameFlockId(l.flockId, flockId));
   if (status) logs = logs.filter((l) => l.submissionStatus === status);
   if (q) logs = logs.filter((l) => [l.observations, l.actionsTaken, l.recommendations].some((s) => s && String(s).toLowerCase().includes(q)));
@@ -5797,6 +5941,7 @@ app.patch("/api/vet-logs/:id/review", requireAuth, requireFarmAccess, requireLea
   const reviewNotes = String(req.body?.reviewNotes ?? "").slice(0, 4000) || null;
   const newStatus = action === "approve" ? "approved" : "rejected";
   if (hasDb()) {
+    if (!(await verifyResourceByFlockTable("farm_vet_logs", logId, req, res))) return;
     try {
       const r = await dbQuery(
         `UPDATE farm_vet_logs
@@ -5878,11 +6023,8 @@ app.post("/api/reports/flock/deep-dive/preview", requireAuth, requireFarmAccess,
     res.status(400).json({ error: "flockId is required." });
     return;
   }
-  const flock = flocksById.get(flockId) ?? await loadFlockByIdFromDbToMemory(flockId);
-  if (!flock) {
-    res.status(404).json({ error: "Flock not found." });
-    return;
-  }
+  const flock = await requireFlockForReport(req, res, flockId);
+  if (!flock) return;
   const fromIso = reportDateValue(req.body?.from);
   const toIso = reportDateValue(req.body?.to);
   const rows = await collectReportRowsForFlockSet([flockId], fromIso, toIso);
@@ -5903,8 +6045,8 @@ app.post("/api/reports/flock/deep-dive/preview", requireAuth, requireFarmAccess,
 app.post("/api/reports/flock/deep-dive/pdf", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_flocks", "dashboard_management", "dashboard_vet"]), requireVetUp, async (req, res) => {
   const flockId = String(req.body?.flockId ?? "").trim();
   if (!flockId) return res.status(400).json({ error: "flockId is required." });
-  const flock = flocksById.get(flockId) ?? await loadFlockByIdFromDbToMemory(flockId);
-  if (!flock) return res.status(404).json({ error: "Flock not found." });
+  const flock = await requireFlockForReport(req, res, flockId);
+  if (!flock) return;
   const fromIso = reportDateValue(req.body?.from);
   const toIso = reportDateValue(req.body?.to);
   const rows = await collectReportRowsForFlockSet([flockId], fromIso, toIso);
@@ -5933,8 +6075,9 @@ app.post("/api/reports/flocks/compare/preview", requireAuth, requireFarmAccess, 
   const toIso = reportDateValue(req.body?.to);
   const flocks = [];
   for (const id of ids) {
-    const f = flocksById.get(id) ?? await loadFlockByIdFromDbToMemory(id);
-    if (f) flocks.push(f);
+    const f = await requireFlockForReport(req, res, id);
+    if (!f) return;
+    flocks.push(f);
   }
   if (flocks.length < 2) return res.status(404).json({ error: "Not enough valid flocks found." });
   const rows = await collectReportRowsForFlockSet(flocks.map((f) => f.id), fromIso, toIso);
@@ -5958,8 +6101,9 @@ app.post("/api/reports/flocks/compare/pdf", requireAuth, requireFarmAccess, requ
   const toIso = reportDateValue(req.body?.to);
   const flocks = [];
   for (const id of ids) {
-    const f = flocksById.get(id) ?? await loadFlockByIdFromDbToMemory(id);
-    if (f) flocks.push(f);
+    const f = await requireFlockForReport(req, res, id);
+    if (!f) return;
+    flocks.push(f);
   }
   if (flocks.length < 2) return res.status(404).json({ error: "Not enough valid flocks found." });
   const rows = await collectReportRowsForFlockSet(flocks.map((f) => f.id), fromIso, toIso);
@@ -5981,14 +6125,19 @@ app.post("/api/reports/flocks/compare/pdf", requireAuth, requireFarmAccess, requ
 app.post("/api/reports/farm/operations/preview", requireAuth, requireFarmAccess, requireAnyPageAccess(["dashboard_management", "dashboard_vet", "farm_inventory"]), requireVetUp, async (req, res) => {
   const fromIso = reportDateValue(req.body?.from);
   const toIso = reportDateValue(req.body?.to);
-  const activeFlocks = [...flocksById.values()].filter((f) => String(f.status ?? "active") === "active");
+  const scopedCompanyId = await userCompanyId(req);
+  const companyFlocks = filterFlocksForUser(flocksById.values(), req.authUser, scopedCompanyId);
+  const companyFlockIds = new Set(companyFlocks.map((f) => String(f.id)));
+  const activeFlocks = companyFlocks.filter((f) => String(f.status ?? "active") === "active");
   const report = buildFarmOperationsReport({
     flocks: activeFlocks,
-    checkins: roundCheckins,
-    feedEntries: flockFeedEntries,
-    mortalityEvents: mortalityEvents,
-    vetLogs: vetLogs,
-    inventoryTransactions,
+    checkins: roundCheckins.filter((c) => companyFlockIds.has(String(c.flockId))),
+    feedEntries: flockFeedEntries.filter((e) => companyFlockIds.has(String(e.flockId))),
+    mortalityEvents: mortalityEvents.filter((e) => companyFlockIds.has(String(e.flockId))),
+    vetLogs: vetLogs.filter((l) => companyFlockIds.has(String(l.flockId))),
+    inventoryTransactions: inventoryTransactions.filter(
+      (t) => !t.flockId || companyFlockIds.has(String(t.flockId))
+    ),
     from: fromIso,
     to: toIso,
   });
@@ -5998,14 +6147,19 @@ app.post("/api/reports/farm/operations/preview", requireAuth, requireFarmAccess,
 app.post("/api/reports/farm/operations/pdf", requireAuth, requireFarmAccess, requireAnyPageAccess(["dashboard_management", "dashboard_vet", "farm_inventory"]), requireVetUp, async (req, res) => {
   const fromIso = reportDateValue(req.body?.from);
   const toIso = reportDateValue(req.body?.to);
-  const activeFlocks = [...flocksById.values()].filter((f) => String(f.status ?? "active") === "active");
+  const scopedCompanyId = await userCompanyId(req);
+  const companyFlocks = filterFlocksForUser(flocksById.values(), req.authUser, scopedCompanyId);
+  const companyFlockIds = new Set(companyFlocks.map((f) => String(f.id)));
+  const activeFlocks = companyFlocks.filter((f) => String(f.status ?? "active") === "active");
   const report = buildFarmOperationsReport({
     flocks: activeFlocks,
-    checkins: roundCheckins,
-    feedEntries: flockFeedEntries,
-    mortalityEvents: mortalityEvents,
-    vetLogs: vetLogs,
-    inventoryTransactions,
+    checkins: roundCheckins.filter((c) => companyFlockIds.has(String(c.flockId))),
+    feedEntries: flockFeedEntries.filter((e) => companyFlockIds.has(String(e.flockId))),
+    mortalityEvents: mortalityEvents.filter((e) => companyFlockIds.has(String(e.flockId))),
+    vetLogs: vetLogs.filter((l) => companyFlockIds.has(String(l.flockId))),
+    inventoryTransactions: inventoryTransactions.filter(
+      (t) => !t.flockId || companyFlockIds.has(String(t.flockId))
+    ),
     from: fromIso,
     to: toIso,
   });
@@ -6023,6 +6177,8 @@ app.get("/api/reports/mortality.csv", requireAuth, requireFarmAccess, requireLea
   const to = req.query.to ? String(req.query.to) : null;
   const status = req.query.status ? String(req.query.status) : null;
   const includeSlaughtered = req.query.includeSlaughtered === "true";
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
   if (hasDb()) {
     try {
       let sql = `SELECT e.id, e.flock_id, f.code AS flock_code, e.at, e.count, e.is_emergency,
@@ -6033,6 +6189,9 @@ app.get("/api/reports/mortality.csv", requireAuth, requireFarmAccess, requireLea
                    LEFT JOIN users u ON u.id = e.laborer_id
                   WHERE 1=1`;
       const params = [];
+      if (!isSuper) {
+        sql = appendSqlFlockCompanyFilter(sql, params, scopedCompanyId, "f");
+      }
       if (flockId) { params.push(flockId); sql += ` AND e.flock_id = $${params.length}::uuid`; }
       if (from) { params.push(from); sql += ` AND e.at >= $${params.length}::timestamptz`; }
       if (to) { params.push(to); sql += ` AND e.at <= $${params.length}::timestamptz`; }
@@ -6059,6 +6218,8 @@ app.get("/api/reports/feed-inventory.csv", requireAuth, requireFarmAccess, requi
   const flockId = req.query.flockId ? String(req.query.flockId) : null;
   const from = req.query.from ? String(req.query.from) : null;
   const to = req.query.to ? String(req.query.to) : null;
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
   if (hasDb()) {
     try {
       let sql = `SELECT e.id, e.flock_id, f.code AS flock_code, e.recorded_at, e.feed_kg,
@@ -6068,6 +6229,9 @@ app.get("/api/reports/feed-inventory.csv", requireAuth, requireFarmAccess, requi
                    LEFT JOIN users u ON u.id = e.entered_by_user_id
                   WHERE 1=1`;
       const params = [];
+      if (!isSuper) {
+        sql = appendSqlFlockCompanyFilter(sql, params, scopedCompanyId, "f");
+      }
       if (flockId) { params.push(flockId); sql += ` AND e.flock_id = $${params.length}::uuid`; }
       if (from) { params.push(from); sql += ` AND e.recorded_at >= $${params.length}::timestamptz`; }
       if (to) { params.push(to); sql += ` AND e.recorded_at <= $${params.length}::timestamptz`; }
@@ -6092,6 +6256,8 @@ app.get("/api/reports/medicine-tracking.csv", requireAuth, requireFarmAccess, re
   const flockId = req.query.flockId ? String(req.query.flockId) : null;
   const from = req.query.from ? String(req.query.from) : null;
   const to = req.query.to ? String(req.query.to) : null;
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
   if (hasDb()) {
     try {
       let sql = `SELECT t.id, t.flock_id, f.code AS flock_code, t.at, t.disease_or_reason, t.medicine_name,
@@ -6101,6 +6267,9 @@ app.get("/api/reports/medicine-tracking.csv", requireAuth, requireFarmAccess, re
                    LEFT JOIN users u ON u.id::text = t.administered_by_user_id
                   WHERE 1=1`;
       const params = [];
+      if (!isSuper) {
+        sql = appendSqlFlockCompanyFilter(sql, params, scopedCompanyId, "f");
+      }
       if (flockId) { params.push(flockId); sql += ` AND t.flock_id = $${params.length}`; }
       if (from) { params.push(from); sql += ` AND t.at >= $${params.length}::timestamptz`; }
       if (to) { params.push(to); sql += ` AND t.at <= $${params.length}::timestamptz`; }
@@ -6121,17 +6290,23 @@ app.get("/api/reports/medicine-tracking.csv", requireAuth, requireFarmAccess, re
   res.status(503).json({ error: "Database required for CSV export" });
 });
 
-app.get("/api/reports/flocks.csv", requireAuth, requireFarmAccess, requireLeadVetUp, async (_req, res) => {
+app.get("/api/reports/flocks.csv", requireAuth, requireFarmAccess, requireLeadVetUp, async (req, res) => {
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
   if (hasDb()) {
     try {
-      const r = await dbQuery(
-        `SELECT f.id, f.code AS flock_code, f.breed_code, f.placement_date, f.initial_count,
+      let sql = `SELECT f.id, f.code AS flock_code, f.breed_code, f.placement_date, f.initial_count,
                 f.status, f.target_weight_kg, f.created_at,
                 COALESCE(bn.name, '') AS barn_name
            FROM poultry_flocks f
            LEFT JOIN poultry_barn_names bn ON bn.id = f.barn_name_id
-          ORDER BY f.placement_date DESC LIMIT 5000`
-      );
+          WHERE 1=1`;
+      const params = [];
+      if (!isSuper) {
+        sql = appendSqlFlockCompanyFilter(sql, params, scopedCompanyId, "f");
+      }
+      sql += ` ORDER BY f.placement_date DESC LIMIT 5000`;
+      const r = await dbQuery(sql, params);
       const header = "id,flock_code,breed_code,barn_name,placement_date,initial_count,status,target_weight_kg,created_at";
       const csvRows = r.rows.map((row) =>
         [row.id, row.flock_code, row.breed_code, row.barn_name ?? "", row.placement_date, row.initial_count, row.status, row.target_weight_kg ?? "", row.created_at].join(",")
@@ -6955,10 +7130,12 @@ app.post("/api/weigh-ins/:flockId", requireAuth, requireFarmAccess, requirePageA
 
 app.get("/api/reports/flock-performance.csv", requireAuth, requireFarmAccess, async (req, res) => {
   const flockId = String(req.query.flock_id ?? "").trim();
-  if (!flockId || !flocksById.has(flockId)) {
+  if (!flockId) {
     res.status(400).json({ error: "Valid flock_id is required" });
     return;
   }
+  const flock = await requireFlockForReport(req, res, flockId);
+  if (!flock) return;
   let summary = null;
   try {
     summary = await buildFlockPerformanceSummary(flockId, parseOptionalIsoDate(req.query.end_at));
@@ -6983,28 +7160,38 @@ app.get("/api/reports/treatments.csv", requireAuth, requireFarmAccess, async (re
   const flockId = String(req.query.flock_id ?? "").trim();
   const startIso = parseOptionalIsoDate(req.query.start_at);
   const endIso = parseOptionalIsoDate(req.query.end_at);
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
   let rows = [];
   try {
-    rows = flockId
-      ? await listTreatmentsForFlock(flockId, startIso, endIso)
-      : hasDb()
-        ? (await dbQuery(
-          `SELECT id, flock_id AS "flockId", at, disease_or_reason AS "diseaseOrReason", medicine_name AS "medicineName",
-                  reason_code AS "reasonCode", dose, dose_unit AS "doseUnit", route, duration_days AS "durationDays", withdrawal_days AS "withdrawalDays", notes
-             FROM flock_treatments
-            WHERE ($1::timestamptz IS NULL OR at >= $1::timestamptz)
-              AND ($2::timestamptz IS NULL OR at <= $2::timestamptz)
-            ORDER BY at DESC`,
-          [startIso, endIso]
-        )).rows
-        : flockTreatments
-          .filter((t) => {
-            const ms = new Date(t.at).getTime();
-            const start = startIso ? new Date(startIso).getTime() : Number.NEGATIVE_INFINITY;
-            const end = endIso ? new Date(endIso).getTime() : Number.POSITIVE_INFINITY;
-            return ms >= start && ms <= end;
-          })
-          .sort((a, b) => (a.at < b.at ? 1 : -1));
+    if (flockId) {
+      const flock = await requireFlockForReport(req, res, flockId);
+      if (!flock) return;
+      rows = await listTreatmentsForFlock(flockId, startIso, endIso);
+    } else if (hasDb()) {
+      let sql = `SELECT t.id, t.flock_id AS "flockId", t.at, t.disease_or_reason AS "diseaseOrReason", t.medicine_name AS "medicineName",
+                  t.reason_code AS "reasonCode", t.dose, t.dose_unit AS "doseUnit", t.route, t.duration_days AS "durationDays", t.withdrawal_days AS "withdrawalDays", t.notes
+             FROM flock_treatments t
+             JOIN poultry_flocks f ON f.id::text = t.flock_id
+            WHERE ($1::timestamptz IS NULL OR t.at >= $1::timestamptz)
+              AND ($2::timestamptz IS NULL OR t.at <= $2::timestamptz)`;
+      const params = [startIso, endIso];
+      if (!isSuper) {
+        sql = appendSqlFlockCompanyFilter(sql, params, scopedCompanyId, "f");
+      }
+      sql += ` ORDER BY t.at DESC`;
+      rows = (await dbQuery(sql, params)).rows;
+    } else {
+      rows = flockTreatments
+        .filter((t) => {
+          if (!isSuper && !memoryFlockIdVisible(t.flockId, flocksById, req.authUser, scopedCompanyId)) return false;
+          const ms = new Date(t.at).getTime();
+          const start = startIso ? new Date(startIso).getTime() : Number.NEGATIVE_INFINITY;
+          const end = endIso ? new Date(endIso).getTime() : Number.POSITIVE_INFINITY;
+          return ms >= start && ms <= end;
+        })
+        .sort((a, b) => (a.at < b.at ? 1 : -1));
+    }
   } catch {
     res.status(503).json({ error: "Database unavailable. Please retry shortly." });
     return;
@@ -7027,28 +7214,38 @@ app.get("/api/reports/slaughter.csv", requireAuth, requireFarmAccess, async (req
   const flockId = String(req.query.flock_id ?? "").trim();
   const startIso = parseOptionalIsoDate(req.query.start_at);
   const endIso = parseOptionalIsoDate(req.query.end_at);
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
   let rows = [];
   try {
-    rows = flockId
-      ? await listSlaughterForFlock(flockId, startIso, endIso)
-      : hasDb()
-        ? (await dbQuery(
-          `SELECT id, flock_id AS "flockId", at, birds_slaughtered AS "birdsSlaughtered",
-                  reason_code AS "reasonCode", avg_live_weight_kg AS "avgLiveWeightKg", avg_carcass_weight_kg AS "avgCarcassWeightKg", notes
-             FROM flock_slaughter_events
-            WHERE ($1::timestamptz IS NULL OR at >= $1::timestamptz)
-              AND ($2::timestamptz IS NULL OR at <= $2::timestamptz)
-            ORDER BY at DESC`,
-          [startIso, endIso]
-        )).rows
-        : slaughterEvents
-          .filter((s) => {
-            const ms = new Date(s.at).getTime();
-            const start = startIso ? new Date(startIso).getTime() : Number.NEGATIVE_INFINITY;
-            const end = endIso ? new Date(endIso).getTime() : Number.POSITIVE_INFINITY;
-            return ms >= start && ms <= end;
-          })
-          .sort((a, b) => (a.at < b.at ? 1 : -1));
+    if (flockId) {
+      const flock = await requireFlockForReport(req, res, flockId);
+      if (!flock) return;
+      rows = await listSlaughterForFlock(flockId, startIso, endIso);
+    } else if (hasDb()) {
+      let sql = `SELECT s.id, s.flock_id AS "flockId", s.at, s.birds_slaughtered AS "birdsSlaughtered",
+                  s.reason_code AS "reasonCode", s.avg_live_weight_kg AS "avgLiveWeightKg", s.avg_carcass_weight_kg AS "avgCarcassWeightKg", s.notes
+             FROM flock_slaughter_events s
+             JOIN poultry_flocks f ON f.id::text = s.flock_id
+            WHERE ($1::timestamptz IS NULL OR s.at >= $1::timestamptz)
+              AND ($2::timestamptz IS NULL OR s.at <= $2::timestamptz)`;
+      const params = [startIso, endIso];
+      if (!isSuper) {
+        sql = appendSqlFlockCompanyFilter(sql, params, scopedCompanyId, "f");
+      }
+      sql += ` ORDER BY s.at DESC`;
+      rows = (await dbQuery(sql, params)).rows;
+    } else {
+      rows = slaughterEvents
+        .filter((s) => {
+          if (!isSuper && !memoryFlockIdVisible(s.flockId, flocksById, req.authUser, scopedCompanyId)) return false;
+          const ms = new Date(s.at).getTime();
+          const start = startIso ? new Date(startIso).getTime() : Number.NEGATIVE_INFINITY;
+          const end = endIso ? new Date(endIso).getTime() : Number.POSITIVE_INFINITY;
+          return ms >= start && ms <= end;
+        })
+        .sort((a, b) => (a.at < b.at ? 1 : -1));
+    }
   } catch {
     res.status(503).json({ error: "Database unavailable. Please retry shortly." });
     return;
@@ -7734,6 +7931,16 @@ app.patch("/api/inventory/:id", requireAuth, requireFarmAccess, requirePageAcces
     res.status(404).json({ error: "Inventory row not found" });
     return;
   }
+  if (row.flockId) {
+    if (!(await getFlockByIdForUser(String(row.flockId), req.authUser, res))) return;
+  } else if (!authIsSuperuser(req)) {
+    const companyId = await userCompanyId(req);
+    const actor = usersById.get(row.actorUserId);
+    if (!actor || String(actor.companyId) !== String(companyId)) {
+      res.status(404).json({ error: "Inventory row not found" });
+      return;
+    }
+  }
   if (!canEditInventoryRow(req.authUser, row)) {
     res.status(403).json({ error: "You do not have permission to edit this record" });
     return;
@@ -7836,10 +8043,7 @@ app.post("/api/daily-logs", requireAuth, requireFarmAccess, requirePageAccess("f
     res.status(400).json({ error: "flockId and logDate are required" });
     return;
   }
-  if (!flocksById.has(String(payload.flockId))) {
-    res.status(404).json({ error: "Flock not found" });
-    return;
-  }
+  if (!(await getFlockByIdForUser(String(payload.flockId), req.authUser, res))) return;
   const validation = computeValidation(payload);
   const mortalityPct = Number(validation.mortalityPct) || 0;
   const flaggedHighMortality = mortalityPct >= 0.5;
@@ -8857,9 +9061,19 @@ app.post("/api/payroll-impact", requireAuth, requireFarmAccess, requirePageAcces
   const userId = String(body.user_id ?? "");
   const logType = String(body.log_type ?? "daily_log").trim() || "daily_log";
   const rwfDelta = Number(body.rwf_delta);
+  const manualFlockId = body.flock_id != null && String(body.flock_id).trim() ? String(body.flock_id).trim() : null;
   if (!userId || !usersById.has(userId)) {
     res.status(400).json({ error: "user_id required" });
     return;
+  }
+  if (!authIsSuperuser(req)) {
+    const scopedCompanyId = await userCompanyId(req);
+    const targetUser = usersById.get(userId);
+    if (!targetUser || String(targetUser.companyId) !== String(scopedCompanyId)) {
+      res.status(404).json({ error: "user_id required" });
+      return;
+    }
+    if (manualFlockId && !(await getFlockByIdForUser(manualFlockId, req.authUser, res))) return;
   }
   if (!Number.isFinite(rwfDelta)) {
     res.status(400).json({ error: "rwf_delta required" });
@@ -8870,7 +9084,6 @@ app.post("/api/payroll-impact", requireAuth, requireFarmAccess, requirePageAcces
   const reason = String(body.reason ?? "Manual adjustment");
   const logId = String(body.log_id ?? `manual_${crypto.randomBytes(4).toString("hex")}`);
   const submittedAt = String(body.submitted_at ?? new Date().toISOString());
-  const manualFlockId = body.flock_id != null && String(body.flock_id).trim() ? String(body.flock_id).trim() : null;
   let id = `pi_${crypto.randomBytes(6).toString("hex")}`;
   const createdAtIso = new Date().toISOString();
   const row = {
@@ -8941,6 +9154,8 @@ app.get(
     return;
   }
   const shouldUseDbQuery = hasDb() && (isPayrollManager || isPersistableUuid(req.authUser.id));
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
   if (shouldUseDbQuery) {
     try {
       const where = [];
@@ -8951,6 +9166,10 @@ app.get(
       } else if (userIdQ) {
         params.push(userIdQ);
         where.push(`p.user_id::text = $${params.length}`);
+      }
+      if (isPayrollManager && !isSuper) {
+        params.push(scopedCompanyId);
+        where.push(`u.company_id = $${params.length}::uuid`);
       }
       if (periodStart) {
         params.push(periodStart);
@@ -9081,6 +9300,7 @@ app.get(
 
 app.patch("/api/payroll-impact/:id/approve", requireAuth, requireFarmAccess, requirePageAccess("farm_payroll"), requirePayrollPaymentDecisionAccess, async (req, res) => {
   const id = String(req.params.id);
+  if (!(await verifyPayrollImpactCompany(id, req, res))) return;
   if (hasDb() && isPersistableUuid(id) && isPersistableUuid(req.authUser.id)) {
     try {
       const r = await dbQuery(
@@ -9123,15 +9343,21 @@ app.patch("/api/payroll-impact/:id/approve", requireAuth, requireFarmAccess, req
 app.post("/api/payroll-impact/bulk-approve", requireAuth, requireFarmAccess, requirePageAccess("farm_payroll"), requirePayrollPaymentDecisionAccess, async (req, res) => {
   const body = req.body ?? {};
   const ids = Array.isArray(body.ids) ? body.ids.map(String) : null;
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
   if (hasDb() && isPersistableUuid(req.authUser.id)) {
     try {
-      let sql = `UPDATE payroll_impact SET approved_by = $1::uuid, approved_at = now() WHERE approved_at IS NULL`;
+      let sql = `UPDATE payroll_impact p SET approved_by = $1::uuid, approved_at = now() FROM users u WHERE p.approved_at IS NULL AND p.user_id = u.id`;
       const params = [req.authUser.id];
+      if (!isSuper) {
+        params.push(scopedCompanyId);
+        sql += ` AND u.company_id = $${params.length}::uuid`;
+      }
       if (ids && ids.length > 0) {
         params.push(ids);
-        sql += ` AND id::text = ANY($2::text[])`;
+        sql += ` AND p.id::text = ANY($${params.length}::text[])`;
       }
-      sql += ` RETURNING id::text AS id, approved_at AS "approvedAt"`;
+      sql += ` RETURNING p.id::text AS id, p.approved_at AS "approvedAt"`;
       const r = await dbQuery(sql, params);
       for (const row of r.rows) {
         const id = String(row.id);
@@ -9155,6 +9381,12 @@ app.post("/api/payroll-impact/bulk-approve", requireAuth, requireFarmAccess, req
   for (const p of payrollImpacts) {
     if (p.approvedAt != null) continue;
     if (ids && !ids.includes(p.id)) continue;
+    if (!isSuper) {
+      const targetUser = usersById.get(String(p.userId ?? ""));
+      const userOk = targetUser && String(targetUser.companyId) === String(scopedCompanyId);
+      const flockOk = p.flockId && memoryFlockIdVisible(p.flockId, flocksById, req.authUser, scopedCompanyId);
+      if (!userOk && !flockOk) continue;
+    }
     p.approvedBy = req.authUser.id;
     p.approvedAt = at;
     await updatePayrollImpactApprovalDb(p);
@@ -9360,20 +9592,25 @@ app.get("/api/treatment-rounds", requireAuth, requireFarmAccess, requirePageAcce
   }
   const flockId = String(req.query.flock_id ?? "").trim();
   const status = String(req.query.status ?? "").trim();
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
   try {
-    const r = await dbQuery(
-      `SELECT r.id, r.flock_id AS "flockId", r.medicine_id AS "medicineId", m.name AS "medicineName",
+    let sql = `SELECT r.id, r.flock_id AS "flockId", r.medicine_id AS "medicineId", m.name AS "medicineName",
               r.planned_for AS "plannedFor", r.window_start AS "windowStart", r.window_end AS "windowEnd",
               r.route, r.dose_per_litre AS "dosePerLitre", r.dose_per_kg_feed AS "dosePerKgFeed", r.dose_per_bird AS "dosePerBird",
               r.planned_quantity AS "plannedQuantity", r.status, r.assigned_to_user_id AS "assignedToUserId",
               r.checklist, r.notes, r.created_by_user_id AS "createdByUserId", r.created_at AS "createdAt"
          FROM treatment_rounds r
          JOIN medicine_inventory m ON m.id = r.medicine_id
+         JOIN poultry_flocks f ON f.id::text = r.flock_id
         WHERE ($1 = '' OR r.flock_id = $1)
-          AND ($2 = '' OR r.status = $2)
-        ORDER BY r.planned_for DESC`,
-      [flockId, status]
-    );
+          AND ($2 = '' OR r.status = $2)`;
+    const params = [flockId, status];
+    if (!isSuper) {
+      sql = appendSqlFlockCompanyFilter(sql, params, scopedCompanyId, "f");
+    }
+    sql += ` ORDER BY r.planned_for DESC`;
+    const r = await dbQuery(sql, params);
     res.json({ rounds: r.rows });
   } catch (e) {
     console.error("[ERROR]", "[db] GET /api/treatment-rounds:", e instanceof Error ? e.message : e);
@@ -9387,18 +9624,23 @@ app.get("/api/treatment-rounds/overdue", requireAuth, requireFarmAccess, require
     return;
   }
   const flockId = String(req.query.flock_id ?? "").trim();
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
   try {
-    const r = await dbQuery(
-      `SELECT r.id, r.flock_id AS "flockId", r.medicine_id AS "medicineId", m.name AS "medicineName",
+    let sql = `SELECT r.id, r.flock_id AS "flockId", r.medicine_id AS "medicineId", m.name AS "medicineName",
               r.planned_for AS "plannedFor", r.status, r.planned_quantity AS "plannedQuantity"
          FROM treatment_rounds r
          JOIN medicine_inventory m ON m.id = r.medicine_id
+         JOIN poultry_flocks f ON f.id::text = r.flock_id
         WHERE ($1 = '' OR r.flock_id = $1)
           AND r.status IN ('planned','in_progress')
-          AND r.planned_for < now()
-        ORDER BY r.planned_for ASC`,
-      [flockId]
-    );
+          AND r.planned_for < now()`;
+    const params = [flockId];
+    if (!isSuper) {
+      sql = appendSqlFlockCompanyFilter(sql, params, scopedCompanyId, "f");
+    }
+    sql += ` ORDER BY r.planned_for ASC`;
+    const r = await dbQuery(sql, params);
     const rows = r.rows.map((x) => {
       const dueMs = new Date(x.plannedFor).getTime();
       const mins = Math.max(0, Math.floor((Date.now() - dueMs) / (60 * 1000)));
@@ -9490,6 +9732,7 @@ app.post("/api/treatment-rounds", requireAuth, requireFarmAccess, requirePageAcc
     res.status(400).json({ error: "Invalid route for treatment round" });
     return;
   }
+  if (!(await getFlockByIdForUser(flockId, req.authUser, res))) return;
   try {
     const r = await dbQuery(
       `INSERT INTO treatment_rounds
@@ -9529,6 +9772,7 @@ app.patch("/api/treatment-rounds/:id/status", requireAuth, requireFarmAccess, re
     res.status(400).json({ error: "Invalid status" });
     return;
   }
+  if (!(await verifyResourceByFlockTable("treatment_rounds", id, req, res, { textFlockId: true }))) return;
   const client = await dbPool.connect();
   try {
     await client.query("BEGIN");
@@ -9670,11 +9914,17 @@ function relativeTimeStatus(targetIso, nowMs = Date.now()) {
   return { label: `Due in ${Math.floor(absMin / 60)}h`, severity: "healthy", overdueHours: 0 };
 }
 
-app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAccess(["dashboard_laborer", "dashboard_vet", "dashboard_management"]), requireAction("flock.view"), async (_req, res) => {
+app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAccess(["dashboard_laborer", "dashboard_vet", "dashboard_management"]), requireAction("flock.view"), async (req, res) => {
   if (!hasDb()) {
     res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
     return;
   }
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
+  const activeFlockIdsSql = isSuper
+    ? `SELECT id FROM poultry_flocks WHERE status = 'active'`
+    : `SELECT id FROM poultry_flocks WHERE status = 'active' AND company_id = $1::uuid`;
+  const companyParams = isSuper ? [] : [scopedCompanyId];
   try {
     try {
       await syncFlocksFromDbToMemory();
@@ -9695,8 +9945,9 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
               f.status
          FROM poultry_flocks f
          LEFT JOIN poultry_barn_names bn ON bn.id = f.barn_name_id
-        WHERE f.status = 'active'
-        ORDER BY f.placement_date DESC`
+        WHERE f.status = 'active'${isSuper ? "" : " AND f.company_id = $1::uuid"}
+        ORDER BY f.placement_date DESC`,
+      companyParams
     );
 
     const latestWeigh = await dbQuery(
@@ -9709,7 +9960,7 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
                 LAG(avg_weight_kg) OVER (PARTITION BY flock_id ORDER BY weigh_date DESC) AS "prevWeightKg",
                 LAG(weigh_date) OVER (PARTITION BY flock_id ORDER BY weigh_date DESC) AS "prevWeighDate"
            FROM weigh_ins
-          WHERE flock_id IN (SELECT id FROM poultry_flocks WHERE status = 'active')
+          WHERE flock_id IN (${activeFlockIdsSql})
        )
        SELECT DISTINCT ON (flock_id)
               flock_id AS "flockId",
@@ -9720,15 +9971,17 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
               "prevWeightKg",
               "prevWeighDate"
          FROM ranked
-        ORDER BY flock_id, "latestWeighDate" DESC`
+        ORDER BY flock_id, "latestWeighDate" DESC`,
+      companyParams
     ).catch(() => ({ rows: [] }));
 
     const slaughterAgg = await dbQuery(
       `SELECT flock_id::text AS "flockId",
               COALESCE(SUM(birds_slaughtered), 0)::float AS "slaughterTotal"
          FROM flock_slaughter_events
-        WHERE flock_id IN (SELECT id FROM poultry_flocks WHERE status = 'active')
-        GROUP BY flock_id`
+        WHERE flock_id IN (${activeFlockIdsSql})
+        GROUP BY flock_id`,
+      companyParams
     ).catch(() => ({ rows: [] }));
 
     // Mortality: flock_mortality_events (field + check-in) + poultry_daily_logs (legacy daily form).
@@ -9740,7 +9993,7 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
                 e.count,
                 (timezone('Africa/Kigali', e.at))::date AS d
            FROM flock_mortality_events e
-          WHERE e.flock_id IN (SELECT id FROM poultry_flocks WHERE status = 'active')
+          WHERE e.flock_id IN (${activeFlockIdsSql})
             AND e.submission_status IS DISTINCT FROM 'rejected'
             AND COALESCE(e.affects_live_count, true) = true
        ),
@@ -9749,7 +10002,7 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
                 GREATEST(COALESCE(l.mortality, 0), 0)::int AS count,
                 l.log_date::date AS d
            FROM poultry_daily_logs l
-          WHERE l.flock_id IN (SELECT id FROM poultry_flocks WHERE status = 'active')
+          WHERE l.flock_id IN (${activeFlockIdsSql})
             AND l.validation_status::text NOT IN ('draft', 'rejected')
             AND COALESCE(l.mortality, 0) > 0
        ),
@@ -9768,7 +10021,8 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
                 THEN count ELSE 0 END), 0)::float AS "mortalityPrev24h",
               MAX(d)::text AS "latestLogDate"
          FROM combined
-        GROUP BY flock_id`
+        GROUP BY flock_id`,
+      companyParams
     ).catch(() => ({ rows: [] }));
 
     const overdueAgg = await dbQuery(
@@ -9778,8 +10032,9 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
          FROM treatment_rounds
         WHERE status IN ('planned','in_progress')
           AND planned_for < now()
-          AND flock_id IN (SELECT id FROM poultry_flocks WHERE status = 'active')
-        GROUP BY flock_id`
+          AND flock_id IN (${activeFlockIdsSql})
+        GROUP BY flock_id`,
+      companyParams
     ).catch(() => ({ rows: [] }));
 
     const withdrawalAgg = await dbQuery(
@@ -9788,8 +10043,9 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
               MIN((at + (withdrawal_days || ' days')::interval)) AS "safeAfterAt"
          FROM flock_treatments
         WHERE (at + (withdrawal_days || ' days')::interval) > now()
-          AND flock_id IN (SELECT id FROM poultry_flocks WHERE status = 'active')
-        GROUP BY flock_id`
+          AND flock_id IN (${activeFlockIdsSql})
+        GROUP BY flock_id`,
+      companyParams
     ).catch(() => ({ rows: [] }));
 
     const weighByFlock = new Map(latestWeigh.rows.map((r) => [String(r.flockId), r]));
