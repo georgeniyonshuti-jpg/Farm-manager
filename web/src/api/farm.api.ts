@@ -161,6 +161,17 @@ export async function fetchOpsBoard(token: string | null) {
   return legacyFetch("/api/farm/ops-board", token);
 }
 
+export async function fetchWeighInTrends(token: string | null, days = 90, flockId?: string | null) {
+  if (IS_FRAPPE_MODE) {
+    const args: Record<string, string | number> = { slug: tenantSlug() ?? "", days };
+    if (flockId) args.flockId = flockId;
+    return callFrappe("dashboard.get_weigh_in_trends", args);
+  }
+  const params = new URLSearchParams({ days: String(days) });
+  if (flockId) params.set("flockId", flockId);
+  return legacyFetch(`/api/farm/weigh-in-trends?${params}`, token);
+}
+
 export async function reviewFeedEntry(
   token: string | null,
   name: string,

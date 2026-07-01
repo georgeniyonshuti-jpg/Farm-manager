@@ -137,6 +137,93 @@ export function MortalityTrendLine({ data }: { data: Array<{ day: string; mortal
   );
 }
 
+export function WeightVsTargetBars({
+  data,
+}: {
+  data: Array<{ name: string; latestWeightKg: number; expectedWeightKg: number; weightDeviationPct: number }>;
+}) {
+  const ct = useChartTheme();
+  return (
+    <div className="h-72">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ left: 4, right: 12, top: 8, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+          <XAxis dataKey="name" hide />
+          <YAxis tick={{ fontSize: 11, fill: ct.axis }} unit=" kg" />
+          <Tooltip
+            contentStyle={ChartTooltipStyle(ct)}
+            formatter={(value: number, name: string) => [
+              `${Number(value).toFixed(2)} kg`,
+              name === "latestWeightKg" ? "Actual" : name === "expectedWeightKg" ? "Target" : name,
+            ]}
+          />
+          <Legend formatter={(val) => <span style={{ color: ct.legendText, fontSize: "12px" }}>{val}</span>} />
+          <Bar dataKey="latestWeightKg" fill="#22c78a" name="Actual" radius={[4, 4, 0, 0]} maxBarSize={24} />
+          <Bar dataKey="expectedWeightKg" fill="#94a3b8" name="Target" radius={[4, 4, 0, 0]} maxBarSize={24} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+export function WeightTrendLine({
+  data,
+}: {
+  data: Array<{ date: string; avgWeightKg: number; expectedWeightKg: number | null; count: number }>;
+}) {
+  const ct = useChartTheme();
+  const gradId = "weightTrendGrad";
+  return (
+    <div className="h-64">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ left: 4, right: 12, top: 8, bottom: 4 }}>
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#22c78a" stopOpacity={ct.gradFill * 2} />
+              <stop offset="95%" stopColor="#22c78a" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+          <XAxis
+            dataKey="date"
+            tick={{ fontSize: 10, fill: ct.axis }}
+            tickFormatter={(v) => String(v).slice(5)}
+          />
+          <YAxis tick={{ fontSize: 11, fill: ct.axis }} unit=" kg" />
+          <Tooltip
+            contentStyle={ChartTooltipStyle(ct)}
+            formatter={(value: number, name: string) => [
+              `${Number(value).toFixed(2)} kg`,
+              name === "avgWeightKg" ? "Farm avg" : "Breed target",
+            ]}
+            labelFormatter={(label) => String(label)}
+          />
+          <Legend formatter={(val) => <span style={{ color: ct.legendText, fontSize: "12px" }}>{val}</span>} />
+          <Line
+            type="monotone"
+            dataKey="avgWeightKg"
+            stroke="#22c78a"
+            strokeWidth={2.5}
+            dot={{ fill: "#22c78a", strokeWidth: 0, r: 3 }}
+            activeDot={{ r: 5, strokeWidth: 0 }}
+            name="Farm avg"
+          />
+          <Line
+            type="monotone"
+            dataKey="expectedWeightKg"
+            stroke="#fbbf24"
+            strokeWidth={1.5}
+            strokeDasharray="5 3"
+            dot={false}
+            name="Breed target"
+            connectNulls
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 export function FcrTargetBars({ data }: { data: Array<{ name: string; latestFcr: number; targetMax: number }> }) {
   const ct = useChartTheme();
   const avgTarget = data.length ? data.reduce((s, d) => s + d.targetMax, 0) / data.length : 0;

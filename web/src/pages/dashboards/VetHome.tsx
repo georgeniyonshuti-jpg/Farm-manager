@@ -13,11 +13,15 @@ import { useHubAggregatePoll } from "../../hooks/useHubAggregatePoll";
 import { useVetDashboardData } from "../../hooks/useVetDashboardData";
 import {
   blockersSeries,
+  biomassSummary,
+  farmAverageWeightTrend,
   fcrVsTargetSeries,
   mortalityTrendPseudoDaily,
   topRiskSeries,
+  weightVsTargetSeries,
 } from "../../lib/dashboardAdapters";
-import { BlockersStacked, FcrTargetBars, MortalityTrendLine, SimpleCategoryBars, TopRiskBars } from "../../components/dashboard/charts/OpsCharts";
+import { BlockersStacked, FcrTargetBars, MortalityTrendLine, SimpleCategoryBars, TopRiskBars, WeightTrendLine, WeightVsTargetBars } from "../../components/dashboard/charts/OpsCharts";
+import { useWeighInTrends } from "../../hooks/useWeighInTrends";
 import { MobileFieldBottomNav, type MobileFieldNavItem } from "../../components/layout/MobileFieldBottomNav";
 import { VetFieldHub } from "./VetFieldHub";
 import { readAuthHeaders } from "../../lib/authHeaders";
@@ -55,6 +59,7 @@ export function VetHome() {
 function VetManagerDashboard() {
   const { token } = useAuth();
   const vetDash = useVetDashboardData(token);
+  const weighTrends = useWeighInTrends(token, 90);
   const [status, setStatus] = useState<CheckinStatus | null>(null);
   const [primaryFlockId, setPrimaryFlockId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -317,6 +322,9 @@ function VetManagerDashboard() {
     },
   ];
   const vetFlocks = vetDash.data.opsBoard?.flocks ?? [];
+  const growth = biomassSummary(vetFlocks);
+  const weightData = weightVsTargetSeries(vetFlocks, 8);
+  const weightTrendData = farmAverageWeightTrend(weighTrends.points);
   const treatmentStatusData = Object.entries(
     vetDash.data.treatmentRounds.reduce<Record<string, number>>((acc, r) => {
       const k = r.status ?? "planned";
@@ -458,15 +466,42 @@ function VetManagerDashboard() {
             <SimpleCategoryBars data={medicineForecastData} xKey="medicine" barKey="days" barName="Days to stockout" color="#f59e0b" />
           </ChartPanel>
         </div>
+        <div className="space-y-2">
+          <PageHeader
+            className="mb-0"
+            title={useLaborerT("Growth & conversion")}
+            subtitle={useLaborerT("Weigh-in vs breed target, FCR, and farm weight trend.")}
+          />
+          <div className="grid gap-2 sm:grid-cols-4 text-center text-xs">
+            <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-2">
+              <p className="text-[var(--text-muted)]">{useLaborerT("Avg wt vs target")}</p>
+              <p className="font-semibold tabular-nums text-[var(--text-primary)]">
+                {growth.avgWeightDeviationPct != null ? `${growth.avgWeightDeviationPct >= 0 ? "+" : ""}${growth.avgWeightDeviationPct}%` : "—"}
+              </p>
+            </div>
+            <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-2">
+              <p className="text-[var(--text-muted)]">{useLaborerT("Below target")}</p>
+              <p className="font-semibold tabular-nums text-[var(--text-primary)]">{growth.belowTargetCount}</p>
+            </div>
+            <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-2">
+              <p className="text-[var(--text-muted)]">{useLaborerT("Stale weigh-ins")}</p>
+              <p className="font-semibold tabular-nums text-[var(--text-primary)]">{growth.staleWeighInCount}</p>
+            </div>
+            <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-2">
+              <p className="text-[var(--text-muted)]">{useLaborerT("Avg FCR")}</p>
+              <p className="font-semibold tabular-nums text-[var(--text-primary)]">{growth.avgFcr ?? "—"}</p>
+            </div>
+          </div>
+        </div>
         <div className="grid gap-4 xl:grid-cols-2">
           <ChartPanel
-            title={useLaborerT("Mortality trend")}
-            subtitle={useLaborerT("Farm-level mortality direction")}
+            title={useLaborerT("Weight vs target")}
+            subtitle={useLaborerT("Actual vs expected by flock")}
             loading={vetDash.loading}
             error={vetDash.error}
-            empty={!vetDash.loading && !vetDash.error && vetFlocks.length === 0}
+            empty={!vetDash.loading && !vetDash.error && weightData.length === 0}
           >
-            <MortalityTrendLine data={mortalityTrendPseudoDaily(vetFlocks)} />
+            <WeightVsTargetBars data={weightData} />
           </ChartPanel>
           <ChartPanel
             title={useLaborerT("FCR vs target")}
@@ -478,7 +513,25 @@ function VetManagerDashboard() {
             <FcrTargetBars data={fcrVsTargetSeries(vetFlocks, 8)} />
           </ChartPanel>
         </div>
+        <ChartPanel
+          title={useLaborerT("Weigh-in trend")}
+          subtitle={useLaborerT("Farm-average weight including vet-log samples")}
+          loading={weighTrends.loading}
+          error={weighTrends.error}
+          empty={!weighTrends.loading && !weighTrends.error && weightTrendData.length === 0}
+        >
+          <WeightTrendLine data={weightTrendData} />
+        </ChartPanel>
         <div className="grid gap-4 xl:grid-cols-2">
+          <ChartPanel
+            title={useLaborerT("Mortality trend")}
+            subtitle={useLaborerT("Farm-level mortality direction")}
+            loading={vetDash.loading}
+            error={vetDash.error}
+            empty={!vetDash.loading && !vetDash.error && vetFlocks.length === 0}
+          >
+            <MortalityTrendLine data={mortalityTrendPseudoDaily(vetFlocks)} />
+          </ChartPanel>
           <ChartPanel
             title={useLaborerT("Highest risk flocks")}
             subtitle={useLaborerT("Immediate vet-manager attention queue")}

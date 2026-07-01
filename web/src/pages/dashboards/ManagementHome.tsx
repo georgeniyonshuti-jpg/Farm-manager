@@ -2,13 +2,14 @@
  * Command Center — premium analytics dashboard
  *
  * Sections (superuser-configurable visibility):
- *   exec_kpis   — Executive KPI strip
- *   health_score — Farm health gauge + insights
- *   risk_intel  — Risk distribution + top risk bars
- *   ops_trends  — Mortality trend + FCR vs target
- *   blockers    — Operational blockers
- *   flock_table — Live flock scanner table
- *   finance     — Financial pulse (permission-gated)
+ *   exec_kpis      — Executive KPI strip
+ *   health_score   — Farm health gauge + insights
+ *   risk_intel     — Risk distribution + top risk bars
+ *   growth_metrics — Weight vs target, FCR, weigh-in trends
+ *   ops_trends     — Mortality trend
+ *   blockers       — Operational blockers
+ *   flock_table    — Live flock scanner table
+ *   finance        — Biomass, fair value, IAS 41 snapshot
  */
 
 import { useEffect, useState } from "react";
@@ -24,14 +25,21 @@ import {
   MortalityTrendLine,
   RiskDonut,
   TopRiskBars,
+  WeightTrendLine,
+  WeightVsTargetBars,
 } from "../../components/dashboard/charts/OpsCharts";
 import { useOpsBoardData } from "../../hooks/useOpsBoardData";
+import { useWeighInTrends } from "../../hooks/useWeighInTrends";
 import {
+  biomassSummary,
   blockersSeries,
+  farmAverageWeightTrend,
   fcrVsTargetSeries,
   mortalityTrendPseudoDaily,
   riskClassCount,
+  topBiomassFlocks,
   topRiskSeries,
+  weightVsTargetSeries,
   type OpsBoardFlock,
 } from "../../lib/dashboardAdapters";
 import { readAuthHeaders } from "../../lib/authHeaders";
@@ -45,7 +53,8 @@ const ALL_WIDGETS = [
   { id: "exec_kpis", label: "Executive KPIs" },
   { id: "health_score", label: "Farm health score" },
   { id: "risk_intel", label: "Risk intelligence" },
-  { id: "ops_trends", label: "Ops trends (mortality & FCR)" },
+  { id: "growth_metrics", label: "Growth & conversion (weight & FCR)" },
+  { id: "ops_trends", label: "Ops trends (mortality)" },
   { id: "blockers", label: "Operational blockers" },
   { id: "flock_table", label: "Flock scanner table" },
   { id: "finance", label: "Financial pulse" },
@@ -67,6 +76,23 @@ function riskBadge(rc: OpsBoardFlock["riskClass"]) {
 
 function riskLabel(rc: OpsBoardFlock["riskClass"]) {
   return { healthy: "Healthy", watch: "Watch", at_risk: "At risk", critical: "Critical" }[rc] ?? rc;
+}
+
+function formatRwf(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return new Intl.NumberFormat("en-RW", { style: "currency", currency: "RWF", maximumFractionDigits: 0 }).format(n);
+}
+
+function formatKg(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`;
+}
+
+function formatWeighDate(d: string | null | undefined): string {
+  if (!d) return "—";
+  const ms = new Date(d).getTime();
+  if (!Number.isFinite(ms)) return d;
+  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
 // ─── Section header ────────────────────────────────────────────────────────────
@@ -214,6 +240,7 @@ export function ManagementHome() {
   const { token, user } = useAuth();
   const { companyHref } = useCompanyNav();
   const { data, loading, error, reload } = useOpsBoardData(token);
+  const weighTrends = useWeighInTrends(token, 90);
   const isSuperuser = user?.role === "superuser";
   const role = user?.role ?? "manager";
   const canOpenAccountingApprovals = user?.role === "manager" || user?.role === "superuser";
@@ -248,6 +275,8 @@ export function ManagementHome() {
   const flocks = data?.flocks ?? [];
   const insights = data?.insights ?? [];
   const farmScore = data?.farmHealthScore ?? null;
+  const farmTotals = data?.farmTotals;
+  const growth = biomassSummary(flocks);
 
   const criticalCount = flocks.filter(f => f.riskClass === "critical").length;
   const watchCount = flocks.filter(f => f.riskClass === "watch" || f.riskClass === "at_risk").length;
@@ -259,6 +288,11 @@ export function ManagementHome() {
   const sortedFlocks = [...flocks].sort((a, b) => b.riskScore - a.riskScore);
   const mortalityData = mortalityTrendPseudoDaily(flocks);
   const fcrData = fcrVsTargetSeries(flocks, 10);
+  const weightData = weightVsTargetSeries(flocks, 8);
+  const weightTrendData = farmAverageWeightTrend(weighTrends.points);
+  const topBiomass = topBiomassFlocks(flocks, 5);
+  const biomassKg = farmTotals?.totalBiomassKg ?? growth.totalBiomassKg;
+  const fairValueRwf = farmTotals?.estimatedFairValueRwf ?? growth.estimatedFairValueRwf;
 
   return (
     <div className="mx-auto w-full max-w-[1280px] space-y-0 pb-12">
@@ -361,6 +395,20 @@ export function ManagementHome() {
             <MiniStat label="Healthy" value={loading ? "…" : healthyCount} tone="good" icon="✓" glow />
             <MiniStat label="Watch/At risk" value={loading ? "…" : watchCount} tone={watchCount > 0 ? "warn" : "good"} icon="⚠" glow={watchCount > 0} />
             <MiniStat label="Critical" value={loading ? "…" : criticalCount} tone={criticalCount > 0 ? "bad" : "good"} icon="🚨" glow={criticalCount > 0} />
+            <MiniStat
+              label="Farm biomass"
+              value={loading ? "…" : formatKg(biomassKg)}
+              tone="good"
+              icon="⚖"
+            />
+            <MiniStat
+              label="Est. fair value"
+              value={loading ? "…" : fairValueRwf != null ? formatRwf(fairValueRwf) : "Set ref. price"}
+              tone={fairValueRwf != null ? "good" : "warn"}
+              icon="💰"
+            />
+          </div>
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
             <MiniStat label="Avg risk score" value={loading ? "…" : `${avgRisk}/100`} tone={avgRisk > 65 ? "bad" : avgRisk > 35 ? "warn" : "good"} icon="📊" />
             <MiniStat
               label="Mortality 24h Δ"
@@ -368,6 +416,17 @@ export function ManagementHome() {
               tone={avgMortDelta > 0.5 ? "bad" : avgMortDelta > 0.1 ? "warn" : "good"}
               change={totalBlockers > 0 ? `${totalBlockers} blockers` : undefined}
               icon="📉"
+            />
+            <MiniStat
+              label="Wt vs target (avg)"
+              value={loading ? "…" : growth.avgWeightDeviationPct != null ? `${growth.avgWeightDeviationPct >= 0 ? "+" : ""}${growth.avgWeightDeviationPct}%` : "—"}
+              tone={(growth.avgWeightDeviationPct ?? 0) < -5 ? "bad" : (growth.avgWeightDeviationPct ?? 0) < 0 ? "warn" : "good"}
+              icon="📏"
+            />
+            <MiniStat
+              label="Avg FCR"
+              value={loading ? "…" : growth.avgFcr != null ? String(growth.avgFcr) : "—"}
+              icon="🌾"
             />
           </div>
         </section>
@@ -462,16 +521,73 @@ export function ManagementHome() {
         </section>
       )}
 
+      {/* ══════════════ GROWTH & CONVERSION ══════════════ */}
+      {show("growth_metrics") && (
+        <section className="mb-8 space-y-3">
+          <SectionHeader num="04" label="Growth & conversion" sub="Weigh-in performance, FCR, and weight trends" />
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 mb-1">
+            <MiniStat
+              label="Avg wt vs target"
+              value={loading ? "…" : growth.avgWeightDeviationPct != null ? `${growth.avgWeightDeviationPct >= 0 ? "+" : ""}${growth.avgWeightDeviationPct}%` : "—"}
+              tone={(growth.avgWeightDeviationPct ?? 0) < -5 ? "bad" : (growth.avgWeightDeviationPct ?? 0) < 0 ? "warn" : "good"}
+            />
+            <MiniStat
+              label="Below target (&lt;5%)"
+              value={loading ? "…" : growth.belowTargetCount}
+              tone={growth.belowTargetCount > 0 ? "warn" : "good"}
+            />
+            <MiniStat
+              label="Stale weigh-ins"
+              value={loading ? "…" : growth.staleWeighInCount}
+              tone={growth.staleWeighInCount > 0 ? "warn" : "good"}
+            />
+            <MiniStat
+              label="Avg FCR"
+              value={loading ? "…" : growth.avgFcr != null ? String(growth.avgFcr) : "—"}
+            />
+          </div>
+          <div className="grid gap-4 xl:grid-cols-2">
+            <ChartPanel
+              title="Weight vs target"
+              subtitle="Actual vs breed expected — worst deviation first"
+              loading={loading}
+              error={error}
+              empty={!loading && !error && weightData.length === 0}
+              emptyLabel="No weigh-in data yet"
+            >
+              <WeightVsTargetBars data={weightData} />
+            </ChartPanel>
+            <ChartPanel
+              title="FCR vs target"
+              subtitle="Latest FCR — red = above target"
+              loading={loading}
+              error={error}
+              empty={!loading && !error && fcrData.length === 0}
+              emptyLabel="No FCR data available yet"
+            >
+              <FcrTargetBars data={fcrData} />
+            </ChartPanel>
+          </div>
+          <ChartPanel
+            title="Weigh-in trend"
+            subtitle="Farm-average weight from vet logs and standalone samples (90 days)"
+            loading={weighTrends.loading}
+            error={weighTrends.error}
+            empty={!weighTrends.loading && !weighTrends.error && weightTrendData.length === 0}
+            emptyLabel="No weigh-in history in the selected period"
+          >
+            <WeightTrendLine data={weightTrendData} />
+          </ChartPanel>
+        </section>
+      )}
+
       {/* ══════════════ OPS TRENDS ══════════════ */}
       {show("ops_trends") && (
         <section className="mb-8 space-y-3">
-          <SectionHeader num="04" label="Ops trends" sub="Mortality and FCR performance over time" />
-          <div className="grid gap-4 xl:grid-cols-2">
+          <SectionHeader num="05" label="Ops trends" sub="Mortality performance over time" />
+          <div className="grid gap-4 xl:grid-cols-1">
             <ChartPanel title="Mortality trend" subtitle="7-day farm average mortality rate" loading={loading} error={error} empty={!loading && !error && flocks.length === 0}>
               <MortalityTrendLine data={mortalityData} />
-            </ChartPanel>
-            <ChartPanel title="FCR vs target" subtitle="Latest FCR — red = above target" loading={loading} error={error} empty={!loading && !error && fcrData.length === 0} emptyLabel="No FCR data available yet">
-              <FcrTargetBars data={fcrData} />
             </ChartPanel>
           </div>
         </section>
@@ -480,7 +596,7 @@ export function ManagementHome() {
       {/* ══════════════ BLOCKERS ══════════════ */}
       {show("blockers") && (
         <section className="mb-8 space-y-3">
-          <SectionHeader num="05" label="Operational blockers" sub="Overdue rounds and withdrawal blockers per flock"
+          <SectionHeader num="06" label="Operational blockers" sub="Overdue rounds and withdrawal blockers per flock"
             action={
               totalBlockers > 0 ? (
                 <span className="rounded-full border border-red-500/20 bg-red-500/10 px-2.5 py-0.5 text-xs font-semibold text-red-400">{totalBlockers} active</span>
@@ -498,7 +614,7 @@ export function ManagementHome() {
       {/* ══════════════ FLOCK SCANNER TABLE ══════════════ */}
       {show("flock_table") && (
         <section className="mb-8 space-y-3">
-          <SectionHeader num="06" label="Flock scanner" sub="Live status of all active flocks"
+          <SectionHeader num="07" label="Flock scanner" sub="Live status of all active flocks"
             action={<Link to={companyHref("farm/flocks")} className="text-xs text-[var(--primary-color)] hover:underline font-medium">View all →</Link>}
           />
           <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]">
@@ -510,6 +626,10 @@ export function ManagementHome() {
                     <th className="px-4 py-3">Barn</th>
                     <th className="px-4 py-3 text-center">Age</th>
                     <th className="px-4 py-3 text-right">Risk</th>
+                    <th className="px-4 py-3 text-right">Latest wt</th>
+                    <th className="px-4 py-3 text-right">Wt vs tgt</th>
+                    <th className="px-4 py-3 text-right">Last weigh-in</th>
+                    <th className="px-4 py-3 text-right">Proj. harvest</th>
                     <th className="px-4 py-3 text-right">FCR</th>
                     <th className="px-4 py-3 text-right">Mortality 7d</th>
                     <th className="px-4 py-3 text-center">Blockers</th>
@@ -520,19 +640,19 @@ export function ManagementHome() {
                 <tbody>
                   {loading && (
                     <tr>
-                      <td colSpan={9} className="px-4 py-8 text-center text-sm text-[var(--text-muted)] animate-pulse">Loading flock data…</td>
+                      <td colSpan={13} className="px-4 py-8 text-center text-sm text-[var(--text-muted)] animate-pulse">Loading flock data…</td>
                     </tr>
                   )}
                   {!loading && sortedFlocks.length === 0 && (
                     <tr>
-                      <td colSpan={9} className="px-4 py-10 text-center text-sm text-[var(--text-muted)]">No active flocks found.</td>
+                      <td colSpan={13} className="px-4 py-10 text-center text-sm text-[var(--text-muted)]">No active flocks found.</td>
                     </tr>
                   )}
                   {sortedFlocks.map(f => (
                     <tr key={f.flockId}
                       className="border-b border-[var(--border-color)] hover:bg-[var(--table-row-hover)] transition-colors group">
                       <td className="px-4 py-2.5">
-                        <Link to={companyHref(`farm/flocks/${f.flockId}`)}
+                        <Link to={`${companyHref(`farm/flocks/${f.flockId}`)}#weigh-in`}
                           className="font-semibold text-[var(--text-primary)] group-hover:text-[var(--primary-color)] transition-colors">
                           {f.label}
                         </Link>
@@ -545,6 +665,20 @@ export function ManagementHome() {
                             color: f.riskScore >= 75 ? "#f87171" : f.riskScore >= 50 ? "#f97316" : f.riskScore >= 25 ? "#fbbf24" : "#22c78a"
                           }}>{Math.round(f.riskScore)}</span>
                         </div>
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-xs tabular-nums text-[var(--text-secondary)]">
+                        {f.latestWeightKg != null ? Number(f.latestWeightKg).toFixed(2) : <span className="text-[var(--text-muted)]">—</span>}
+                      </td>
+                      <td className={["px-4 py-2.5 text-right text-xs tabular-nums", (f.weightDeviationPct ?? 0) < -5 ? "text-red-400 font-semibold" : ""].join(" ")}>
+                        {f.weightDeviationPct != null ? `${f.weightDeviationPct >= 0 ? "+" : ""}${Number(f.weightDeviationPct).toFixed(1)}%` : <span className="text-[var(--text-muted)]">—</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-xs text-[var(--text-muted)] tabular-nums">
+                        {formatWeighDate(f.latestWeighDate)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-xs tabular-nums text-[var(--text-secondary)]">
+                        {f.projections?.projectedHarvestWeightKg != null
+                          ? Number(f.projections.projectedHarvestWeightKg).toFixed(2)
+                          : <span className="text-[var(--text-muted)]">—</span>}
                       </td>
                       <td className="px-4 py-2.5 text-right text-xs tabular-nums">
                         {f.latestFcr != null ? (
@@ -585,7 +719,89 @@ export function ManagementHome() {
       {/* ══════════════ FINANCIAL PULSE ══════════════ */}
       {show("finance") && (
         <section className="mb-8 space-y-3">
-          <SectionHeader num="07" label="Financial pulse" sub="Financial metrics (subject to permissions)" />
+          <SectionHeader
+            num="08"
+            label="Financial pulse"
+            sub="Biomass valuation and IAS 41 snapshots"
+            action={
+              canOpenAccountingApprovals ? (
+                <Link to={companyHref("farm/accounting-approvals")} className="text-xs text-[var(--primary-color)] hover:underline font-medium">
+                  Accounting approvals →
+                </Link>
+              ) : undefined
+            }
+          />
+          <div className="grid gap-4 lg:grid-cols-3">
+            <FinanceCard label="Farm biomass">
+              <p className="font-mono-data text-2xl font-bold text-[var(--text-primary)]">
+                {loading ? "…" : formatKg(biomassKg)}
+              </p>
+              <p className="text-xs text-[var(--text-muted)] mt-1">
+                {growth.flocksWithWeight} flock{growth.flocksWithWeight !== 1 ? "s" : ""} with weigh-in data
+              </p>
+            </FinanceCard>
+
+            <FinanceCard label="Est. fair value (reference market)">
+              <p className="font-mono-data text-2xl font-bold text-[var(--text-primary)]">
+                {loading ? "…" : fairValueRwf != null ? formatRwf(fairValueRwf) : "—"}
+              </p>
+              <p className="text-xs text-[var(--text-muted)] mt-1">
+                {farmTotals?.referenceMarketPriceRwfPerKg != null
+                  ? `At ${formatRwf(farmTotals.referenceMarketPriceRwfPerKg)}/kg reference price`
+                  : "Set reference market price in System config"}
+              </p>
+            </FinanceCard>
+
+            <FinanceCard label="Approved IAS 41 snapshots">
+              <p className="font-mono-data text-2xl font-bold text-[var(--text-primary)]">
+                {loading ? "…" : farmTotals?.approvedValuationTotalRwf != null ? formatRwf(farmTotals.approvedValuationTotalRwf) : "—"}
+              </p>
+              <p className="text-xs text-[var(--text-muted)] mt-1">Latest approved/posted snapshot totals per flock</p>
+            </FinanceCard>
+          </div>
+
+          {topBiomass.length > 0 && (
+            <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]">
+              <div className="px-4 py-3 border-b border-[var(--border-color)]">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Top flocks by biomass</p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="border-b border-[var(--border-color)] text-left text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] bg-[var(--table-header-bg)]">
+                      <th className="px-4 py-2">Flock</th>
+                      <th className="px-4 py-2 text-right">Biomass</th>
+                      <th className="px-4 py-2 text-right">Wt vs tgt</th>
+                      <th className="px-4 py-2 text-right">FCR</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {topBiomass.map((row) => (
+                      <tr key={row.flockId} className="border-b border-[var(--border-color)] hover:bg-[var(--table-row-hover)]">
+                        <td className="px-4 py-2">
+                          <Link to={companyHref(`farm/flocks/${row.flockId}`)} className="font-medium text-[var(--text-primary)] hover:text-[var(--primary-color)]">
+                            {row.label}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums">{formatKg(row.biomassKg)}</td>
+                        <td className={["px-4 py-2 text-right tabular-nums text-xs", (row.weightDeviationPct ?? 0) < -5 ? "text-red-400" : ""].join(" ")}>
+                          {row.weightDeviationPct != null ? `${row.weightDeviationPct >= 0 ? "+" : ""}${row.weightDeviationPct.toFixed(1)}%` : "—"}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums text-xs">
+                          {row.latestFcr != null ? (
+                            <span style={{ color: row.latestFcr > row.expectedFcrRange.max ? "#f87171" : "var(--text-secondary)" }}>
+                              {Number(row.latestFcr).toFixed(2)}
+                            </span>
+                          ) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           <div className="grid gap-4 lg:grid-cols-3">
             <PermissionGuard
               permission="view_net_profit"

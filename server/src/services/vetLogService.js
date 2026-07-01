@@ -12,6 +12,10 @@ export const VET_LOG_LIST_EXTRA_SELECT = `
   v.underweight_pct AS "underweightPct",
   v.total_feed_used_kg AS "totalFeedUsedKg",
   (v.avg_weight_kg IS NOT NULL) AS "hasWeightSample",
+  v.previous_vet_log_id::text AS "previousVetLogId",
+  v.mortality_logged_since_last_visit AS "mortalityLoggedSinceLastVisit",
+  v.mortality_confirmed_since_last_visit AS "mortalityConfirmedSinceLastVisit",
+  v.confirmed_live_count AS "confirmedLiveCount",
   t.id AS "treatmentId",
   t.medicine_name AS "medicineName"`;
 

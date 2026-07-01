@@ -3169,7 +3169,7 @@ app.put("/api/admin/system-config", requireAuth, requireLeadVetUp, requirePageAc
 // ─── Dashboard widget visibility config ────────────────────────────────────
 const DASHBOARD_WIDGETS_KEY = "dashboard_widgets_visible";
 const DASHBOARD_WIDGETS_DEFAULT = [
-  "exec_kpis","health_score","risk_intel","ops_trends","blockers","flock_table","finance",
+  "exec_kpis","health_score","risk_intel","growth_metrics","ops_trends","blockers","flock_table","finance",
 ];
 
 app.get("/api/admin/dashboard-widgets", requireAuth, requireManagerOrSuperuser, async (_req, res) => {
@@ -10211,6 +10211,20 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
       companyParams
     ).catch(() => ({ rows: [] }));
 
+    const valuationAgg = await dbQuery(
+      `SELECT DISTINCT ON (flock_id)
+              flock_id::text AS "flockId",
+              total_fair_value_rwf AS "totalFairValueRwf",
+              snapshot_date::text AS "snapshotDate"
+         FROM flock_valuation_snapshots
+        WHERE flock_id IN (${activeFlockIdsSql})
+          AND status IN ('approved', 'posted')
+        ORDER BY flock_id, snapshot_date DESC`,
+      companyParams
+    ).catch(() => ({ rows: [] }));
+
+    const referencePricing = systemConfig.getReferenceMarketPricing();
+
     const overdueAgg = await dbQuery(
       `SELECT flock_id::text AS "flockId",
               COUNT(*)::int AS "overdueRounds",
@@ -10239,6 +10253,7 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
     const slaughterByFlock = new Map(slaughterAgg.rows.map((r) => [String(r.flockId), r]));
     const overdueByFlock = new Map(overdueAgg.rows.map((r) => [String(r.flockId), r]));
     const withdrawalByFlock = new Map(withdrawalAgg.rows.map((r) => [String(r.flockId), r]));
+    const valuationByFlock = new Map(valuationAgg.rows.map((r) => [String(r.flockId), r]));
 
     const rows = [];
     for (const f of flocks.rows) {
@@ -10383,6 +10398,18 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
       const needsRole = withdrawalCount > 0 || mortalitySpikePct > 0.5 ? "vet_manager" : riskScore > 45 ? "vet" : "laborer";
       const pendingSince = overdue.oldestPlannedFor ?? withdrawal.safeAfterAt ?? null;
 
+      const biomassKg =
+        latestWeightKg != null && birdsLiveEstimate > 0
+          ? Number((birdsLiveEstimate * latestWeightKg).toFixed(2))
+          : null;
+      const estimatedFairValueRwf =
+        biomassKg != null && referencePricing.netFairValuePerKg != null
+          ? Math.round(biomassKg * referencePricing.netFairValuePerKg)
+          : null;
+      const valSnap = valuationByFlock.get(String(f.id));
+      const lastValuationSnapshotRwf = valSnap?.totalFairValueRwf != null ? Number(valSnap.totalFairValueRwf) : null;
+      const lastValuationDate = valSnap?.snapshotDate ?? null;
+
       rows.push({
         flockId: f.id,
         label,
@@ -10391,6 +10418,11 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
         latestFcr,
         latestWeightKg,
         latestWeighDate: weigh.latestWeighDate ?? null,
+        birdsLiveEstimate,
+        biomassKg,
+        estimatedFairValueRwf,
+        lastValuationSnapshotRwf,
+        lastValuationDate,
         overdueRounds: overdueCount,
         withdrawalBlockers: withdrawalCount,
         mortality7d: mortality7dCount,
@@ -10481,6 +10513,30 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
     const elevatedMortality = rows.filter((r) => (r.mortality24hDeltaPct || 0) > 0.5).length;
     if (elevatedMortality >= 2) insights.push("Multiple flocks showing elevated mortality");
 
+    const staleWeighIns = rows.filter((r) => {
+      if (!r.latestWeighDate) return true;
+      const ms = new Date(r.latestWeighDate).getTime();
+      return !Number.isFinite(ms) || Date.now() - ms > 14 * 86400000;
+    }).length;
+    if (staleWeighIns > 0) {
+      insights.push(
+        `${staleWeighIns} flock${staleWeighIns !== 1 ? "s have" : " has"} no weigh-in within 14 days — schedule a vet visit`
+      );
+    }
+    const belowTarget = rows.filter((r) => (r.weightDeviationPct ?? 0) < -5).length;
+    if (belowTarget >= 2) {
+      insights.push(`${belowTarget} flocks are more than 5% below target weight for age`);
+    }
+
+    let totalBiomassKg = 0;
+    let estimatedFairValueSum = 0;
+    let approvedValuationTotalRwf = 0;
+    for (const r of rows) {
+      if (r.biomassKg != null) totalBiomassKg += Number(r.biomassKg);
+      if (r.estimatedFairValueRwf != null) estimatedFairValueSum += Number(r.estimatedFairValueRwf);
+      if (r.lastValuationSnapshotRwf != null) approvedValuationTotalRwf += Number(r.lastValuationSnapshotRwf);
+    }
+
     res.json({
       flocks: rows.sort((a, b) => Number(b.riskScore || 0) - Number(a.riskScore || 0)),
       barns: barnSummary,
@@ -10488,10 +10544,85 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
       farmHealthScore,
       mostImprovedFlockId: mostImproved?.flockId ?? null,
       worstDecliningFlockId: worstDeclining?.flockId ?? null,
+      farmTotals: {
+        totalBiomassKg: Number(totalBiomassKg.toFixed(1)),
+        estimatedFairValueRwf:
+          referencePricing.netFairValuePerKg != null && estimatedFairValueSum > 0
+            ? Math.round(estimatedFairValueSum)
+            : null,
+        referenceMarketPriceRwfPerKg: referencePricing.marketPricePerKg,
+        approvedValuationTotalRwf: approvedValuationTotalRwf > 0 ? Math.round(approvedValuationTotalRwf) : null,
+      },
     });
   } catch (e) {
     console.error("[ERROR]", "[db] GET /api/farm/ops-board:", e instanceof Error ? e.message : e);
     res.status(503).json({ error: "Unable to build operations board." });
+  }
+});
+
+app.get("/api/farm/weigh-in-trends", requireAuth, requireFarmAccess, requireAnyPageAccess(["dashboard_laborer", "dashboard_vet", "dashboard_management"]), requireAction("flock.view"), async (req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
+  const scopedCompanyId = await userCompanyId(req);
+  const isSuper = authIsSuperuser(req);
+  const days = Math.min(365, Math.max(7, Number(req.query.days) || 90));
+  const flockIdFilter = req.query.flockId != null && String(req.query.flockId).trim() !== ""
+    ? String(req.query.flockId).trim()
+    : null;
+
+  const params = isSuper ? [days] : [scopedCompanyId, days];
+  const daysParam = isSuper ? 1 : 2;
+  let flockClause = "";
+  if (flockIdFilter) {
+    const flockParam = isSuper ? 2 : 3;
+    flockClause = ` AND w.flock_id = $${flockParam}::text`;
+    params.push(flockIdFilter);
+  }
+
+  try {
+    const result = await dbQuery(
+      `SELECT w.flock_id::text AS "flockId",
+              COALESCE(f.code, CONCAT('Flock ', LEFT(f.id::text, 8))) AS label,
+              w.weigh_date::text AS "weighDate",
+              w.avg_weight_kg::float AS "avgWeightKg",
+              w.age_days AS "ageDays",
+              w.fcr::float AS "fcrAtSample",
+              COALESCE(w.source, 'standalone') AS source,
+              w.vet_log_id::text AS "vetLogId"
+         FROM weigh_ins w
+         JOIN poultry_flocks f ON f.id = w.flock_id
+        WHERE f.status = 'active'
+          ${isSuper ? "" : "AND f.company_id = $1::uuid"}
+          AND w.weigh_date >= (CURRENT_DATE - $${daysParam}::int)${flockClause}
+        ORDER BY w.weigh_date ASC, w.flock_id`,
+      params
+    );
+
+    const points = result.rows.map((row) => {
+      const ageDays = row.ageDays != null ? Number(row.ageDays) : null;
+      const expectedWeightKg =
+        ageDays != null && Number.isFinite(ageDays)
+          ? Number(interpolateCurve(BENCHMARK_CACHE.expectedWeightByDay, ageDays).toFixed(3))
+          : null;
+      return {
+        flockId: String(row.flockId),
+        label: String(row.label ?? row.flockId),
+        weighDate: String(row.weighDate),
+        avgWeightKg: Number(row.avgWeightKg),
+        expectedWeightKg,
+        source: row.source != null ? String(row.source) : null,
+        vetLogId: row.vetLogId != null ? String(row.vetLogId) : null,
+        ageDays,
+        fcrAtSample: row.fcrAtSample != null ? Number(row.fcrAtSample) : null,
+      };
+    });
+
+    res.json({ points, days });
+  } catch (e) {
+    console.error("[ERROR]", "[db] GET /api/farm/weigh-in-trends:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Unable to load weigh-in trends." });
   }
 });
 

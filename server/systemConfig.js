@@ -97,7 +97,24 @@ export const DEFAULT_APP_SETTINGS = {
   checkin_commission_on_time_rwf: "500",
   checkin_deduction_late_rwf: "300",
   checkin_deduction_missed_rwf: "500",
+  reference_market_price_rwf_per_kg: "",
+  reference_costs_to_sell_rwf_per_kg: "0",
 };
+
+/** Net reference price per kg for biomass fair-value estimates (RWF). */
+export function getReferenceMarketPricing() {
+  const market = Number(memAppSettings.reference_market_price_rwf_per_kg);
+  const costs = Number(memAppSettings.reference_costs_to_sell_rwf_per_kg ?? 0);
+  if (!Number.isFinite(market) || market <= 0) {
+    return { marketPricePerKg: null, costsToSellPerKg: 0, netFairValuePerKg: null };
+  }
+  const costsSafe = Number.isFinite(costs) && costs >= 0 ? costs : 0;
+  return {
+    marketPricePerKg: market,
+    costsToSellPerKg: costsSafe,
+    netFairValuePerKg: Math.max(0, market - costsSafe),
+  };
+}
 
 /** @type {Array<{ category: string, value: string, label: string, sortOrder: number, active: boolean, metadata: object }>} */
 let memReferenceRows = [];
@@ -496,6 +513,8 @@ export async function applyAdminSystemConfigPut(payload, dbPool, dbQuery, hasDbF
       "rate_limit_api_window_ms",
       "max_image_upload_bytes",
       "demo_initial_count",
+      "reference_market_price_rwf_per_kg",
+      "reference_costs_to_sell_rwf_per_kg",
     ]);
     const next = { ...memAppSettings };
     const clean = { ...settingsIn };
@@ -503,7 +522,17 @@ export async function applyAdminSystemConfigPut(payload, dbPool, dbQuery, hasDbF
     for (const k of Object.keys(clean)) {
       if (!allowedKeys.has(k)) continue;
       let v = String(clean[k] ?? "").trim();
-      if (k === "max_image_upload_bytes") {
+      if (k === "reference_market_price_rwf_per_kg") {
+        if (v === "") {
+          next[k] = "";
+          continue;
+        }
+        const n = Math.max(0, Math.min(1_000_000, Number(v) || 0));
+        v = n > 0 ? String(Math.floor(n)) : "";
+      } else if (k === "reference_costs_to_sell_rwf_per_kg") {
+        const n = Math.max(0, Math.min(1_000_000, Number(v) || 0));
+        v = String(Math.floor(n));
+      } else if (k === "max_image_upload_bytes") {
         const n = Math.max(1024 * 100, Math.min(50 * 1024 * 1024, Number(v) || 0));
         v = String(n);
       } else if (k.endsWith("_ms")) {

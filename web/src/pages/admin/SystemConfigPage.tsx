@@ -50,6 +50,8 @@ const SETTING_FIELDS: Array<{ key: string; label: string }> = [
   { key: "rate_limit_api_window_ms", label: "General API window (ms)" },
   { key: "max_image_upload_bytes", label: "Max image upload (bytes)" },
   { key: "demo_initial_count", label: "Demo initial flock count fallback" },
+  { key: "reference_market_price_rwf_per_kg", label: "Reference market price (RWF/kg) — biomass fair value" },
+  { key: "reference_costs_to_sell_rwf_per_kg", label: "Reference costs to sell (RWF/kg) — deducted from fair value" },
 ];
 
 export function SystemConfigPage() {
