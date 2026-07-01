@@ -7,6 +7,8 @@ import {
   canCreateVetLog,
   canReviewVetLog,
   needsVetLogApproval,
+  attachMedicineToVetLog,
+  isValidVetLogMedicineDoseUnit,
 } from "../src/services/vetLogService.js";
 
 describe("vetLogSchema", () => {
@@ -65,9 +67,10 @@ describe("vetLogSchema", () => {
 });
 
 describe("vet log role permissions", () => {
-  it("canCreateVetLog allows vet_manager and manager", () => {
+  it("canCreateVetLog allows vet_manager, manager, and company_admin", () => {
     assert.equal(canCreateVetLog({ role: "vet_manager" }), true);
     assert.equal(canCreateVetLog({ role: "manager" }), true);
+    assert.equal(canCreateVetLog({ role: "company_admin" }), true);
     assert.equal(canCreateVetLog({ role: "vet" }), true);
     assert.equal(canCreateVetLog({ role: "laborer" }), false);
   });
@@ -97,6 +100,93 @@ describe("vet log ERPNext sync policy", () => {
   it("syncs on review only when approved", () => {
     assert.equal(shouldSyncVetLogOnReview("approve"), true);
     assert.equal(shouldSyncVetLogOnReview("reject"), false);
+  });
+});
+
+describe("attachMedicineToVetLog", () => {
+  const systemConfig = {
+    validateAgainstCategory(category, value, fallbacks = []) {
+      const codes = {
+        treatment_dose_unit: ["ml", "g", "mg", "tablet", "drop", "other"],
+        medicine_admin_route: ["drinking_water", "feed_additive", "injection", "topical"],
+      };
+      const allowed = codes[category] ?? fallbacks;
+      return allowed.includes(value);
+    },
+    getStaticFallbackCodes(category) {
+      return [];
+    },
+  };
+
+  it("accepts medicine_admin_route values like drinking_water", async () => {
+    const queries = [];
+    const client = {
+      query: async (sql, params) => {
+        queries.push({ sql, params });
+        if (sql.includes("medicine_inventory")) return { rows: [] };
+        if (sql.includes("INSERT INTO flock_treatments")) return { rows: [] };
+        return { rows: [] };
+      },
+    };
+    const treatmentId = await attachMedicineToVetLog({
+      client,
+      vetLogId: "vl-12345678",
+      flockId: "flock-1",
+      authorUserId: "user-1",
+      medicine: {
+        medicineName: "Amoxicillin",
+        dose: 10,
+        doseUnit: "ml",
+        route: "drinking_water",
+      },
+      systemConfig,
+      treatmentReasonCodes: [],
+    });
+    assert.match(treatmentId, /^trt_/);
+    const insert = queries.find((q) => q.sql.includes("INSERT INTO flock_treatments"));
+    assert.ok(insert);
+    assert.equal(insert.params[6], "drinking_water");
+    assert.match(insert.sql, /'vet_directive'/);
+  });
+
+  it("rejects treatment_route-only values like oral", async () => {
+    const client = { query: async () => ({ rows: [] }) };
+    await assert.rejects(
+      () =>
+        attachMedicineToVetLog({
+          client,
+          vetLogId: "vl-12345678",
+          flockId: "flock-1",
+          authorUserId: "user-1",
+          medicine: {
+            medicineName: "X",
+            dose: 1,
+            doseUnit: "ml",
+            route: "oral",
+          },
+          systemConfig,
+          treatmentReasonCodes: [],
+        }),
+      /Invalid route for treatment/
+    );
+  });
+});
+
+describe("isValidVetLogMedicineDoseUnit", () => {
+  const systemConfig = {
+    validateAgainstCategory(category, value) {
+      return category === "treatment_dose_unit" && value === "ml";
+    },
+    getStaticFallbackCodes() {
+      return [];
+    },
+  };
+
+  it("allows treatment units and vet-log extras", () => {
+    assert.equal(isValidVetLogMedicineDoseUnit(systemConfig, "ml"), true);
+    assert.equal(isValidVetLogMedicineDoseUnit(systemConfig, "doses"), true);
+    assert.equal(isValidVetLogMedicineDoseUnit(systemConfig, "sachets"), true);
+    assert.equal(isValidVetLogMedicineDoseUnit(systemConfig, "invalid"), false);
   });
 });
 

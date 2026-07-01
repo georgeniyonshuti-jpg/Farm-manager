@@ -38,11 +38,37 @@ export function shouldSyncVetLogOnReview(action) {
   return action === "approve";
 }
 
-/** vet, vet_manager, manager, superuser — not laborer/dispatcher. */
+/** vet, vet_manager, manager, company_admin, superuser — not laborer/dispatcher. */
 export function canCreateVetLog(user) {
   if (!user) return false;
   const r = user.role;
-  return r === "vet" || r === "vet_manager" || r === "manager" || r === "superuser";
+  return (
+    r === "vet" ||
+    r === "vet_manager" ||
+    r === "manager" ||
+    r === "company_admin" ||
+    r === "superuser"
+  );
+}
+
+/** Extra dose units accepted on vet-log medicine (beyond treatment_dose_unit). */
+const VET_LOG_EXTRA_DOSE_UNITS = ["doses", "sachets"];
+
+/**
+ * @param {object} systemConfig
+ * @param {string} doseUnit
+ */
+export function isValidVetLogMedicineDoseUnit(systemConfig, doseUnit) {
+  if (
+    systemConfig.validateAgainstCategory(
+      "treatment_dose_unit",
+      doseUnit,
+      systemConfig.getStaticFallbackCodes("treatment_dose_unit")
+    )
+  ) {
+    return true;
+  }
+  return VET_LOG_EXTRA_DOSE_UNITS.includes(doseUnit);
 }
 
 /** vet_manager, manager, superuser — anyone at lead-vet tier or above. */
@@ -236,20 +262,14 @@ export async function attachMedicineToVetLog({
     throw new Error("medicineName, dose, doseUnit, and route are required when logging medicine");
   }
 
-  if (
-    !systemConfig.validateAgainstCategory(
-      "treatment_dose_unit",
-      doseUnit,
-      systemConfig.getStaticFallbackCodes("treatment_dose_unit")
-    )
-  ) {
+  if (!isValidVetLogMedicineDoseUnit(systemConfig, doseUnit)) {
     throw new Error("Invalid doseUnit for treatment");
   }
   if (
     !systemConfig.validateAgainstCategory(
-      "treatment_route",
+      "medicine_admin_route",
       route,
-      systemConfig.getStaticFallbackCodes("treatment_route")
+      systemConfig.getStaticFallbackCodes("medicine_admin_route")
     )
   ) {
     throw new Error("Invalid route for treatment");
@@ -260,7 +280,7 @@ export async function attachMedicineToVetLog({
     `INSERT INTO flock_treatments
        (id, flock_id, at, disease_or_reason, medicine_name, reason_code, dose, dose_unit, route,
         duration_days, withdrawal_days, notes, administered_by_user_id, vet_log_id)
-     VALUES ($1, $2, now(), $3, $4, 'vet_visit', $5, $6, $7, 1, $8, $9, $10, $11::uuid)`,
+     VALUES ($1, $2, now(), $3, $4, 'vet_directive', $5, $6, $7, 1, $8, $9, $10, $11::uuid)`,
     [
       treatmentId,
       flockId,

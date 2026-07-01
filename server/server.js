@@ -5725,7 +5725,7 @@ app.get("/api/flocks/:id/vet-log-mortality-review", requireAuth, requireFarmAcce
 
 app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("farm_vet_logs"), async (req, res) => {
   if (!canCreateVetLog(req.authUser)) {
-    res.status(403).json({ error: "Only vet, vet manager, manager, or superuser can create vet logs" });
+    res.status(403).json({ error: "Only vet, vet manager, manager, company admin, or superuser can create vet logs" });
     return;
   }
   const parsed = vetLogSchema.safeParse(req.body ?? {});
@@ -5873,7 +5873,13 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
       await client.query("ROLLBACK");
       const msg = e instanceof Error ? e.message : String(e);
       console.error("[ERROR]", "[db] POST /api/vet-logs:", msg);
-      res.status(400).json({ error: msg.includes("required") || msg.includes("Invalid") ? msg : "Could not save vet log." });
+      let clientMsg = msg || "Could not save vet log.";
+      if (/duplicate key|unique constraint/i.test(msg)) {
+        clientMsg = "A vet log already exists for this flock on this date.";
+      } else if (/column .+ does not exist/i.test(msg)) {
+        clientMsg = "Vet log storage is not fully migrated yet. Retry after the next deploy.";
+      }
+      res.status(400).json({ error: clientMsg });
       return;
     } finally {
       client.release();

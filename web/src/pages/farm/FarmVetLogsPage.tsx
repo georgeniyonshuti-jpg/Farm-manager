@@ -14,6 +14,7 @@ import {
   type VetLogListRow,
 } from "../../api/farm.api";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
+import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { canReviewVetLog, canSubmitVetLog, vetLogNeedsManagerReview } from "../../auth/permissions";
 import { FlockPerformancePanel } from "../../components/farm/FlockPerformancePanel";
 import { VetLogValuePreview } from "../../components/farm/VetLogValuePreview";
@@ -33,6 +34,23 @@ type MedicineOption = {
   name: string;
   unit: string;
 };
+
+const FALLBACK_MEDICINE_ROUTES = [
+  { value: "drinking_water", label: "Drinking water" },
+  { value: "feed_additive", label: "Feed additive" },
+  { value: "injection", label: "Injection" },
+  { value: "topical", label: "Topical" },
+];
+
+const FALLBACK_MEDICINE_DOSE_UNITS = [
+  { value: "ml", label: "ml" },
+  { value: "g", label: "g" },
+  { value: "mg", label: "mg" },
+  { value: "tablet", label: "tablet" },
+  { value: "doses", label: "doses" },
+  { value: "sachets", label: "sachets" },
+  { value: "other", label: "other" },
+];
 
 function StatusBadge({ status }: { status: string }) {
   if (status === "approved") return <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-800">Approved</span>;
@@ -65,6 +83,8 @@ function resetFormState() {
 export function FarmVetLogsPage() {
   const { token, user } = useAuth();
   const { showToast } = useToast();
+  const medicineRouteOptions = useReferenceOptions("medicine_admin_route", token, FALLBACK_MEDICINE_ROUTES);
+  const medicineDoseUnitOptions = useReferenceOptions("treatment_dose_unit", token, FALLBACK_MEDICINE_DOSE_UNITS);
   const [searchParams] = useSearchParams();
   const {
     flocks,
@@ -557,19 +577,17 @@ export function FarmVetLogsPage() {
                     <label className="block text-sm font-medium text-neutral-700">
                       Unit
                       <select className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-sm" value={form.medicineDoseUnit} onChange={(e) => setForm((f) => ({ ...f, medicineDoseUnit: e.target.value }))}>
-                        <option value="ml">ml</option>
-                        <option value="g">g</option>
-                        <option value="doses">doses</option>
-                        <option value="sachets">sachets</option>
+                        {medicineDoseUnitOptions.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
                       </select>
                     </label>
                     <label className="block text-sm font-medium text-neutral-700">
                       Route
                       <select className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-1.5 text-sm" value={form.medicineRoute} onChange={(e) => setForm((f) => ({ ...f, medicineRoute: e.target.value }))}>
-                        <option value="drinking_water">Drinking water</option>
-                        <option value="feed_additive">Feed additive</option>
-                        <option value="injection">Injection</option>
-                        <option value="topical">Topical</option>
+                        {medicineRouteOptions.map((opt) => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
                       </select>
                     </label>
                     <label className="block text-sm font-medium text-neutral-700">
