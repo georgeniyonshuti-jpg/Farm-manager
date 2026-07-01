@@ -76,7 +76,8 @@ describe("weigh-in trends API", () => {
     assert.ok(block, "weigh-in-trends route must exist");
     assert.ok(block.includes("company_id"), "Must filter by company for non-superusers");
     assert.ok(block.includes("interpolateCurve"), "Must compute expected weight at sample age");
-    assert.ok(block.includes("vet_log_id"), "Must expose vet log source linkage");
+    assert.ok(block.includes("weigh_in_id"), "Must link vet-log weigh-ins when available");
+    assert.ok(block.includes("id::text"), "Must compare flock ids as text for weigh_ins join");
   });
 });
 

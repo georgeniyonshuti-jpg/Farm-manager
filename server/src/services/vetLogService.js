@@ -19,6 +19,11 @@ export const VET_LOG_LIST_EXTRA_SELECT = `
   t.id AS "treatmentId",
   t.medicine_name AS "medicineName"`;
 
+/** Safe fallback when newer vet-log columns are not migrated yet. */
+export const VET_LOG_LIST_EXTRA_SELECT_MINIMAL = `
+  t.id AS "treatmentId",
+  t.medicine_name AS "medicineName"`;
+
 export const VET_LOG_LIST_EXTRA_JOINS = `
   LEFT JOIN LATERAL (
     SELECT ft.id, ft.medicine_name

@@ -67,6 +67,7 @@ import {
 } from "./src/services/feedStockService.js";
 import {
   VET_LOG_LIST_EXTRA_SELECT,
+  VET_LOG_LIST_EXTRA_SELECT_MINIMAL,
   VET_LOG_LIST_EXTRA_JOINS,
   shouldSyncVetLogOnCreate,
   shouldSyncVetLogOnReview,
@@ -5970,7 +5971,7 @@ app.get("/api/vet-logs", requireAuth, requireFarmAccess, requireAnyPageAccess(["
   const scopedCompanyId = await userCompanyId(req);
   const isSuper = authIsSuperuser(req);
   if (hasDb()) {
-    try {
+    const buildVetLogListSql = (extraSelect) => {
       let sql = `SELECT v.id::text AS id, v.flock_id AS "flockId", v.author_user_id AS "authorUserId",
                         v.log_date AS "logDate", v.observations, v.actions_taken AS "actionsTaken",
                         v.recommendations, v.submission_status AS "submissionStatus",
@@ -5978,7 +5979,7 @@ app.get("/api/vet-logs", requireAuth, requireFarmAccess, requireAnyPageAccess(["
                         v.review_notes AS "reviewNotes", v.created_at AS "createdAt",
                         v.fcr_at_log_time AS "fcrAtLogTime", v.fcr_status AS "fcrStatus",
                         v.fcr_target_min AS "fcrTargetMin", v.fcr_target_max AS "fcrTargetMax",
-                        ${VET_LOG_LIST_EXTRA_SELECT},
+                        ${extraSelect},
                         u.full_name AS "authorName", f.code AS "flockCode"
                    FROM farm_vet_logs v
                    ${VET_LOG_LIST_EXTRA_JOINS}
@@ -5994,13 +5995,28 @@ app.get("/api/vet-logs", requireAuth, requireFarmAccess, requireAnyPageAccess(["
       if (from) { params.push(from); sql += ` AND v.log_date >= $${params.length}::date`; }
       if (to) { params.push(to); sql += ` AND v.log_date <= $${params.length}::date`; }
       if (q) { params.push(`%${q}%`); sql += ` AND (v.observations ILIKE $${params.length} OR v.actions_taken ILIKE $${params.length} OR v.recommendations ILIKE $${params.length})`; }
+      return { sql, params };
+    };
+    const runVetLogListQuery = async (extraSelect) => {
+      const { sql, params } = buildVetLogListSql(extraSelect);
       const countSql = sql.replace(/SELECT[\s\S]+?FROM/, "SELECT count(*)::int AS total FROM");
       const countR = await dbQuery(countSql, params);
       const total = countR.rows[0]?.total ?? 0;
-      sql += ` ORDER BY v.log_date DESC, v.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
-      params.push(pageSize, offset);
-      const r = await dbQuery(sql, params);
-      res.json({ logs: r.rows, total, page, pageSize });
+      const listSql = `${sql} ORDER BY v.log_date DESC, v.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      const listParams = [...params, pageSize, offset];
+      const r = await dbQuery(listSql, listParams);
+      return { logs: r.rows, total, page, pageSize };
+    };
+    try {
+      let payload;
+      try {
+        payload = await runVetLogListQuery(VET_LOG_LIST_EXTRA_SELECT);
+      } catch (e) {
+        if (!isPgMissingColumnError(e)) throw e;
+        console.warn("[WARN]", "[db] GET /api/vet-logs: falling back to minimal select:", e instanceof Error ? e.message : e);
+        payload = await runVetLogListQuery(VET_LOG_LIST_EXTRA_SELECT_MINIMAL);
+      }
+      res.json(payload);
       return;
     } catch (e) {
       console.error("[ERROR]", "[db] GET /api/vet-logs:", e instanceof Error ? e.message : e);
@@ -6551,6 +6567,12 @@ const BENCHMARK_CACHE = {
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
+}
+
+function isPgMissingColumnError(e) {
+  const code = e && typeof e === "object" ? e.code : null;
+  const msg = e instanceof Error ? e.message : String(e ?? "");
+  return code === "42703" || /column .* does not exist/i.test(msg);
 }
 
 function interpolateCurve(curve, x) {
@@ -10572,33 +10594,49 @@ app.get("/api/farm/weigh-in-trends", requireAuth, requireFarmAccess, requireAnyP
     ? String(req.query.flockId).trim()
     : null;
 
+  const activeFlockIdsSql = isSuper
+    ? `SELECT id::text FROM poultry_flocks WHERE status = 'active'`
+    : `SELECT id::text FROM poultry_flocks WHERE status = 'active' AND company_id = $1::uuid`;
   const params = isSuper ? [days] : [scopedCompanyId, days];
   const daysParam = isSuper ? 1 : 2;
   let flockClause = "";
   if (flockIdFilter) {
     const flockParam = isSuper ? 2 : 3;
-    flockClause = ` AND w.flock_id = $${flockParam}::text`;
+    flockClause = ` AND w.flock_id = $${flockParam}`;
     params.push(flockIdFilter);
   }
 
-  try {
-    const result = await dbQuery(
-      `SELECT w.flock_id::text AS "flockId",
-              COALESCE(f.code, CONCAT('Flock ', LEFT(f.id::text, 8))) AS label,
+  const whereTail = ` AND w.weigh_date >= (CURRENT_DATE - $${daysParam}::int)${flockClause}`;
+  const baseSelect = `SELECT w.flock_id::text AS "flockId",
+              COALESCE(f.code, CONCAT('Flock ', LEFT(w.flock_id, 8))) AS label,
               w.weigh_date::text AS "weighDate",
               w.avg_weight_kg::float AS "avgWeightKg",
               w.age_days AS "ageDays",
-              w.fcr::float AS "fcrAtSample",
-              COALESCE(w.source, 'standalone') AS source,
-              w.vet_log_id::text AS "vetLogId"
-         FROM weigh_ins w
-         JOIN poultry_flocks f ON f.id = w.flock_id
-        WHERE f.status = 'active'
-          ${isSuper ? "" : "AND f.company_id = $1::uuid"}
-          AND w.weigh_date >= (CURRENT_DATE - $${daysParam}::int)${flockClause}
-        ORDER BY w.weigh_date ASC, w.flock_id`,
-      params
-    );
+              w.fcr::float AS "fcrAtSample"`;
+  const baseFrom = ` FROM weigh_ins w
+         LEFT JOIN poultry_flocks f ON f.id::text = w.flock_id
+        WHERE w.flock_id IN (${activeFlockIdsSql})${whereTail}
+        ORDER BY w.weigh_date ASC, w.flock_id`;
+
+  try {
+    let result;
+    try {
+      result = await dbQuery(
+        `${baseSelect},
+                CASE WHEN vl.id IS NOT NULL THEN 'vet_log' ELSE 'standalone' END AS source,
+                vl.id::text AS "vetLogId"
+           FROM weigh_ins w
+           LEFT JOIN poultry_flocks f ON f.id::text = w.flock_id
+           LEFT JOIN farm_vet_logs vl ON vl.weigh_in_id = w.id
+          WHERE w.flock_id IN (${activeFlockIdsSql})${whereTail}
+          ORDER BY w.weigh_date ASC, w.flock_id`,
+        params
+      );
+    } catch (e) {
+      if (!isPgMissingColumnError(e)) throw e;
+      console.warn("[WARN]", "[db] weigh-in-trends vet-log join unavailable, using base query:", e instanceof Error ? e.message : e);
+      result = await dbQuery(`${baseSelect}${baseFrom}`, params);
+    }
 
     const points = result.rows.map((row) => {
       const ageDays = row.ageDays != null ? Number(row.ageDays) : null;
@@ -10612,7 +10650,7 @@ app.get("/api/farm/weigh-in-trends", requireAuth, requireFarmAccess, requireAnyP
         weighDate: String(row.weighDate),
         avgWeightKg: Number(row.avgWeightKg),
         expectedWeightKg,
-        source: row.source != null ? String(row.source) : null,
+        source: row.source != null ? String(row.source) : "standalone",
         vetLogId: row.vetLogId != null ? String(row.vetLogId) : null,
         ageDays,
         fcrAtSample: row.fcrAtSample != null ? Number(row.fcrAtSample) : null,
