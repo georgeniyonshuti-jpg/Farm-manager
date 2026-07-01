@@ -12,7 +12,7 @@
  *   finance        — Biomass, fair value, IAS 41 snapshot
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { PermissionGuard } from "../../components/PermissionGuard";
@@ -21,11 +21,11 @@ import { ChartPanel } from "../../components/dashboard/ChartPanel";
 import { MiniStat } from "../../components/dashboard/MiniStat";
 import {
   BlockersStacked,
+  FlockWeightTrendLines,
   FcrTargetBars,
   MortalityTrendLine,
   RiskDonut,
   TopRiskBars,
-  WeightTrendLine,
   WeightVsTargetBars,
 } from "../../components/dashboard/charts/OpsCharts";
 import { useOpsBoardData } from "../../hooks/useOpsBoardData";
@@ -33,12 +33,13 @@ import { useWeighInTrends } from "../../hooks/useWeighInTrends";
 import {
   biomassSummary,
   blockersSeries,
-  farmAverageWeightTrend,
+  flockWeightTrendChartData,
   fcrVsTargetSeries,
   mortalityTrendPseudoDaily,
   riskClassCount,
   topBiomassFlocks,
   topRiskSeries,
+  weighInTrendFlockOptions,
   weightVsTargetSeries,
   type OpsBoardFlock,
 } from "../../lib/dashboardAdapters";
@@ -241,6 +242,7 @@ export function ManagementHome() {
   const { companyHref } = useCompanyNav();
   const { data, loading, error, reload } = useOpsBoardData(token);
   const weighTrends = useWeighInTrends(token, 90);
+  const [weighTrendFlockFilter, setWeighTrendFlockFilter] = useState<string | null>(null);
   const isSuperuser = user?.role === "superuser";
   const role = user?.role ?? "manager";
   const canOpenAccountingApprovals = user?.role === "manager" || user?.role === "superuser";
@@ -289,7 +291,18 @@ export function ManagementHome() {
   const mortalityData = mortalityTrendPseudoDaily(flocks);
   const fcrData = fcrVsTargetSeries(flocks, 10);
   const weightData = weightVsTargetSeries(flocks, 8);
-  const weightTrendData = farmAverageWeightTrend(weighTrends.points);
+  const weighTrendFlockOptionsList = useMemo(
+    () => weighInTrendFlockOptions(weighTrends.points),
+    [weighTrends.points],
+  );
+  const flockWeightTrend = useMemo(
+    () =>
+      flockWeightTrendChartData(weighTrends.points, {
+        flockId: weighTrendFlockFilter,
+        limit: 8,
+      }),
+    [weighTrends.points, weighTrendFlockFilter],
+  );
   const topBiomass = topBiomassFlocks(flocks, 5);
   const biomassKg = farmTotals?.totalBiomassKg ?? growth.totalBiomassKg;
   const fairValueRwf = farmTotals?.estimatedFairValueRwf ?? growth.estimatedFairValueRwf;
@@ -570,13 +583,30 @@ export function ManagementHome() {
           </div>
           <ChartPanel
             title="Weigh-in trend"
-            subtitle="Farm-average weight from vet logs and standalone samples (90 days)"
+            subtitle="Per-flock actual (solid) vs breed target (dotted) — 90 days"
             loading={weighTrends.loading}
             error={weighTrends.error}
-            empty={!weighTrends.loading && !weighTrends.error && weightTrendData.length === 0}
+            empty={!weighTrends.loading && !weighTrends.error && flockWeightTrend.rows.length === 0}
             emptyLabel="No weigh-in history in the selected period"
+            action={
+              weighTrendFlockOptionsList.length > 0 ? (
+                <select
+                  className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-secondary)]"
+                  value={weighTrendFlockFilter ?? ""}
+                  onChange={(e) => setWeighTrendFlockFilter(e.target.value || null)}
+                  aria-label="Filter weigh-in trend by flock"
+                >
+                  <option value="">All flocks (top 8)</option>
+                  {weighTrendFlockOptionsList.map((f) => (
+                    <option key={f.flockId} value={f.flockId}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+              ) : null
+            }
           >
-            <WeightTrendLine data={weightTrendData} />
+            <FlockWeightTrendLines rows={flockWeightTrend.rows} series={flockWeightTrend.series} />
           </ChartPanel>
         </section>
       )}

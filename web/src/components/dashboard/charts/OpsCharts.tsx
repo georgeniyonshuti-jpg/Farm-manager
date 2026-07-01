@@ -17,6 +17,7 @@ import {
   YAxis,
 } from "recharts";
 import { useTheme } from "../../../context/ThemeContext";
+import type { FlockWeightTrendRow, FlockWeightTrendSeries } from "../../../lib/dashboardAdapters";
 
 function useChartTheme() {
   const { theme } = useTheme();
@@ -162,6 +163,140 @@ export function WeightVsTargetBars({
           <Bar dataKey="expectedWeightKg" fill="#94a3b8" name="Target" radius={[4, 4, 0, 0]} maxBarSize={24} />
         </BarChart>
       </ResponsiveContainer>
+    </div>
+  );
+}
+
+export function FlockWeightTrendLines({
+  rows,
+  series,
+}: {
+  rows: FlockWeightTrendRow[];
+  series: FlockWeightTrendSeries[];
+}) {
+  const ct = useChartTheme();
+
+  return (
+    <div className="h-80 flex flex-col gap-2">
+      <div className="flex-1 min-h-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={rows} margin={{ left: 4, right: 12, top: 8, bottom: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+            <XAxis
+              dataKey="date"
+              tick={{ fontSize: 10, fill: ct.axis }}
+              tickFormatter={(v) => String(v).slice(5)}
+            />
+            <YAxis tick={{ fontSize: 11, fill: ct.axis }} unit=" kg" />
+            <Tooltip
+              content={({ active, label }) => {
+                if (!active || label == null) return null;
+                const date = String(label);
+                const row = rows.find((r) => r.date === date);
+                if (!row) return null;
+                const entries = series
+                  .map((flock) => {
+                    const actual = row[flock.actualKey];
+                    const target = row[flock.targetKey];
+                    const source = row[`__src_${flock.actualKey}`];
+                    return {
+                      flock,
+                      actual: typeof actual === "number" ? actual : null,
+                      target: typeof target === "number" ? target : null,
+                      source: source != null ? String(source) : null,
+                    };
+                  })
+                  .filter((e) => e.actual != null || e.target != null);
+                if (!entries.length) return null;
+                return (
+                  <div
+                    style={{
+                      backgroundColor: ct.tooltipBg,
+                      border: `1px solid ${ct.tooltipBorder}`,
+                      borderRadius: 8,
+                      padding: "8px 10px",
+                      fontSize: 12,
+                      color: ct.tooltipText,
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.25)",
+                    }}
+                  >
+                    <p className="font-semibold mb-1.5">{date}</p>
+                    <ul className="space-y-1.5">
+                      {entries.map(({ flock, actual, target, source }) => (
+                        <li key={flock.flockId}>
+                          <div className="flex items-center gap-1.5 font-medium" style={{ color: flock.color }}>
+                            <span className="inline-block h-0.5 w-3 rounded-full" style={{ background: flock.color }} />
+                            {flock.label}
+                          </div>
+                          <div className="pl-4 text-[11px] opacity-90 tabular-nums">
+                            {actual != null ? `Actual: ${actual.toFixed(2)} kg` : "Actual: —"}
+                            {target != null ? ` · Target: ${target.toFixed(2)} kg` : ""}
+                            {source ? (
+                              <span className="ml-1 opacity-75">
+                                ({source === "vet_log" ? "vet log" : "standalone"})
+                              </span>
+                            ) : null}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              }}
+            />
+            {series.map((s) => (
+              <Line
+                key={`${s.flockId}-actual`}
+                type="monotone"
+                dataKey={s.actualKey}
+                stroke={s.color}
+                strokeWidth={2.5}
+                dot={{ fill: s.color, strokeWidth: 0, r: 3 }}
+                activeDot={{ r: 5, strokeWidth: 0 }}
+                name={`${s.label} actual`}
+                connectNulls
+                legendType="none"
+              />
+            ))}
+            {series.map((s) => (
+              <Line
+                key={`${s.flockId}-target`}
+                type="monotone"
+                dataKey={s.targetKey}
+                stroke={s.color}
+                strokeWidth={1.5}
+                strokeDasharray="6 4"
+                strokeOpacity={0.75}
+                dot={false}
+                name={`${s.label} target`}
+                connectNulls
+                legendType="none"
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      {series.length > 0 ? (
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5 px-1 max-h-16 overflow-y-auto">
+          {series.map((s) => (
+            <div key={s.flockId} className="flex items-center gap-1.5 text-[11px]" style={{ color: ct.legendText }}>
+              <span className="inline-flex items-center gap-0.5">
+                <span className="inline-block h-0.5 w-4 rounded-full" style={{ background: s.color }} />
+                <span
+                  className="inline-block h-0 w-4 border-t-2 border-dashed"
+                  style={{ borderColor: s.color, opacity: 0.75 }}
+                />
+              </span>
+              <span className="truncate max-w-[8rem]" title={s.label}>
+                {s.label}
+              </span>
+            </div>
+          ))}
+          <span className="text-[10px] w-full opacity-70" style={{ color: ct.legendText }}>
+            Solid = actual · Dashed = breed target
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

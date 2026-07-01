@@ -14,13 +14,14 @@ import { useVetDashboardData } from "../../hooks/useVetDashboardData";
 import {
   blockersSeries,
   biomassSummary,
-  farmAverageWeightTrend,
+  flockWeightTrendChartData,
   fcrVsTargetSeries,
   mortalityTrendPseudoDaily,
   topRiskSeries,
+  weighInTrendFlockOptions,
   weightVsTargetSeries,
 } from "../../lib/dashboardAdapters";
-import { BlockersStacked, FcrTargetBars, MortalityTrendLine, SimpleCategoryBars, TopRiskBars, WeightTrendLine, WeightVsTargetBars } from "../../components/dashboard/charts/OpsCharts";
+import { BlockersStacked, FcrTargetBars, FlockWeightTrendLines, MortalityTrendLine, SimpleCategoryBars, TopRiskBars, WeightVsTargetBars } from "../../components/dashboard/charts/OpsCharts";
 import { useWeighInTrends } from "../../hooks/useWeighInTrends";
 import { MobileFieldBottomNav, type MobileFieldNavItem } from "../../components/layout/MobileFieldBottomNav";
 import { VetFieldHub } from "./VetFieldHub";
@@ -60,6 +61,7 @@ function VetManagerDashboard() {
   const { token } = useAuth();
   const vetDash = useVetDashboardData(token);
   const weighTrends = useWeighInTrends(token, 90);
+  const [weighTrendFlockFilter, setWeighTrendFlockFilter] = useState<string | null>(null);
   const [status, setStatus] = useState<CheckinStatus | null>(null);
   const [primaryFlockId, setPrimaryFlockId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -324,7 +326,20 @@ function VetManagerDashboard() {
   const vetFlocks = vetDash.data.opsBoard?.flocks ?? [];
   const growth = biomassSummary(vetFlocks);
   const weightData = weightVsTargetSeries(vetFlocks, 8);
-  const weightTrendData = farmAverageWeightTrend(weighTrends.points);
+  const weighTrendFlockOptionsList = useMemo(
+    () => weighInTrendFlockOptions(weighTrends.points),
+    [weighTrends.points],
+  );
+  const flockWeightTrend = useMemo(
+    () =>
+      flockWeightTrendChartData(weighTrends.points, {
+        flockId: weighTrendFlockFilter,
+        limit: 8,
+      }),
+    [weighTrends.points, weighTrendFlockFilter],
+  );
+  const tWeighTrendSub = useLaborerT("Per-flock actual (solid) vs breed target (dotted) — 90 days");
+  const tAllFlocksTop8 = useLaborerT("All flocks (top 8)");
   const treatmentStatusData = Object.entries(
     vetDash.data.treatmentRounds.reduce<Record<string, number>>((acc, r) => {
       const k = r.status ?? "planned";
@@ -515,12 +530,29 @@ function VetManagerDashboard() {
         </div>
         <ChartPanel
           title={useLaborerT("Weigh-in trend")}
-          subtitle={useLaborerT("Farm-average weight including vet-log samples")}
+          subtitle={tWeighTrendSub}
           loading={weighTrends.loading}
           error={weighTrends.error}
-          empty={!weighTrends.loading && !weighTrends.error && weightTrendData.length === 0}
+          empty={!weighTrends.loading && !weighTrends.error && flockWeightTrend.rows.length === 0}
+          action={
+            weighTrendFlockOptionsList.length > 0 ? (
+              <select
+                className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-secondary)]"
+                value={weighTrendFlockFilter ?? ""}
+                onChange={(e) => setWeighTrendFlockFilter(e.target.value || null)}
+                aria-label="Filter weigh-in trend by flock"
+              >
+                <option value="">{tAllFlocksTop8}</option>
+                {weighTrendFlockOptionsList.map((f) => (
+                  <option key={f.flockId} value={f.flockId}>
+                    {f.label}
+                  </option>
+                ))}
+              </select>
+            ) : null
+          }
         >
-          <WeightTrendLine data={weightTrendData} />
+          <FlockWeightTrendLines rows={flockWeightTrend.rows} series={flockWeightTrend.series} />
         </ChartPanel>
         <div className="grid gap-4 xl:grid-cols-2">
           <ChartPanel

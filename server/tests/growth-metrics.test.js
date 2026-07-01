@@ -97,7 +97,22 @@ describe("dashboardAdapters growth helpers", async () => {
     weightVsTargetSeries,
     biomassSummary,
     farmAverageWeightTrend,
+    flockWeightTrendChartData,
+    FLOCK_TREND_COLORS,
   } = await import("../../web/src/lib/dashboardAdapters.ts");
+
+  const samplePoint = (overrides) => ({
+    flockId: "f1",
+    label: "Barn-A",
+    weighDate: "2026-01-01",
+    avgWeightKg: 2,
+    expectedWeightKg: 2.1,
+    source: "vet_log",
+    vetLogId: null,
+    ageDays: 20,
+    fcrAtSample: 1.5,
+    ...overrides,
+  });
 
   it("weightVsTargetSeries sorts worst deviation first", () => {
     const rows = weightVsTargetSeries(
@@ -159,6 +174,51 @@ describe("dashboardAdapters growth helpers", async () => {
     assert.equal(trend[0].date, "2026-01-01");
     assert.equal(trend[0].avgWeightKg, 2.1);
     assert.equal(trend[0].count, 2);
+  });
+
+  it("flockWeightTrendChartData pivots two flocks with distinct colors", () => {
+    const { rows, series } = flockWeightTrendChartData([
+      samplePoint({ flockId: "f1", label: "Alpha", weighDate: "2026-01-01", avgWeightKg: 2 }),
+      samplePoint({ flockId: "f2", label: "Beta", weighDate: "2026-01-08", avgWeightKg: 2.2 }),
+    ]);
+    assert.equal(series.length, 2);
+    assert.notEqual(series[0].color, series[1].color);
+    assert.equal(series[0].color, FLOCK_TREND_COLORS[0]);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].date, "2026-01-01");
+    assert.equal(rows[1].date, "2026-01-08");
+    assert.equal(rows[0][series[0].actualKey], 2);
+    assert.equal(rows[1][series[1].actualKey], 2.2);
+  });
+
+  it("flockWeightTrendChartData filters to one flock", () => {
+    const points = [
+      samplePoint({ flockId: "f1", label: "Alpha" }),
+      samplePoint({ flockId: "f2", label: "Beta", weighDate: "2026-01-02" }),
+    ];
+    const { series } = flockWeightTrendChartData(points, { flockId: "f2" });
+    assert.equal(series.length, 1);
+    assert.equal(series[0].flockId, "f2");
+    assert.equal(series[0].label, "Beta");
+  });
+
+  it("flockWeightTrendChartData caps at limit when many flocks", () => {
+    const points = [];
+    for (let i = 0; i < 12; i += 1) {
+      for (let j = 0; j <= i; j += 1) {
+        points.push(
+          samplePoint({
+            flockId: `f${i}`,
+            label: `Flock-${i}`,
+            weighDate: `2026-01-${String(j + 1).padStart(2, "0")}`,
+            avgWeightKg: 2 + i * 0.01,
+          }),
+        );
+      }
+    }
+    const { series } = flockWeightTrendChartData(points, { limit: 8 });
+    assert.equal(series.length, 8);
+    assert.equal(series[0].flockId, "f11");
   });
 });
 

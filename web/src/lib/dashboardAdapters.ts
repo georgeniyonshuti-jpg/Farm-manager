@@ -266,6 +266,125 @@ export function farmAverageWeightTrend(
     }));
 }
 
+export const FLOCK_TREND_COLORS = [
+  "#22c78a",
+  "#38bdf8",
+  "#fbbf24",
+  "#a78bfa",
+  "#f472b6",
+  "#2dd4bf",
+  "#fb923c",
+  "#818cf8",
+] as const;
+
+export type FlockWeightTrendSeries = {
+  flockId: string;
+  label: string;
+  color: string;
+  actualKey: string;
+  targetKey: string;
+};
+
+export type FlockWeightTrendRow = Record<string, string | number | null>;
+
+function chartKeyForFlock(label: string, flockId: string, prefix: string): string {
+  const slug = label
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 28);
+  return `${prefix}_${slug || flockId.slice(0, 8)}`;
+}
+
+/** Unique flocks for weigh-in trend filter dropdown (sorted by label). */
+export function weighInTrendFlockOptions(
+  points: WeighInTrendPoint[],
+): Array<{ flockId: string; label: string }> {
+  const byId = new Map<string, string>();
+  for (const p of points) {
+    const id = String(p.flockId);
+    if (!byId.has(id)) byId.set(id, String(p.label || id));
+  }
+  return [...byId.entries()]
+    .map(([flockId, label]) => ({ flockId, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/** Pivot weigh-in points into wide Recharts rows + per-flock series metadata. */
+export function flockWeightTrendChartData(
+  points: WeighInTrendPoint[],
+  opts?: { limit?: number; flockId?: string | null },
+): { rows: FlockWeightTrendRow[]; series: FlockWeightTrendSeries[] } {
+  const limit = opts?.limit ?? 8;
+  const filterFlockId = opts?.flockId?.trim() ? opts.flockId.trim() : null;
+
+  const byFlock = new Map<string, { label: string; points: WeighInTrendPoint[] }>();
+  for (const p of points) {
+    const id = String(p.flockId);
+    const entry = byFlock.get(id) ?? { label: String(p.label || id), points: [] };
+    entry.points.push(p);
+    byFlock.set(id, entry);
+  }
+
+  let selectedIds: string[];
+  if (filterFlockId) {
+    selectedIds = byFlock.has(filterFlockId) ? [filterFlockId] : [];
+  } else {
+    selectedIds = [...byFlock.entries()]
+      .sort((a, b) => {
+        const byCount = b[1].points.length - a[1].points.length;
+        if (byCount !== 0) return byCount;
+        return a[1].label.localeCompare(b[1].label);
+      })
+      .slice(0, limit)
+      .map(([id]) => id);
+  }
+
+  const series: FlockWeightTrendSeries[] = selectedIds.map((flockId, index) => {
+    const { label } = byFlock.get(flockId)!;
+    const actualKey = chartKeyForFlock(label, flockId, "wt");
+    const targetKey = chartKeyForFlock(label, flockId, "tgt");
+    return {
+      flockId,
+      label,
+      color: FLOCK_TREND_COLORS[index % FLOCK_TREND_COLORS.length],
+      actualKey,
+      targetKey,
+    };
+  });
+
+  const dateSet = new Set<string>();
+  for (const flockId of selectedIds) {
+    for (const p of byFlock.get(flockId)!.points) {
+      dateSet.add(String(p.weighDate).slice(0, 10));
+    }
+  }
+
+  const keyByFlock = new Map(series.map((s) => [s.flockId, s]));
+
+  const rows: FlockWeightTrendRow[] = [...dateSet]
+    .sort()
+    .map((date) => {
+      const row: FlockWeightTrendRow = { date };
+      for (const flockId of selectedIds) {
+        const meta = keyByFlock.get(flockId)!;
+        const dayPoints = byFlock
+          .get(flockId)!
+          .points.filter((p) => String(p.weighDate).slice(0, 10) === date)
+          .sort((a, b) => String(a.weighDate).localeCompare(String(b.weighDate)));
+        const pt = dayPoints.at(-1);
+        row[meta.actualKey] = pt != null ? Number(pt.avgWeightKg) : null;
+        row[meta.targetKey] =
+          pt?.expectedWeightKg != null ? Number(pt.expectedWeightKg) : null;
+        if (pt) {
+          row[`__src_${meta.actualKey}`] = pt.source ?? "standalone";
+        }
+      }
+      return row;
+    });
+
+  return { rows, series };
+}
+
 export function mortalityTrendPseudoDaily(flocks: OpsBoardFlock[]): Array<{ day: string; mortalityPct: number }> {
   const avgDelta = flocks.length
     ? flocks.reduce((s, f) => s + Number(f.mortality24hDeltaPct || 0), 0) / flocks.length
