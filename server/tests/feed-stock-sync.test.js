@@ -5,6 +5,7 @@ import {
   assertFeedStockAvailable,
   filterAvailableFeedStock,
   normalizeInventoryTxnType,
+  stockSummaryFromSqlAggregates,
 } from "../src/services/feedStockService.js";
 import { mapInboundPayload } from "../src/services/clevafarm/inboundMappers.js";
 import { rowToPayload } from "../src/services/clevafarm/entitySerializers.js";
@@ -33,6 +34,17 @@ describe("feed stock service", () => {
     assert.equal(over.ok, false);
     assert.match(String(over.error), /Insufficient stock/);
     assert.equal(assertFeedStockAvailable("starter", 40, stock).ok, true);
+  });
+
+  it("stockSummaryFromSqlAggregates maps SQL rows to balanceKg", () => {
+    const summary = stockSummaryFromSqlAggregates([
+      { ft: "starter", purchased: 100, used: 30, adjustments: -5 },
+      { ft: "unspecified", purchased: 0, used: 0, adjustments: 0 },
+    ]);
+    const starter = summary.find((r) => r.feedType === "starter");
+    assert.ok(starter);
+    assert.equal(starter.balanceKg, 65);
+    assert.ok(summary.some((r) => r.feedType === null));
   });
 });
 

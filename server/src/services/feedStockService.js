@@ -57,3 +57,25 @@ export function assertFeedStockAvailable(feedType, feedKg, stockRows) {
   }
   return { ok: true, availableKg: Number(row.balanceKg) };
 }
+
+/**
+ * Build stock summary rows from SQL aggregate query (avoids loading full inventory ledger).
+ * @param {{ ft: string, purchased: string | number, used: string | number, adjustments: string | number }[]} rows
+ */
+export function stockSummaryFromSqlAggregates(rows) {
+  return rows
+    .map((row) => {
+      const purchased = Number(row.purchased) || 0;
+      const used = Number(row.used) || 0;
+      const adjustments = Number(row.adjustments) || 0;
+      const ft = row.ft === "unspecified" ? null : String(row.ft);
+      return {
+        feedType: ft,
+        purchasedKg: Number(purchased.toFixed(3)),
+        usedKg: Number(used.toFixed(3)),
+        adjustmentsKg: Number(adjustments.toFixed(3)),
+        balanceKg: Number((purchased - used + adjustments).toFixed(3)),
+      };
+    })
+    .sort((a, b) => String(a.feedType ?? "").localeCompare(String(b.feedType ?? "")));
+}

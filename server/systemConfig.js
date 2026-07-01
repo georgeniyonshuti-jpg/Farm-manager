@@ -315,8 +315,12 @@ export function isActiveReferenceValue(category, value) {
 export function validateAgainstCategory(category, value, fallbackCodes) {
   const active = getActiveValuesForCategory(category);
   const v = normalizedOptionValue(category, value);
+  if (!v) return false;
   if (active.size > 0) return active.has(v);
-  return fallbackCodes.some((c) => normalizedOptionValue(category, c) === v);
+  const fallbacks = Array.isArray(fallbackCodes)
+    ? fallbackCodes
+    : getStaticFallbackCodes(category);
+  return fallbacks.some((c) => normalizedOptionValue(category, c) === v);
 }
 
 export function mergeBreedStandardsFileWithDb(fileDoc, dbDoc) {
@@ -369,6 +373,18 @@ export async function refreshSystemConfigFromDatabase(dbQuery, hasDbFn) {
     );
     if (rOpts.rows.length > 0) {
       memReferenceRows = rOpts.rows.map((row) => rowToClient(row));
+      const categoriesPresent = new Set(memReferenceRows.map((r) => r.category));
+      for (const def of DEFAULT_REFERENCE_ROWS) {
+        if (categoriesPresent.has(def.category)) continue;
+        memReferenceRows.push({
+          category: def.category,
+          value: def.value,
+          label: def.label,
+          sortOrder: def.sortOrder,
+          active: def.active,
+          metadata: {},
+        });
+      }
     } else {
       memReferenceRows = DEFAULT_REFERENCE_ROWS.map((r) => ({
         category: r.category,

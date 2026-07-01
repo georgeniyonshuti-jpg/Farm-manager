@@ -60,7 +60,11 @@ import { emitEntitySync, initClevaFarmEmit } from "./src/services/clevafarm/emit
 import { enqueueFlockTombstoneSync, initFlockLifecycleSync } from "./src/services/clevafarm/flockLifecycleSync.js";
 import { buildFlockCode, formatPlacementYymmdd } from "./src/services/flockCode.js";
 import { registerInboundEntityRefresh } from "./src/services/clevafarm/inboundEntityRefresh.js";
-import { assertFeedStockAvailable, filterAvailableFeedStock } from "./src/services/feedStockService.js";
+import {
+  assertFeedStockAvailable,
+  filterAvailableFeedStock,
+  stockSummaryFromSqlAggregates,
+} from "./src/services/feedStockService.js";
 import {
   VET_LOG_LIST_EXTRA_SELECT,
   VET_LOG_LIST_EXTRA_JOINS,
@@ -129,6 +133,7 @@ const dbPool = process.env.DATABASE_URL
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,
+  "https://farm.clevacredit.com",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
   "http://localhost:4173",
@@ -164,6 +169,10 @@ app.use(cors({
       callback(null, true);
       return;
     }
+    if (IS_PRODUCTION && /^https:\/\/([a-z0-9-]+\.)*clevacredit\.com$/i.test(origin)) {
+      callback(null, true);
+      return;
+    }
     if (!IS_PRODUCTION && isDevBrowserHttpOrigin(origin)) {
       callback(null, true);
       return;
@@ -172,7 +181,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-ERPNext-Session"],
 }));
 app.use(express.json({ limit: "20mb" }));
 app.set("trust proxy", 1); // required for Render
@@ -1934,6 +1943,27 @@ async function syncFlockFeedEntriesFromDb() {
   if (preservedMemory.length > 0) {
     flockFeedEntries.push(...preservedMemory);
   }
+}
+
+function upsertFeedEntryInMemory(row) {
+  const id = String(row.id ?? "");
+  if (!id) return;
+  const normalized = {
+    id,
+    flockId: String(row.flockId),
+    recordedAt: String(row.recordedAt),
+    feedKg: Number(row.feedKg) || 0,
+    feedType: row.feedType != null ? String(row.feedType) : null,
+    notes: String(row.notes ?? ""),
+    enteredByUserId: String(row.enteredByUserId),
+    submissionStatus: String(row.submissionStatus ?? "approved"),
+    reviewedByUserId: row.reviewedByUserId != null ? String(row.reviewedByUserId) : null,
+    reviewedAt: row.reviewedAt != null ? String(row.reviewedAt) : null,
+    reviewNotes: row.reviewNotes != null ? String(row.reviewNotes) : null,
+  };
+  const idx = flockFeedEntries.findIndex((e) => String(e.id) === id);
+  if (idx >= 0) flockFeedEntries[idx] = normalized;
+  else flockFeedEntries.push(normalized);
 }
 
 function isPersistableUuid(s) {
@@ -4730,108 +4760,121 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
 });
 
 app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requirePageAccess("farm_feed"), requireAction("flock.view"), async (req, res) => {
-  const flockId = String(req.params.id ?? "").trim();
-  const f = await getFlockByIdForUser(flockId, req.authUser, res);
-  if (!f) return;
-  if (!assertFlockNotArchivedForMutation(f, res)) return;
-  const parsed = feedEntrySchema.safeParse(req.body ?? {});
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid feed entry" });
-    return;
-  }
-  const { feedKg, notes, feedType: feedTypeRaw } = parsed.data;
-  const feedType = String(feedTypeRaw ?? "").trim();
-  if (!systemConfig.validateAgainstCategory("feed_type", feedType)) {
-    res.status(400).json({ error: "Invalid feedType" });
-    return;
-  }
-  if (hasDb()) {
-    const stockCheck = assertFeedStockAvailable(feedType, feedKg, await getAvailableFeedStockRows());
-    if (!stockCheck.ok) {
-      res.status(400).json({ error: stockCheck.error });
+  try {
+    const flockId = String(req.params.id ?? "").trim();
+    const f = await getFlockByIdForUser(flockId, req.authUser, res);
+    if (!f) return;
+    if (!assertFlockNotArchivedForMutation(f, res)) return;
+    const parsed = feedEntrySchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid feed entry" });
       return;
     }
-  }
-  let atIso = new Date().toISOString();
-  const recRaw = parsed.data.recordedAt;
-  if (recRaw) {
-    const p = parseOptionalIsoDate(recRaw);
-    if (p) atIso = p;
-  }
-  const submissionStatus = needsApproval(req.authUser) ? "pending_review" : "approved";
-  let id = `ffe_${crypto.randomBytes(8).toString("hex")}`;
-  const row = {
-    id,
-    flockId: f.id,
-    recordedAt: atIso,
-    feedKg,
-    feedType,
-    notes: notes ?? "",
-    enteredByUserId: req.authUser.id,
-    submissionStatus,
-  };
-  let feedSavedToDb = false;
-  if (hasDb()) {
-    try {
-      const ins = await dbQuery(
-        `INSERT INTO flock_feed_entries (flock_id, recorded_at, feed_kg, feed_type, notes, entered_by_user_id, submission_status)
-         VALUES ($1::uuid, $2::timestamptz, $3::numeric, $4, $5, $6::uuid, $7)
-         RETURNING id::text AS id, recorded_at AS "recordedAt"`,
-        [f.id, atIso, feedKg, feedType, notes && String(notes).trim() ? String(notes).slice(0, 4000) : null, req.authUser.id, submissionStatus]
-      );
-      const r0 = ins.rows[0];
-      id = String(r0?.id ?? id);
-      const ra = r0?.recordedAt;
-      row.id = id;
-      row.recordedAt = ra instanceof Date ? ra.toISOString() : String(ra ?? atIso);
-      feedSavedToDb = true;
-    } catch (e) {
-      console.error("[ERROR]", "[db] POST /api/flocks/:id/feed-entries:", e instanceof Error ? e.message : e);
-      res.status(503).json({ error: "Could not save feed entry." });
+    const { feedKg, notes, feedType: feedTypeRaw } = parsed.data;
+    const feedType = String(feedTypeRaw ?? "").trim();
+    if (!systemConfig.validateAgainstCategory("feed_type", feedType, systemConfig.getStaticFallbackCodes("feed_type"))) {
+      res.status(400).json({ error: "Invalid feedType" });
       return;
     }
-  }
-  if (feedSavedToDb) {
-    try {
-      await syncFlockFeedEntriesFromDb();
-    } catch (syncErr) {
-      console.error("[ERROR]", "[db] syncFlockFeedEntriesFromDb after feed entry:", syncErr instanceof Error ? syncErr.message : syncErr);
+    if (hasDb()) {
+      const stockCheck = assertFeedStockAvailable(feedType, feedKg, await getAvailableFeedStockRows());
+      if (!stockCheck.ok) {
+        res.status(400).json({ error: stockCheck.error });
+        return;
+      }
     }
-  } else {
-    flockFeedEntries.push(row);
-  }
-  const { payrollImpact, payrollSaved } = await maybeAutoPayrollForSubmit(
-    req.authUser,
-    f.id,
-    "feed_entry",
-    id,
-    row.recordedAt,
-  );
-  appendAudit(req.authUser.id, req.authUser.role, "farm.feed_entry.create", "flock", f.id, {
-    feedEntryId: row.id,
-    feedKg,
-    feedType,
-    submissionStatus,
-  });
-  if (feedSavedToDb && submissionStatus === "approved") {
-    await deductFeedStockForEntry(row, req.authUser.id);
-  }
-  if (feedSavedToDb) clevaSync("feed_log", id);
-  const summary = await buildFlockPerformanceSummary(f.id);
-  res.json({
-    ok: true,
-    entry: {
-      id: row.id,
-      recordedAt: row.recordedAt,
-      feedKg: row.feedKg,
-      feedType: row.feedType,
-      notes: row.notes,
+    let atIso = new Date().toISOString();
+    const recRaw = parsed.data.recordedAt;
+    if (recRaw) {
+      const p = parseOptionalIsoDate(recRaw);
+      if (p) atIso = p;
+    }
+    const submissionStatus = needsApproval(req.authUser) ? "pending_review" : "approved";
+    let id = `ffe_${crypto.randomBytes(8).toString("hex")}`;
+    const row = {
+      id,
+      flockId: f.id,
+      recordedAt: atIso,
+      feedKg,
+      feedType,
+      notes: notes ?? "",
+      enteredByUserId: req.authUser.id,
       submissionStatus,
-    },
-    feedToDateKg: summary?.feedToDateKg ?? Number(totalFeedKgForFlock(f.id).toFixed(2)),
-    payrollImpact,
-    payrollSaved,
-  });
+    };
+    let feedSavedToDb = false;
+    if (hasDb()) {
+      try {
+        const ins = await dbQuery(
+          `INSERT INTO flock_feed_entries (flock_id, recorded_at, feed_kg, feed_type, notes, entered_by_user_id, submission_status)
+           VALUES ($1::uuid, $2::timestamptz, $3::numeric, $4, $5, $6::uuid, $7)
+           RETURNING id::text AS id, recorded_at AS "recordedAt"`,
+          [f.id, atIso, feedKg, feedType, notes && String(notes).trim() ? String(notes).slice(0, 4000) : null, req.authUser.id, submissionStatus]
+        );
+        const r0 = ins.rows[0];
+        id = String(r0?.id ?? id);
+        const ra = r0?.recordedAt;
+        row.id = id;
+        row.recordedAt = ra instanceof Date ? ra.toISOString() : String(ra ?? atIso);
+        feedSavedToDb = true;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error("[ERROR]", "[db] POST /api/flocks/:id/feed-entries:", msg);
+        if (/duplicate key|unique constraint/i.test(msg)) {
+          res.status(400).json({ error: "A feed entry for this flock at this time may already exist." });
+          return;
+        }
+        res.status(503).json({ error: "Could not save feed entry." });
+        return;
+      }
+    }
+    if (feedSavedToDb) {
+      upsertFeedEntryInMemory(row);
+    } else {
+      flockFeedEntries.push(row);
+    }
+    const { payrollImpact, payrollSaved } = await maybeAutoPayrollForSubmit(
+      req.authUser,
+      f.id,
+      "feed_entry",
+      id,
+      row.recordedAt,
+    );
+    appendAudit(req.authUser.id, req.authUser.role, "farm.feed_entry.create", "flock", f.id, {
+      feedEntryId: row.id,
+      feedKg,
+      feedType,
+      submissionStatus,
+    });
+    if (feedSavedToDb && submissionStatus === "approved") {
+      await deductFeedStockForEntry(row, req.authUser.id);
+    }
+    if (feedSavedToDb) clevaSync("feed_log", id);
+    let feedToDateKg = Number(totalFeedKgForFlock(f.id).toFixed(2));
+    try {
+      const summary = await buildFlockPerformanceSummary(f.id);
+      if (summary?.feedToDateKg != null) feedToDateKg = summary.feedToDateKg;
+    } catch (e) {
+      console.error("[ERROR]", "[feed] performance summary after entry:", e instanceof Error ? e.message : e);
+    }
+    res.json({
+      ok: true,
+      entry: {
+        id: row.id,
+        recordedAt: row.recordedAt,
+        feedKg: row.feedKg,
+        feedType: row.feedType,
+        notes: row.notes,
+        submissionStatus,
+      },
+      feedToDateKg,
+      payrollImpact,
+      payrollSaved,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[ERROR]", "POST /api/flocks/:id/feed-entries:", msg);
+    res.status(500).json({ error: msg || "Could not save feed entry." });
+  }
 });
 
 app.get("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, requirePageAccess("farm_feed"), requireAction("flock.view"), async (req, res) => {
@@ -6462,7 +6505,7 @@ async function listSlaughterForFlock(flockId, startIso = null, endIso = null) {
       return r.rows;
     } catch (e) {
       console.error("[ERROR]", "[db] listSlaughterForFlock failed:", e instanceof Error ? e.message : e);
-      throw e;
+      return [];
     }
   }
   const startMs = startIso ? new Date(startIso).getTime() : Number.NEGATIVE_INFINITY;
@@ -7401,12 +7444,67 @@ function computeInventoryStockSummary(feedTypeFilter = null) {
   return summary;
 }
 
+async function queryFeedStockSummaryFromDb(feedTypeFilter = null) {
+  const params = [];
+  let typeFilter = "";
+  if (feedTypeFilter) {
+    params.push(String(feedTypeFilter).trim());
+    typeFilter = ` AND feed_type = $${params.length}`;
+  }
+  const r = await dbQuery(
+    `SELECT COALESCE(feed_type, 'unspecified') AS ft,
+            SUM(CASE WHEN transaction_type = 'procurement_receipt' THEN COALESCE(delta_kg, 0) ELSE 0 END) AS purchased,
+            SUM(CASE WHEN transaction_type = 'feed_consumption' THEN ABS(COALESCE(delta_kg, 0)) ELSE 0 END) AS used,
+            SUM(CASE WHEN transaction_type = 'adjustment' THEN COALESCE(delta_kg, 0) ELSE 0 END) AS adjustments
+       FROM farm_inventory_transactions
+      WHERE 1=1${typeFilter}
+      GROUP BY COALESCE(feed_type, 'unspecified')`,
+    params
+  );
+  return stockSummaryFromSqlAggregates(r.rows);
+}
+
+async function loadInventoryTransactionIntoMemory(txnId) {
+  if (!hasDb() || !isPersistableUuid(String(txnId))) return;
+  try {
+    const r = await dbQuery(
+      `SELECT id::text AS id,
+              transaction_type AS type,
+              flock_id::text AS "flockId",
+              recorded_at AS "recordedAt",
+              quantity_kg AS "quantityKg",
+              delta_kg AS "deltaKg",
+              unit_cost_rwf_per_kg AS "unitCostRwfPerKg",
+              reason,
+              reference,
+              supplier_name AS "supplierName",
+              actor_user_id::text AS "actorUserId",
+              approved_by_user_id::text AS "approvedByUserId",
+              approved_at AS "approvedAt",
+              feed_type AS "feedType",
+              feed_entry_id::text AS "feedEntryId",
+              COALESCE(accounting_status, 'not_applicable') AS "accountingStatus"
+         FROM farm_inventory_transactions
+        WHERE id = $1::uuid`,
+      [txnId]
+    );
+    const row = r.rows[0];
+    if (!row) return;
+    const mapped = mapInventoryRowFromDb(row);
+    const idx = inventoryTransactions.findIndex((t) => String(t.id) === String(txnId));
+    if (idx >= 0) inventoryTransactions[idx] = mapped;
+    else inventoryTransactions.unshift(mapped);
+  } catch (e) {
+    console.error("[ERROR]", "[feed] loadInventoryTransactionIntoMemory:", e instanceof Error ? e.message : e);
+  }
+}
+
 async function getAvailableFeedStockRows() {
   if (hasDb()) {
     try {
-      await syncInventoryTransactionsFromDb();
+      return filterAvailableFeedStock(await queryFeedStockSummaryFromDb());
     } catch (e) {
-      console.error("[ERROR]", "[feed] sync inventory for stock check:", e instanceof Error ? e.message : e);
+      console.error("[ERROR]", "[feed] query stock summary:", e instanceof Error ? e.message : e);
     }
   }
   return filterAvailableFeedStock(computeInventoryStockSummary());
@@ -7462,7 +7560,7 @@ async function deductFeedStockForEntry(entry, actorUserId) {
       txnId = again.rows[0]?.id ? String(again.rows[0].id) : null;
     }
     if (txnId) {
-      await syncInventoryTransactionsFromDb();
+      await loadInventoryTransactionIntoMemory(txnId);
       clevaSync("feed_inventory_transaction", txnId);
     }
     return txnId;
@@ -7793,7 +7891,7 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
     res.status(400).json({ error: "Invalid reasonCode for feed consumption" });
     return;
   }
-  if (!systemConfig.validateAgainstCategory("feed_type", feedType)) {
+  if (!systemConfig.validateAgainstCategory("feed_type", feedType, systemConfig.getStaticFallbackCodes("feed_type"))) {
     res.status(400).json({ error: "Valid feedType is required" });
     return;
   }
