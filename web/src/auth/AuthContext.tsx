@@ -13,7 +13,6 @@ import {
 } from "./permissions";
 import { readAuthHeaders } from "../lib/authHeaders";
 import { API_BASE_URL, IS_FRAPPE_MODE } from "../api/config";
-import { loginERPNextSession } from "../api/erpnext.api";
 import {
   frappeGetMe,
   frappeLogin,
@@ -145,13 +144,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(u);
       setActiveWorkspaceState(defaultWorkspaceForUser(u));
 
-      // Optional: establish ERPNext session with same credentials (non-fatal)
-      try {
-        const erp = await loginERPNextSession(t, creds.email, creds.password);
-        if (erp?.sid) setErpnextSessionId(erp.sid);
-      } catch {
-        /* ERPNext session optional — API key fallback on server */
-      }
+      // ERPNext user session is optional — connect via Farm → ERPNext setup (OAuth) when needed.
+      // Server-side sync uses ERPNEXT_API_KEY; farm email/password rarely match ERPNext users.
 
       return u;
     },
