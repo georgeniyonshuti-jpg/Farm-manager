@@ -10,6 +10,7 @@ import { API_BASE_URL } from "../../api/config";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
+import { SegmentedControl } from "../../components/ui";
 
 type MortalityRow = {
   id: string;
@@ -207,16 +208,17 @@ export function FarmMortalityPage() {
               value={searchQ}
               onChange={(e) => setSearchQ(e.target.value)}
             />
-            <select
-              className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
+            <SegmentedControl
+              size="sm"
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-            >
-              <option value="all">All statuses</option>
-              <option value="approved">Approved</option>
-              <option value="pending_review">Pending</option>
-              <option value="rejected">Rejected</option>
-            </select>
+              onChange={setStatusFilter}
+              options={[
+                { value: "all", label: "All" },
+                { value: "pending_review", label: "Pending" },
+                { value: "approved", label: "Approved" },
+                { value: "rejected", label: "Rejected" },
+              ]}
+            />
             <span className="ml-auto flex items-center gap-2">
               <span className="text-xs text-neutral-500">{filteredRows.length} rows</span>
               <a

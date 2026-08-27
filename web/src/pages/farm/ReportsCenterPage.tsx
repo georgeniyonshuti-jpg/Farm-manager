@@ -7,6 +7,7 @@ import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { ERPNextReportsSection } from "../../components/accounting/ERPNextReportsSection";
 import { useToast } from "../../components/Toast";
 import { FieldSubmissionsSection } from "../../components/farm/reports/FieldSubmissionsSection";
+import { SegmentedControl } from "../../components/ui";
 
 type FlockOption = { id: string; label: string };
 type ReportType = "flock_deep_dive" | "flock_comparison" | "farm_operations" | "field_submissions";
@@ -155,12 +156,17 @@ export function ReportsCenterPage() {
         <div className="grid gap-3 md:grid-cols-4">
           <div className="md:col-span-2">
             <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">Report type</label>
-            <select className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm" value={reportType} onChange={(e) => setReportType(e.target.value as ReportType)}>
-              <option value="flock_deep_dive">Flock deep dive</option>
-              <option value="flock_comparison">Flock comparison (2+)</option>
-              <option value="farm_operations">Farm operations overview</option>
-              <option value="field_submissions">Field submissions</option>
-            </select>
+            <SegmentedControl
+              size="sm"
+              value={reportType}
+              onChange={(v) => setReportType(v as ReportType)}
+              options={[
+                { value: "flock_deep_dive", label: "Flock deep dive" },
+                { value: "flock_comparison", label: "Flock comparison" },
+                { value: "farm_operations", label: "Farm operations" },
+                { value: "field_submissions", label: "Field submissions" },
+              ]}
+            />
           </div>
           <div>
             <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">From</label>

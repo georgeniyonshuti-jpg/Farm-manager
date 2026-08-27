@@ -13,6 +13,7 @@ import {
 import { SubmissionListTable } from "./SubmissionListTable";
 import { CheckinPhotoReport } from "./CheckinPhotoReport";
 import { VetLogReport } from "./VetLogReport";
+import { SegmentedControl } from "../../ui";
 import { SubmissionReportModal } from "./SubmissionReportModal";
 
 type FlockOption = { id: string; label: string };
@@ -166,32 +167,15 @@ export function FieldSubmissionsSection({
         </p>
       </div>
 
-      <div className="flex flex-wrap gap-2 border-b border-[var(--border-color)] pb-3">
-        <button
-          type="button"
-          onClick={() => { setTab("checkins"); setPage(1); }}
-          className={[
-            "rounded-lg px-3 py-1.5 text-sm font-semibold",
-            tab === "checkins"
-              ? "bg-[var(--primary-color)] text-white"
-              : "border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]",
-          ].join(" ")}
-        >
-          Round check-ins
-        </button>
-        <button
-          type="button"
-          onClick={() => { setTab("vet_logs"); setPage(1); }}
-          className={[
-            "rounded-lg px-3 py-1.5 text-sm font-semibold",
-            tab === "vet_logs"
-              ? "bg-[var(--primary-color)] text-white"
-              : "border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]",
-          ].join(" ")}
-        >
-          Vet logs
-        </button>
-      </div>
+      <SegmentedControl
+        size="sm"
+        value={tab}
+        onChange={(v) => { setTab(v as SubmissionTab); setPage(1); }}
+        options={[
+          { value: "checkins", label: "Round check-ins" },
+          { value: "vet_logs", label: "Vet logs" },
+        ]}
+      />
 
       <div className="grid gap-3 md:grid-cols-4">
         <div>

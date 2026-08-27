@@ -25,6 +25,7 @@ import { BusinessModelMemosTab } from "./BusinessModelMemosTab";
 import { BusinessModelBroilerOpsTab } from "./BusinessModelBroilerOpsTab";
 import BatchResults from "../../components/analytics/BatchResults";
 import { broilerInputsFromRecord, runBroilerModel, type BroilerModelResults } from "../../lib/broilerModel";
+import { SegmentedControl } from "../../components/ui";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1012,29 +1013,16 @@ export function BusinessModelAnalyticsPage() {
       </div>
 
       {/* Main tabs */}
-      <div className="flex flex-wrap gap-2 border-b border-neutral-200 pb-2">
-        {(
-          [
-            ["paygo", "PAYGO workspace"],
-            ["budget", "Budget & actuals"],
-            ["memos", "PDF memoranda"],
-            ["broiler", "Broiler"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id)}
-            className={`rounded-full px-4 py-2 text-sm font-semibold ${
-              tab === id
-                ? "bg-emerald-800 text-white"
-                : "border border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        value={tab}
+        onChange={(v) => setTab(v as TabId)}
+        options={[
+          { value: "paygo", label: "PAYGO workspace" },
+          { value: "budget", label: "Budget & actuals" },
+          { value: "memos", label: "PDF memoranda" },
+          { value: "broiler", label: "Broiler" },
+        ]}
+      />
 
       {/* ── PAYGO workspace ── */}
       {tab === "paygo" ? (
@@ -1042,33 +1030,23 @@ export function BusinessModelAnalyticsPage() {
           {!paygoCtl ? <p className="text-sm text-neutral-500">Loading scenario defaults…</p> : null}
 
           {/* Sub-view tabs */}
-          <div className="flex flex-wrap gap-2">
-            {(
-              [
-                ["summary", "Summary"],
-                ["growth", "Growth"],
-                ["cash", "Cash"],
-                ["debt", "Debt"],
-                ["units", "Unit econ."],
-                ["scenario", "Scenario"],
-                ["sensitivity", "Sensitivity"],
-                ["data", "Data"],
-                ["compare", "A vs B"],
-                ["live", "Live data"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setPaygoView(id)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                  paygoView === id ? "bg-slate-800 text-white" : "border border-neutral-300 bg-white text-neutral-700"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            size="sm"
+            value={paygoView}
+            onChange={(v) => setPaygoView(v as PaygoView)}
+            options={[
+              { value: "summary", label: "Summary" },
+              { value: "growth", label: "Growth" },
+              { value: "cash", label: "Cash" },
+              { value: "debt", label: "Debt" },
+              { value: "units", label: "Unit econ." },
+              { value: "scenario", label: "Scenario" },
+              { value: "sensitivity", label: "Sensitivity" },
+              { value: "data", label: "Data" },
+              { value: "compare", label: "A vs B" },
+              { value: "live", label: "Live data" },
+            ]}
+          />
 
           {/* ── Scenario builder (always shown when on scenario view) ── */}
           {paygoCtl && paygoView === "scenario" ? (
@@ -1915,25 +1893,15 @@ export function BusinessModelAnalyticsPage() {
       {/* ── Broiler tab ── */}
       {tab === "broiler" ? (
         <div className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            {(
-              [
-                ["economics", "Batch economics"],
-                ["operations", "Operations cockpit"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setBroilerSub(id)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
-                  broilerSub === id ? "bg-slate-800 text-white" : "border border-neutral-300 bg-white text-neutral-700"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <SegmentedControl
+            size="sm"
+            value={broilerSub}
+            onChange={(v) => setBroilerSub(v as "economics" | "operations")}
+            options={[
+              { value: "economics", label: "Batch economics" },
+              { value: "operations", label: "Operations cockpit" },
+            ]}
+          />
 
           {broilerSub === "operations" ? (
             <BusinessModelBroilerOpsTab

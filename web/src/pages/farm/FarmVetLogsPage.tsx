@@ -24,6 +24,10 @@ import {
 } from "../../components/farm/VetLogMortalityReviewSection";
 import { VetLogReport } from "../../components/farm/reports/VetLogReport";
 import { SubmissionReportModal } from "../../components/farm/reports/SubmissionReportModal";
+import { SectionCard } from "../../components/ui/SectionCard";
+import { DataTable, type DataColumn } from "../../components/ui/DataTable";
+import { StatusPill } from "../../components/ui/StatusPill";
+import { SegmentedControl } from "../../components/ui";
 
 type VetLog = VetLogListRow & {
   reviewedByUserId?: string;
@@ -53,9 +57,9 @@ const FALLBACK_MEDICINE_DOSE_UNITS = [
 ];
 
 function StatusBadge({ status }: { status: string }) {
-  if (status === "approved") return <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-800">Approved</span>;
-  if (status === "pending_review") return <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-800">Pending review</span>;
-  return <span className="inline-block rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-800">Rejected</span>;
+  if (status === "approved") return <StatusPill tone="success">Approved</StatusPill>;
+  if (status === "pending_review") return <StatusPill tone="warning">Pending review</StatusPill>;
+  return <StatusPill tone="danger">Rejected</StatusPill>;
 }
 
 function resetFormState() {
@@ -291,6 +295,66 @@ export function FarmVetLogsPage() {
 
   const pageError = ctxError ?? logsError;
 
+  const vetLogColumns = useMemo((): DataColumn<VetLog>[] => {
+    const cols: DataColumn<VetLog>[] = [
+      { key: "date", header: "Log date", className: "tbl-mono", render: (l) => l.logDate },
+      { key: "author", header: "Author", render: (l) => l.authorName ?? l.authorUserId?.slice(0, 8) },
+      {
+        key: "weight",
+        header: "Weight",
+        className: "tbl-mono text-xs",
+        render: (l) =>
+          l.hasWeightSample || l.avgWeightKg != null
+            ? `${Number(l.avgWeightKg).toFixed(2)} kg${l.sampleSize ? ` (n=${l.sampleSize})` : ""}`
+            : "—",
+      },
+      { key: "medicine", header: "Medicine", className: "text-xs", render: (l) => l.medicineName ?? "—" },
+      {
+        key: "fcr",
+        header: "FCR @ log",
+        numeric: true,
+        className: "tbl-mono text-xs",
+        render: (l) => (l.fcrAtLogTime != null ? Number(l.fcrAtLogTime).toFixed(2) : "—"),
+      },
+      { key: "obs", header: "Observations", render: (l) => <span className="block max-w-[14rem] truncate">{l.observations || "—"}</span> },
+      { key: "status", header: "Status", badge: true, render: (l) => <StatusBadge status={l.submissionStatus} /> },
+      {
+        key: "report",
+        header: "Report",
+        badge: true,
+        render: (l) => (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              void openReport(l.id);
+            }}
+            className="rounded-md border border-[var(--border-color)] px-2 py-1 text-xs font-semibold text-[var(--primary-color)]"
+          >
+            View
+          </button>
+        ),
+      },
+    ];
+    if (isReviewer) {
+      cols.push({
+        key: "review",
+        header: "Review",
+        badge: true,
+        render: (l) =>
+          l.submissionStatus === "pending_review" ? (
+            <span className="flex flex-wrap justify-center gap-1">
+              <button type="button" onClick={(e) => { e.stopPropagation(); void handleReview(l.id, "approve"); }} className="rounded bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">Approve</button>
+              <button type="button" onClick={(e) => { e.stopPropagation(); void handleReview(l.id, "reject"); }} className="rounded bg-red-600 px-2 py-0.5 text-xs font-semibold text-white">Reject</button>
+            </span>
+          ) : (
+            <span className="text-neutral-400">—</span>
+          ),
+      });
+    }
+    return cols;
+  }, [isReviewer]);
+
   return (
     <div className="mx-auto max-w-7xl space-y-5">
       <PageHeader
@@ -301,6 +365,17 @@ export function FarmVetLogsPage() {
             : isReviewer
               ? "Submit visits or review junior vet logs. Weight samples drive live-bird value in ERPNext."
               : "Clinical visits per flock — weight samples drive live-bird value; medicine feeds flock spend in ERPNext."
+        }
+        action={
+          canSubmit ? (
+            <button
+              type="button"
+              onClick={() => setShowNewLog((v) => !v)}
+              className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)]"
+            >
+              {showNewLog ? "Close" : "Create new vet log"}
+            </button>
+          ) : null
         }
       />
 
@@ -328,104 +403,52 @@ export function FarmVetLogsPage() {
             </p>
           )}
 
-          <div className="table-block">
-            <div className="table-toolbar">
-              <input
-                className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
-                placeholder="Search keywords…"
-                value={searchQ}
-                onChange={(e) => { setSearchQ(e.target.value); setPage(1); }}
+          <SectionCard
+            title="Vet log history"
+            description={`${total} row${total === 1 ? "" : "s"} matching filters`}
+            controls={
+              <>
+                <input
+                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
+                  placeholder="Search keywords…"
+                  value={searchQ}
+                  onChange={(e) => { setSearchQ(e.target.value); setPage(1); }}
+                />
+                <select
+                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
+                  value={flockId}
+                  onChange={(e) => { setFlockId(e.target.value); setPage(1); }}
+                >
+                  <option value="">All flocks</option>
+                  {flocks.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+                </select>
+                <SegmentedControl
+                  size="sm"
+                  value={statusFilter}
+                  onChange={(v) => { setStatusFilter(v); setPage(1); }}
+                  options={[
+                    { value: "all", label: "All" },
+                    { value: "pending_review", label: "Pending" },
+                    { value: "approved", label: "Approved" },
+                    { value: "rejected", label: "Rejected" },
+                  ]}
+                />
+              </>
+            }
+            flushBody
+          >
+            {logsLoading ? <div className="p-4"><SkeletonList rows={4} /></div> : null}
+            {!logsLoading ? (
+              <DataTable<VetLog>
+                columns={vetLogColumns}
+                rows={logs}
+                rowKey={(l) => l.id}
+                onRowClick={(l) => void openReport(l.id)}
+                emptyTitle="No vet logs"
+                emptyDescription="Create a new log when you have observations to record."
               />
-              <select
-                className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
-                value={flockId}
-                onChange={(e) => { setFlockId(e.target.value); setPage(1); }}
-              >
-                <option value="">All flocks</option>
-                {flocks.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
-              </select>
-              <select
-                className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
-                value={statusFilter}
-                onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }}
-              >
-                <option value="all">All statuses</option>
-                <option value="approved">Approved</option>
-                <option value="pending_review">Pending</option>
-                <option value="rejected">Rejected</option>
-              </select>
-              <span className="ml-auto text-xs text-neutral-500">{total} rows</span>
-            </div>
-
-            {logsLoading && <div className="p-4"><SkeletonList rows={4} /></div>}
-
-            {!logsLoading && logs.length === 0 ? (
-              <div className="p-6">
-                <EmptyState title="No vet logs" description="Create a new log when you have observations to record." />
-              </div>
             ) : null}
-
-            {!logsLoading && logs.length > 0 ? (
-              <div className="institutional-table-wrapper">
-                <table className="institutional-table min-w-[72rem]">
-                  <thead>
-                    <tr>
-                      <th>Log date</th>
-                      <th>Author</th>
-                      <th>Weight</th>
-                      <th>Medicine</th>
-                      <th>FCR @ log</th>
-                      <th>Observations</th>
-                      <th>Status</th>
-                      <th className="tbl-actions">Report</th>
-                      {isReviewer ? <th className="tbl-actions">Review</th> : null}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {logs.map((l) => (
-                      <tr key={l.id} className="cursor-pointer hover:bg-[var(--table-row-hover)]" onClick={() => void openReport(l.id)}>
-                        <td className="tbl-mono">{l.logDate}</td>
-                        <td className="whitespace-nowrap">{l.authorName ?? l.authorUserId?.slice(0, 8)}</td>
-                        <td className="tbl-mono text-xs">
-                          {l.hasWeightSample || l.avgWeightKg != null
-                            ? `${Number(l.avgWeightKg).toFixed(2)} kg${l.sampleSize ? ` (n=${l.sampleSize})` : ""}`
-                            : "—"}
-                        </td>
-                        <td className="text-xs">{l.medicineName ?? "—"}</td>
-                        <td className="tbl-mono text-xs">{l.fcrAtLogTime != null ? Number(l.fcrAtLogTime).toFixed(2) : "—"}</td>
-                        <td style={{ maxWidth: "14rem" }}>{l.observations || "—"}</td>
-                        <td className="tbl-badge"><StatusBadge status={l.submissionStatus} /></td>
-                        <td className="tbl-actions">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void openReport(l.id);
-                            }}
-                            className="rounded-md border border-[var(--border-color)] px-2 py-1 text-xs font-semibold text-[var(--primary-color)]"
-                          >
-                            View
-                          </button>
-                        </td>
-                        {isReviewer ? (
-                          <td className="tbl-actions">
-                            {l.submissionStatus === "pending_review" ? (
-                              <span className="flex flex-wrap gap-1 justify-center">
-                                <button type="button" onClick={(e) => { e.stopPropagation(); void handleReview(l.id, "approve"); }} className="rounded bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">Approve</button>
-                                <button type="button" onClick={(e) => { e.stopPropagation(); void handleReview(l.id, "reject"); }} className="rounded bg-red-600 px-2 py-0.5 text-xs font-semibold text-white">Reject</button>
-                              </span>
-                            ) : (
-                              <span className="text-neutral-400">—</span>
-                            )}
-                          </td>
-                        ) : null}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : null}
-          </div>
+          </SectionCard>
 
           {!logsLoading && logs.length > 0 ? (
             <div className="flex items-center justify-between text-xs text-neutral-500">
@@ -437,18 +460,6 @@ export function FarmVetLogsPage() {
               </span>
             </div>
           ) : null}
-
-          <div className="flex flex-wrap gap-2">
-            {canSubmit ? (
-              <button
-                type="button"
-                onClick={() => setShowNewLog((v) => !v)}
-                className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
-              >
-                {showNewLog ? "Close" : "Create new vet log"}
-              </button>
-            ) : null}
-          </div>
 
           {showNewLog && canSubmit ? (
             <form onSubmit={(ev) => void handleSubmit(ev)} className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">

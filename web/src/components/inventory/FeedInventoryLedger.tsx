@@ -1,6 +1,8 @@
 import { EmptyState } from "../EmptyState";
 import { SkeletonList } from "../LoadingSkeleton";
 import { OdooSyncBadge } from "../accounting/OdooSyncBadge";
+import { DataTable, type DataColumn } from "../ui/DataTable";
+import { SegmentedControl } from "../ui";
 
 type LedgerRow = {
   id: string;
@@ -74,32 +76,91 @@ export function FeedInventoryLedger({
 }: Props) {
   const visibleRows = txTypeFilter === "all" ? rows : rows.filter((row) => row.type === txTypeFilter);
 
+  const columns: DataColumn<LedgerRow>[] = [
+    {
+      key: "at",
+      header: "Date / time",
+      className: "tbl-mono whitespace-nowrap",
+      render: (row) => new Date(row.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" }),
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (row) => (
+        <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${txBadgeClass(row.type)}`}>
+          {txLabel(row.type)}
+        </span>
+      ),
+    },
+    {
+      key: "feedType",
+      header: "Feed type",
+      render: (row) => feedTypeLabel(row.feedType, feedTypeOptions),
+    },
+    {
+      key: "qty",
+      header: "Qty (kg)",
+      numeric: true,
+      render: (row) => row.quantityKg.toFixed(1),
+    },
+    {
+      key: "delta",
+      header: "Delta (kg)",
+      numeric: true,
+      render: (row) => (
+        <span className={`font-semibold ${row.deltaKg >= 0 ? "text-emerald-500" : "text-amber-500"}`}>
+          {row.deltaKg >= 0 ? "+" : ""}
+          {row.deltaKg.toFixed(1)}
+        </span>
+      ),
+    },
+    {
+      key: "reason",
+      header: "Reason",
+      render: (row) => <span className="text-[var(--text-secondary)]">{row.reason || "—"}</span>,
+    },
+    {
+      key: "ref",
+      header: "Flock / reference",
+      className: "tbl-mono",
+      render: (row) => <span className="text-[var(--text-muted)]">{row.flockLabel ?? row.reference ?? "—"}</span>,
+    },
+    {
+      key: "accounting",
+      header: "Accounting",
+      render: (row) =>
+        row.type === "procurement_receipt" ? (
+          <OdooSyncBadge status={row.accountingStatus} compact approvalsHref="/farm/accounting-approvals" />
+        ) : (
+          <span className="text-xs text-[var(--text-muted)]">N/A</span>
+        ),
+    },
+  ];
+
   return (
     <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)]">
       <div className="table-block border-0 bg-transparent">
         <div className="table-toolbar">
-          <select
-            className="rounded border border-[var(--border-input)] bg-[var(--surface-input)] px-2.5 py-1.5 text-xs text-[var(--text-primary)]"
-            value={feedTypeFilter}
-            onChange={(e) => onFeedTypeFilterChange(e.target.value)}
-          >
-            <option value="">All feed types</option>
-            {feedTypeOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <select
-            className="rounded border border-[var(--border-input)] bg-[var(--surface-input)] px-2.5 py-1.5 text-xs text-[var(--text-primary)]"
+          <SegmentedControl
+            size="sm"
+            value={feedTypeFilter || "__all__"}
+            onChange={(v) => onFeedTypeFilterChange(v === "__all__" ? "" : v)}
+            options={[
+              { value: "__all__", label: "All feeds" },
+              ...feedTypeOptions.map((option) => ({ value: option.value, label: option.label })),
+            ]}
+          />
+          <SegmentedControl
+            size="sm"
             value={txTypeFilter}
-            onChange={(e) => onTxTypeFilterChange(e.target.value as TxTypeFilter)}
-          >
-            <option value="all">All transaction types</option>
-            <option value="procurement_receipt">Received</option>
-            <option value="feed_consumption">Used</option>
-            <option value="adjustment">Adjustment</option>
-          </select>
+            onChange={(v) => onTxTypeFilterChange(v as TxTypeFilter)}
+            options={[
+              { value: "all", label: "All types" },
+              { value: "procurement_receipt", label: "Received" },
+              { value: "feed_consumption", label: "Used" },
+              { value: "adjustment", label: "Adjustment" },
+            ]}
+          />
           <a
             href={exportHref}
             className="rounded border border-[var(--border-color)] bg-[var(--surface-input)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
@@ -119,51 +180,32 @@ export function FeedInventoryLedger({
             <EmptyState title="No transactions found." description="Try changing feed type or transaction filters." />
           </div>
         ) : (
-          <div className="institutional-table-wrapper">
-            <table className="institutional-table">
-              <thead>
-                <tr>
-                  <th>Date / time</th>
-                  <th>Status</th>
-                  <th>Feed type</th>
-                  <th className="tbl-num">Qty (kg)</th>
-                  <th className="tbl-num">Delta (kg)</th>
-                  <th>Reason</th>
-                  <th>Flock / reference</th>
-                  <th>Accounting</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleRows.map((row) => (
-                  <tr key={row.id}>
-                    <td className="tbl-mono whitespace-nowrap">
-                      {new Date(row.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
-                    </td>
-                    <td>
-                      <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${txBadgeClass(row.type)}`}>
-                        {txLabel(row.type)}
-                      </span>
-                    </td>
-                    <td>{feedTypeLabel(row.feedType, feedTypeOptions)}</td>
-                    <td className="tbl-num">{row.quantityKg.toFixed(1)}</td>
-                    <td className={`tbl-num font-semibold ${row.deltaKg >= 0 ? "text-emerald-500" : "text-amber-500"}`}>
-                      {row.deltaKg >= 0 ? "+" : ""}
-                      {row.deltaKg.toFixed(1)}
-                    </td>
-                    <td className="text-[var(--text-secondary)]">{row.reason || "—"}</td>
-                    <td className="tbl-mono text-[var(--text-muted)]">{row.flockLabel ?? row.reference ?? "—"}</td>
-                    <td>
-                      {row.type === "procurement_receipt" ? (
-                        <OdooSyncBadge status={row.accountingStatus} compact approvalsHref="/farm/accounting-approvals" />
-                      ) : (
-                        <span className="text-xs text-[var(--text-muted)]">N/A</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable<LedgerRow>
+            columns={columns}
+            rows={visibleRows}
+            rowKey={(row) => row.id}
+            renderMobileCard={(row) => (
+              <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-sm)]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${txBadgeClass(row.type)}`}>
+                    {txLabel(row.type)}
+                  </span>
+                  <span className={`text-sm font-semibold ${row.deltaKg >= 0 ? "text-emerald-500" : "text-amber-500"}`}>
+                    {row.deltaKg >= 0 ? "+" : ""}
+                    {row.deltaKg.toFixed(1)} kg
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                  {feedTypeLabel(row.feedType, feedTypeOptions)}
+                  {row.reason ? ` · ${row.reason}` : ""}
+                </p>
+                <p className="mt-1 text-xs text-[var(--text-muted)]">
+                  {new Date(row.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
+                  {row.flockLabel ? ` · ${row.flockLabel}` : ""}
+                </p>
+              </div>
+            )}
+          />
         )}
       </div>
 

@@ -17,6 +17,8 @@ import { API_BASE_URL } from "../../api/config";
 import { useToast } from "../../components/Toast";
 import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
 import { ERPNextSyncPanel } from "../../components/accounting/ERPNextSyncPanel";
+import { DataTable, type DataColumn } from "../../components/ui/DataTable";
+import { SegmentedControl } from "../../components/ui";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -422,6 +424,58 @@ export function AccountingApprovalsPage() {
     return outboxRows.filter(r => r.status === outboxFilter);
   }, [outboxRows, outboxFilter]);
 
+  const outboxColumns: DataColumn<OutboxRow>[] = [
+    {
+      key: "type",
+      header: "Type",
+      render: (row) => (
+        <span className={["text-[11px] font-medium border px-2 py-0.5 rounded-full", eventTypeBadgeColor(row.eventType)].join(" ")}>
+          {eventTypeLabel(row.eventType)}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (row) => <OdooSyncBadge status="approved" outboxStatus={row.status} />,
+    },
+    {
+      key: "doc",
+      header: "Odoo document",
+      render: (row) => <span className="font-mono text-xs text-[var(--text-secondary)]">{row.odooMoveName || "—"}</span>,
+    },
+    {
+      key: "tries",
+      header: "Tries",
+      numeric: true,
+      render: (row) => <span className="text-[var(--text-muted)]">{row.attempts}</span>,
+    },
+    {
+      key: "last",
+      header: "Last tried",
+      render: (row) => <span className="text-xs text-[var(--text-muted)]">{row.lastAttemptedAt ? fmtDate(row.lastAttemptedAt) : "—"}</span>,
+    },
+    {
+      key: "actions",
+      header: "Actions",
+      render: (row) => (
+        <div className="space-y-1">
+          {(row.status === "failed" || row.status === "pending" || row.status === "processing") && (
+            <button onClick={() => retryOutbox(row.id)} className="text-xs text-[var(--primary-color)] hover:underline font-medium">
+              {row.status === "pending" || row.status === "processing" ? "Resend" : "Retry"}
+            </button>
+          )}
+          {row.lastError && (
+            <details>
+              <summary className="text-xs text-red-400 cursor-pointer font-medium">Error</summary>
+              <p className="text-xs text-red-400 max-w-xs mt-1 opacity-80">{row.lastError}</p>
+            </details>
+          )}
+        </div>
+      ),
+    },
+  ];
+
   const failedItems = filteredActionQueue.filter(i => i.outboxStatus === "failed");
   const pendingApprovalItems = filteredActionQueue.filter(i => i.sourceStatus === "pending_approval" && i.outboxStatus !== "failed");
   const notQueuedItems = filteredActionQueue.filter(i => i.outboxStatus === "not_queued" && i.sourceStatus !== "pending_approval");
@@ -445,27 +499,12 @@ export function AccountingApprovalsPage() {
       <PageHeader title="Accounting Approvals" subtitle="Review farm records and sync to ERPNext (or legacy Odoo outbox)" />
 
       {/* ── Tab bar ── */}
-      <div className="flex items-center gap-0.5 rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-subtle)] p-1">
-        {tabs.map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={[
-              "flex flex-1 items-center justify-center gap-1.5 rounded-[var(--radius-md)] px-3 py-2 text-sm font-medium whitespace-nowrap transition-all",
-              tab === t.id
-                ? "bg-[var(--surface-color)] text-[var(--text-primary)] shadow-[var(--shadow-xs)]"
-                : "text-[var(--text-muted)] hover:text-[var(--text-secondary)]",
-            ].join(" ")}
-          >
-            {t.label}
-            {t.badge != null && t.badge > 0 && (
-              <span className={["rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none", tab === t.id && t.id === "action" ? "bg-red-500 text-white" : "bg-[var(--primary-color)] text-white"].join(" ")}>
-                {t.badge}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl
+        fullWidth
+        value={tab}
+        onChange={(v) => setTab(v as Tab)}
+        options={tabs.map((t) => ({ value: t.id, label: t.label, badge: t.badge }))}
+      />
 
       {/* ══════════════ NEEDS ACTION ══════════════ */}
       {tab === "action" && (
@@ -690,57 +729,38 @@ export function AccountingApprovalsPage() {
 
           {outboxLoading && <p className="text-sm text-[var(--text-muted)] animate-pulse">Loading…</p>}
 
-          <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-sm)]">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="border-b border-[var(--border-color)] text-left text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)] bg-[var(--table-header-bg)]">
-                    <th className="px-4 py-2.5">Type</th>
-                    <th className="px-4 py-2.5">Status</th>
-                    <th className="px-4 py-2.5">Odoo document</th>
-                    <th className="px-4 py-2.5 text-center">Tries</th>
-                    <th className="px-4 py-2.5">Last tried</th>
-                    <th className="px-4 py-2.5">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredOutbox.map(row => (
-                    <tr key={row.id} className="border-b border-[var(--border-color)] hover:bg-[var(--table-row-hover)] transition-colors">
-                      <td className="px-4 py-2.5">
-                        <span className={["text-[11px] font-medium border px-2 py-0.5 rounded-full", eventTypeBadgeColor(row.eventType)].join(" ")}>
-                          {eventTypeLabel(row.eventType)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <OdooSyncBadge status="approved" outboxStatus={row.status} />
-                      </td>
-                      <td className="px-4 py-2.5 font-mono text-xs text-[var(--text-secondary)]">{row.odooMoveName || "—"}</td>
-                      <td className="px-4 py-2.5 text-center text-[var(--text-muted)]">{row.attempts}</td>
-                      <td className="px-4 py-2.5 text-xs text-[var(--text-muted)]">{row.lastAttemptedAt ? fmtDate(row.lastAttemptedAt) : "—"}</td>
-                      <td className="px-4 py-2.5 space-y-1">
-                        {(row.status === "failed" || row.status === "pending" || row.status === "processing") && (
-                          <button onClick={() => retryOutbox(row.id)} className="text-xs text-[var(--primary-color)] hover:underline font-medium">
-                            {row.status === "pending" || row.status === "processing" ? "Resend" : "Retry"}
-                          </button>
-                        )}
-                        {row.lastError && (
-                          <details>
-                            <summary className="text-xs text-red-400 cursor-pointer font-medium">Error</summary>
-                            <p className="text-xs text-red-400 max-w-xs mt-1 opacity-80">{row.lastError}</p>
-                          </details>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                  {!outboxLoading && filteredOutbox.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-10 text-center text-sm text-[var(--text-muted)]">No sync events found.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <DataTable<OutboxRow>
+            columns={outboxColumns}
+            rows={filteredOutbox}
+            rowKey={(row) => row.id}
+            empty={
+              outboxLoading ? null : (
+                <div className="rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] p-10 text-center">
+                  <p className="text-sm text-[var(--text-muted)]">No sync events found.</p>
+                </div>
+              )
+            }
+            renderMobileCard={(row) => (
+              <div className="rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] p-3 space-y-1.5 shadow-[var(--shadow-sm)]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={["text-[11px] font-medium border px-2 py-0.5 rounded-full", eventTypeBadgeColor(row.eventType)].join(" ")}>
+                    {eventTypeLabel(row.eventType)}
+                  </span>
+                  <OdooSyncBadge status="approved" outboxStatus={row.status} />
+                </div>
+                <p className="text-xs text-[var(--text-muted)]">
+                  {row.odooMoveName ? `Doc ${row.odooMoveName} · ` : ""}
+                  {row.attempts} tries · Last {row.lastAttemptedAt ? fmtDate(row.lastAttemptedAt) : "—"}
+                </p>
+                {row.lastError ? <p className="text-xs text-red-400">{row.lastError}</p> : null}
+                {(row.status === "failed" || row.status === "pending" || row.status === "processing") && (
+                  <button onClick={() => retryOutbox(row.id)} className="text-xs text-[var(--primary-color)] hover:underline font-medium">
+                    {row.status === "pending" || row.status === "processing" ? "Resend" : "Retry"}
+                  </button>
+                )}
+              </div>
+            )}
+          />
         </section>
       )}
 

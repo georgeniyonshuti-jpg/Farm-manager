@@ -6,12 +6,15 @@ import { canFlockAction } from "../../auth/permissions";
 import { API_BASE_URL } from "../../api/config";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
+import { SectionCard } from "../../components/ui/SectionCard";
+import { DataTable, type DataColumn } from "../../components/ui/DataTable";
 import { useToast } from "../../components/Toast";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
 import { syncSlaughterSaleToERPNext } from "../../api/erpnext.api";
 import { getStoredErpnextCompany, getStoredErpnextCostCenter, CLIENT_ERPNEXT_ENTITY_SYNC } from "../../lib/erpnextPrefs";
 import { useERPNextConnection } from "../../context/OdooConnectionContext";
+import { SegmentedControl } from "../../components/ui";
 
 type Flock = { id: string; label: string; birdsLiveEstimate?: number | null };
 type Slaughter = {
@@ -73,25 +76,27 @@ export function FarmSlaughterPage() {
     notes: "",
   });
   const [showRecordSlaughter, setShowRecordSlaughter] = useState(false);
+  const [datePreset, setDatePreset] = useState<"7d" | "30d" | "cycle" | "custom">("custom");
 
-  const preset = useMemo(() => ({
-    set7d: () => {
+  const applyDatePreset = useCallback((value: "7d" | "30d" | "cycle") => {
+    setDatePreset(value);
+    if (value === "7d") {
       const end = new Date();
       const start = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000);
       setStartAt(start.toISOString().slice(0, 10));
       setEndAt(end.toISOString().slice(0, 10));
-    },
-    set30d: () => {
+      return;
+    }
+    if (value === "30d") {
       const end = new Date();
       const start = new Date(Date.now() - 29 * 24 * 60 * 60 * 1000);
       setStartAt(start.toISOString().slice(0, 10));
       setEndAt(end.toISOString().slice(0, 10));
-    },
-    setCycle: () => {
-      setStartAt("");
-      setEndAt(new Date().toISOString().slice(0, 10));
-    },
-  }), []);
+      return;
+    }
+    setStartAt("");
+    setEndAt(new Date().toISOString().slice(0, 10));
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -244,9 +249,39 @@ export function FarmSlaughterPage() {
     }
   }
 
+  const slaughterColumns = useMemo((): DataColumn<Slaughter>[] => [
+    {
+      key: "at",
+      header: "Date / Time",
+      className: "tbl-mono",
+      render: (r) => new Date(r.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" }),
+    },
+    { key: "reason", header: "Reason", render: (r) => slaughterReasonLabel(r, slaughterReasonOptions) },
+    { key: "birds", header: "Birds slaughtered", numeric: true, render: (r) => <span className="font-semibold">{r.birdsSlaughtered}</span> },
+    { key: "live", header: "Avg live wt (kg)", numeric: true, render: (r) => r.avgLiveWeightKg },
+    { key: "carcass", header: "Avg carcass wt (kg)", numeric: true, render: (r) => (r.avgCarcassWeightKg != null ? r.avgCarcassWeightKg : "—") },
+    { key: "notes", header: "Notes", render: (r) => <span className="block max-w-[14rem] truncate">{r.notes || "—"}</span> },
+    { key: "odoo", header: "Odoo", badge: true, render: (r) => <OdooSyncBadge status={r.accountingStatus} compact approvalsHref="/farm/accounting-approvals" /> },
+  ], [slaughterReasonOptions]);
+
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <PageHeader title="Slaughter and FCR" subtitle="Capture slaughter metrics and monitor feed conversion ratio." />
+      <PageHeader
+        title="Slaughter and FCR"
+        subtitle="Capture slaughter metrics and monitor feed conversion ratio."
+        action={
+          canRecordSlaughter ? (
+            <button
+              type="button"
+              onClick={() => setShowRecordSlaughter((v) => !v)}
+              className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)] disabled:opacity-50"
+              disabled={eligibility != null && !eligibility.eligibleForSlaughter}
+            >
+              {showRecordSlaughter ? "Close" : "Record new slaughter"}
+            </button>
+          ) : null
+        }
+      />
       {loading && <SkeletonList rows={3} />}
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
       {!loading && !error ? (
@@ -307,35 +342,49 @@ export function FarmSlaughterPage() {
             </>
           ) : null}
 
-          <div className="table-block">
-            <div className="table-toolbar">
-              <select
-                className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
-                value={flockId}
-                onChange={(e) => setFlockId(e.target.value)}
-              >
-                <option value="">All flocks</option>
-                {flocks.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
-              </select>
-              <input
-                className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
-                type="date"
-                value={startAt}
-                onChange={(e) => setStartAt(e.target.value)}
-                placeholder="From"
-              />
-              <input
-                className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
-                type="date"
-                value={endAt}
-                onChange={(e) => setEndAt(e.target.value)}
-                placeholder="To"
-              />
-              <button type="button" onClick={preset.set7d} className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-neutral-700">Last 7d</button>
-              <button type="button" onClick={preset.set30d} className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-neutral-700">Last 30d</button>
-              <button type="button" onClick={preset.setCycle} className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-neutral-700">Cycle to date</button>
-              <span className="ml-auto flex items-center gap-2">
-                <span className="text-xs text-neutral-500">{rows.length} records</span>
+          <SectionCard
+            title="Slaughter records"
+            description={`${rows.length} record${rows.length === 1 ? "" : "s"} in range`}
+            controls={
+              <>
+                <select
+                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
+                  value={flockId}
+                  onChange={(e) => setFlockId(e.target.value)}
+                >
+                  <option value="">All flocks</option>
+                  {flocks.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+                </select>
+                <input
+                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
+                  type="date"
+                  value={startAt}
+                  onChange={(e) => {
+                    setDatePreset("custom");
+                    setStartAt(e.target.value);
+                  }}
+                />
+                <input
+                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
+                  type="date"
+                  value={endAt}
+                  onChange={(e) => {
+                    setDatePreset("custom");
+                    setEndAt(e.target.value);
+                  }}
+                />
+                <SegmentedControl
+                  size="sm"
+                  value={datePreset === "custom" ? "" : datePreset}
+                  onChange={(v) => {
+                    if (v === "7d" || v === "30d" || v === "cycle") applyDatePreset(v);
+                  }}
+                  options={[
+                    { value: "7d", label: "Last 7d" },
+                    { value: "30d", label: "Last 30d" },
+                    { value: "cycle", label: "Cycle to date" },
+                  ]}
+                />
                 <a
                   className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
                   href={`${API_BASE_URL}/api/reports/slaughter.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`}
@@ -352,70 +401,27 @@ export function FarmSlaughterPage() {
                 >
                   Performance CSV
                 </a>
-              </span>
-            </div>
-
+              </>
+            }
+            flushBody
+          >
             {!canRecordSlaughter ? (
               <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
                 View-only: only vet manager, manager, or superuser can save slaughter events.
               </div>
             ) : null}
-
-            <div className="institutional-table-wrapper">
-              <table className="institutional-table min-w-[52rem]">
-                <thead>
-                  <tr>
-                    <th>Date / Time</th>
-                    <th>Reason</th>
-                    <th className="tbl-num">Birds slaughtered</th>
-                    <th className="tbl-num">Avg live wt (kg)</th>
-                    <th className="tbl-num">Avg carcass wt (kg)</th>
-                    <th>Notes</th>
-                    <th>Odoo</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.id}>
-                      <td className="tbl-mono">{new Date(r.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}</td>
-                      <td className="whitespace-nowrap">{slaughterReasonLabel(r, slaughterReasonOptions)}</td>
-                      <td className="tbl-num font-semibold">{r.birdsSlaughtered}</td>
-                      <td className="tbl-num">{r.avgLiveWeightKg}</td>
-                      <td className="tbl-num">{r.avgCarcassWeightKg != null ? r.avgCarcassWeightKg : "—"}</td>
-                      <td style={{ maxWidth: "14rem" }}>{r.notes || "—"}</td>
-                      <td><OdooSyncBadge status={r.accountingStatus} compact approvalsHref="/farm/accounting-approvals" /></td>
-                    </tr>
-                  ))}
-                  {!rows.length ? (
-                    <tr>
-                      <td colSpan={7} className="py-6 text-center text-neutral-500">No slaughter records yet.</td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-          </div>
+            <DataTable<Slaughter>
+              columns={slaughterColumns}
+              rows={rows}
+              rowKey={(r) => r.id}
+              emptyTitle="No slaughter records yet"
+              emptyDescription="Slaughter events for the selected flock and date range will appear here once recorded."
+            />
+          </SectionCard>
           {canRecordSlaughter ? (
             <div className="space-y-3">
-              {!showRecordSlaughter ? (
-                <button
-                  type="button"
-                  onClick={() => setShowRecordSlaughter(true)}
-                  className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 disabled:opacity-50"
-                  disabled={eligibility != null && !eligibility.eligibleForSlaughter}
-                >
-                  Record new slaughter
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => setShowRecordSlaughter(false)}
-                    className="rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
-                  >
-                    Cancel
-                  </button>
-                  <form onSubmit={submit} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+              {showRecordSlaughter ? (
+                <form onSubmit={submit} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
                     <p className="mb-1 text-sm font-semibold text-neutral-800">New slaughter record</p>
                     {(() => {
                       const selectedFlock = flocks.find((f) => f.id === flockId);
@@ -457,9 +463,8 @@ export function FarmSlaughterPage() {
                     <div className="mt-3 flex justify-end">
                       <button disabled={busy || (eligibility != null && !eligibility.eligibleForSlaughter)} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">{busy ? "Saving..." : "Save slaughter"}</button>
                     </div>
-                  </form>
-                </>
-              )}
+                </form>
+              ) : null}
             </div>
           ) : null}
         </>

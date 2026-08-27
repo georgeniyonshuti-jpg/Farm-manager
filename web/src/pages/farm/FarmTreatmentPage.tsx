@@ -4,6 +4,8 @@ import { useAuth } from "../../auth/AuthContext";
 import { readAuthHeaders, jsonAuthHeaders } from "../../lib/authHeaders";
 import { API_BASE_URL } from "../../api/config";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
+import { EmptyState } from "../../components/EmptyState";
+import { SectionCard } from "../../components/ui/SectionCard";
 import { useToast } from "../../components/Toast";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
@@ -11,6 +13,7 @@ import type { FieldPerformanceSummary } from "../../hooks/useFlockFieldContext";
 import type { CheckinStatus } from "./checkinStatusTypes";
 import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
 import { syncTreatmentToERPNext } from "../../api/erpnext.api";
+import { SegmentedControl } from "../../components/ui";
 import {
   getStoredErpnextCompany,
   getStoredErpnextCostCenter,
@@ -514,26 +517,41 @@ export function FarmTreatmentPage() {
     }
   }
 
-  function tabClass(active: boolean) {
-    return [
-      "rounded-lg px-3 py-2 text-sm font-semibold transition-colors",
-      active ? "bg-emerald-800 text-white" : "bg-neutral-100 text-neutral-700 hover:bg-neutral-200",
-    ].join(" ");
-  }
-
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <PageHeader
         title="Medicine tracking"
         subtitle="Record treatments and withdrawal windows by flock."
         action={
-          <a
-            href={`${API_BASE_URL}/api/reports/medicine-tracking.csv${flockId ? `?flockId=${encodeURIComponent(flockId)}` : ""}`}
-            className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
-            download
-          >
-            Export CSV
-          </a>
+          <div className="flex items-center gap-2">
+            <a
+              href={`${API_BASE_URL}/api/reports/medicine-tracking.csv${flockId ? `?flockId=${encodeURIComponent(flockId)}` : ""}`}
+              className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
+              download
+            >
+              Export CSV
+            </a>
+            {tab === "treatments" ? (
+              <button
+                type="button"
+                onClick={() => setShowTreatmentForm((v) => !v)}
+                className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)]"
+              >
+                {showTreatmentForm ? "Close" : "Record new treatment"}
+              </button>
+            ) : null}
+          </div>
+        }
+        tabs={
+          <SegmentedControl
+            value={tab}
+            onChange={(v) => setTab(v as MedTab)}
+            options={[
+              { value: "treatments", label: "Treatments" },
+              { value: "rounds", label: "Rounds" },
+              { value: "inventory", label: "Inventory" },
+            ]}
+          />
         }
       />
       {!loading && flockId && flockStrip ? (
@@ -553,18 +571,6 @@ export function FarmTreatmentPage() {
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
       {!loading && !error ? (
         <>
-          <div className="flex flex-wrap gap-2 border-b border-neutral-200 pb-3">
-            <button type="button" className={tabClass(tab === "treatments")} onClick={() => setTab("treatments")}>
-              Treatments
-            </button>
-            <button type="button" className={tabClass(tab === "rounds")} onClick={() => setTab("rounds")}>
-              Rounds
-            </button>
-            <button type="button" className={tabClass(tab === "inventory")} onClick={() => setTab("inventory")}>
-              Inventory
-            </button>
-          </div>
-
           {tab === "treatments" ? (
             <>
               {overdueRounds.length > 0 ? (
@@ -575,12 +581,29 @@ export function FarmTreatmentPage() {
                   </button>
                 </div>
               ) : (
-                <p className="text-sm text-emerald-800">No overdue rounds.</p>
+                <EmptyState title="No overdue rounds" description="All scheduled medicine rounds are on track." />
               )}
 
-              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-                <p className="mb-2 text-sm font-semibold text-neutral-800">List filters</p>
-                <div className="grid gap-3 sm:grid-cols-2">
+              <SectionCard
+                title="Recent treatments"
+                description="Filtered by flock and date range"
+                controls={
+                  <>
+                    <button type="button" onClick={preset.set7d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 7d</button>
+                    <button type="button" onClick={preset.set30d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 30d</button>
+                    <button type="button" onClick={preset.setCycle} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Cycle to date</button>
+                    <a
+                      className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700"
+                      href={`${API_BASE_URL}/api/reports/treatments.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Download CSV
+                    </a>
+                  </>
+                }
+              >
+                <div className="mb-4 grid gap-3 sm:grid-cols-2">
                   <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={startAt} onChange={(e) => setStartAt(e.target.value)} />
                   <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
                   <select className="rounded-lg border border-neutral-300 px-3 py-2 sm:col-span-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
@@ -590,23 +613,6 @@ export function FarmTreatmentPage() {
                     ))}
                   </select>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button type="button" onClick={preset.set7d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 7d</button>
-                  <button type="button" onClick={preset.set30d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 30d</button>
-                  <button type="button" onClick={preset.setCycle} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Cycle to date</button>
-                  <a
-                    className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700"
-                    href={`${API_BASE_URL}/api/reports/treatments.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Download CSV
-                  </a>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-                <p className="mb-3 text-sm font-semibold text-neutral-800">Recent treatments</p>
                 <div className="space-y-2">
                   {rows.map((r) => (
                     <div key={r.id} className="rounded-lg border border-neutral-200 p-3 text-sm">
@@ -623,19 +629,16 @@ export function FarmTreatmentPage() {
                       </p>
                     </div>
                   ))}
-                  {!rows.length ? <p className="text-sm text-neutral-500">No treatments yet.</p> : null}
+                  {!rows.length ? (
+                    <EmptyState
+                      title="No treatments yet"
+                      description="Recorded treatments for this flock and date range will appear here."
+                    />
+                  ) : null}
                 </div>
-              </div>
+              </SectionCard>
 
-              {!showTreatmentForm ? (
-                <button
-                  type="button"
-                  onClick={() => setShowTreatmentForm(true)}
-                  className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
-                >
-                  Record new treatment
-                </button>
-              ) : (
+              {showTreatmentForm ? (
                 <form onSubmit={submit} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-neutral-800">New treatment</p>
@@ -674,7 +677,7 @@ export function FarmTreatmentPage() {
                     <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">{busy ? "Saving..." : "Save treatment"}</button>
                   </div>
                 </form>
-              )}
+              ) : null}
             </>
           ) : null}
 

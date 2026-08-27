@@ -11,8 +11,10 @@ import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
 import { useToast } from "../../components/Toast";
 import { useBarnNames } from "../../hooks/useBarnNames";
+import { Modal } from "../../components/ui/Modal";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { useSuppliers } from "../../hooks/useSuppliers";
+import { SegmentedControl } from "../../components/ui";
 
 const FALLBACK_BREED_OPTIONS = [
   { value: "generic_broiler", label: "generic_broiler" },
@@ -71,13 +73,6 @@ type BarnSummary = {
   mortality7d: number;
   avgFcr: number | null;
 };
-type FlockRecoveryOverview = {
-  failedFlocks: Array<{ id: string; label: string; status?: string; failedReason?: string; failedAt?: string }>;
-  unexpectedStatusFlocks: Array<{ id: string; label: string; status?: string }>;
-  orphanReferences: Array<{ source: string; count: number; sampleIds: string[] }>;
-  summary?: { failedCount?: number; unexpectedStatusCount?: number; orphanReferenceCount?: number };
-};
-
 type SortCol = "risk" | "label" | "barn" | "placement";
 
 export function FlockListPage() {
@@ -97,14 +92,13 @@ export function FlockListPage() {
   const [focusMode, setFocusMode] = useState(false);
   const [insights, setInsights] = useState<string[]>([]);
   const [farmHealthScore, setFarmHealthScore] = useState<number | null>(null);
+  const [healthContributors, setHealthContributors] = useState<string[]>([]);
   const [createBusy, setCreateBusy] = useState(false);
   const [showCreateFlock, setShowCreateFlock] = useState(false);
   const [purgeBusyId, setPurgeBusyId] = useState<string | null>(null);
   const [archiveBusyId, setArchiveBusyId] = useState<string | null>(null);
   const [retryBusyId, setRetryBusyId] = useState<string | null>(null);
   const [deleteFailedBusyId, setDeleteFailedBusyId] = useState<string | null>(null);
-  const [recoveryOverview, setRecoveryOverview] = useState<FlockRecoveryOverview | null>(null);
-  const [recoveryLoading, setRecoveryLoading] = useState(false);
   const [createForm, setCreateForm] = useState({
     placementDate: new Date().toISOString().slice(0, 10),
     initialCount: "",
@@ -155,7 +149,7 @@ export function FlockListPage() {
         setBarns([]);
         setInsights([]);
         setFarmHealthScore(null);
-        setRecoveryOverview(null);
+        setHealthContributors([]);
         return;
       }
       if (!r.ok) throw new Error(d.error ?? "Load failed");
@@ -190,30 +184,6 @@ export function FlockListPage() {
         })
       );
       setFlocks(enriched);
-      if (user?.role === "superuser") {
-        setRecoveryLoading(true);
-        try {
-          const rr = await fetch(`${API_BASE_URL}/api/flocks/recovery-overview`, { headers: readAuthHeaders(token) });
-          const rd = await rr.json().catch(() => ({}));
-          if (rr.ok) {
-            setRecoveryOverview({
-              failedFlocks: (rd as { failedFlocks?: FlockRecoveryOverview["failedFlocks"] }).failedFlocks ?? [],
-              unexpectedStatusFlocks:
-                (rd as { unexpectedStatusFlocks?: FlockRecoveryOverview["unexpectedStatusFlocks"] }).unexpectedStatusFlocks ?? [],
-              orphanReferences: (rd as { orphanReferences?: FlockRecoveryOverview["orphanReferences"] }).orphanReferences ?? [],
-              summary: (rd as { summary?: FlockRecoveryOverview["summary"] }).summary,
-            });
-          } else {
-            setRecoveryOverview(null);
-          }
-        } catch {
-          setRecoveryOverview(null);
-        } finally {
-          setRecoveryLoading(false);
-        }
-      } else {
-        setRecoveryOverview(null);
-      }
       try {
         const br = await fetch(`${API_BASE_URL}/api/farm/ops-board`, { headers: readAuthHeaders(token) });
         const bd = await br.json().catch(() => ({ barns: [], flocks: [], insights: [] }));
@@ -221,6 +191,9 @@ export function FlockListPage() {
           setBarns((bd.barns as BarnSummary[]) ?? []);
           setInsights(((bd as { insights?: string[] }).insights) ?? []);
           setFarmHealthScore((bd as { farmHealthScore?: number }).farmHealthScore ?? null);
+          setHealthContributors(
+            ((bd as { healthScoreContributors?: string[] }).healthScoreContributors) ?? []
+          );
           type OpsRow = {
             flockId: string;
             label?: string;
@@ -652,52 +625,52 @@ export function FlockListPage() {
       ) : null}
       {farmHealthScore != null ? (
         <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 text-sm shadow-[var(--shadow-sm)]">
-          <p className="font-semibold text-[var(--text-primary)]">Farm health score: {farmHealthScore}/100</p>
-          {!!insights.length ? <p className="mt-1 text-[var(--text-secondary)]">{insights[0]}</p> : null}
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="type-h3 text-[var(--text-primary)]">
+              Farm health <span className="type-metric ml-1">{farmHealthScore}</span>
+              <span className="type-caption ml-1">/100</span>
+            </p>
+          </div>
+          {healthContributors.length ? (
+            <ul className="mt-2 list-inside list-disc type-caption">
+              {healthContributors.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ul>
+          ) : insights.length ? (
+            <p className="mt-1 text-[var(--text-secondary)]">{insights[0]}</p>
+          ) : (
+            <p className="mt-1 type-caption">No major detractors right now.</p>
+          )}
         </div>
       ) : null}
-      {user?.role === "superuser" ? (
-        <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 text-sm shadow-[var(--shadow-sm)]">
-          <div className="flex items-center justify-between gap-2">
-            <p className="font-semibold text-[var(--text-primary)]">Data repair</p>
-            <button
-              type="button"
-              onClick={() => void load()}
-              className="rounded border border-[var(--border-color)] bg-[var(--surface-input)] px-2 py-1 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
-            >
-              Refresh
-            </button>
-          </div>
-          {recoveryLoading ? (
-            <p className="mt-2 text-xs text-[var(--text-muted)]">Loading recovery signals…</p>
-          ) : recoveryOverview ? (
-            <div className="mt-2 space-y-2 text-xs">
-              <p className="text-[var(--text-secondary)]">
-                Failed: <strong>{recoveryOverview.summary?.failedCount ?? recoveryOverview.failedFlocks.length}</strong> ·
-                Unexpected statuses: <strong>{recoveryOverview.summary?.unexpectedStatusCount ?? recoveryOverview.unexpectedStatusFlocks.length}</strong> ·
-                Orphan refs: <strong>{recoveryOverview.summary?.orphanReferenceCount ?? 0}</strong>
-              </p>
-              {recoveryOverview.orphanReferences.length > 0 ? (
-                <ul className="space-y-1">
-                  {recoveryOverview.orphanReferences.map((r) => (
-                    <li key={r.source} className="text-amber-300">
-                      {r.source}: {r.count} orphan refs {r.sampleIds.length ? `(${r.sampleIds.slice(0, 3).join(", ")})` : ""}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-emerald-400">No orphan references detected.</p>
-              )}
-              {recoveryOverview.unexpectedStatusFlocks.length > 0 ? (
-                <p className="text-amber-300">
-                  Unexpected status flocks: {recoveryOverview.unexpectedStatusFlocks.slice(0, 5).map((f) => `${f.label}(${f.status})`).join(", ")}
+      {barns.length > 0 ? (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {barns.slice(0, 6).map((b) => {
+            const risk =
+              b.overdueRounds > 0 || b.blockedFlocks > 0
+                ? "Watch"
+                : b.mortality7d > 5
+                  ? "Elevated"
+                  : "Low";
+            return (
+              <div
+                key={b.barn}
+                className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] p-3 text-sm"
+              >
+                <p className="font-semibold text-[var(--text-primary)]">{b.barn || "Unassigned barn"}</p>
+                <p className="mt-1 type-caption">
+                  {b.flockCount} flocks · Mortality 7d {b.mortality7d}
+                  {b.avgFcr != null ? ` · FCR ${b.avgFcr}` : ""}
                 </p>
-              ) : null}
-            </div>
-          ) : (
-            <p className="mt-2 text-xs text-[var(--text-muted)]">Recovery overview unavailable.</p>
-          )}
-        </section>
+                <p className="mt-1 text-xs font-semibold text-[var(--text-secondary)]">
+                  Risk {risk}
+                  {b.overdueRounds > 0 ? ` · Next: ${b.overdueRounds} overdue check-in(s)` : ""}
+                </p>
+              </div>
+            );
+          })}
+        </div>
       ) : null}
       {canCreateFlock ? (
         <div className="flex flex-wrap items-center gap-2">
@@ -713,17 +686,20 @@ export function FlockListPage() {
             onClick={toggleCreateFlockPanel}
             className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)]"
           >
-            {showCreateFlock ? "Close" : "Create new flock"}
+            Create new flock
           </button>
         </div>
       ) : null}
 
-      {canCreateFlock && showCreateFlock ? (
-        <form onSubmit={(e) => void submitCreateFlock(e)} className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-sm)]">
-          <p className="text-sm font-semibold text-[var(--text-primary)]">
-            {editingFlockId ? "Edit flock" : "Add purchased flock"}
-          </p>
-          <p className="mt-1 text-xs text-[var(--text-muted)]">
+      {canCreateFlock ? (
+        <Modal
+          open={showCreateFlock}
+          title={editingFlockId ? "Edit flock" : "Add purchased flock"}
+          onClose={toggleCreateFlockPanel}
+          wide
+        >
+        <form onSubmit={(e) => void submitCreateFlock(e)}>
+          <p className="text-xs text-[var(--text-muted)]">
             {editingFlockId
               ? "Update placement, counts, breed, barn, and purchase details. Flock code stays the same."
               : "The system assigns a unique flock name from placement date and sequence (e.g. FM-260529-042)."}
@@ -917,6 +893,7 @@ export function FlockListPage() {
             </button>
           </div>
         </form>
+        </Modal>
       ) : null}
 
       {loading && <SkeletonList rows={4} />}
@@ -932,63 +909,45 @@ export function FlockListPage() {
 
       {!loading && !error && flocks.length > 0 ? (
         <>
-          {!!barns.length ? (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {barns.map((b) => (
-                <div key={b.barn} className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-sm)] text-xs">
-                  <p className="font-semibold text-sm text-[var(--text-primary)]">{b.barn}</p>
-                  <p className="text-[var(--text-muted)]">{b.flockCount} active flock(s)</p>
-                  <div className="mt-2 grid grid-cols-2 gap-1">
-                    <span className="text-[var(--text-muted)]">Avg FCR</span>
-                    <span className="font-semibold text-right tabular-nums">{b.avgFcr != null ? b.avgFcr.toFixed(2) : "—"}</span>
-                    <span className="text-[var(--text-muted)]">Blocked</span>
-                    <span className={["font-semibold text-right", b.blockedFlocks > 0 ? "text-red-400" : ""].join(" ")}>{b.blockedFlocks}</span>
-                    <span className="text-[var(--text-muted)]">Overdue rounds</span>
-                    <span className={["font-semibold text-right", b.overdueRounds > 0 ? "text-amber-400" : ""].join(" ")}>{b.overdueRounds}</span>
-                    <span className="text-[var(--text-muted)]">Mortality 7d</span>
-                    <span className={["font-semibold text-right", b.mortality7d > 0 ? "text-amber-400" : ""].join(" ")}>{b.mortality7d}</span>
-                  </div>
-                </div>
-              ))}
+          {!!barns.length ? null : null}
+          {flocks.some((f) => (f.overdueRounds ?? 0) > 0 || (f.timeStatus?.overdueHours ?? 0) > 0) ? (
+            <div
+              className="rounded-xl border border-[var(--status-danger)]/30 bg-[var(--status-danger-soft)] px-4 py-3 text-sm font-semibold text-[var(--status-danger)]"
+              role="alert"
+            >
+              Check-ins overdue —{" "}
+              {
+                flocks.filter((f) => (f.overdueRounds ?? 0) > 0 || (f.timeStatus?.overdueHours ?? 0) > 0)
+                  .length
+              }{" "}
+              flock(s) need immediate attention.
             </div>
           ) : null}
 
           <div className="table-block">
-            <div className="table-toolbar">
-              <button
-                type="button"
-                onClick={() => setFocusMode((v) => !v)}
-                className={[
-                  "rounded border px-2.5 py-1.5 text-xs font-semibold",
-                  focusMode
-                    ? "border-red-500/40 bg-red-500/10 text-red-300"
-                    : "border-[var(--border-color)] bg-[var(--surface-input)] text-[var(--text-secondary)]",
-                ].join(" ")}
-              >
-                Focus Mode {focusMode ? "ON" : "OFF"}
-              </button>
-              {([
-                ["all", "All"],
-                ["at_risk", "At risk"],
-                ["blocked", "Blocked"],
-                ["needs_vet", "Needs vet"],
-                ["needs_manager", "Needs manager"],
-                ["overdue_checkins", "Overdue check-ins"],
-              ] as const).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setRiskFilter(id as typeof riskFilter)}
-                  className={[
-                    "rounded border px-2.5 py-1.5 text-xs font-semibold",
-                    riskFilter === id
-                      ? "border-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--primary-color-dark)]"
-                      : "border-[var(--border-color)] bg-[var(--surface-input)] text-[var(--text-secondary)]",
-                  ].join(" ")}
-                >
-                  {label}
-                </button>
-              ))}
+            <div className="table-toolbar flex flex-wrap items-center gap-2">
+              <SegmentedControl
+                size="sm"
+                value={focusMode ? "focus" : "all_focus"}
+                onChange={(v) => setFocusMode(v === "focus")}
+                options={[
+                  { value: "all_focus", label: "All" },
+                  { value: "focus", label: "Focus" },
+                ]}
+              />
+              <SegmentedControl
+                size="sm"
+                value={riskFilter}
+                onChange={(v) => setRiskFilter(v as typeof riskFilter)}
+                options={[
+                  { value: "all", label: "All" },
+                  { value: "at_risk", label: "At risk" },
+                  { value: "blocked", label: "Blocked" },
+                  { value: "needs_vet", label: "Needs vet" },
+                  { value: "needs_manager", label: "Needs manager" },
+                  { value: "overdue_checkins", label: "Overdue check-ins" },
+                ]}
+              />
               <span className="ml-auto flex items-center gap-2">
                 <span className="text-xs text-[var(--text-muted)]">{visibleFlocks.length} flocks</span>
                 <button
@@ -1004,7 +963,45 @@ export function FlockListPage() {
               </span>
             </div>
 
-            <div className="institutional-table-wrapper">
+            <div className="space-y-2 md:hidden">
+              {visibleFlocks.map((f) => {
+                const score = Number(f.riskScore ?? 0);
+                const level = score > 60 ? "High" : score > 30 ? "Medium" : "Low";
+                const tone =
+                  score > 60
+                    ? "border-[var(--status-danger)]/30 bg-[var(--status-danger-soft)] text-[var(--status-danger)]"
+                    : score > 30
+                      ? "border-[var(--status-warning)]/30 bg-[var(--status-warning-soft)] text-[var(--status-warning)]"
+                      : "border-[var(--status-success)]/30 bg-[var(--status-success-soft)] text-[var(--status-success)]";
+                return (
+                  <Link
+                    key={f.id}
+                    to={f.status === "failed" ? "#" : `/farm/flocks/${f.id}`}
+                    className="block rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-sm)]"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold text-[var(--text-primary)]">{f.label}</span>
+                      <span className={`inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${tone}`}>
+                        {level} {score}/100
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                      {f.barnName ?? "No barn"} · {f.ageDays != null ? `${f.ageDays} d old` : "Age unknown"} ·{" "}
+                      {f.latestFcr != null ? `FCR ${f.latestFcr.toFixed(2)}` : "Not weighed yet"}
+                    </p>
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">
+                      Mortality 7d {f.mortality7d ?? 0}
+                      {(f.overdueRounds ?? 0) > 0 ? ` · ${f.overdueRounds} overdue check-in(s)` : ""}
+                      {f.withdrawalActive ? " · Withdrawal active" : ""}
+                      {f.status === "archived" ? " · Archived" : ""}
+                      {f.status === "failed" ? " · Failed create" : ""}
+                    </p>
+                  </Link>
+                );
+              })}
+            </div>
+
+            <div className="institutional-table-wrapper hidden md:block">
               <table className="institutional-table flock-list-table min-w-[80rem]">
                 <thead>
                   <tr>
@@ -1080,12 +1077,33 @@ export function FlockListPage() {
                       <td className="text-[var(--text-muted)] tabular-nums">{f.placementDate || "—"}</td>
                       <td className="tbl-num">{f.ageDays ?? "—"}</td>
                       <td className="tbl-num">{f.intervalHours ?? "—"}</td>
-                      <td className="tbl-num">{f.latestFcr != null ? f.latestFcr.toFixed(2) : "—"}</td>
-                      <td className={["tbl-num", f.fcrDeviation != null && f.fcrDeviation > 0.2 ? "text-red-400 font-semibold" : ""].join(" ")}>
-                        {f.fcrDeviation != null ? `${f.fcrDeviation >= 0 ? "+" : ""}${f.fcrDeviation.toFixed(2)}` : "—"}
+                      <td className="tbl-num">{f.latestFcr != null ? f.latestFcr.toFixed(2) : (
+                        <span className="text-[var(--text-muted)]" title="Not weighed yet">Not weighed yet</span>
+                      )}</td>
+                      <td className={["tbl-num", f.fcrDeviation != null && f.fcrDeviation > 0.2 ? "text-[var(--status-danger)] font-semibold" : ""].join(" ")}>
+                        {f.fcrDeviation != null ? `${f.fcrDeviation >= 0 ? "+" : ""}${f.fcrDeviation.toFixed(2)}` : (
+                          <span className="text-[var(--text-muted)]" title="Not applicable until weigh-in">n/a</span>
+                        )}
                       </td>
-                      <td className={["tbl-num font-semibold", Number(f.riskScore ?? 0) > 60 ? "text-red-400" : Number(f.riskScore ?? 0) > 30 ? "text-amber-400" : "text-emerald-400"].join(" ")}>
-                        {f.riskScore ?? 0}
+                      <td className="tbl-badge">
+                        {(() => {
+                          const score = Number(f.riskScore ?? 0);
+                          const level = score > 60 ? "High" : score > 30 ? "Medium" : "Low";
+                          const tone = score > 60 ? "danger" : score > 30 ? "warning" : "success";
+                          return (
+                            <span
+                              className={`inline-flex rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${
+                                tone === "danger"
+                                  ? "border-[var(--status-danger)]/30 bg-[var(--status-danger-soft)] text-[var(--status-danger)]"
+                                  : tone === "warning"
+                                    ? "border-[var(--status-warning)]/30 bg-[var(--status-warning-soft)] text-[var(--status-warning)]"
+                                    : "border-[var(--status-success)]/30 bg-[var(--status-success-soft)] text-[var(--status-success)]"
+                              }`}
+                            >
+                              {level} {score}/100
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td className="tbl-num">{f.latestWeightKg != null ? f.latestWeightKg.toFixed(2) : "—"}</td>
                       <td className={["tbl-num", (f.weightDeviationPct ?? 0) < -5 ? "text-red-400 font-semibold" : ""].join(" ")}>

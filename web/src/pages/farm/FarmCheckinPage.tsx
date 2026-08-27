@@ -1,19 +1,21 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { PhotoCaptureInput } from "../../components/farm/PhotoCaptureInput";
 import { useAuth } from "../../auth/AuthContext";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { CheckinBandLine } from "./CheckinBandLine";
 import { CheckinUrgencyBadge } from "../../components/farm/CheckinUrgencyBadge";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
+import { FieldPageHeader } from "../../components/layout/FieldPageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { createRoundCheckin } from "../../api/farm.api";
-import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
+import { PhotoTile } from "../../components/farm/PhotoTile";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import type { CheckinStatus } from "./checkinStatusTypes";
 import { SubmissionStageScreen } from "../../components/farm/SubmissionStageScreen";
+import { Button, Card, Field, Input, Metric, SegmentedControl, Textarea } from "../../components/ui";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
 
 export type { CheckinBadge, CheckinStatus } from "./checkinStatusTypes";
 export type OpsGlanceSummary = {
@@ -48,102 +50,93 @@ export function CheckinStatusBlock({
   showWarning = true,
   otherOverdueCount = 0,
   opsGlance = null,
+  birdsLive,
+  mortalityToDate,
 }: {
   status: CheckinStatus;
   showWarning?: boolean;
-  /** Other flocks (besides this card) that are overdue — multi-flock hint only. */
   otherOverdueCount?: number;
-  /** Optional compact operations summary across active flocks. */
   opsGlance?: OpsGlanceSummary | null;
+  birdsLive?: number | null;
+  mortalityToDate?: number | null;
 }) {
-  const onSiteLine = useLaborerT(
-    `Day ${status.ageDays} on-site • target harvest ~days ${status.targetSlaughterDays.min}–${status.targetSlaughterDays.max}`
-  );
-  const sourceWord =
-    status.intervalSource === "default_age_curve" ? "age-based default" : "custom batch";
-  const policyLine = useLaborerT(
-    `Current policy: every ${status.intervalHours} h (${sourceWord})`
-  );
-  const nextDueLbl = useLaborerT("Next due:");
-  const overdueMsg = useLaborerT("Overdue — please complete check-in as soon as possible.");
+  const overdueMsg = useLaborerT("Immediate attention required — potential welfare risk.");
   const onTrackMsg = useLaborerT("You are on track.");
-  const otherFlocksOverdue = useLaborerT("other flock(s) are also overdue.");
-  const checkinLbl = useLaborerT("Check-in");
-  const feedLbl = useLaborerT("Feed");
-  const vetLbl = useLaborerT("Vet");
-  const needsAttentionLbl = useLaborerT("Needs attention:");
+  const nextDueLbl = useLaborerT("Next check");
+  const dayLbl = useLaborerT("Day");
+  const birdsLbl = useLaborerT("Live birds");
+  const mortLbl = useLaborerT("Mortality");
+  const otherFlocksOverdue = useLaborerT("other flock(s) also overdue");
+  const detailsLbl = useLaborerT("Details");
+  const policyLine = useLaborerT(
+    `Policy: every ${status.intervalHours} h · harvest ~days ${status.targetSlaughterDays.min}–${status.targetSlaughterDays.max}`
+  );
   const nextDueMs = new Date(status.nextDueAt).getTime();
   const remainingMs = Math.max(0, nextDueMs - Date.now());
-  const focusSummary = (() => {
-    if (!opsGlance?.focus || !opsGlance.oldestMissing) return null;
-    if (opsGlance.focus === "checkin" && opsGlance.oldestMissing.checkin) {
-      const p = opsGlance.oldestMissing.checkin;
-      return `${checkinLbl} (${p.label}, ${p.hours}h)`;
-    }
-    if (opsGlance.focus === "feed" && opsGlance.oldestMissing.feed) {
-      const p = opsGlance.oldestMissing.feed;
-      return `${feedLbl} (${p.label}, ${p.hours}h)`;
-    }
-    if (opsGlance.focus === "vet" && opsGlance.oldestMissing.vet) {
-      const p = opsGlance.oldestMissing.vet;
-      return `${vetLbl} (${p.label}, ${p.days}d)`;
-    }
-    return null;
-  })();
+  const overdueHours = Math.max(1, Math.round(status.overdueMs / 3600000));
+
   return (
-    <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-sm)]">
+    <Card level={status.isOverdue ? "elevated" : "default"} className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <TranslatedFlockName name={status.label} />
         <CheckinUrgencyBadge badge={status.checkinBadge} />
       </div>
       {opsGlance && opsGlance.activeFlockCount > 0 ? (
-        <>
-          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
-            <span className="rounded-full border border-[var(--border-color)] px-2 py-0.5 text-[var(--text-secondary)]">
-              {checkinLbl} {opsGlance.checkinDoneTodayCount}/{opsGlance.activeFlockCount}
-            </span>
-            <span className="rounded-full border border-[var(--border-color)] px-2 py-0.5 text-[var(--text-secondary)]">
-              {feedLbl} {opsGlance.feedLoggedTodayCount}/{opsGlance.activeFlockCount}
-            </span>
-            <span className="rounded-full border border-[var(--border-color)] px-2 py-0.5 text-[var(--text-secondary)]">
-              {vetLbl} {opsGlance.vetLoggedRecentCount}/{opsGlance.activeFlockCount}
-            </span>
-          </div>
-          {focusSummary ? (
-            <p className="mt-1 text-xs font-medium text-amber-400">
-              {needsAttentionLbl} {focusSummary}
-            </p>
-          ) : null}
-        </>
+        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)]">
+          Today&apos;s rounds {opsGlance.checkinDoneTodayCount}/{opsGlance.activeFlockCount}
+          {otherOverdueCount > 0 ? ` · ${otherOverdueCount} ${otherFlocksOverdue}` : ""}
+        </div>
       ) : otherOverdueCount > 0 ? (
-        <p className="mt-2 text-xs font-medium text-amber-400">
-          +{otherOverdueCount} <TranslatedText text={otherFlocksOverdue} />
+        <p className="text-xs font-medium text-[var(--status-warning)]">
+          +{otherOverdueCount} {otherFlocksOverdue}
         </p>
       ) : null}
-      <p className="mt-1 text-xs text-[var(--text-muted)]">{onSiteLine}</p>
-      <p className="mt-2 text-sm text-[var(--text-secondary)]">{policyLine}</p>
-      <p className="mt-1 text-sm">
-        {nextDueLbl}{" "}
-        <time className="font-mono text-[var(--text-primary)]" dateTime={status.nextDueAt}>
-          {new Date(status.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
-        </time>
-      </p>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Metric label={dayLbl} value={status.ageDays} />
+        <Metric label={birdsLbl} value={birdsLive != null ? birdsLive : "—"} />
+        <Metric
+          label={mortLbl}
+          value={mortalityToDate != null ? mortalityToDate : "—"}
+          context={mortalityToDate == null ? undefined : "To date"}
+        />
+        <Metric
+          label={nextDueLbl}
+          value={status.isOverdue ? `${overdueHours}h` : formatDurationMs(remainingMs)}
+          context={status.isOverdue ? "Overdue" : "Remaining"}
+        />
+      </div>
       {showWarning ? (
         status.isOverdue ? (
-          <p className="mt-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm font-medium text-red-400">
-            {overdueMsg} ({formatDurationMs(status.overdueMs)})
-          </p>
+          <div
+            className="rounded-xl border border-[var(--status-danger)]/30 bg-[var(--status-danger-soft)] px-3 py-3 text-sm font-semibold text-[var(--status-danger)]"
+            role="alert"
+          >
+            {overdueMsg}
+            <p className="mt-1 text-xs font-medium opacity-90">
+              Last due {formatDurationMs(status.overdueMs)} ago · {new Date(status.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
+            </p>
+          </div>
         ) : (
-          <p className="mt-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-400">
+          <p className="rounded-xl border border-[var(--status-success)]/25 bg-[var(--status-success-soft)] px-3 py-2 text-sm font-medium text-[var(--status-success)]">
             {onTrackMsg} ({formatDurationMs(remainingMs)} remaining)
           </p>
         )
       ) : null}
-    </section>
+      <details className="text-xs text-[var(--text-muted)]">
+        <summary className="cursor-pointer font-semibold text-[var(--text-secondary)]">{detailsLbl}</summary>
+        <p className="mt-2">{policyLine}</p>
+        <p className="mt-1">
+          Feed to date: {status.feedToDateKg != null ? `${status.feedToDateKg} kg` : "—"} · Placement{" "}
+          {status.placementDate}
+        </p>
+      </details>
+    </Card>
   );
 }
 
 function CheckinPhotoBlock({
+  title,
+  help,
   minCount,
   maxCount = 6,
   allowMultiple = true,
@@ -151,6 +144,8 @@ function CheckinPhotoBlock({
   pickerLabel,
   onPhotos,
 }: {
+  title: string;
+  help?: string;
   minCount: number;
   maxCount?: number;
   allowMultiple?: boolean;
@@ -158,19 +153,16 @@ function CheckinPhotoBlock({
   pickerLabel?: string;
   onPhotos: (urls: string[]) => void;
 }) {
-  const defaultLabel = useLaborerT(
-    minCount === 1
-      ? "Tap to add photos (1+ required, up to 6)"
-      : `Tap to add photos (${minCount}+ required, up to 6)`
-  );
   return (
-    <PhotoCaptureInput
+    <PhotoTile
+      title={title}
+      help={help}
       minCount={minCount}
       maxCount={maxCount}
       allowMultiple={allowMultiple}
-      pickerLabel={pickerLabel ?? defaultLabel}
-      onChangeDataUrls={onPhotos}
-      disabled={busy}
+      busy={busy}
+      pickerLabel={pickerLabel}
+      onPhotos={onPhotos}
     />
   );
 }
@@ -178,6 +170,7 @@ function CheckinPhotoBlock({
 export function FarmCheckinPage() {
   const { token } = useAuth();
   const { showToast } = useToast();
+  const { companyHref } = useCompanyNav();
   const lblFlock = useLaborerT("Flock");
   const title = useLaborerT("Round check-in");
   const subtitle = useLaborerT(
@@ -224,11 +217,12 @@ export function FarmCheckinPage() {
   const [photosFeed, setPhotosFeed] = useState<string[]>([]);
   const [photosWater, setPhotosWater] = useState<string[]>([]);
   const [coopTemperatureC, setCoopTemperatureC] = useState("");
-  const [feedAvailable, setFeedAvailable] = useState(false);
-  const [waterAvailable, setWaterAvailable] = useState(false);
   const [mortalityAtCheckin, setMortalityAtCheckin] = useState("");
   const [mortalityReportedInMortalityLog, setMortalityReportedInMortalityLog] = useState(false);
   const [notes, setNotes] = useState("");
+  const [showNotes, setShowNotes] = useState(false);
+  const [feedLevel, setFeedLevel] = useState<"full" | "low" | "empty">("full");
+  const [waterLevel, setWaterLevel] = useState<"yes" | "no">("yes");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [fcrHintDismissed, setFcrHintDismissed] = useState(false);
@@ -256,6 +250,8 @@ export function FarmCheckinPage() {
       setSubmitError("Add at least one thermometer photo.");
       return;
     }
+    const feedAvailable = feedLevel !== "empty";
+    const waterAvailable = waterLevel === "yes";
     if (feedAvailable && photosFeed.length < 1) {
       setSubmitError("Add at least one feed photo when feed is available.");
       return;
@@ -289,8 +285,9 @@ export function FarmCheckinPage() {
       setPhotosFeed([]);
       setPhotosWater([]);
       setCoopTemperatureC("");
-      setFeedAvailable(false);
-      setWaterAvailable(false);
+      setFeedLevel("full");
+      setWaterLevel("yes");
+      setShowNotes(false);
       setMortalityAtCheckin("");
       setMortalityReportedInMortalityLog(false);
       setNotes("");
@@ -327,24 +324,44 @@ export function FarmCheckinPage() {
     );
   }
 
+  const tempVal = Number(coopTemperatureC);
+  const tempExpectedMin = 27;
+  const tempExpectedMax = 30;
+  const tempVerdict =
+    !Number.isFinite(tempVal) || coopTemperatureC === ""
+      ? null
+      : tempVal < tempExpectedMin || tempVal > tempExpectedMax
+        ? "out"
+        : "ok";
+  const feedAvailable = feedLevel !== "empty";
+  const waterAvailable = waterLevel === "yes";
+
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <PageHeader
+    <div className="mx-auto max-w-lg space-y-4 md:max-w-3xl md:space-y-6">
+      <FieldPageHeader
         title={title}
-        subtitle={subtitle}
-        action={
-          <Link to="/dashboard/laborer" className="bounce-tap rounded-lg px-2 py-1 text-sm font-medium text-[var(--primary-color-dark)] hover:bg-[var(--primary-color-soft)]">
-            {linkAction}
-          </Link>
-        }
+        backTo={companyHref("/dashboard/laborer")}
+        backLabel={linkAction}
+        context={status?.label}
       />
+      <div className="hidden md:block">
+        <PageHeader
+          title={title}
+          subtitle={subtitle}
+          action={
+            <Link to={companyHref("/dashboard/laborer")} className="bounce-tap rounded-lg px-2 py-1 text-sm font-medium text-[var(--primary-color-dark)] hover:bg-[var(--primary-color-soft)]">
+              {linkAction}
+            </Link>
+          }
+        />
+      </div>
 
       {flockSync?.stale && !loadError ? (
         <div
-          className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-100"
+          className="rounded-lg border border-[var(--status-warning)]/40 bg-[var(--status-warning-soft)] px-3 py-2 text-sm text-[var(--status-warning)]"
           role="status"
         >
-          Flock list may be slightly out of date (last sync had an issue). Refresh the page if a batch is missing.
+          Flock list may be slightly out of date. Refresh if a batch is missing.
         </div>
       ) : null}
 
@@ -364,8 +381,7 @@ export function FarmCheckinPage() {
       ) : null}
 
       {!pageLoading && !loadError && flocks.length > 0 ? (
-        <label className="block text-sm font-medium text-[var(--text-secondary)]">
-          {lblFlock}
+        <Field label={lblFlock}>
           <select
             className="mt-1 w-full min-h-[48px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-3 text-base text-[var(--text-primary)]"
             value={flockId}
@@ -377,7 +393,7 @@ export function FarmCheckinPage() {
               </option>
             ))}
           </select>
-        </label>
+        </Field>
       ) : null}
 
       {!pageLoading && !loadError && flockId && !status && detailLoading ? <SkeletonList rows={2} /> : null}
@@ -386,63 +402,40 @@ export function FarmCheckinPage() {
         <div
           className={
             status.fcrCheckinHint.severity === "warning"
-              ? "rounded-xl border border-red-500/25 bg-red-500/10 px-4 py-3 text-sm text-red-300"
-              : "rounded-xl border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-300"
+              ? "rounded-xl border border-[var(--status-danger)]/25 bg-[var(--status-danger-soft)] px-4 py-3 text-sm text-[var(--status-danger)]"
+              : "rounded-xl border border-[var(--status-warning)]/25 bg-[var(--status-warning-soft)] px-4 py-3 text-sm text-[var(--status-warning)]"
           }
           role="status"
         >
           <div className="flex flex-wrap items-start justify-between gap-2">
             <p className="font-medium">{status.fcrCheckinHint.message}</p>
-            <div className="flex gap-2">
-              {flockId ? (
-                <Link
-                  to={`/farm/vet-logs?flockId=${encodeURIComponent(flockId)}`}
-                  className="shrink-0 rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-1 text-xs font-semibold text-emerald-400 underline"
-                >
-                  Vet logs & FCR
-                </Link>
-              ) : null}
-              <button
-                type="button"
-                className="shrink-0 text-xs font-semibold text-[var(--text-muted)] underline"
-                onClick={() => setFcrHintDismissed(true)}
-              >
-                Dismiss
-              </button>
-            </div>
+            <button
+              type="button"
+              className="shrink-0 text-xs font-semibold underline"
+              onClick={() => setFcrHintDismissed(true)}
+            >
+              Dismiss
+            </button>
           </div>
         </div>
       ) : null}
 
       {!pageLoading && !loadError && status ? (
-        <FlockContextStrip
-          label={status.label}
-          code={flocks.find((f) => f.id === flockId)?.code}
-          placementDate={status.placementDate}
-          ageDays={status.ageDays}
-          feedToDateKg={status.feedToDateKg}
-          initialCount={flocks.find((f) => f.id === flockId)?.initialCount}
-          birdsLiveEstimate={performance?.birdsLiveEstimate}
-          verifiedLiveCount={performance?.verifiedLiveCount}
-          mortalityToDate={performance?.mortalityToDate}
+        <CheckinStatusBlock
           status={status}
-          footer={
-            <Link
-              to="/farm/feed"
-              className="text-xs font-semibold text-emerald-400 underline hover:text-emerald-300"
-            >
-              Log feed only (no photos)
-            </Link>
-          }
+          birdsLive={performance?.birdsLiveEstimate ?? performance?.verifiedLiveCount}
+          mortalityToDate={performance?.mortalityToDate}
         />
       ) : null}
 
       {!pageLoading && !loadError && status ? (
       <form
         onSubmit={(e) => void handleSubmit(e)}
-        className="space-y-5 rounded-2xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-sm)] sm:p-5"
+        className="space-y-4 rounded-2xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-card)]"
       >
         <CheckinPhotoBlock
+          title={lblFlockSignPhoto}
+          help="Required for this round"
           minCount={status?.photosRequiredPerRound ?? 1}
           maxCount={6}
           allowMultiple
@@ -451,22 +444,26 @@ export function FarmCheckinPage() {
           onPhotos={setPhotosFlockSign}
         />
 
-        <div>
-          <label className="mb-1 block text-sm font-medium text-[var(--text-secondary)]" htmlFor="coop-temperature">
-            {lblCoopTemp}
-          </label>
-          <input
+        <Field label={lblCoopTemp} htmlFor="coop-temperature" help={`Expected ${tempExpectedMin}–${tempExpectedMax}°C`}>
+          <Input
             id="coop-temperature"
             inputMode="decimal"
-            className="w-full min-h-[48px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 text-lg text-[var(--text-primary)]"
+            className="text-lg"
             value={coopTemperatureC}
-            placeholder="0"
+            placeholder="28.4"
             onChange={(e) => setCoopTemperatureC(e.target.value)}
             required
           />
-        </div>
+        </Field>
+        {tempVerdict === "ok" ? (
+          <p className="text-xs font-semibold text-[var(--status-success)]">✓ Normal — within expected range</p>
+        ) : null}
+        {tempVerdict === "out" ? (
+          <p className="text-xs font-semibold text-[var(--status-danger)]">Out of expected range ({tempExpectedMin}–{tempExpectedMax}°C)</p>
+        ) : null}
 
         <CheckinPhotoBlock
+          title={lblThermometerPhoto}
           minCount={1}
           maxCount={1}
           allowMultiple={false}
@@ -475,17 +472,20 @@ export function FarmCheckinPage() {
           onPhotos={setPhotosThermometer}
         />
 
-        <label className="flex items-center gap-3 rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] px-4 py-3 text-sm font-medium text-[var(--text-secondary)] cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={feedAvailable}
-            onChange={(e) => setFeedAvailable(e.target.checked)}
-            className="h-5 w-5 rounded border-[var(--border-input)] text-emerald-500 focus:ring-emerald-500"
-          />
-          {lblFeedAvail}
-        </label>
+        <SegmentedControl
+          variant="grid"
+          label={lblFeedAvail}
+          value={feedLevel}
+          onChange={(v) => setFeedLevel(v as "full" | "low" | "empty")}
+          options={[
+            { value: "full", label: "Full" },
+            { value: "low", label: "Low" },
+            { value: "empty", label: "Empty" },
+          ]}
+        />
         {feedAvailable ? (
           <CheckinPhotoBlock
+            title={lblFeedPhoto}
             minCount={1}
             maxCount={1}
             allowMultiple={false}
@@ -494,17 +494,20 @@ export function FarmCheckinPage() {
             onPhotos={setPhotosFeed}
           />
         ) : null}
-        <label className="flex items-center gap-3 rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] px-4 py-3 text-sm font-medium text-[var(--text-secondary)] cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={waterAvailable}
-            onChange={(e) => setWaterAvailable(e.target.checked)}
-            className="h-5 w-5 rounded border-[var(--border-input)] text-emerald-500 focus:ring-emerald-500"
-          />
-          {lblWaterAvail}
-        </label>
+
+        <SegmentedControl
+          variant="grid"
+          label={lblWaterAvail}
+          value={waterLevel}
+          onChange={(v) => setWaterLevel(v as "yes" | "no")}
+          options={[
+            { value: "yes", label: "Yes" },
+            { value: "no", label: "No" },
+          ]}
+        />
         {waterAvailable ? (
           <CheckinPhotoBlock
+            title={lblWaterPhoto}
             minCount={1}
             maxCount={1}
             allowMultiple={false}
@@ -513,54 +516,49 @@ export function FarmCheckinPage() {
             onPhotos={setPhotosWater}
           />
         ) : null}
-        <div>
-          <label className="mb-1 block text-sm font-medium text-[var(--text-secondary)]" htmlFor="mort">
-            {lblMort}
-          </label>
-          <input
+
+        <Field label={lblMort} htmlFor="mort">
+          <Input
             id="mort"
             inputMode="numeric"
-            className="w-full min-h-[48px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 text-lg text-[var(--text-primary)]"
+            className="text-lg"
             value={mortalityAtCheckin}
             placeholder={phZero}
             onChange={(e) => setMortalityAtCheckin(e.target.value)}
           />
-        </div>
+        </Field>
         {mortalityAtCheckin && Number(mortalityAtCheckin) > 0 ? (
-          <label className="flex items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-300 cursor-pointer select-none">
+          <label className="flex items-center gap-3 rounded-xl border border-[var(--status-warning)]/30 bg-[var(--status-warning-soft)] px-4 py-3 text-sm font-medium text-[var(--status-warning)] cursor-pointer select-none">
             <input
               type="checkbox"
               checked={mortalityReportedInMortalityLog}
               onChange={(e) => setMortalityReportedInMortalityLog(e.target.checked)}
-              className="h-5 w-5 rounded border-amber-500/30 text-amber-400 focus:ring-amber-500"
+              className="h-5 w-5 rounded"
             />
             {lblMortLogged}
           </label>
         ) : null}
-        <div>
-          <label className="mb-1 block text-sm font-medium text-[var(--text-secondary)]" htmlFor="notes">
-            {lblNotes}
-          </label>
-          <textarea
-            id="notes"
-            rows={3}
-            className="w-full rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 py-3 text-sm text-[var(--text-primary)]"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-          />
-        </div>
+
+        {!showNotes ? (
+          <Button type="button" variant="ghost" size="sm" onClick={() => setShowNotes(true)}>
+            + {lblNotes}
+          </Button>
+        ) : (
+          <Field label={lblNotes} htmlFor="notes">
+            <Textarea id="notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </Field>
+        )}
+
         {submitError && (
-          <p className="text-sm text-red-400" role="alert">
+          <p className="text-sm text-[var(--status-danger)]" role="alert">
             <TranslatedText text={submitError} />
           </p>
         )}
-        <button
-          type="submit"
-          disabled={busy || !flockId || !status}
-          className="bounce-tap w-full min-h-[52px] rounded-xl bg-[var(--primary-color)] text-lg font-semibold text-white hover:bg-[var(--primary-color-dark)] disabled:opacity-50"
-        >
-          {busy ? btnSaving : btnSubmit}
-        </button>
+        <div className="sticky bottom-[calc(3.75rem+env(safe-area-inset-bottom,0px))] z-[5] bg-[var(--surface-card)] pt-2 md:static md:bg-transparent">
+          <Button type="submit" size="field" className="w-full" disabled={busy || !flockId || !status}>
+            {busy ? btnSaving : btnSubmit}
+          </Button>
+        </div>
       </form>
       ) : null}
 
@@ -573,6 +571,9 @@ export function FarmCheckinPage() {
             ))}
           </ul>
           <p className="mt-2 text-xs text-[var(--text-muted)]">{detailsFoot}</p>
+          <Link to={companyHref("/farm/feed")} className="mt-2 inline-block text-xs font-semibold text-[var(--primary-color)] underline">
+            Log feed only
+          </Link>
         </details>
       ) : null}
     </div>

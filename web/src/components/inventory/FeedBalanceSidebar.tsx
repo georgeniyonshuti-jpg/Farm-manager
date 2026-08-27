@@ -1,3 +1,5 @@
+import { SegmentedControl } from "../ui";
+
 type StockRow = {
   feedType: string | null;
   purchasedKg: number;
@@ -58,35 +60,21 @@ export function FeedBalanceSidebar({
   return (
     <>
       <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 lg:hidden">
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-2">
           <h2 className="text-sm font-semibold text-[var(--text-primary)]">Feed balances</h2>
-          <button
-            type="button"
-            className="text-xs font-medium text-[var(--primary-color)] hover:underline"
-            onClick={() => onFeedTypeFilterChange("")}
-          >
-            All feed types
-          </button>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {orderedRows.map((row) => {
-            const isActive = feedTypeFilter === row.feedType;
-            return (
-              <button
-                key={`chip-${row.feedType}`}
-                type="button"
-                onClick={() => onFeedTypeFilterChange(isActive ? "" : row.feedType)}
-                className={`rounded-full border px-3 py-1 text-xs font-medium ${
-                  isActive
-                    ? "border-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--primary-color-dark)]"
-                    : "border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
-                }`}
-              >
-                {row.label}: {row.balanceKg.toFixed(1)} kg
-              </button>
-            );
-          })}
-        </div>
+        <SegmentedControl
+          size="sm"
+          value={feedTypeFilter || "__all__"}
+          onChange={(v) => onFeedTypeFilterChange(v === "__all__" ? "" : v)}
+          options={[
+            { value: "__all__", label: "All" },
+            ...orderedRows.map((row) => ({
+              value: row.feedType ?? "",
+              label: `${row.label}: ${row.balanceKg.toFixed(1)} kg`,
+            })),
+          ]}
+        />
       </section>
 
       <aside className="hidden rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 lg:block">
