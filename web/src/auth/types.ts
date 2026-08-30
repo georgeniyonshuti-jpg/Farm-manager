@@ -33,6 +33,12 @@ export type SessionUser = {
   companyId?: string;
   companySlug?: string;
   companyName?: string;
+  /** local password vs Login with Cleva */
+  authSource?: "local" | "cleva";
+  /** From ERP farm_bootstrap when Cleva SSO is used. */
+  erpnextAccess?: boolean;
+  /** ERP app role from farm_bootstrap (laborer, junior_vet, vet_manager, admin). */
+  erpAppRole?: string;
 };
 
 export type AuthState = {

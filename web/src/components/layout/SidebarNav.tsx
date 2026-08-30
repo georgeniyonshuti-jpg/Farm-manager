@@ -1,68 +1,91 @@
-import { NavLink } from "react-router-dom";
-import { useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import { NavLink, Link } from "react-router-dom";
+import { useMemo, type ReactNode } from "react";
+import {
+  Home,
+  ClipboardCheck,
+  Wheat,
+  Skull,
+  NotebookPen,
+  Stethoscope,
+  Pill,
+  Package,
+  Drumstick,
+  Bird,
+  CalendarCog,
+  Wallet,
+  CircleDollarSign,
+  FileCheck2,
+  Plug,
+  ExternalLink,
+  BarChart3,
+  PieChart,
+  Landmark,
+  HandCoins,
+  FileText,
+  Gauge,
+  Users,
+  Shield,
+  Settings2,
+  LogOut,
+  LayoutDashboard,
+} from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
-import { canAccessPageByKey, canFlockAction, canManageUsers, farmCoreNavItems, hasPermission } from "../../auth/permissions";
+import type { ActiveWorkspace, SessionUser } from "../../auth/types";
+import { canAccessPageByKey, canAccessWorkspace, canFlockAction, canManageUsers, farmCoreNavItems, hasPermission } from "../../auth/permissions";
 import { canEditFlockScheduleRole } from "../../farm/scheduleAccess";
 import { useLaborerT } from "../../i18n/laborerI18n";
 import { useCompanyNav } from "../../hooks/useCompanyNav";
+import { useFarmCapabilities } from "../../hooks/useFarmCapabilities";
+import { BrandLogo } from "../BrandLogo";
+import { useTenant } from "../../context/TenantContext";
 
 function NavText({ text }: { text: string }) {
   const t = useLaborerT(text);
   return <>{t}</>;
 }
 
-// ─── Group icons ───────────────────────────────────────────────────────────────
-
-function IconOverview() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-      <polyline points="9 22 9 12 15 12 15 22" />
-    </svg>
-  );
-}
-
-function IconOperations() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="12" cy="12" r="4" />
-      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-    </svg>
-  );
-}
-
-function IconFlocksHealth() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-    </svg>
-  );
-}
-
-function IconPlanning() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-      <line x1="16" y1="2" x2="16" y2="6" />
-      <line x1="8" y1="2" x2="8" y2="6" />
-      <line x1="3" y1="10" x2="21" y2="10" />
-    </svg>
-  );
-}
-
-function IconIntegrations() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14" />
-    </svg>
-  );
-}
-
 type NavItem = { to: string; label: string; end?: boolean };
 type Props = { onNavigate?: () => void; collapsed?: boolean };
-type GroupId = "overview" | "operations" | "flocks_health" | "planning_workforce" | "integrations_admin";
+
+const ICON_CLS = "mgr-nav-icon h-4 w-4 shrink-0";
+
+const PATH_ICONS: Record<string, ReactNode> = {
+  "/dashboard/management": <LayoutDashboard className={ICON_CLS} aria-hidden />,
+  "/dashboard/laborer": <Home className={ICON_CLS} aria-hidden />,
+  "/dashboard/vet": <Stethoscope className={ICON_CLS} aria-hidden />,
+  "/farm/checkin": <ClipboardCheck className={ICON_CLS} aria-hidden />,
+  "/farm/feed": <Wheat className={ICON_CLS} aria-hidden />,
+  "/farm/mortality-log": <Skull className={ICON_CLS} aria-hidden />,
+  "/farm/daily-log": <NotebookPen className={ICON_CLS} aria-hidden />,
+  "/farm/batch-schedule": <CalendarCog className={ICON_CLS} aria-hidden />,
+  "/farm/checkin-review": <FileCheck2 className={ICON_CLS} aria-hidden />,
+  "/farm/mortality": <Skull className={ICON_CLS} aria-hidden />,
+  "/farm/vet-logs": <Stethoscope className={ICON_CLS} aria-hidden />,
+  "/farm/treatments": <Pill className={ICON_CLS} aria-hidden />,
+  "/farm/inventory": <Package className={ICON_CLS} aria-hidden />,
+  "/farm/slaughter": <Drumstick className={ICON_CLS} aria-hidden />,
+  "/farm/flocks": <Bird className={ICON_CLS} aria-hidden />,
+  "/farm/schedule-settings": <CalendarCog className={ICON_CLS} aria-hidden />,
+  "/farm/payroll": <Wallet className={ICON_CLS} aria-hidden />,
+  "/laborer/earnings": <CircleDollarSign className={ICON_CLS} aria-hidden />,
+  "/farm/accounting-approvals": <FileCheck2 className={ICON_CLS} aria-hidden />,
+  "/farm/erpnext-setup": <Plug className={ICON_CLS} aria-hidden />,
+  "/farm/erpnext": <ExternalLink className={ICON_CLS} aria-hidden />,
+  "/farm/odoo-setup": <Plug className={ICON_CLS} aria-hidden />,
+  "/farm/reports": <BarChart3 className={ICON_CLS} aria-hidden />,
+  "/cleva/portfolio": <PieChart className={ICON_CLS} aria-hidden />,
+  "/cleva/business-model": <Landmark className={ICON_CLS} aria-hidden />,
+  "/cleva/general-lending": <HandCoins className={ICON_CLS} aria-hidden />,
+  "/cleva/investor-memos": <FileText className={ICON_CLS} aria-hidden />,
+  "/cleva/credit-scoring": <Gauge className={ICON_CLS} aria-hidden />,
+  "/admin/users": <Users className={ICON_CLS} aria-hidden />,
+  "/admin/super": <Shield className={ICON_CLS} aria-hidden />,
+  "/admin/system-config": <Settings2 className={ICON_CLS} aria-hidden />,
+};
+
+function iconForPath(to: string): ReactNode {
+  return PATH_ICONS[to] ?? <Home className={ICON_CLS} aria-hidden />;
+}
 
 const CLEVA_NAV: NavItem[] = [
   { to: "/cleva/portfolio", label: "Portfolio analytics", end: true },
@@ -75,19 +98,50 @@ const CLEVA_NAV: NavItem[] = [
 export function SidebarNav({ onNavigate, collapsed = false }: Props) {
   const { activeWorkspace, user } = useAuth();
   const { companyHref } = useCompanyNav();
-  const href = (path: string) => companyHref(path);
   const farmSectionTitle = useLaborerT("Farm operations");
   const clevaSectionTitle = useLaborerT("Clevafarm Finance");
 
   if (!user || !activeWorkspace) return null;
 
-  const [openGroups, setOpenGroups] = useState<Record<GroupId, boolean>>({
-    overview: true,
-    operations: true,
-    flocks_health: true,
-    planning_workforce: true,
-    integrations_admin: true,
-  });
+  return (
+    <SidebarNavBody
+      user={user}
+      activeWorkspace={activeWorkspace}
+      companyHref={companyHref}
+      farmSectionTitle={farmSectionTitle}
+      clevaSectionTitle={clevaSectionTitle}
+      onNavigate={onNavigate}
+      collapsed={collapsed}
+    />
+  );
+}
+
+type SidebarNavBodyProps = Props & {
+  user: SessionUser;
+  activeWorkspace: ActiveWorkspace;
+  companyHref: (path: string) => string;
+  farmSectionTitle: string;
+  clevaSectionTitle: string;
+};
+
+function SidebarNavBody({
+  user,
+  activeWorkspace,
+  companyHref,
+  farmSectionTitle,
+  clevaSectionTitle,
+  onNavigate,
+  collapsed = false,
+}: SidebarNavBodyProps) {
+  const { logout, setActiveWorkspace } = useAuth();
+  const { tenantCompany } = useTenant();
+  const { can, erpnextAccess, hasBootstrap } = useFarmCapabilities();
+  const href = (path: string) => companyHref(path);
+  const signOut = useLaborerT("Sign out");
+  const appName = useLaborerT("Clevafarm");
+  const farmWorkspace = useLaborerT("Farm / Poultry");
+  const clevaWorkspace = useLaborerT("Clevafarm Finance");
+  const switchWorkspaceAria = useLaborerT("Switch active business unit");
 
   const clevaNav = CLEVA_NAV.filter((item) => {
     if (item.to !== "/cleva/investor-memos") return true;
@@ -105,7 +159,6 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
       ? { to: "/farm/batch-schedule", label: "Check-in schedule" }
       : null;
 
-  // FIX: flock list + urgency for management / clinical roles
   const flocksItem: NavItem | null =
     activeWorkspace === "farm" &&
     user &&
@@ -124,7 +177,8 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
   const checkinReviewNavItem: NavItem | null =
     activeWorkspace === "farm" &&
     (user.role === "manager" || user.role === "vet_manager" || user.role === "superuser") &&
-    canSee("farm_checkin_review")
+    canSee("farm_checkin_review") &&
+    (!hasBootstrap || can("review_queue"))
       ? { to: "/farm/checkin-review", label: "Review check-ins" }
       : null;
 
@@ -137,13 +191,15 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
   const treatmentNavItem: NavItem | null =
     activeWorkspace === "farm" &&
     canFlockAction(user, "treatment.execute") &&
-    canSee("farm_treatments")
+    canSee("farm_treatments") &&
+    (!hasBootstrap || can("treatment_rounds"))
       ? { to: "/farm/treatments", label: "Medicine tracking" }
       : null;
   const slaughterNavItem: NavItem | null =
     activeWorkspace === "farm" &&
     canFlockAction(user, "slaughter.schedule") &&
-    canSee("farm_slaughter")
+    canSee("farm_slaughter") &&
+    (!hasBootstrap || can("slaughter"))
       ? { to: "/farm/slaughter", label: "Slaughter & FCR" }
       : null;
   const laborerEarningsItem: NavItem | null =
@@ -158,17 +214,20 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
 
   const accountingApprovalsNavItem: NavItem | null =
     activeWorkspace === "farm" &&
+    erpnextAccess &&
     (user.role === "manager" || user.role === "superuser")
       ? { to: "/farm/accounting-approvals", label: "Accounting approvals" }
       : null;
 
   const erpnextSetupNavItem: NavItem | null =
     activeWorkspace === "farm" &&
+    erpnextAccess &&
     (user.role === "manager" || user.role === "superuser")
       ? { to: "/farm/erpnext-setup", label: "ERPNext integration" }
       : null;
   const erpnextDeskNavItem: NavItem | null =
     activeWorkspace === "farm" &&
+    erpnextAccess &&
     (user.role === "manager" || user.role === "superuser")
       ? { to: "/farm/erpnext", label: "ERPNext desk" }
       : null;
@@ -203,7 +262,17 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
       "/farm/mortality": "farm_mortality",
       "/farm/inventory": "farm_inventory",
     };
+    const capByPath: Partial<Record<string, Parameters<typeof can>[0]>> = {
+      "/farm/checkin": "checkin",
+      "/farm/feed": "feed_log",
+      "/farm/mortality-log": "mortality",
+      "/farm/mortality": "mortality",
+      "/farm/vet-logs": "vet_log_create",
+      "/farm/inventory": "medicine_stock",
+    };
     const k = byPath[item.to];
+    const cap = capByPath[item.to];
+    if (hasBootstrap && cap && !can(cap)) return false;
     return k ? canSee(k) : true;
   });
   const farmNav = [...farmCore, ...farmExtras];
@@ -240,6 +309,8 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
       ? (canSee("admin_system_config") ? { to: "/admin/system-config", label: "Type settings" } : null)
       : null;
 
+  const adminItems = [adminLink, superAdminLink, typeLink].filter(Boolean) as NavItem[];
+
   const groupedFarmNav = useMemo(() => {
     const byPath = new Map(farmNav.map((item) => [item.to, item]));
     const pick = (paths: string[]) => paths.map((p) => byPath.get(p)).filter(Boolean) as NavItem[];
@@ -251,23 +322,18 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
         "/farm/feed",
         "/farm/mortality-log",
         "/farm/daily-log",
-      ]),
-      flocks_health: pick([
-        "/farm/inventory",
-        "/farm/flocks",
-        "/farm/mortality",
-        "/farm/vet-logs",
-        "/farm/treatments",
-        "/farm/slaughter",
-      ]),
-      planning_workforce: pick([
         "/farm/batch-schedule",
         "/farm/checkin-review",
+      ]),
+      health: pick(["/farm/mortality", "/farm/vet-logs", "/farm/treatments"]),
+      inventory: pick(["/farm/inventory", "/farm/slaughter"]),
+      planning_workforce: pick([
+        "/farm/flocks",
         "/farm/schedule-settings",
         "/farm/payroll",
         "/laborer/earnings",
       ]),
-      integrations_admin: pick([
+      finance: pick([
         "/farm/accounting-approvals",
         "/farm/erpnext-setup",
         "/farm/erpnext",
@@ -277,70 +343,18 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
     };
   }, [farmNav, effectiveDashLink]);
 
-  function toggleGroup(id: GroupId) {
-    setOpenGroups((prev) => ({ ...prev, [id]: !prev[id] }));
-  }
-
-  function GroupSection({ id, title, items, icon }: { id: GroupId; title: string; items: NavItem[]; icon: ReactNode }) {
-    if (!items.length) return null;
-    const isOpen = openGroups[id];
-    return (
-      <section className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)]/60">
-        <button
-          type="button"
-          onClick={() => toggleGroup(id)}
-          className="bounce-tap flex w-full items-center justify-between px-3 py-2 text-[11px] font-semibold text-[var(--text-muted)]"
-        >
-          <span className="inline-flex items-center gap-2">
-            <span className="opacity-60">{icon}</span>
-            <span>{title}</span>
-          </span>
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden
-            className={["transition-transform duration-150", isOpen ? "rotate-180" : ""].join(" ")}>
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </button>
-        {isOpen ? (
-          <div className="flex flex-col gap-1 px-2 pb-2">
-            {items.map((item) => (
-              <NavLink
-                key={item.to}
-                to={href(item.to)}
-                end={item.end}
-                onClick={onNavigate}
-                className={({ isActive }) =>
-                  [
-                    "bounce-tap flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-medium",
-                    isActive
-                      ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
-                      : "border-l-transparent text-[var(--text-secondary)] hover:bg-[var(--primary-color-soft)] hover:text-[var(--text-primary)]",
-                  ].join(" ")
-                }
-              >
-                <NavText text={item.label} />
-              </NavLink>
-            ))}
-          </div>
-        ) : null}
-      </section>
-    );
-  }
-
-  const compactItems = (() => {
-    const base = [
-      ...(activeWorkspace === "farm"
+  const compactPrimary = (() => {
+    const base =
+      activeWorkspace === "farm"
         ? [
             ...groupedFarmNav.overview,
             ...groupedFarmNav.operations,
-            ...groupedFarmNav.flocks_health,
+            ...groupedFarmNav.health,
+            ...groupedFarmNav.inventory,
             ...groupedFarmNav.planning_workforce,
-            ...groupedFarmNav.integrations_admin,
+            ...groupedFarmNav.finance,
           ]
-        : nav),
-      adminLink,
-      superAdminLink,
-      typeLink,
-    ].filter(Boolean) as NavItem[];
+        : nav;
     const seen = new Set<string>();
     return base.filter((i) => {
       if (seen.has(i.to)) return false;
@@ -349,137 +363,166 @@ export function SidebarNav({ onNavigate, collapsed = false }: Props) {
     });
   })();
 
-  function CollapsedGlyph({ label }: { label: string }) {
-    const trimmed = label.trim();
-    const parts = trimmed.split(/\s+/).filter(Boolean);
-    const glyph =
-      parts.length >= 2
-        ? `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase()
-        : (trimmed.slice(0, 2) || "?").toUpperCase();
+  function MgrLink({ item, compact = false }: { item: NavItem; compact?: boolean }) {
     return (
-      <span
-        aria-hidden
-        className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-[var(--primary-color-soft)] text-[10px] font-bold text-[var(--primary-color)]"
-        style={{ fontFamily: "var(--font-mono)" }}
+      <NavLink
+        to={href(item.to)}
+        end={item.end}
+        onClick={onNavigate}
+        title={compact ? item.label : undefined}
+        className={({ isActive }) =>
+          `mgr-nav-link ${compact ? "mgr-nav-link--compact" : ""} ${isActive ? "active" : ""}`
+        }
       >
-        {glyph}
-      </span>
+        {iconForPath(item.to)}
+        {compact ? (
+          <span className="sr-only">{item.label}</span>
+        ) : (
+          <span className="mgr-nav-link-label truncate">
+            <NavText text={item.label} />
+          </span>
+        )}
+      </NavLink>
     );
   }
 
-  return (
-    <aside className="w-full border-b border-[var(--border-color)] bg-[var(--surface-elevated)] md:h-full md:border-b-0 md:border-r">
-      <div className="p-4 md:p-5">
-        {!collapsed ? (
-          <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-            {activeWorkspace === "farm" ? farmSectionTitle : clevaSectionTitle}
-          </p>
-        ) : null}
-        <nav className="mt-4 flex flex-col gap-2.5 pb-20 md:pb-0">
-          {          collapsed
-            ? compactItems.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={href(item.to)}
-                  end={item.end}
-                  onClick={onNavigate}
-                  title={item.label}
-                  className={({ isActive }) =>
-                    [
-                      "bounce-tap flex h-10 items-center justify-center rounded-lg border-l-[3px]",
-                      isActive
-                        ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
-                        : "border-l-transparent text-[var(--text-muted)] hover:bg-[var(--primary-color-soft)]",
-                    ].join(" ")
-                  }
-                >
-                  <CollapsedGlyph label={item.label} />
-                  <span className="sr-only">{item.label}</span>
-                </NavLink>
-              ))
-            : null}
-          {!collapsed ? (
-            <>
-          {activeWorkspace === "farm" ? (
-            <>
-              <GroupSection id="overview" title="Overview" icon={<IconOverview />} items={groupedFarmNav.overview} />
-              <GroupSection id="operations" title="Daily operations" icon={<IconOperations />} items={groupedFarmNav.operations} />
-              <GroupSection id="flocks_health" title="Management" icon={<IconFlocksHealth />} items={groupedFarmNav.flocks_health} />
-              <GroupSection id="planning_workforce" title="Planning & workforce" icon={<IconPlanning />} items={groupedFarmNav.planning_workforce} />
-              <GroupSection id="integrations_admin" title="Integrations & admin" icon={<IconIntegrations />} items={groupedFarmNav.integrations_admin} />
-            </>
-          ) : (
-            nav.map((item) => (
-              <NavLink
-                key={item.to}
-                to={href(item.to)}
-                end={item.end}
-                onClick={onNavigate}
-                className={({ isActive }) =>
-                  [
-                    "bounce-tap flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-medium",
-                    isActive
-                      ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
-                      : "border-l-transparent text-[var(--text-secondary)] hover:bg-[var(--primary-color-soft)] hover:text-[var(--text-primary)]",
-                  ].join(" ")
-                }
-              >
-                <NavText text={item.label} />
-              </NavLink>
-            ))
-          )}
-          {adminLink && (
-            <NavLink
-              to={href(adminLink.to)}
-              onClick={onNavigate}
-              className={({ isActive }) =>
-                [
-                  "mt-2 flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-medium",
-                  isActive
-                    ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
-                    : "border border-dashed border-[var(--border-color)] border-l-transparent text-[var(--text-secondary)] hover:bg-[var(--surface-card)] hover:text-[var(--text-primary)]",
-                ].join(" ")
-              }
-            >
-              <NavText text={adminLink.label} />
-            </NavLink>
-          )}
-          {superAdminLink && (
-            <NavLink
-              to={href(superAdminLink.to)}
-              onClick={onNavigate}
-              className={({ isActive }) =>
-                [
-                  "flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-medium",
-                  isActive
-                    ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
-                    : "border-l-transparent text-[var(--text-secondary)] hover:bg-[var(--primary-color-soft)] hover:text-[var(--text-primary)]",
-                ].join(" ")
-              }
-            >
-              <NavText text={superAdminLink.label} />
-            </NavLink>
-          )}
-          {typeLink && (!adminLink || typeLink.to !== adminLink.to) && (
-            <NavLink
-              to={href(typeLink.to)}
-              onClick={onNavigate}
-              className={({ isActive }) =>
-                [
-                  "flex h-9 items-center rounded-lg border-l-[3px] px-3 text-sm font-medium",
-                  isActive
-                    ? "border-l-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--text-primary)]"
-                    : "border-l-transparent text-[var(--text-secondary)] hover:bg-[var(--primary-color-soft)] hover:text-[var(--text-primary)]",
-                ].join(" ")
-              }
-            >
-              <NavText text={typeLink.label} />
-            </NavLink>
-          )}
-            </>
-          ) : null}
-        </nav>
+  function GroupSection({ title, items }: { title: string; items: NavItem[] }) {
+    if (!items.length) return null;
+    return (
+      <div className="mgr-nav-group">
+        <p className="mgr-nav-label">{title}</p>
+        <div className="mgr-nav-group__items">
+          {items.map((item) => (
+            <MgrLink key={item.to} item={item} />
+          ))}
+        </div>
       </div>
-    </aside>
+    );
+  }
+
+  const showWorkspaceSwitch = user.businessUnitAccess === "both";
+  const workspaceLabel =
+    activeWorkspace === "farm" ? farmSectionTitle : clevaSectionTitle;
+  const companyLabel = tenantCompany?.name ?? user.companyName ?? appName;
+
+  const footerBlock = (
+    <div className={`mgr-sidebar-footer ${collapsed ? "mgr-sidebar-footer--collapsed" : ""}`}>
+      {adminItems.length > 0 ? (
+        <div className="mgr-nav-group">
+          {!collapsed ? <p className="mgr-nav-label">Admin</p> : null}
+          <div className="mgr-nav-group__items">
+            {adminItems.map((item) => (
+              <MgrLink key={item.to} item={item} compact={collapsed} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+      <button
+        type="button"
+        className={`mgr-nav-link w-full ${collapsed ? "mgr-nav-link--compact" : ""}`}
+        title={collapsed ? signOut : undefined}
+        onClick={() => {
+          onNavigate?.();
+          void logout();
+        }}
+      >
+        <LogOut className={ICON_CLS} aria-hidden />
+        {collapsed ? (
+          <span className="sr-only">{signOut}</span>
+        ) : (
+          <span className="mgr-nav-link-label truncate">{signOut}</span>
+        )}
+      </button>
+    </div>
+  );
+
+  return (
+    <div className="flex h-full flex-col text-white">
+      {!collapsed ? (
+        <div className="border-b border-white/10 px-3.5 pb-3.5 pt-5">
+          <Link
+            to={user.companySlug ? companyHref("") : "/"}
+            onClick={onNavigate}
+            className="mgr-sidebar-brand inline-flex min-h-10 w-full items-center gap-2.5"
+          >
+            {/* Solid white plate — green mark vanishes on the green sidebar otherwise */}
+            <span className="mgr-sidebar-logo-plate inline-flex size-9 shrink-0 items-center justify-center">
+              <BrandLogo size={30} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="mgr-brand-name block truncate text-[15px] leading-tight">
+                {companyLabel}
+              </span>
+              {!showWorkspaceSwitch ? (
+                <span className="mt-0.5 block truncate text-[10px] font-medium tracking-wide text-white/55">
+                  {workspaceLabel}
+                </span>
+              ) : null}
+            </span>
+          </Link>
+          {showWorkspaceSwitch ? (
+            <label className="mt-3 block">
+              <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.06em] text-white/40">
+                Workspace
+              </span>
+              <select
+                className="mgr-sidebar-select"
+                value={activeWorkspace ?? "farm"}
+                aria-label={switchWorkspaceAria}
+                onChange={(e) => setActiveWorkspace(e.target.value as ActiveWorkspace)}
+              >
+                <option value="farm" disabled={!canAccessWorkspace(user, "farm")}>
+                  {farmWorkspace}
+                </option>
+                <option value="clevacredit" disabled={!canAccessWorkspace(user, "clevacredit")}>
+                  {clevaWorkspace}
+                </option>
+              </select>
+            </label>
+          ) : null}
+        </div>
+      ) : (
+        <div className="flex justify-center border-b border-white/10 px-2 py-4">
+          <Link
+            to={user.companySlug ? companyHref("") : "/"}
+            onClick={onNavigate}
+            className="mgr-sidebar-logo-plate inline-flex size-10 items-center justify-center"
+            aria-label={appName}
+          >
+            <BrandLogo size={32} />
+          </Link>
+        </div>
+      )}
+
+      <nav className={`mgr-sidebar-nav flex-1 overflow-y-auto ${collapsed ? "mgr-sidebar-nav--collapsed" : ""}`}>
+        {collapsed ? (
+          <div className="mgr-nav-group__items">
+            {compactPrimary.map((item) => (
+              <MgrLink key={item.to} item={item} compact />
+            ))}
+          </div>
+        ) : activeWorkspace === "farm" ? (
+          <>
+            <GroupSection title="Overview" items={groupedFarmNav.overview} />
+            <GroupSection title="Operations" items={groupedFarmNav.operations} />
+            <GroupSection title="Health" items={groupedFarmNav.health} />
+            <GroupSection title="Inventory" items={groupedFarmNav.inventory} />
+            <GroupSection title="Planning" items={groupedFarmNav.planning_workforce} />
+            <GroupSection title="Finance" items={groupedFarmNav.finance} />
+          </>
+        ) : (
+          <div className="mgr-nav-group">
+            <p className="mgr-nav-label">{clevaSectionTitle}</p>
+            <div className="mgr-nav-group__items">
+              {nav.map((item) => (
+                <MgrLink key={item.to} item={item} />
+              ))}
+            </div>
+          </div>
+        )}
+      </nav>
+
+      {footerBlock}
+    </div>
   );
 }

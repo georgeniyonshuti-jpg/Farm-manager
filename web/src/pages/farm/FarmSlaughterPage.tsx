@@ -14,6 +14,7 @@ import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
 import { syncSlaughterSaleToERPNext } from "../../api/erpnext.api";
 import { getStoredErpnextCompany, getStoredErpnextCostCenter, CLIENT_ERPNEXT_ENTITY_SYNC } from "../../lib/erpnextPrefs";
 import { useERPNextConnection } from "../../context/OdooConnectionContext";
+import { useFarmCapabilities } from "../../hooks/useFarmCapabilities";
 import { SegmentedControl } from "../../components/ui";
 
 type Flock = { id: string; label: string; birdsLiveEstimate?: number | null };
@@ -53,6 +54,7 @@ function slaughterReasonLabel(row: Slaughter, reasons: { value: string; label: s
 export function FarmSlaughterPage() {
   const { token, user } = useAuth();
   const { status: erpnextStatus } = useERPNextConnection();
+  const { erpnextAccess } = useFarmCapabilities();
   const slaughterReasonOptions = useReferenceOptions("slaughter_reason", token, FALLBACK_SLAUGHTER_REASONS);
   const { showToast } = useToast();
   const canRecordSlaughter = canFlockAction(user, "slaughter.record");
@@ -218,7 +220,14 @@ export function FarmSlaughterPage() {
       const totalWeight = birds * carcassKg;
       const totalAmount = Number(form.fairValueRwf) || totalWeight * priceKg;
       const erpCompany = getStoredErpnextCompany() || erpnextStatus?.company;
-      if (CLIENT_ERPNEXT_ENTITY_SYNC && erpnextStatus?.connected && erpCompany && token && totalAmount > 0) {
+      if (
+        erpnextAccess &&
+        CLIENT_ERPNEXT_ENTITY_SYNC &&
+        erpnextStatus?.connected &&
+        erpCompany &&
+        token &&
+        totalAmount > 0
+      ) {
         try {
           await syncSlaughterSaleToERPNext(token, {
             company: erpCompany,

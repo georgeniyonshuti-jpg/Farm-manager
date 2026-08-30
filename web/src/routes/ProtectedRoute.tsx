@@ -6,11 +6,13 @@ import {
   canAccessWorkspace,
   isSuperuser,
   roleAtLeast,
+  roleInAllowList,
 } from "../auth/permissions";
 import type { ActiveWorkspace, UserRole } from "../auth/types";
 import { stripTenantPrefix, tenantPath } from "../lib/tenancy";
 import { AppLoadingScreen } from "../components/AppLoadingScreen";
 import { AccessDeniedRedirect } from "./AccessDeniedRedirect";
+import { mapErpRoleToPwaRole, readStoredFarmBootstrap } from "../auth/farmBootstrap";
 
 function SessionLoadingScreen() {
   return <AppLoadingScreen />;
@@ -60,7 +62,7 @@ export function ProtectedRoute({
     return <AccessDeniedRedirect />;
   }
 
-  if (user && roles?.length && !isSuperuser(user) && !roles.includes(user.role)) {
+  if (user && roles?.length && !isSuperuser(user) && !roleInAllowList(user.role, roles)) {
     return <AccessDeniedRedirect />;
   }
 
@@ -110,7 +112,10 @@ export function defaultHomePathForRole(role: UserRole): string {
 }
 
 export function defaultHomeForUser(role: UserRole, companySlug?: string): string {
-  const path = defaultHomePathForRole(role);
+  const bootstrap = readStoredFarmBootstrap();
+  const mapped = bootstrap?.role ? mapErpRoleToPwaRole(bootstrap.role) : null;
+  const effectiveRole = mapped ?? role;
+  const path = defaultHomePathForRole(effectiveRole);
   if (!companySlug) return path;
   return tenantPath(companySlug, path);
 }

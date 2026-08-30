@@ -6,6 +6,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { ActiveWorkspace, SessionUser } from "./types";
 import {
   canAccessWorkspace,
@@ -19,6 +20,16 @@ import {
   frappeLogout,
 } from "../api/frappe.api";
 import { setErpnextSessionId } from "../lib/erpnextSession";
+import {
+  AGGREGATE_CHECKIN_QUERY_KEY,
+  type AggregateCheckinPayload,
+} from "../hooks/useFieldOpsHubStatus";
+import {
+  applyBootstrapToUser,
+  clearStoredFarmBootstrap,
+  persistFarmBootstrap,
+  type FarmBootstrap,
+} from "./farmBootstrap";
 
 const AUTH_STORAGE_KEY = "fm_auth_token";
 
@@ -29,34 +40,63 @@ type AuthContextValue = {
   token: string | null;
   activeWorkspace: ActiveWorkspace | null;
   bootstrapped: boolean;
+  farmBootstrap: FarmBootstrap | null;
   login: (creds: LoginCredentials) => Promise<SessionUser>;
   logout: () => Promise<void>;
   setActiveWorkspace: (w: ActiveWorkspace) => void;
   refreshMe: () => Promise<void>;
-  establishSession: (token: string, user: SessionUser) => void;
+  establishSession: (token: string, user: SessionUser, farmBootstrap?: FarmBootstrap | null) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-async function fetchMe(token: string): Promise<SessionUser> {
-  if (IS_FRAPPE_MODE) {
-    return frappeGetMe() as Promise<SessionUser>;
-  }
-  const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
+type BootstrapPayload = {
+  user: SessionUser;
+  fieldHub?: AggregateCheckinPayload | null;
+  farmBootstrap?: FarmBootstrap | null;
+};
+
+function applyBootstrapSession(
+  bootstrap: FarmBootstrap | null | undefined,
+  user: SessionUser
+): { user: SessionUser; farmBootstrap: FarmBootstrap | null } {
+  const farmBootstrap = bootstrap ?? null;
+  persistFarmBootstrap(farmBootstrap);
+  return { user: applyBootstrapToUser(user, farmBootstrap), farmBootstrap };
+}
+
+async function fetchBootstrap(token: string): Promise<BootstrapPayload> {
+  const res = await fetch(`${API_BASE_URL}/api/bootstrap`, {
     headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(8000),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error((data as { error?: string }).error ?? "Session expired");
   }
-  return (data as { user: SessionUser }).user;
+  const user = (data as BootstrapPayload).user;
+  if (!user || typeof user !== "object" || !("email" in user)) {
+    // Same-origin SPA HTML mistake or broken proxy — fall back to /api/auth/me.
+    throw new Error("Invalid bootstrap payload");
+  }
+  return data as BootstrapPayload;
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(AUTH_STORAGE_KEY));
   const [activeWorkspace, setActiveWorkspaceState] = useState<ActiveWorkspace | null>(null);
   const [bootstrapped, setBootstrapped] = useState(false);
+  const [farmBootstrap, setFarmBootstrap] = useState<FarmBootstrap | null>(null);
+
+  const seedFieldHub = useCallback(
+    (t: string, fieldHub: AggregateCheckinPayload | null | undefined) => {
+      if (!fieldHub) return;
+      queryClient.setQueryData([AGGREGATE_CHECKIN_QUERY_KEY, t], fieldHub);
+    },
+    [queryClient]
+  );
 
   const setTokenPersist = useCallback((t: string | null) => {
     setToken(t);
@@ -69,16 +109,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!t) {
       setUser(null);
       setActiveWorkspaceState(null);
+      setFarmBootstrap(null);
       return;
     }
-    const me = await fetchMe(t);
-    setUser(me);
-    const def = defaultWorkspaceForUser(me);
+    if (IS_FRAPPE_MODE) {
+      const me = (await frappeGetMe()) as SessionUser;
+      setUser(me);
+      const def = defaultWorkspaceForUser(me);
+      setActiveWorkspaceState((prev) => {
+        if (prev && canAccessWorkspace(me, prev)) return prev;
+        return def;
+      });
+      return;
+    }
+    const boot = await fetchBootstrap(t);
+    const applied = applyBootstrapSession(boot.farmBootstrap, boot.user);
+    setUser(applied.user);
+    setFarmBootstrap(applied.farmBootstrap);
+    seedFieldHub(t, boot.fieldHub);
+    const def = defaultWorkspaceForUser(applied.user);
     setActiveWorkspaceState((prev) => {
-      if (prev && canAccessWorkspace(me, prev)) return prev;
+      if (prev && canAccessWorkspace(applied.user, prev)) return prev;
       return def;
     });
-  }, [token]);
+  }, [token, seedFieldHub]);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,14 +150,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!t) {
           setUser(null);
           setActiveWorkspaceState(null);
+          setFarmBootstrap(null);
           return;
         }
-        const me = await fetchMe(t);
-        if (cancelled) return;
-        setUser(me);
-        setToken(t);
-        const def = defaultWorkspaceForUser(me);
-        setActiveWorkspaceState(def);
+        try {
+          const boot = await fetchBootstrap(t);
+          if (cancelled) return;
+          const applied = applyBootstrapSession(boot.farmBootstrap, boot.user);
+          setUser(applied.user);
+          setFarmBootstrap(applied.farmBootstrap);
+          setToken(t);
+          seedFieldHub(t, boot.fieldHub);
+          setActiveWorkspaceState(defaultWorkspaceForUser(applied.user));
+        } catch {
+          // Token present but bootstrap failed — clear session so login is reachable.
+          if (!cancelled) {
+            setUser(null);
+            setFarmBootstrap(null);
+            clearStoredFarmBootstrap();
+            setTokenPersist(null);
+            setActiveWorkspaceState(null);
+          }
+        }
       } catch {
         if (!cancelled) {
           setUser(null);
@@ -117,7 +185,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [setTokenPersist]);
+  }, [setTokenPersist, seedFieldHub]);
 
   const login = useCallback(
     async (creds: LoginCredentials): Promise<SessionUser> => {
@@ -143,13 +211,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setTokenPersist(t);
       setUser(u);
       setActiveWorkspaceState(defaultWorkspaceForUser(u));
-
-      // ERPNext user session is optional — connect via Farm → ERPNext setup (OAuth) when needed.
-      // Server-side sync uses ERPNEXT_API_KEY; farm email/password rarely match ERPNext users.
-
+      try {
+        const boot = await fetchBootstrap(t);
+        const applied = applyBootstrapSession(boot.farmBootstrap, u);
+        setUser(applied.user);
+        setFarmBootstrap(applied.farmBootstrap);
+        seedFieldHub(t, boot.fieldHub);
+      } catch {
+        /* non-fatal */
+      }
       return u;
     },
-    [setTokenPersist]
+    [setTokenPersist, seedFieldHub]
   );
 
   const logout = useCallback(async () => {
@@ -172,10 +245,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }).catch(() => {});
     }
     setErpnextSessionId(null);
+    clearStoredFarmBootstrap();
+    setFarmBootstrap(null);
     setTokenPersist(null);
     setUser(null);
     setActiveWorkspaceState(null);
-  }, [setTokenPersist, token]);
+    queryClient.clear();
+  }, [setTokenPersist, token, queryClient]);
 
   const setActiveWorkspace = useCallback(
     (w: ActiveWorkspace) => {
@@ -185,12 +261,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const establishSession = useCallback(
-    (t: string, u: SessionUser) => {
+    (t: string, u: SessionUser, bootstrap?: FarmBootstrap | null) => {
+      const applied = applyBootstrapSession(bootstrap, u);
       setTokenPersist(t);
-      setUser(u);
-      setActiveWorkspaceState(defaultWorkspaceForUser(u));
+      setUser(applied.user);
+      setFarmBootstrap(applied.farmBootstrap);
+      setActiveWorkspaceState(defaultWorkspaceForUser(applied.user));
+      void fetchBootstrap(t)
+        .then((boot) => {
+          const refreshed = applyBootstrapSession(boot.farmBootstrap ?? applied.farmBootstrap, boot.user);
+          setUser(refreshed.user);
+          setFarmBootstrap(refreshed.farmBootstrap);
+          seedFieldHub(t, boot.fieldHub);
+        })
+        .catch(() => {});
     },
-    [setTokenPersist]
+    [setTokenPersist, seedFieldHub]
   );
 
   const value = useMemo<AuthContextValue>(
@@ -199,13 +285,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       token,
       activeWorkspace,
       bootstrapped,
+      farmBootstrap,
       login,
       logout,
       refreshMe,
       establishSession,
       setActiveWorkspace,
     }),
-    [user, token, activeWorkspace, bootstrapped, login, logout, refreshMe, establishSession, setActiveWorkspace]
+    [user, token, activeWorkspace, bootstrapped, farmBootstrap, login, logout, refreshMe, establishSession, setActiveWorkspace]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

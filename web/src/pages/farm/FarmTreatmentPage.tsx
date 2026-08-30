@@ -19,6 +19,7 @@ import {
   getStoredErpnextCostCenter,
   CLIENT_ERPNEXT_ENTITY_SYNC,
 } from "../../lib/erpnextPrefs";
+import { useFarmCapabilities } from "../../hooks/useFarmCapabilities";
 
 type Flock = { id: string; label: string; code?: string | null; initialCount?: number };
 type Medicine = {
@@ -122,6 +123,7 @@ function treatmentReasonLabel(row: Treatment, reasons: { value: string; label: s
 
 export function FarmTreatmentPage() {
   const { token } = useAuth();
+  const { erpnextAccess } = useFarmCapabilities();
   const { showToast } = useToast();
   const treatmentReasonOptions = useReferenceOptions("treatment_reason", token, TREATMENT_REASON_OPTIONS);
   const routeOptions = useReferenceOptions("treatment_route", token, FALLBACK_ROUTE_OPTIONS);
@@ -355,7 +357,7 @@ export function FarmTreatmentPage() {
 
       // Non-blocking ERPNext medicine expense sync
       const company = getStoredErpnextCompany();
-      if (CLIENT_ERPNEXT_ENTITY_SYNC && token && company && treatmentId) {
+      if (erpnextAccess && CLIENT_ERPNEXT_ENTITY_SYNC && token && company && treatmentId) {
         void syncTreatmentToERPNext(token, {
           company,
           supplier: "Farm Veterinary Supplier",

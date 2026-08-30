@@ -7,8 +7,9 @@ import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { HubCheckinBanner } from "../../components/farm/HubCheckinBanner";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { useFieldOpsHubStatus } from "../../hooks/useFieldOpsHubStatus";
-import { MobileFieldBottomNav, type MobileFieldNavItem } from "../../components/layout/MobileFieldBottomNav";
 import { FieldOpsActionLink } from "../../components/field/FieldOpsActionLink";
+import { TodayChecklistPanel } from "../../components/farm/TodayChecklistPanel";
+import { useFarmCapabilities } from "../../hooks/useFarmCapabilities";
 
 export function LaborerHome() {
   const { token } = useAuth();
@@ -23,10 +24,6 @@ export function LaborerHome() {
   const noFlockTitle = useLaborerT("No flock available");
   const noFlockBody = useLaborerT("Round status appears when a flock is assigned to your site.");
   const tRetry = useLaborerT("Try again");
-  const tabHome = useLaborerT("Home");
-  const tabRounds = useLaborerT("Rounds");
-  const tabMort = useLaborerT("Mortality");
-  const tabFeed = useLaborerT("Feed");
 
   const tLoadingBanner = useLaborerT("Preparing round check-in status…");
   const tErrBanner = useLaborerT("Could not load round check-in. Try again.");
@@ -65,50 +62,8 @@ export function LaborerHome() {
 
   const { status, loading, loadError, load, opsGlance, roundBanner, otherOverdueCount } =
     useFieldOpsHubStatus(token, hubLabels);
-
-  const bottomNav: MobileFieldNavItem[] = [
-    {
-      to: "/dashboard/laborer",
-      label: tabHome,
-      end: true,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" strokeLinejoin="round" />
-          <polyline points="9 22 9 12 15 12 15 22" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/checkin",
-      label: tabRounds,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <circle cx="12" cy="12" r="10" />
-          <path d="M12 6v6l4 2" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/mortality-log",
-      label: tabMort,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-          <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/feed",
-      label: tabFeed,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-  ];
-
+  const { can, hasBootstrap } = useFarmCapabilities();
+  const showCap = (cap: Parameters<typeof can>[0], legacy = true) => (hasBootstrap ? can(cap) : legacy);
   return (
     <div className="mx-auto w-full max-w-[960px] space-y-6">
       {roundBanner ? (
@@ -139,26 +94,35 @@ export function LaborerHome() {
         <EmptyState title={noFlockTitle} description={noFlockBody} />
       ) : null}
 
+      <TodayChecklistPanel />
+
       <div className="grid gap-3 md:grid-cols-2 md:gap-4 md:items-start">
         <div className="grid gap-3">
-          <FieldOpsActionLink to="/farm/checkin" variant="primary">
-            {linkCheckin}
-          </FieldOpsActionLink>
-          <FieldOpsActionLink to="/farm/mortality-log" variant="danger">
-            {linkMort}
-          </FieldOpsActionLink>
-          <FieldOpsActionLink to="/farm/feed" variant="neutral">
-            {linkFeed}
-          </FieldOpsActionLink>
+          {showCap("checkin") ? (
+            <FieldOpsActionLink to="/farm/checkin" variant="primary">
+              {linkCheckin}
+            </FieldOpsActionLink>
+          ) : null}
+          {showCap("mortality") ? (
+            <FieldOpsActionLink to="/farm/mortality-log" variant="danger">
+              {linkMort}
+            </FieldOpsActionLink>
+          ) : null}
+          {showCap("feed_log") ? (
+            <FieldOpsActionLink to="/farm/feed" variant="neutral">
+              {linkFeed}
+            </FieldOpsActionLink>
+          ) : null}
         </div>
         <div className="grid gap-3">
-          <FieldOpsActionLink to="/laborer/earnings" variant="soft">
-            {linkEarnings}
-          </FieldOpsActionLink>
+          {showCap("payroll_visible") ? (
+            <FieldOpsActionLink to="/laborer/earnings" variant="soft">
+              {linkEarnings}
+            </FieldOpsActionLink>
+          ) : null}
         </div>
       </div>
 
-      <MobileFieldBottomNav items={bottomNav} />
     </div>
   );
 }

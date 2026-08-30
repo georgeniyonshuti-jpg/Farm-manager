@@ -7,10 +7,12 @@ import { FarmSection } from "./routes/FarmSection";
 import { ProtectedRoute } from "./routes/ProtectedRoute";
 import { HomeRedirect } from "./pages/HomeRedirect";
 import { LoginPage } from "./pages/LoginPage";
+import { ForgotPasswordPage, ResetPasswordPage } from "./pages/ForgotPasswordPage";
 import { SignupPage } from "./pages/SignupPage";
 import { WelcomePage } from "./pages/WelcomePage";
 import { PricingPage } from "./pages/PricingPage";
 import { TrialExpiredPage } from "./pages/TrialExpiredPage";
+import { BillingCancelledPage, BillingSuccessPage } from "./pages/BillingResultPages";
 import { SuperAdminRoute } from "./routes/SuperAdminRoute";
 import { FlockDetailPage } from "./pages/farm/FlockDetailPage";
 import { AccessDeniedRedirect } from "./routes/AccessDeniedRedirect";
@@ -32,7 +34,10 @@ import { TenantProvider } from "./context/TenantContext";
 import { TenantGuard } from "./components/guards/TenantGuard";
 import { LegacyTenantRedirect } from "./routes/LegacyTenantRedirect";
 import { ERPNextOAuthCallbackPage } from "./pages/auth/ERPNextOAuthCallbackPage";
+import { ClevaOAuthCallbackPage } from "./pages/auth/ClevaOAuthCallbackPage";
 import { RootRedirect } from "./routes/RootRedirect";
+import { FarmBootstrapProvider } from "./context/FarmBootstrapContext";
+import { ContractRouteAliases } from "./routes/ContractRouteAliases";
 
 function AppRoutes() {
   const { bootstrapped } = useAuth();
@@ -41,9 +46,14 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/signup" element={<SignupPage />} />
       <Route path="/auth/erpnext/callback" element={<ERPNextOAuthCallbackPage />} />
+      <Route path="/auth/cleva/callback" element={<ClevaOAuthCallbackPage />} />
       <Route path="/billing/pricing" element={<PricingPage />} />
+      <Route path="/billing/success" element={<BillingSuccessPage />} />
+      <Route path="/billing/cancelled" element={<BillingCancelledPage />} />
       <Route path="/billing/trial-expired" element={<TrialExpiredPage />} />
 
       <Route element={<ProtectedRoute />}>
@@ -62,7 +72,9 @@ function AppRoutes() {
           element={
             <TenantProvider>
               <TenantGuard>
-                <AppShell />
+                <FarmBootstrapProvider>
+                  <AppShell />
+                </FarmBootstrapProvider>
               </TenantGuard>
             </TenantProvider>
           }
@@ -123,6 +135,8 @@ function AppRoutes() {
           <Route element={<SuperAdminRoute />}>
             <Route path="admin/super" element={null} />
           </Route>
+
+          <ContractRouteAliases />
 
           <Route path="*" element={<HomeRedirect />} />
         </Route>

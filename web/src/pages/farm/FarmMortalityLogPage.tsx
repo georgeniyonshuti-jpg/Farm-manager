@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { PhotoCaptureInput } from "../../components/farm/PhotoCaptureInput";
+import { PhotoTile } from "../../components/farm/PhotoTile";
 import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import { useAuth } from "../../auth/AuthContext";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
+import { FieldPageHeader } from "../../components/layout/FieldPageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { createMortalityEvent, IS_FRAPPE_MODE } from "../../api/farm.api";
@@ -13,7 +14,10 @@ import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import { SubmissionStageScreen } from "../../components/farm/SubmissionStageScreen";
 import { syncMortalityToERPNext } from "../../api/erpnext.api";
 import { getStoredErpnextCompany, getStoredErpnextCostCenter, CLIENT_ERPNEXT_ENTITY_SYNC } from "../../lib/erpnextPrefs";
+import { useFarmCapabilities } from "../../hooks/useFarmCapabilities";
 import { useERPNextConnection } from "../../context/OdooConnectionContext";
+import { Button, Card, Metric } from "../../components/ui";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
 
 function MortalityPhotoBlock({
   busy,
@@ -24,19 +28,23 @@ function MortalityPhotoBlock({
 }) {
   const pickerLabel = useLaborerT("Tap to add photos (1+ required, up to 6)");
   return (
-    <PhotoCaptureInput
+    <PhotoTile
+      title={pickerLabel}
+      help="Log only birds that died naturally or were culled."
       minCount={1}
       maxCount={6}
+      busy={busy}
       pickerLabel={pickerLabel}
-      onChangeDataUrls={onPhotos}
-      disabled={busy}
+      onPhotos={onPhotos}
     />
   );
 }
 
 export function FarmMortalityLogPage() {
   const { token } = useAuth();
+  const { erpnextAccess } = useFarmCapabilities();
   const { showToast } = useToast();
+  const { companyHref } = useCompanyNav();
   const { status: erpnextStatus } = useERPNextConnection();
   const lblFlock = useLaborerT("Flock");
   const title = useLaborerT("Log mortality");
@@ -56,7 +64,9 @@ export function FarmMortalityLogPage() {
   const alertNorm = useLaborerT("Mortality logged.");
   const errSave = useLaborerT("Save failed");
   const noFlockTitle = useLaborerT("No flock available");
-  const noFlockBody = useLaborerT("Add a flock before logging mortality.");
+  const noFlockBody = useLaborerT(
+    "Add a flock before logging mortality. Log only birds that died naturally or were culled.",
+  );
 
   const {
     flocks,
@@ -114,6 +124,7 @@ export function FarmMortalityLogPage() {
       const erpCompany = getStoredErpnextCompany() || erpnextStatus?.company;
       const estValue = Number(valuePerBird) || 0;
       if (
+        erpnextAccess &&
         CLIENT_ERPNEXT_ENTITY_SYNC &&
         !IS_FRAPPE_MODE &&
         erpnextStatus?.connected &&
@@ -170,15 +181,27 @@ export function FarmMortalityLogPage() {
 
   return (
     <div className="mx-auto max-w-lg space-y-6">
-      <PageHeader
+      <FieldPageHeader
         title={title}
-        subtitle={subtitle}
+        backTo={companyHref("/dashboard/laborer")}
+        context={status?.label}
         action={
-          <Link to="/farm/mortality" className="text-sm font-medium text-[var(--primary-color-dark)] hover:underline">
+          <Link to={companyHref("/farm/mortality")} className="text-xs font-semibold text-[var(--primary-color)] underline">
             {linkHist}
           </Link>
         }
       />
+      <div className="hidden md:block">
+        <PageHeader
+          title={title}
+          subtitle={subtitle}
+          action={
+            <Link to={companyHref("/farm/mortality")} className="text-sm font-medium text-[var(--primary-color-dark)] hover:underline">
+              {linkHist}
+            </Link>
+          }
+        />
+      </div>
 
       {flockLoading && <SkeletonList rows={2} />}
 
@@ -193,7 +216,15 @@ export function FarmMortalityLogPage() {
       )}
 
       {!flockLoading && !ctxError && flocks.length === 0 ? (
-        <EmptyState title={noFlockTitle} description={noFlockBody} />
+        <EmptyState
+          title={noFlockTitle}
+          description={noFlockBody}
+          action={
+            <Button type="button" variant="secondary" onClick={() => void loadFlocks()}>
+              Retry
+            </Button>
+          }
+        />
       ) : null}
 
       {!flockLoading && !ctxError && flocks.length > 0 ? (
@@ -216,17 +247,35 @@ export function FarmMortalityLogPage() {
       {!flockLoading && !ctxError && flockId && !status && detailLoading ? <SkeletonList rows={2} /> : null}
 
       {!flockLoading && !ctxError && status ? (
-        <FlockContextStrip
-          label={status.label}
-          code={flocks.find((f) => f.id === flockId)?.code}
-          placementDate={status.placementDate}
-          ageDays={status.ageDays}
-          feedToDateKg={status.feedToDateKg}
-          initialCount={flocks.find((f) => f.id === flockId)?.initialCount}
-          birdsLiveEstimate={performance?.birdsLiveEstimate}
-          verifiedLiveCount={performance?.verifiedLiveCount}
-          mortalityToDate={performance?.mortalityToDate}
-        />
+        <>
+          <Card level="subtle" className="grid grid-cols-2 gap-3">
+            <Metric
+              label="Mortality to date"
+              value={performance?.mortalityToDate ?? 0}
+              context={
+                (performance?.mortalityToDate ?? 0) === 0
+                  ? "Below expected for a quiet day"
+                  : "Review with vet if rising"
+              }
+            />
+            <Metric
+              label="Live birds"
+              value={performance?.birdsLiveEstimate ?? performance?.verifiedLiveCount ?? "—"}
+              context={`Day ${status.ageDays}`}
+            />
+          </Card>
+          <FlockContextStrip
+            label={status.label}
+            code={flocks.find((f) => f.id === flockId)?.code}
+            placementDate={status.placementDate}
+            ageDays={status.ageDays}
+            feedToDateKg={status.feedToDateKg}
+            initialCount={flocks.find((f) => f.id === flockId)?.initialCount}
+            birdsLiveEstimate={performance?.birdsLiveEstimate}
+            verifiedLiveCount={performance?.verifiedLiveCount}
+            mortalityToDate={performance?.mortalityToDate}
+          />
+        </>
       ) : null}
 
       {!flockLoading && !ctxError && flockId && status ? (

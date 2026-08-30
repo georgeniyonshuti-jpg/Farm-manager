@@ -43,6 +43,7 @@ import { buildFlockComparisonReport } from "./src/services/reports/flockComparis
 import { buildFarmOperationsReport } from "./src/services/reports/farmOperationsReport.js";
 import { buildFlockDeepDivePdfBuffer } from "./src/services/reports/pdfFlockDeepDive.js";
 import { buildFlockComparisonPdfBuffer } from "./src/services/reports/pdfFlockComparison.js";
+import { buildFarmInsights } from "./src/services/insights.js";
 import { buildFarmOperationsPdfBuffer } from "./src/services/reports/pdfFarmOperations.js";
 import { extractLiveDbActuals } from "./business-model/liveDbActuals.js";
 import { projectionToCsv, varianceToCsv, compareToCsv, heatmapsToCsv } from "./business-model/exportCsv.js";
@@ -87,7 +88,9 @@ import {
   isPlatformSuperuser,
   assertSameCompany,
   appendSqlFlockCompanyFilter,
+  appendSqlInventoryCompanyFilter,
   filterFlocksForUser,
+  filterInventoryForUser,
   memoryFlockIdVisible,
 } from "./src/services/tenant/companyIsolation.js";
 import {
@@ -98,6 +101,10 @@ import {
   resolveAssignCompanyId,
 } from "./src/services/tenant/companyAdmin.js";
 import { createSaasRouter } from "./src/routes/saasRoutes.js";
+import { createClevaAuthRouter } from "./src/routes/clevaAuth.routes.js";
+import { fetchClevaUserExists } from "./src/services/clevaSso.js";
+import { createPasswordResetService } from "./src/services/passwordReset.js";
+import { smtpConfigFromEnv } from "./src/services/smtpSend.js";
 import { initOdooSyncWorker, processOdooSyncOutbox, enqueueOdooSync } from "./src/services/odoo/odooSyncWorker.js";
 import {
   mapFeedProcurementToBill,
@@ -134,6 +141,7 @@ const dbPool = process.env.DATABASE_URL
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,
+  "https://farm.cleva.rw",
   "https://farm.clevacredit.com",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
@@ -170,7 +178,11 @@ app.use(cors({
       callback(null, true);
       return;
     }
-    if (IS_PRODUCTION && /^https:\/\/([a-z0-9-]+\.)*clevacredit\.com$/i.test(origin)) {
+    if (
+      IS_PRODUCTION &&
+      (/^https:\/\/([a-z0-9-]+\.)*clevacredit\.com$/i.test(origin) ||
+        /^https:\/\/(([a-z0-9-]+)\.)?farm\.cleva\.rw$/i.test(origin))
+    ) {
       callback(null, true);
       return;
     }
@@ -211,6 +223,15 @@ app.use(
 );
 
 app.use(
+  "/api/auth/forgot-password",
+  systemConfig.ipWindowRateLimitMiddleware(
+    () => systemConfig.getAppSettingNumber("rate_limit_forgot_max", 5),
+    () => systemConfig.getAppSettingNumber("rate_limit_forgot_window_ms", 15 * 60 * 1000),
+    { error: "Too many reset requests. Try again in 15 minutes." },
+  ),
+);
+
+app.use(
   "/api/laborer/translate",
   systemConfig.ipWindowRateLimitMiddleware(
     () => systemConfig.getAppSettingNumber("rate_limit_translate_max", 30),
@@ -230,6 +251,35 @@ app.use(
 
 function hashPassword(pw) {
   return crypto.createHash("sha256").update(`${PEPPER}:${pw}`).digest("hex");
+}
+
+const FRONTEND_BASE_URL = String(
+  process.env.FRONTEND_URL || process.env.PUBLIC_WEB_URL || "https://farm.cleva.rw",
+).replace(/\/$/, "");
+const ERP_BASE_URL = String(process.env.ERPNEXT_BASE_URL || "https://erp.clevacredit.com").replace(
+  /\/$/,
+  "",
+);
+
+const passwordReset = createPasswordResetService({
+  hasDb,
+  dbQuery,
+  findUserByEmail: (email) => {
+    const id = usersByEmail.get(String(email || "").trim().toLowerCase());
+    return id ? usersById.get(id) ?? null : null;
+  },
+  hashPassword,
+  upsertUser: async (user) => {
+    upsertUser(user);
+    await persistUserToDb(user);
+  },
+  fetchClevaUserExists,
+  frontendUrl: FRONTEND_BASE_URL,
+  erpUrl: ERP_BASE_URL,
+});
+
+if (!smtpConfigFromEnv()) {
+  console.warn("[password-reset] SMTP_* not set — forgot-password emails will not send");
 }
 
 function imageDataUrlMeta(value) {
@@ -270,6 +320,7 @@ function sanitizeUser(row) {
     companyId: row.companyId ?? null,
     companySlug: row.companySlug ?? null,
     companyName: row.companyName ?? null,
+    authSource: row.authSource === "cleva" ? "cleva" : "local",
   };
 }
 
@@ -553,13 +604,14 @@ async function hydrateUserCompanyFromDb(userRow) {
 async function persistUserToDb(row) {
   if (!hasDb()) return;
   const companyId = row.companyId ?? DEFAULT_COMPANY_ID;
+  const authSource = row.authSource === "cleva" ? "cleva" : "local";
   await dbQuery(
     `INSERT INTO users (
       id, email, full_name, role, password_hash, business_unit_access,
-      can_view_sensitive_financial, department_keys, page_access, company_id
+      can_view_sensitive_financial, department_keys, page_access, company_id, auth_source
     )
     VALUES (
-      $1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::uuid
+      $1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::uuid, $11
     )
     ON CONFLICT (id) DO UPDATE SET
       email = EXCLUDED.email,
@@ -570,7 +622,8 @@ async function persistUserToDb(row) {
       can_view_sensitive_financial = EXCLUDED.can_view_sensitive_financial,
       department_keys = EXCLUDED.department_keys,
       page_access = EXCLUDED.page_access,
-      company_id = COALESCE(EXCLUDED.company_id, users.company_id)`,
+      company_id = COALESCE(EXCLUDED.company_id, users.company_id),
+      auth_source = EXCLUDED.auth_source`,
     [
       row.id,
       row.email,
@@ -582,6 +635,7 @@ async function persistUserToDb(row) {
       JSON.stringify(Array.isArray(row.departmentKeys) ? row.departmentKeys : []),
       JSON.stringify(normalizePageAccess(row.pageAccess, PAGE_ACCESS_KEYS)),
       companyId,
+      authSource,
     ]
   );
 }
@@ -601,9 +655,11 @@ async function syncUsersFromDbToMemory() {
       COALESCE(u.page_access, '[]'::jsonb) AS "pageAccess",
       u.company_id::text AS "companyId",
       c.slug AS "companySlug",
-      c.name AS "companyName"
+      c.name AS "companyName",
+      COALESCE(u.auth_source, 'local') AS "authSource"
     FROM users u
     LEFT JOIN companies c ON c.id = u.company_id
+    WHERE u.is_active IS NOT FALSE
     ORDER BY u.created_at ASC NULLS LAST`
   );
   usersById.clear();
@@ -622,6 +678,7 @@ async function syncUsersFromDbToMemory() {
       companyId: row.companyId ? String(row.companyId) : DEFAULT_COMPANY_ID,
       companySlug: row.companySlug ? String(row.companySlug) : "default-farm",
       companyName: row.companyName ? String(row.companyName) : "Default farm",
+      authSource: row.authSource === "cleva" ? "cleva" : "local",
     });
   }
   return result.rowCount ?? 0;
@@ -754,12 +811,18 @@ function newSessionId() {
   return crypto.randomBytes(32).toString("hex");
 }
 
-function getUserFromRequest(req) {
+function getSessionFromRequest(req) {
   const h = req.headers.authorization;
   if (!h || !h.startsWith("Bearer ")) return null;
   const sid = h.slice("Bearer ".length).trim();
   const s = sessions.get(sid);
   if (!s || s.exp < Date.now()) return null;
+  return s;
+}
+
+function getUserFromRequest(req) {
+  const s = getSessionFromRequest(req);
+  if (!s) return null;
   return usersById.get(s.userId) ?? null;
 }
 
@@ -770,7 +833,27 @@ function requireAuth(req, res, next) {
     return;
   }
   req.authUser = u;
-  next();
+  void (async () => {
+    if (authIsSuperuser({ role: u.role })) {
+      next();
+      return;
+    }
+    const companyId = u.companyId ?? null;
+    if (!companyId || !hasDb()) {
+      next();
+      return;
+    }
+    try {
+      const r = await dbQuery(`SELECT is_active FROM companies WHERE id = $1::uuid`, [companyId]);
+      if (r.rows[0] && r.rows[0].is_active === false) {
+        res.status(403).json({ error: "Company suspended" });
+        return;
+      }
+    } catch {
+      // Allow request if company status check fails transiently.
+    }
+    next();
+  })();
 }
 
 function requireSameCompany(req, res, next) {
@@ -2274,6 +2357,7 @@ function mapInventoryRowFromDb(row) {
     feedType: row.feedType != null ? String(row.feedType) : null,
     feedEntryId: row.feedEntryId != null ? String(row.feedEntryId) : null,
     accountingStatus: row.accountingStatus != null ? String(row.accountingStatus) : null,
+    companyId: row.companyId != null ? String(row.companyId) : null,
   };
 }
 
@@ -2296,7 +2380,8 @@ async function syncInventoryTransactionsFromDb() {
             approved_at AS "approvedAt",
             feed_type AS "feedType",
             feed_entry_id::text AS "feedEntryId",
-            COALESCE(accounting_status, 'not_applicable') AS "accountingStatus"
+            COALESCE(accounting_status, 'not_applicable') AS "accountingStatus",
+            company_id::text AS "companyId"
        FROM farm_inventory_transactions
       ORDER BY recorded_at DESC, created_at DESC`
   );
@@ -2392,20 +2477,21 @@ function normalizeSupplierName(name) {
  * @param {string | null | undefined} rawName
  * @returns {Promise<{ id: string, name: string, normalizedName: string } | null>}
  */
-async function upsertSupplierByName(rawName) {
+async function upsertSupplierByName(rawName, companyId = DEFAULT_COMPANY_ID) {
   const cleaned = String(rawName ?? "").trim().replace(/\s+/g, " ");
   const normalized = normalizeSupplierName(cleaned);
   if (!cleaned || !normalized) return null;
+  const scopedCompanyId = String(companyId ?? DEFAULT_COMPANY_ID);
   if (hasDb()) {
     try {
       const q = await dbQuery(
-        `INSERT INTO farm_suppliers (name, normalized_name, updated_at)
-         VALUES ($1, $2, now())
-         ON CONFLICT (normalized_name) DO UPDATE
+        `INSERT INTO farm_suppliers (name, normalized_name, company_id, updated_at)
+         VALUES ($1, $2, $3::uuid, now())
+         ON CONFLICT (company_id, normalized_name) DO UPDATE
            SET name = EXCLUDED.name,
                updated_at = now()
          RETURNING id::text AS id, name, normalized_name AS "normalizedName"`,
-        [cleaned, normalized]
+        [cleaned, normalized, scopedCompanyId]
       );
       const row = q.rows[0];
       if (row?.id) {
@@ -2430,7 +2516,7 @@ async function upsertSupplierByName(rawName) {
  * @param {string | null} supplierId
  * @param {string | null} supplierName
  */
-async function resolveSupplierForWrite(supplierId, supplierName) {
+async function resolveSupplierForWrite(supplierId, supplierName, companyId = DEFAULT_COMPANY_ID) {
   const sid = String(supplierId ?? "").trim();
   if (sid && hasDb()) {
     try {
@@ -2438,8 +2524,9 @@ async function resolveSupplierForWrite(supplierId, supplierName) {
         `SELECT id::text AS id, name, normalized_name AS "normalizedName"
            FROM farm_suppliers
           WHERE id::text = $1
+            AND company_id = $2::uuid
           LIMIT 1`,
-        [sid]
+        [sid, companyId]
       );
       const row = q.rows[0];
       if (row?.id) {
@@ -2451,7 +2538,7 @@ async function resolveSupplierForWrite(supplierId, supplierName) {
       // Fallback to supplierName path below.
     }
   }
-  return await upsertSupplierByName(supplierName);
+  return await upsertSupplierByName(supplierName, companyId);
 }
 
 /**
@@ -2542,15 +2629,18 @@ async function listBarnNames() {
   return [...barnNamesByNormalized.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-async function listSuppliers() {
+async function listSuppliers(companyId = null) {
   if (hasDb()) {
     try {
-      const q = await dbQuery(
-        `SELECT id::text AS id, name, normalized_name AS "normalizedName"
-           FROM farm_suppliers
-          ORDER BY name ASC
-          LIMIT 2000`
-      );
+      const params = [];
+      let sql = `SELECT id::text AS id, name, normalized_name AS "normalizedName"
+                   FROM farm_suppliers`;
+      if (companyId) {
+        params.push(companyId);
+        sql += ` WHERE company_id = $${params.length}::uuid`;
+      }
+      sql += ` ORDER BY name ASC LIMIT 2000`;
+      const q = await dbQuery(sql, params);
       return q.rows.map((r) => ({
         id: String(r.id),
         name: String(r.name),
@@ -2750,6 +2840,28 @@ app.post("/api/auth/login", async (req, res) => {
   const password = payload.password;
   const uid = usersByEmail.get(email);
   let u = uid ? usersById.get(uid) : null;
+
+  if (u?.authSource === "cleva") {
+    res.status(401).json({
+      error: "This account uses Login with Cleva. Sign in with Cleva instead of a Farm password.",
+      code: "cleva_login_required",
+    });
+    return;
+  }
+  if (!u) {
+    try {
+      if (await fetchClevaUserExists(email)) {
+        res.status(401).json({
+          error: "This email is registered in Cleva. Sign in with Login with Cleva.",
+          code: "cleva_login_required",
+        });
+        return;
+      }
+    } catch (e) {
+      console.error("[ERROR]", "[auth] cleva_user_exists:", e instanceof Error ? e.message : e);
+    }
+  }
+
   if (!u || u.passwordHash !== hashPassword(password)) {
     res.status(401).json({ error: "Invalid email or password" });
     return;
@@ -2759,6 +2871,54 @@ app.post("/api/auth/login", async (req, res) => {
   sessions.set(token, { userId: u.id, exp: Date.now() + 1000 * 60 * 60 * 24 * 7 });
   appendAudit(u.id, u.role, "auth.login", "session", null, { email: u.email });
   res.json({ token, user: sanitizeUser(u) });
+});
+
+app.post("/api/auth/forgot-password", async (req, res) => {
+  const email = String(req.body?.email ?? "").trim().toLowerCase();
+  if (!email || !email.includes("@")) {
+    res.status(400).json({ error: "Valid email is required" });
+    return;
+  }
+  try {
+    const result = await passwordReset.requestPasswordReset(email);
+    if (result.hint === "cleva") {
+      res.json({
+        ok: true,
+        message:
+          "This account uses Login with Cleva. Reset your password on ERP, then sign in with Cleva.",
+        erpForgotUrl: result.erpForgotUrl,
+      });
+      return;
+    }
+    res.json({
+      ok: true,
+      message: "We sent password reset instructions to your email.",
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Could not request password reset.";
+    console.error("[ERROR]", "[auth] forgot-password:", message);
+    res.status(400).json({ ok: false, error: message });
+  }
+});
+
+app.post("/api/auth/reset-password", async (req, res) => {
+  const token = String(req.body?.token ?? "");
+  const password = String(req.body?.password ?? "");
+  if (token.length < 20) {
+    res.status(400).json({ error: "Invalid reset token" });
+    return;
+  }
+  try {
+    const result = await passwordReset.resetPasswordWithToken(token, password);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    res.json({ ok: true, message: "Password updated. You can sign in now." });
+  } catch (e) {
+    console.error("[ERROR]", "[auth] reset-password:", e instanceof Error ? e.message : e);
+    res.status(500).json({ error: "Could not reset password" });
+  }
 });
 
 app.post("/api/auth/logout", requireAuth, (req, res) => {
@@ -2772,6 +2932,34 @@ app.post("/api/auth/logout", requireAuth, (req, res) => {
 app.get("/api/auth/me", requireAuth, async (req, res) => {
   const u = await hydrateUserCompanyFromDb(req.authUser);
   res.json({ user: sanitizeUser(u) });
+});
+
+/** One-shot session + optional field hub (hub must never block login). */
+app.get("/api/bootstrap", requireAuth, async (req, res) => {
+  const u = await hydrateUserCompanyFromDb(req.authUser);
+  const user = sanitizeUser(u);
+  let fieldHub = null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2500);
+    const hubRes = await fetch(`http://127.0.0.1:${PORT}/api/me/aggregate-checkin-status`, {
+      headers: {
+        Authorization: req.headers.authorization || "",
+        Cookie: req.headers.cookie || "",
+        Accept: "application/json",
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (hubRes.ok) {
+      fieldHub = await hubRes.json();
+    }
+  } catch (e) {
+    console.warn("[bootstrap] field hub skipped:", e instanceof Error ? e.message : e);
+  }
+  const session = getSessionFromRequest(req);
+  const farmBootstrap = session?.farmBootstrap ?? null;
+  res.json({ user, fieldHub, farmBootstrap });
 });
 
 app.get("/api/users", requireAuth, requireUserManagementAccess, requirePageAccess("admin_users"), async (req, res) => {
@@ -2962,6 +3150,47 @@ app.put("/api/users/:id", requireAuth, requireUserManagementAccess, requirePageA
     passwordReset: Boolean(password.trim()),
   });
   res.json({ user: sanitizeUser(updated) });
+});
+
+app.delete("/api/users/:id", requireAuth, requireUserManagementAccess, requirePageAccess("admin_users"), async (req, res) => {
+  if (!hasDb()) {
+    res.status(503).json({ error: "Database unavailable. Configure DATABASE_URL." });
+    return;
+  }
+  const id = String(req.params.id ?? "");
+  if (id === String(req.authUser.id)) {
+    res.status(400).json({ error: "You cannot remove your own account." });
+    return;
+  }
+  const existing = usersById.get(id);
+  if (!existing) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  const scopedCompanyId = await userCompanyId(req);
+  if (!actorCanManageUser(req.authUser, existing, scopedCompanyId)) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+  try {
+    // Soft delete: user rows are referenced by ON DELETE RESTRICT foreign keys,
+    // so we deactivate to revoke access while preserving historical records.
+    await dbQuery(`UPDATE users SET is_active = false WHERE id = $1::uuid`, [id]);
+  } catch (e) {
+    console.error("[ERROR]", "[db] DELETE /api/users/:id:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Database unavailable. Please retry shortly." });
+    return;
+  }
+  usersById.delete(id);
+  usersByEmail.delete(String(existing.email).toLowerCase());
+  for (const [sid, s] of sessions) {
+    if (String(s.userId) === id) sessions.delete(sid);
+  }
+  appendAudit(req.authUser.id, req.authUser.role, "user.remove", "user", id, {
+    email: existing.email,
+    role: existing.role,
+  });
+  res.json({ ok: true });
 });
 
 app.patch("/api/users/:id/page-access", requireAuth, requireUserManagementAccess, requirePageAccess("admin_users"), async (req, res) => {
@@ -3678,10 +3907,11 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
   const purchaseDate = /^\d{4}-\d{2}-\d{2}$/.test(purchaseDateRaw) ? purchaseDateRaw : null;
   const barnNameIdInput = String(body.barnNameId ?? "").trim() || null;
   const barnNameInput = String(body.barnName ?? "").trim() || null;
+  const scopedCompanyId = await userCompanyId(req);
 
   let supplier = null;
   try {
-    supplier = await resolveSupplierForWrite(supplierId, purchaseSupplierInput);
+    supplier = await resolveSupplierForWrite(supplierId, purchaseSupplierInput, scopedCompanyId);
   } catch (e) {
     console.error("[ERROR]", "[db] resolve supplier for flock create:", e instanceof Error ? e.message : e);
   }
@@ -3915,7 +4145,8 @@ app.post("/api/flocks/:id/retry-create", requireAuth, requireFarmAccess, require
   const purchaseSupplierInput = String(draft.purchaseSupplier ?? "").trim() || null;
   let purchaseSupplier = purchaseSupplierInput;
   try {
-    const s = await resolveSupplierForWrite(null, purchaseSupplierInput);
+    const scopedCompanyId = f.companyId ?? (await userCompanyId(req));
+    const s = await resolveSupplierForWrite(null, purchaseSupplierInput, scopedCompanyId);
     purchaseSupplier = s?.name ?? purchaseSupplierInput;
   } catch {
     purchaseSupplier = purchaseSupplierInput;
@@ -4030,10 +4261,11 @@ app.patch("/api/flocks/:id", requireAuth, requireFarmAccess, requireCompanyAdmin
   const purchaseDate = /^\d{4}-\d{2}-\d{2}$/.test(purchaseDateRaw) ? purchaseDateRaw : null;
   const barnNameIdInput = String(body.barnNameId ?? "").trim() || null;
   const barnNameInput = String(body.barnName ?? "").trim() || null;
+  const scopedCompanyId = await userCompanyId(req);
 
   let supplier = null;
   try {
-    supplier = await resolveSupplierForWrite(supplierId, purchaseSupplierInput);
+    supplier = await resolveSupplierForWrite(supplierId, purchaseSupplierInput, scopedCompanyId);
   } catch (e) {
     console.error("[ERROR]", "[db] resolve supplier for flock patch:", e instanceof Error ? e.message : e);
   }
@@ -4778,7 +5010,7 @@ app.post("/api/flocks/:id/feed-entries", requireAuth, requireFarmAccess, require
       return;
     }
     if (hasDb()) {
-      const stockCheck = assertFeedStockAvailable(feedType, feedKg, await getAvailableFeedStockRows());
+      const stockCheck = assertFeedStockAvailable(feedType, feedKg, await getAvailableFeedStockRows(f.companyId ?? await userCompanyId(req)));
       if (!stockCheck.ok) {
         res.status(400).json({ error: stockCheck.error });
         return;
@@ -5577,7 +5809,9 @@ app.patch("/api/feed-entries/:id/review", requireAuth, requireFarmAccess, requir
       return;
     }
     if (feedKg > 0) {
-      const stockCheck = assertFeedStockAvailable(feedType, feedKg, await getAvailableFeedStockRows());
+      const entryFlock = flocksById.get(String(entryBefore.flockId ?? ""));
+      const stockCompanyId = entryFlock?.companyId ?? (await userCompanyId(req));
+      const stockCheck = assertFeedStockAvailable(feedType, feedKg, await getAvailableFeedStockRows(stockCompanyId));
       if (!stockCheck.ok) {
         res.status(400).json({ error: stockCheck.error });
         return;
@@ -6282,9 +6516,7 @@ app.post("/api/reports/farm/operations/preview", requireAuth, requireFarmAccess,
     feedEntries: flockFeedEntries.filter((e) => companyFlockIds.has(String(e.flockId))),
     mortalityEvents: mortalityEvents.filter((e) => companyFlockIds.has(String(e.flockId))),
     vetLogs: vetLogs.filter((l) => companyFlockIds.has(String(l.flockId))),
-    inventoryTransactions: inventoryTransactions.filter(
-      (t) => !t.flockId || companyFlockIds.has(String(t.flockId))
-    ),
+    inventoryTransactions: filterInventoryForUser(inventoryTransactions, req.authUser, scopedCompanyId, usersById),
     from: fromIso,
     to: toIso,
   });
@@ -6304,9 +6536,7 @@ app.post("/api/reports/farm/operations/pdf", requireAuth, requireFarmAccess, req
     feedEntries: flockFeedEntries.filter((e) => companyFlockIds.has(String(e.flockId))),
     mortalityEvents: mortalityEvents.filter((e) => companyFlockIds.has(String(e.flockId))),
     vetLogs: vetLogs.filter((l) => companyFlockIds.has(String(l.flockId))),
-    inventoryTransactions: inventoryTransactions.filter(
-      (t) => !t.flockId || companyFlockIds.has(String(t.flockId))
-    ),
+    inventoryTransactions: filterInventoryForUser(inventoryTransactions, req.authUser, scopedCompanyId, usersById),
     from: fromIso,
     to: toIso,
   });
@@ -7425,8 +7655,22 @@ function inventoryRowPayload(row) {
   };
 }
 
-function computeInventoryBalances(flockId = null) {
-  const scoped = inventoryTransactions.filter((r) => (flockId ? sameFlockId(r.flockId, flockId) : true));
+async function scopedInventoryRowsForRequest(req) {
+  const scopedCompanyId = await userCompanyId(req);
+  return filterInventoryForUser(inventoryTransactions, req.authUser, scopedCompanyId, usersById);
+}
+
+function resolveInventoryCompanyIdForWrite(flockId, actorUserId) {
+  if (flockId) {
+    const flock = flocksById.get(String(flockId));
+    if (flock?.companyId) return String(flock.companyId);
+  }
+  const actor = usersById.get(String(actorUserId ?? ""));
+  return String(actor?.companyId ?? DEFAULT_COMPANY_ID);
+}
+
+function computeInventoryBalances(flockId = null, sourceRows = inventoryTransactions) {
+  const scoped = sourceRows.filter((r) => (flockId ? sameFlockId(r.flockId, flockId) : true));
   const byFlock = new Map();
   for (const row of scoped) {
     const fk = String(row.flockId ?? "");
@@ -7440,8 +7684,8 @@ function computeInventoryBalances(flockId = null) {
   }));
 }
 
-function computeInventoryStockSummary(feedTypeFilter = null) {
-  let rows = inventoryTransactions;
+function computeInventoryStockSummary(feedTypeFilter = null, sourceRows = inventoryTransactions) {
+  let rows = sourceRows;
   if (feedTypeFilter) rows = rows.filter((r) => r.feedType === feedTypeFilter);
   const byFeedType = new Map();
   for (const row of rows) {
@@ -7466,23 +7710,24 @@ function computeInventoryStockSummary(feedTypeFilter = null) {
   return summary;
 }
 
-async function queryFeedStockSummaryFromDb(feedTypeFilter = null) {
+async function queryFeedStockSummaryFromDb(companyId, feedTypeFilter = null) {
   const params = [];
-  let typeFilter = "";
-  if (feedTypeFilter) {
-    params.push(String(feedTypeFilter).trim());
-    typeFilter = ` AND feed_type = $${params.length}`;
-  }
-  const r = await dbQuery(
-    `SELECT COALESCE(feed_type, 'unspecified') AS ft,
+  let sql = `SELECT COALESCE(feed_type, 'unspecified') AS ft,
             SUM(CASE WHEN transaction_type = 'procurement_receipt' THEN COALESCE(delta_kg, 0) ELSE 0 END) AS purchased,
             SUM(CASE WHEN transaction_type = 'feed_consumption' THEN ABS(COALESCE(delta_kg, 0)) ELSE 0 END) AS used,
             SUM(CASE WHEN transaction_type = 'adjustment' THEN COALESCE(delta_kg, 0) ELSE 0 END) AS adjustments
        FROM farm_inventory_transactions
-      WHERE 1=1${typeFilter}
-      GROUP BY COALESCE(feed_type, 'unspecified')`,
-    params
-  );
+      WHERE 1=1`;
+  if (companyId) {
+    params.push(companyId);
+    sql += ` AND company_id = $${params.length}::uuid`;
+  }
+  if (feedTypeFilter) {
+    params.push(String(feedTypeFilter).trim());
+    sql += ` AND feed_type = $${params.length}`;
+  }
+  sql += ` GROUP BY COALESCE(feed_type, 'unspecified')`;
+  const r = await dbQuery(sql, params);
   return stockSummaryFromSqlAggregates(r.rows);
 }
 
@@ -7505,7 +7750,8 @@ async function loadInventoryTransactionIntoMemory(txnId) {
               approved_at AS "approvedAt",
               feed_type AS "feedType",
               feed_entry_id::text AS "feedEntryId",
-              COALESCE(accounting_status, 'not_applicable') AS "accountingStatus"
+              COALESCE(accounting_status, 'not_applicable') AS "accountingStatus",
+              company_id::text AS "companyId"
          FROM farm_inventory_transactions
         WHERE id = $1::uuid`,
       [txnId]
@@ -7521,15 +7767,18 @@ async function loadInventoryTransactionIntoMemory(txnId) {
   }
 }
 
-async function getAvailableFeedStockRows() {
+async function getAvailableFeedStockRows(companyId) {
   if (hasDb()) {
     try {
-      return filterAvailableFeedStock(await queryFeedStockSummaryFromDb());
+      return filterAvailableFeedStock(await queryFeedStockSummaryFromDb(companyId));
     } catch (e) {
       console.error("[ERROR]", "[feed] query stock summary:", e instanceof Error ? e.message : e);
     }
   }
-  return filterAvailableFeedStock(computeInventoryStockSummary());
+  const scopedRows = companyId
+    ? filterInventoryForUser(inventoryTransactions, { role: "manager", companyId }, companyId, usersById)
+    : inventoryTransactions;
+  return filterAvailableFeedStock(computeInventoryStockSummary(null, scopedRows));
 }
 
 /**
@@ -7548,6 +7797,7 @@ async function deductFeedStockForEntry(entry, actorUserId) {
   const feedType = entry.feedType != null ? String(entry.feedType).trim() || null : null;
   const flockId =
     entry.flockId && isPersistableUuid(String(entry.flockId)) ? String(entry.flockId) : null;
+  const companyId = resolveInventoryCompanyIdForWrite(flockId, actorUserId);
 
   try {
     const existing = await dbQuery(
@@ -7563,14 +7813,14 @@ async function deductFeedStockForEntry(entry, actorUserId) {
       `INSERT INTO farm_inventory_transactions (
          flock_id, transaction_type, recorded_at, quantity_kg, delta_kg,
          reason, reference, actor_user_id, approved_by_user_id, approved_at,
-         feed_type, feed_entry_id
+         feed_type, feed_entry_id, company_id
        )
        VALUES ($1::uuid, 'feed_consumption', now(), $2::numeric, $3::numeric,
                'approved_feed_log', $4, $5::uuid, $5::uuid, now(),
-               $6, $7::uuid)
+               $6, $7::uuid, $8::uuid)
        ON CONFLICT (feed_entry_id) WHERE feed_entry_id IS NOT NULL DO NOTHING
        RETURNING id::text AS id`,
-      [flockId, feedKg, -feedKg, `feed_log:${entryId}`, actorUserId, feedType, entryId]
+      [flockId, feedKg, -feedKg, `feed_log:${entryId}`, actorUserId, feedType, entryId, companyId]
     );
     let txnId = ins.rows[0]?.id ? String(ins.rows[0].id) : null;
     if (!txnId) {
@@ -7603,7 +7853,8 @@ app.get("/api/inventory/stock-summary", requireAuth, requireFarmAccess, requireA
     }
   }
   const feedTypeFilter = String(req.query.feed_type ?? "").trim() || null;
-  res.json({ summary: computeInventoryStockSummary(feedTypeFilter) });
+  const scopedRows = await scopedInventoryRowsForRequest(req);
+  res.json({ summary: computeInventoryStockSummary(feedTypeFilter, scopedRows) });
 });
 
 app.get("/api/inventory/ledger", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
@@ -7621,9 +7872,16 @@ app.get("/api/inventory/ledger", requireAuth, requireFarmAccess, requirePageAcce
   const type = String(req.query.type ?? "").trim();
   const page = Math.max(1, Number(req.query.page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 50));
+  const scopedCompanyId = await userCompanyId(req);
 
-  let list = inventoryTransactions;
-  if (flockId) list = list.filter((r) => sameFlockId(r.flockId, flockId));
+  let list = await scopedInventoryRowsForRequest(req);
+  if (flockId) {
+    if (!authIsSuperuser(req) && !memoryFlockIdVisible(flockId, flocksById, req.authUser, scopedCompanyId)) {
+      res.status(404).json({ error: "Flock not found" });
+      return;
+    }
+    list = list.filter((r) => sameFlockId(r.flockId, flockId));
+  }
   if (feedType) list = list.filter((r) => r.feedType === feedType);
   if (type) list = list.filter((r) => r.type === type);
 
@@ -7645,12 +7903,14 @@ app.get("/api/inventory/balance", requireAuth, requireFarmAccess, async (req, re
     }
   }
   const flockId = String(req.query.flock_id ?? "").trim() || null;
-  res.json({ balances: computeInventoryBalances(flockId) });
+  const scopedRows = await scopedInventoryRowsForRequest(req);
+  res.json({ balances: computeInventoryBalances(flockId, scopedRows) });
 });
 
-app.get("/api/suppliers", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_flocks", "farm_inventory"]), async (_req, res) => {
+app.get("/api/suppliers", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_flocks", "farm_inventory"]), async (req, res) => {
   try {
-    const suppliers = await listSuppliers();
+    const scopedCompanyId = await userCompanyId(req);
+    const suppliers = await listSuppliers(scopedCompanyId);
     res.json({ suppliers: suppliers.map((s) => ({ id: s.id, name: s.name })) });
   } catch (e) {
     console.error("[ERROR]", "[db] GET /api/suppliers:", e instanceof Error ? e.message : e);
@@ -7669,7 +7929,8 @@ app.post("/api/suppliers", requireAuth, requireFarmAccess, requireAnyPageAccess(
     return;
   }
   try {
-    const supplier = await upsertSupplierByName(name);
+    const scopedCompanyId = await userCompanyId(req);
+    const supplier = await upsertSupplierByName(name, scopedCompanyId);
     if (!supplier) {
       res.status(400).json({ error: "Invalid supplier name." });
       return;
@@ -7714,9 +7975,10 @@ app.post("/api/barn-names", requireAuth, requireFarmAccess, requirePageAccess("f
   }
 });
 
-app.get("/api/inventory/suppliers", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (_req, res) => {
+app.get("/api/inventory/suppliers", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
   try {
-    const suppliers = await listSuppliers();
+    const scopedCompanyId = await userCompanyId(req);
+    const suppliers = await listSuppliers(scopedCompanyId);
     res.json({ suppliers: suppliers.map((s) => s.name) });
   } catch (e) {
     console.error("[ERROR]", "[db] GET /api/inventory/suppliers:", e instanceof Error ? e.message : e);
@@ -7762,9 +8024,9 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
       return;
     }
   }
-  if (flockId && !flocksById.has(flockId)) {
-    res.status(400).json({ error: "Invalid flockId" });
-    return;
+  const scopedCompanyId = await userCompanyId(req);
+  if (flockId) {
+    if (!(await getFlockByIdForUser(flockId, req.authUser, res))) return;
   }
   if (!Number.isFinite(quantityKg) || quantityKg <= 0) {
     res.status(400).json({ error: "quantityKg must be > 0" });
@@ -7774,9 +8036,10 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     res.status(400).json({ error: "unitCostRwfPerKg must be >= 0" });
     return;
   }
+  const inventoryCompanyId = resolveInventoryCompanyIdForWrite(flockId, req.authUser.id);
   let supplier = null;
   try {
-    supplier = await resolveSupplierForWrite(supplierId, supplierNameInput);
+    supplier = await resolveSupplierForWrite(supplierId, supplierNameInput, scopedCompanyId);
   } catch (e) {
     console.error("[ERROR]", "[db] resolve supplier for procurement:", e instanceof Error ? e.message : e);
   }
@@ -7798,6 +8061,7 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     actorUserId: req.authUser.id,
     approvedByUserId: null,
     approvedAt: null,
+    companyId: inventoryCompanyId,
   };
   let procurementSavedToDb = false;
   const canPersistActor = isPersistableUuid(req.authUser.id);
@@ -7807,9 +8071,9 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
         `INSERT INTO farm_inventory_transactions (
            flock_id, transaction_type, recorded_at, quantity_kg, delta_kg,
            unit_cost_rwf_per_kg, reason, reference, supplier_name, actor_user_id, approved_by_user_id, approved_at,
-           feed_type, feed_entry_id
+           feed_type, feed_entry_id, company_id
          )
-         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9, $10::uuid, NULL, NULL, $11, NULL)
+         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, $6::numeric, $7, $8, $9, $10::uuid, NULL, NULL, $11, NULL, $12::uuid)
          RETURNING id::text AS id,
                    transaction_type AS type,
                    flock_id::text AS "flockId",
@@ -7824,7 +8088,8 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
                    approved_by_user_id::text AS "approvedByUserId",
                    approved_at AS "approvedAt",
                    feed_type AS "feedType",
-                   feed_entry_id::text AS "feedEntryId"`,
+                   feed_entry_id::text AS "feedEntryId",
+                   company_id::text AS "companyId"`,
         [
           flockId,
           "procurement_receipt",
@@ -7837,6 +8102,7 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
           supplierName,
           req.authUser.id,
           feedType,
+          inventoryCompanyId,
         ]
       );
       row = mapInventoryRowFromDb(ins.rows[0]);
@@ -7896,7 +8162,10 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
 
   if (procurementSavedToDb && row?.id) clevaSync("feed_inventory_transaction", row.id);
 
-  res.status(201).json({ row: inventoryRowPayload(row), summary: computeInventoryStockSummary() });
+  res.status(201).json({
+    row: inventoryRowPayload(row),
+    summary: computeInventoryStockSummary(null, await scopedInventoryRowsForRequest(req)),
+  });
 });
 
 app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
@@ -7918,14 +8187,17 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
     return;
   }
   const reason = String(body.reason ?? reasonCode).slice(0, 400);
-  if (!flockId || !flocksById.has(flockId)) {
+  if (!flockId) {
     res.status(400).json({ error: "Valid flockId is required" });
     return;
   }
+  if (!(await getFlockByIdForUser(flockId, req.authUser, res))) return;
   if (!Number.isFinite(quantityKg) || quantityKg <= 0) {
     res.status(400).json({ error: "quantityKg must be > 0" });
     return;
   }
+  const scopedCompanyId = await userCompanyId(req);
+  const inventoryCompanyId = resolveInventoryCompanyIdForWrite(flockId, req.authUser.id);
   if (hasDb()) {
     try {
       await syncInventoryTransactionsFromDb();
@@ -7934,13 +8206,14 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
       res.status(503).json({ error: "Inventory balances unavailable. Please retry shortly." });
       return;
     }
-    const stockCheck = assertFeedStockAvailable(feedType, quantityKg, await getAvailableFeedStockRows());
+    const stockCheck = assertFeedStockAvailable(feedType, quantityKg, await getAvailableFeedStockRows(scopedCompanyId));
     if (!stockCheck.ok) {
       res.status(400).json({ error: stockCheck.error });
       return;
     }
   } else {
-    const currentBalance = computeInventoryBalances(flockId)[0]?.balanceKg ?? 0;
+    const scopedRows = filterInventoryForUser(inventoryTransactions, req.authUser, scopedCompanyId, usersById);
+    const currentBalance = computeInventoryBalances(flockId, scopedRows)[0]?.balanceKg ?? 0;
     if (currentBalance - quantityKg < 0 && !canCreateInventoryAdjustment(req.authUser)) {
       res.status(400).json({ error: "Insufficient stock for this flock" });
       return;
@@ -7960,6 +8233,7 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
     actorUserId: req.authUser.id,
     approvedByUserId: null,
     approvedAt: null,
+    companyId: inventoryCompanyId,
   };
   let feedConsumptionSavedToDb = false;
   if (hasDb() && isPersistableUuid(flockId) && isPersistableUuid(req.authUser.id)) {
@@ -7968,9 +8242,9 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
         `INSERT INTO farm_inventory_transactions (
            flock_id, transaction_type, recorded_at, quantity_kg, delta_kg,
            unit_cost_rwf_per_kg, reason, reference, actor_user_id, approved_by_user_id, approved_at,
-           feed_type
+           feed_type, company_id
          )
-         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, NULL, $6, '', $7::uuid, NULL, NULL, $8)
+         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, NULL, $6, '', $7::uuid, NULL, NULL, $8, $9::uuid)
          RETURNING id::text AS id,
                    transaction_type AS type,
                    flock_id::text AS "flockId",
@@ -7983,7 +8257,8 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
                    actor_user_id::text AS "actorUserId",
                    approved_by_user_id::text AS "approvedByUserId",
                    approved_at AS "approvedAt",
-                   feed_type AS "feedType"`,
+                   feed_type AS "feedType",
+                   company_id::text AS "companyId"`,
         [
           flockId,
           "feed_consumption",
@@ -7993,6 +8268,7 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
           reason,
           req.authUser.id,
           feedType,
+          inventoryCompanyId,
         ]
       );
       row = mapInventoryRowFromDb(ins.rows[0]);
@@ -8018,7 +8294,10 @@ app.post("/api/inventory/feed-consumption", requireAuth, requireFarmAccess, requ
     quantityKg,
   });
   if (feedConsumptionSavedToDb && row?.id) clevaSync("feed_inventory_transaction", row.id);
-  res.status(201).json({ row: inventoryRowPayload(row), balances: computeInventoryBalances(flockId) });
+  res.status(201).json({
+    row: inventoryRowPayload(row),
+    balances: computeInventoryBalances(flockId, await scopedInventoryRowsForRequest(req)),
+  });
 });
 
 app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
@@ -8037,14 +8316,14 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
     return;
   }
   const reason = String(body.reason ?? reasonCode).slice(0, 400);
-  if (flockId && !flocksById.has(flockId)) {
-    res.status(400).json({ error: "Invalid flockId" });
-    return;
+  if (flockId) {
+    if (!(await getFlockByIdForUser(flockId, req.authUser, res))) return;
   }
   if (!Number.isFinite(deltaKg) || deltaKg === 0) {
     res.status(400).json({ error: "deltaKg must be a non-zero number" });
     return;
   }
+  const inventoryCompanyId = resolveInventoryCompanyIdForWrite(flockId, req.authUser.id);
   let row = {
     id: `inv_${crypto.randomBytes(6).toString("hex")}`,
     type: "adjustment",
@@ -8060,6 +8339,7 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
     actorUserId: req.authUser.id,
     approvedByUserId: req.authUser.id,
     approvedAt: new Date().toISOString(),
+    companyId: inventoryCompanyId,
   };
   let adjustmentSavedToDb = false;
   if (hasDb() && isPersistableUuid(req.authUser.id)) {
@@ -8068,9 +8348,9 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
         `INSERT INTO farm_inventory_transactions (
            flock_id, transaction_type, recorded_at, quantity_kg, delta_kg,
            unit_cost_rwf_per_kg, reason, reference, actor_user_id, approved_by_user_id, approved_at,
-           feed_type, feed_entry_id
+           feed_type, feed_entry_id, company_id
          )
-         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, NULL, $6, '', $7::uuid, $8::uuid, $9::timestamptz, $10, NULL)
+         VALUES ($1::uuid, $2, $3::timestamptz, $4::numeric, $5::numeric, NULL, $6, '', $7::uuid, $8::uuid, $9::timestamptz, $10, NULL, $11::uuid)
          RETURNING id::text AS id,
                    transaction_type AS type,
                    flock_id::text AS "flockId",
@@ -8084,7 +8364,8 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
                    approved_by_user_id::text AS "approvedByUserId",
                    approved_at AS "approvedAt",
                    feed_type AS "feedType",
-                   feed_entry_id::text AS "feedEntryId"`,
+                   feed_entry_id::text AS "feedEntryId",
+                   company_id::text AS "companyId"`,
         [
           flockId,
           "adjustment",
@@ -8096,6 +8377,7 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
           req.authUser.id,
           row.approvedAt,
           feedType,
+          inventoryCompanyId,
         ]
       );
       row = mapInventoryRowFromDb(ins.rows[0]);
@@ -8121,7 +8403,10 @@ app.post("/api/inventory/adjustments", requireAuth, requireFarmAccess, requirePa
     deltaKg,
   });
   if (adjustmentSavedToDb && row?.id) clevaSync("feed_inventory_transaction", row.id);
-  res.status(201).json({ row: inventoryRowPayload(row), summary: computeInventoryStockSummary() });
+  res.status(201).json({
+    row: inventoryRowPayload(row),
+    summary: computeInventoryStockSummary(null, await scopedInventoryRowsForRequest(req)),
+  });
 });
 
 app.patch("/api/inventory/:id", requireAuth, requireFarmAccess, requirePageAccess("farm_inventory"), async (req, res) => {
@@ -8134,20 +8419,11 @@ app.patch("/api/inventory/:id", requireAuth, requireFarmAccess, requirePageAcces
       return;
     }
   }
-  const row = inventoryTransactions.find((r) => r.id === req.params.id);
+  const scopedRows = await scopedInventoryRowsForRequest(req);
+  const row = scopedRows.find((r) => r.id === req.params.id);
   if (!row) {
     res.status(404).json({ error: "Inventory row not found" });
     return;
-  }
-  if (row.flockId) {
-    if (!(await getFlockByIdForUser(String(row.flockId), req.authUser, res))) return;
-  } else if (!authIsSuperuser(req)) {
-    const companyId = await userCompanyId(req);
-    const actor = usersById.get(row.actorUserId);
-    if (!actor || String(actor.companyId) !== String(companyId)) {
-      res.status(404).json({ error: "Inventory row not found" });
-      return;
-    }
   }
   if (!canEditInventoryRow(req.authUser, row)) {
     res.status(403).json({ error: "You do not have permission to edit this record" });
@@ -10432,6 +10708,25 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
       const lastValuationSnapshotRwf = valSnap?.totalFairValueRwf != null ? Number(valSnap.totalFairValueRwf) : null;
       const lastValuationDate = valSnap?.snapshotDate ?? null;
 
+      const daysSinceWeighIn =
+        weigh.latestWeighDate != null
+          ? Math.max(
+              0,
+              Math.floor(
+                (Date.now() - new Date(`${String(weigh.latestWeighDate).slice(0, 10)}T12:00:00Z`).getTime()) /
+                  86400000
+              )
+            )
+          : null;
+      const adgGramsPerDay =
+        gainPerDay != null && Number.isFinite(gainPerDay) && gainPerDay > 0
+          ? Number((gainPerDay * 1000).toFixed(1))
+          : null;
+      const feedPerBirdKg =
+        birdsLiveEstimate > 0 && broiler.feedToDateKg != null
+          ? Number((broiler.feedToDateKg / birdsLiveEstimate).toFixed(3))
+          : null;
+
       rows.push({
         flockId: f.id,
         label,
@@ -10445,6 +10740,12 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
         estimatedFairValueRwf,
         lastValuationSnapshotRwf,
         lastValuationDate,
+        feedToDateKg: broiler.feedToDateKg,
+        weightGainedKg: broiler.weightGainedKg,
+        feedPerBirdKg,
+        fcrStatus: broiler.status,
+        daysSinceWeighIn,
+        adgGramsPerDay,
         overdueRounds: overdueCount,
         withdrawalBlockers: withdrawalCount,
         mortality7d: mortality7dCount,
@@ -10506,6 +10807,24 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
     const farmHealthScore = rows.length
       ? Math.round(100 - (rows.reduce((sum, r) => sum + Number(r.riskScore || 0), 0) / rows.length))
       : 100;
+    const overdueCheckins = rows.filter((r) => Number(r.overdueRounds || 0) > 0).length;
+    const highWeightVar = rows.filter((r) => Math.abs(Number(r.weightDeviationPct || 0)) >= 8).length;
+    const noRecentVet = rows.filter((r) => {
+      if (!r.latestWeighDate) return true;
+      const ms = new Date(r.latestWeighDate).getTime();
+      return !Number.isFinite(ms) || Date.now() - ms > 14 * 86400000;
+    }).length;
+    const elevatedMortalityPreview = rows.filter((r) => (r.mortality24hDeltaPct || 0) > 0.5).length;
+    const healthScoreContributors = [
+      overdueCheckins > 0 ? `Late check-ins (${overdueCheckins} flock${overdueCheckins === 1 ? "" : "s"})` : null,
+      highWeightVar > 0 ? `Weight variance (${highWeightVar} flock${highWeightVar === 1 ? "" : "s"})` : null,
+      noRecentVet > 0 ? `No recent weigh-in / vet visit (${noRecentVet})` : null,
+      elevatedMortalityPreview > 0
+        ? `Elevated mortality trend (${elevatedMortalityPreview})`
+        : null,
+    ]
+      .filter(Boolean)
+      .slice(0, 3);
     const worstDeclining = [...rows]
       .sort((a, b) => (b.mortality24hDeltaPct || 0) - (a.mortality24hDeltaPct || 0))[0] ?? null;
     const mostImproved = [...rows]
@@ -10549,21 +10868,109 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
     if (belowTarget >= 2) {
       insights.push(`${belowTarget} flocks are more than 5% below target weight for age`);
     }
+    const fcrAboveTarget = rows.filter(
+      (r) => r.latestFcr != null && r.latestFcr > (r.expectedFcrRange?.max ?? 999)
+    ).length;
+    if (fcrAboveTarget >= 2) {
+      insights.push(`${fcrAboveTarget} flocks have FCR above the breed target band for age`);
+    }
+
+    const growthInsights = [];
+    const insightSeverityRank = { critical: 3, warn: 2, info: 1 };
+    for (const r of rows) {
+      if (r.daysSinceWeighIn == null) {
+        growthInsights.push({
+          id: `stale-none-${r.flockId}`,
+          severity: "critical",
+          flockId: String(r.flockId),
+          flockLabel: r.label,
+          category: "weigh_in",
+          message: `${r.label} has no weigh-in on record — schedule a weight sample`,
+        });
+      } else if (r.daysSinceWeighIn > 14) {
+        growthInsights.push({
+          id: `stale-${r.flockId}`,
+          severity: "warn",
+          flockId: String(r.flockId),
+          flockLabel: r.label,
+          category: "weigh_in",
+          message: `${r.label} — last weigh-in ${r.daysSinceWeighIn} days ago`,
+        });
+      }
+      if ((r.weightDeviationPct ?? 0) < -5) {
+        growthInsights.push({
+          id: `wt-${r.flockId}`,
+          severity: (r.weightDeviationPct ?? 0) < -10 ? "critical" : "warn",
+          flockId: String(r.flockId),
+          flockLabel: r.label,
+          category: "weigh_in",
+          message: `${r.label} is ${Math.abs(Number(r.weightDeviationPct)).toFixed(1)}% below target weight (day ${r.ageDays})`,
+        });
+      }
+      if (r.latestFcr != null && r.latestFcr > (r.expectedFcrRange?.max ?? 999)) {
+        growthInsights.push({
+          id: `fcr-${r.flockId}`,
+          severity: r.fcrStatus === "warning" ? "critical" : "warn",
+          flockId: String(r.flockId),
+          flockLabel: r.label,
+          category: "fcr",
+          message: `${r.label} FCR ${Number(r.latestFcr).toFixed(2)} above target max ${Number(r.expectedFcrRange.max).toFixed(2)}`,
+        });
+      }
+      if (r.fcrStatus === "warning" && (r.feedToDateKg ?? 0) > 0) {
+        growthInsights.push({
+          id: `feed-${r.flockId}`,
+          severity: "warn",
+          flockId: String(r.flockId),
+          flockLabel: r.label,
+          category: "feed",
+          message: `${r.label} — ${Number(r.feedToDateKg).toLocaleString()} kg feed to date; review wastage and drinkers`,
+        });
+      }
+      const projDelta = r.projections?.projectedHarvestDeltaPct;
+      if (projDelta != null && projDelta < -5) {
+        growthInsights.push({
+          id: `proj-${r.flockId}`,
+          severity: "warn",
+          flockId: String(r.flockId),
+          flockLabel: r.label,
+          category: "projection",
+          message: `${r.label} projected harvest weight ${projDelta}% below breed target at day 42`,
+        });
+      }
+    }
+    growthInsights.sort(
+      (a, b) => (insightSeverityRank[b.severity] ?? 0) - (insightSeverityRank[a.severity] ?? 0)
+    );
 
     let totalBiomassKg = 0;
     let estimatedFairValueSum = 0;
     let approvedValuationTotalRwf = 0;
+    let totalFeedToDateKg = 0;
+    let feedPerBirdSum = 0;
+    let feedPerBirdCount = 0;
+    let flocksAboveTargetFcr = 0;
     for (const r of rows) {
       if (r.biomassKg != null) totalBiomassKg += Number(r.biomassKg);
       if (r.estimatedFairValueRwf != null) estimatedFairValueSum += Number(r.estimatedFairValueRwf);
       if (r.lastValuationSnapshotRwf != null) approvedValuationTotalRwf += Number(r.lastValuationSnapshotRwf);
+      if (r.feedToDateKg != null) totalFeedToDateKg += Number(r.feedToDateKg);
+      if (r.feedPerBirdKg != null) {
+        feedPerBirdSum += Number(r.feedPerBirdKg);
+        feedPerBirdCount += 1;
+      }
+      if (r.latestFcr != null && r.latestFcr > (r.expectedFcrRange?.max ?? 999)) {
+        flocksAboveTargetFcr += 1;
+      }
     }
 
     res.json({
       flocks: rows.sort((a, b) => Number(b.riskScore || 0) - Number(a.riskScore || 0)),
       barns: barnSummary,
       insights,
+      growthInsights: growthInsights.slice(0, 12),
       farmHealthScore,
+      healthScoreContributors,
       mostImprovedFlockId: mostImproved?.flockId ?? null,
       worstDecliningFlockId: worstDeclining?.flockId ?? null,
       farmTotals: {
@@ -10574,6 +10981,10 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
             : null,
         referenceMarketPriceRwfPerKg: referencePricing.marketPricePerKg,
         approvedValuationTotalRwf: approvedValuationTotalRwf > 0 ? Math.round(approvedValuationTotalRwf) : null,
+        totalFeedToDateKg: Number(totalFeedToDateKg.toFixed(1)),
+        avgFeedPerBirdKg:
+          feedPerBirdCount > 0 ? Number((feedPerBirdSum / feedPerBirdCount).toFixed(3)) : null,
+        flocksAboveTargetFcr,
       },
     });
   } catch (e) {
@@ -10581,6 +10992,71 @@ app.get("/api/farm/ops-board", requireAuth, requireFarmAccess, requireAnyPageAcc
     res.status(503).json({ error: "Unable to build operations board." });
   }
 });
+
+app.get(
+  "/api/farm/insights",
+  requireAuth,
+  requireFarmAccess,
+  requireAnyPageAccess(["dashboard_laborer", "dashboard_vet", "dashboard_management", "farm_inventory", "farm_feed"]),
+  requireAction("flock.view"),
+  async (req, res) => {
+    try {
+      // Prefer lightweight reuse: callers often already have ops-board; accept optional body? No — GET.
+      // Build from DB the same way ops-board does is heavy; instead return rule insights from
+      // a compact flock risk query when available, else empty.
+      if (!hasDb()) {
+        res.json({ insights: [] });
+        return;
+      }
+      const companyId = req.authUser?.companyId;
+      // Use recent ops-board computation via internal fetch pattern: query flock status cache if present.
+      // Fallback: pull active flocks from memory/DB similarly to recovery overview.
+      let flocks = [];
+      try {
+        const scopeSql = companyId
+          ? `SELECT id::text, label, placement_date, status FROM poultry_flocks WHERE status <> 'archived' AND company_id = $1::uuid LIMIT 200`
+          : `SELECT id::text, label, placement_date, status FROM poultry_flocks WHERE status <> 'archived' LIMIT 200`;
+        const params = companyId ? [companyId] : [];
+        const fr = await dbQuery(scopeSql, params);
+        flocks = (fr.rows || []).map((r) => ({
+          id: r.id,
+          flockId: r.id,
+          label: r.label,
+          overdueRounds: 0,
+        }));
+      } catch {
+        flocks = [];
+      }
+
+      let stock = [];
+      try {
+        const sr = await dbQuery(
+          `SELECT feed_type AS "feedType",
+                  COALESCE(SUM(CASE WHEN direction = 'in' THEN quantity_kg ELSE -quantity_kg END), 0)::float AS "balanceKg"
+           FROM farm_inventory_transactions
+           WHERE ($1::uuid IS NULL OR company_id = $1::uuid)
+           GROUP BY feed_type
+           HAVING COALESCE(SUM(CASE WHEN direction = 'in' THEN quantity_kg ELSE -quantity_kg END), 0) > 0`,
+          [companyId || null]
+        );
+        stock = (sr.rows || []).map((r) => ({
+          feedType: r.feedType,
+          balanceKg: Number(r.balanceKg || 0),
+          // Proxy daily use: 5% of balance / day floors poorly; use 14kg/day default when unknown
+          avgDailyUseKg: Math.max(10, Number(r.balanceKg || 0) * 0.08),
+        }));
+      } catch {
+        stock = [];
+      }
+
+      const insights = buildFarmInsights({ flocks, stock });
+      res.json({ insights, generatedAt: new Date().toISOString() });
+    } catch (e) {
+      console.error("[ERROR]", "[db] GET /api/farm/insights:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Unable to build insights." });
+    }
+  }
+);
 
 app.get("/api/farm/weigh-in-trends", requireAuth, requireFarmAccess, requireAnyPageAccess(["dashboard_laborer", "dashboard_vet", "dashboard_management"]), requireAction("flock.view"), async (req, res) => {
   if (!hasDb()) {
@@ -10673,6 +11149,64 @@ app.use("/api/entities", clevafarmEntitiesRouter);
 app.use("/api/webhooks/erpnext", erpnextWebhookRouter);
 app.use("/api/erpnext", requireAuth, erpnextRouter);
 
+function scrubCompanyFromMemory(companyId) {
+  const cid = String(companyId);
+  const companyFlockIds = new Set(
+    [...flocksById.values()]
+      .filter((f) => String(f.companyId) === cid)
+      .map((f) => String(f.id))
+  );
+
+  for (const [email, u] of usersByEmail.entries()) {
+    if (String(u.companyId) === cid) usersByEmail.delete(email);
+  }
+  for (const [id, u] of usersById.entries()) {
+    if (String(u.companyId) === cid) usersById.delete(id);
+  }
+  for (const flockId of companyFlockIds) {
+    flocksById.delete(flockId);
+  }
+
+  const filterOutFlock = (row) => !companyFlockIds.has(String(row?.flockId ?? ""));
+  for (const bucket of [
+    roundCheckins,
+    flockFeedEntries,
+    mortalityEvents,
+    logSchedules,
+    payrollImpacts,
+    flockTreatments,
+    slaughterEvents,
+    inventoryTransactions,
+    dailyLogs,
+    vetLogs,
+  ]) {
+    const keep = bucket.filter((row) => {
+      if (row?.companyId != null) return String(row.companyId) !== cid;
+      return filterOutFlock(row);
+    });
+    bucket.length = 0;
+    bucket.push(...keep);
+  }
+}
+
+app.use(
+  "/api/auth/cleva",
+  createClevaAuthRouter({
+    hasDb,
+    dbQuery,
+    sessions,
+    newSessionId,
+    hashPassword,
+    upsertUser,
+    persistUserToDb,
+    sanitizeUser,
+    appendAudit,
+    usersByEmail,
+    usersById,
+    defaultCompanyId: DEFAULT_COMPANY_ID,
+  })
+);
+
 app.use(
   "/api",
   createSaasRouter({
@@ -10689,6 +11223,7 @@ app.use(
     appendAudit,
     usersByEmail,
     usersById,
+    scrubCompanyFromMemory,
   })
 );
 
