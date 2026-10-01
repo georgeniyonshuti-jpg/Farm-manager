@@ -1,3 +1,15 @@
+@import "@fontsource/bricolage-grotesque/400.css";
+@import "@fontsource/bricolage-grotesque/600.css";
+@import "@fontsource/bricolage-grotesque/700.css";
+@import "@fontsource/bricolage-grotesque/800.css";
+@import "@fontsource/dm-sans/400.css";
+@import "@fontsource/dm-sans/500.css";
+@import "@fontsource/dm-sans/600.css";
+@import "@fontsource/dm-sans/400-italic.css";
+@import "@fontsource/dm-mono/400.css";
+@import "@fontsource/dm-mono/500.css";
+@import "./publicStore.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -6,14 +18,46 @@
    Light theme (default)
 ───────────────────────────────────────────────────────────── */
 :root {
-  --app-header-h: 4rem;
+  --app-header-h: 3rem; /* 48px — AppTopBar row 1 */
+
+  /* Base unit (immutable) */
+  --u: 4px;
+  --density: 1;
+
+  /* Control tokens — DENSITY-INVARIANT (WCAG targets) */
+  --control-h-sm: 28px;
+  --control-h-md: 32px;
+  --control-h-lg: 40px;
+  --control-h-field: 48px;
+  --pad-control-x: 12px;
+  --radius-control: 8px;
+
+  /* Layout tokens — scaled by --density (comfortable defaults) */
+  --space-shell-x: calc(6 * var(--u) * var(--density)); /* 24 */
+  --space-shell-y: calc(4 * var(--u) * var(--density)); /* 16 */
+  --space-section: calc(5 * var(--u) * var(--density)); /* 20 */
+  --space-stack: calc(3 * var(--u) * var(--density)); /* 12 */
+  --space-card: calc(4 * var(--u) * var(--density)); /* 16 */
+  --space-title-gap: calc(2 * var(--u) * var(--density)); /* 8 */
+
+  /* Legacy spacing scale (deprecated aliases — prefer semantic layout tokens) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  /* Zebra table row (v2 spec §1.2 / §2.4) */
+  --row-zebra: #fafafb;
 
   /* Fonts */
   --font-display: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
   --font-body: "DM Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* Brand */
+  /* Brand — reserved for primary actions only */
   --primary-color: #1d9e75;
   --primary-color-dark: #16805f;
   --primary-color-soft: #d6f4eb;
@@ -22,6 +66,30 @@
   --accent-color: #22c55e;
   --accent-warning: #f59e0b;
   --accent-danger: #ef4444;
+
+  /* Semantic status — success is distinct from brand green */
+  --status-success: #15803d;
+  --status-success-soft: #dcfce7;
+  --status-warning: #b45309;
+  --status-warning-soft: #fef3c7;
+  --status-danger: #b91c1c;
+  --status-danger-soft: #fee2e2;
+  --status-info: #1d4ed8;
+  --status-info-soft: #dbeafe;
+  --status-neutral: #475569;
+  --status-neutral-soft: #f1f5f9;
+
+  /* Chart series */
+  --chart-1: #1d9e75;
+  --chart-2: #1196b5;
+  --chart-3: #f59e0b;
+  --chart-4: #ef4444;
+  --chart-5: #8b5cf6;
+  --chart-6: #ec4899;
+  --chart-7: #14b8a6;
+  --chart-8: #f97316;
+  --focus-ring: rgba(29, 158, 117, 0.22);
+  --focus-ring-strong: rgba(29, 158, 117, 0.5);
 
   /* Backgrounds */
   --background-color: #f2f8f6;
@@ -40,6 +108,7 @@
   --text-primary: #0f172a;
   --text-secondary: #475569;
   --text-muted: #64748b;
+  --text-label: #9ca3af;
   --text-on-primary: #ffffff;
 
   /* Radius */
@@ -66,7 +135,7 @@
 
   /* Table */
   --table-header-bg: #edf4f2;
-  --table-row-alt: rgba(248, 252, 251, 0.8);
+  --table-row-alt: var(--row-zebra);
   --table-row-hover: rgba(29, 158, 117, 0.06);
 
   /* Skeleton */
@@ -95,12 +164,33 @@
 
   /* Header */
   --header-border: var(--border-color);
+
+  /* Manager shell (POS pattern, farm greens) */
+  --farm-header: rgba(255, 255, 255, 0.92);
+  --farm-overlay: rgba(15, 23, 42, 0.45);
+  --farm-sidebar: linear-gradient(180deg, #16805f 0%, #1d9e75 55%, #1196b5 100%);
+  --mgr-nav-hover: rgba(255, 255, 255, 0.12);
+  --mgr-nav-active: rgba(255, 255, 255, 0.2);
+  --mgr-nav-icon: rgba(255, 255, 255, 0.65);
+  --duration-fast: 150ms;
+  --duration-base: 250ms;
+  --duration-slow: 300ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Global density — layout tokens shrink; control heights do not */
+html[data-density="compact"] {
+  --density: 0.75;
 }
 
 /* ─────────────────────────────────────────────────────────────
    Dark theme
 ───────────────────────────────────────────────────────────── */
 [data-theme="dark"] {
+  /* Zebra table row (dark) */
+  --row-zebra: rgba(255, 255, 255, 0.02);
+
   /* Brand (keep primary green, adjust softs) */
   --primary-color: #22c78a;
   --primary-color-dark: #1aaa76;
@@ -109,6 +199,28 @@
   --secondary-soft: rgba(56, 189, 248, 0.12);
   --accent-warning: #fbbf24;
   --accent-danger: #f87171;
+
+  --status-success: #4ade80;
+  --status-success-soft: rgba(74, 222, 128, 0.14);
+  --status-warning: #fbbf24;
+  --status-warning-soft: rgba(251, 191, 36, 0.14);
+  --status-danger: #f87171;
+  --status-danger-soft: rgba(248, 113, 113, 0.14);
+  --status-info: #60a5fa;
+  --status-info-soft: rgba(96, 165, 250, 0.14);
+  --status-neutral: #8fa4c0;
+  --status-neutral-soft: rgba(143, 164, 192, 0.12);
+
+  --chart-1: #22c78a;
+  --chart-2: #38bdf8;
+  --chart-3: #fbbf24;
+  --chart-4: #f87171;
+  --chart-5: #a78bfa;
+  --chart-6: #f472b6;
+  --chart-7: #2dd4bf;
+  --chart-8: #fb923c;
+  --focus-ring: rgba(34, 199, 138, 0.28);
+  --focus-ring-strong: rgba(34, 199, 138, 0.55);
 
   /* Backgrounds — deep analytics terminal navy */
   --background-color: #080d18;
@@ -175,6 +287,14 @@
 
   /* Header */
   --header-border: linear-gradient(90deg, transparent, var(--primary-color) 30%, var(--secondary-color) 70%, transparent);
+
+  /* Manager shell (POS pattern, farm greens — dark) */
+  --farm-header: rgba(17, 24, 39, 0.92);
+  --farm-overlay: rgba(0, 0, 0, 0.6);
+  --farm-sidebar: linear-gradient(180deg, #0c1220 0%, #0f3d32 45%, #16805f 100%);
+  --mgr-nav-hover: rgba(255, 255, 255, 0.1);
+  --mgr-nav-active: rgba(255, 255, 255, 0.18);
+  --mgr-nav-icon: rgba(255, 255, 255, 0.6);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -206,6 +326,71 @@ body {
   letter-spacing: -0.01em;
 }
 
+/* Typography scale */
+.type-display {
+  font-family: var(--font-display);
+  font-size: 2rem;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.type-h1 {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  line-height: 1.25;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+.type-h2 {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  line-height: 1.3;
+  font-weight: 650;
+}
+.type-h3 {
+  font-family: var(--font-body);
+  font-size: 1.05rem;
+  line-height: 1.35;
+  font-weight: 650;
+}
+.type-body {
+  font-family: var(--font-body);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  font-weight: 400;
+}
+.type-caption {
+  font-family: var(--font-body);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+.type-label {
+  font-family: var(--font-body);
+  font-size: 0.75rem;
+  line-height: 1.35;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.type-metric {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 1.5rem;
+  line-height: 1.2;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+@media (min-width: 640px) {
+  .field-metric-strip .type-metric {
+    font-size: 1.35rem;
+  }
+}
+
 button,
 a,
 input,
@@ -223,7 +408,7 @@ input:focus,
 select:focus,
 textarea:focus {
   outline: none;
-  box-shadow: 0 0 0 3px rgba(29, 158, 117, 0.22);
+  box-shadow: 0 0 0 3px var(--focus-ring);
   border-color: var(--primary-color) !important;
 }
 
@@ -267,7 +452,7 @@ a:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 2px solid rgba(29, 158, 117, 0.5);
+  outline: 2px solid var(--focus-ring-strong);
   outline-offset: 2px;
 }
 
@@ -301,17 +486,40 @@ textarea:focus-visible {
 
 .institutional-table th {
   text-align: left;
-  font-weight: 700;
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 12px;
+  line-height: 16px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-label, var(--text-muted));
   background: var(--table-header-bg);
   position: sticky;
   top: 0;
   z-index: 2;
   white-space: nowrap;
+  height: 40px;
   box-shadow: 0 2px 0 var(--border-color);
+}
+
+.institutional-table--compact th,
+.institutional-table--compact td {
+  padding: 0.2rem 0.5rem;
+}
+
+.institutional-table--compact th {
+  height: 32px;
+}
+
+html[data-table-density="compact"] .institutional-table th,
+html[data-table-density="compact"] .institutional-table td,
+html[data-density="compact"] .institutional-table th,
+html[data-density="compact"] .institutional-table td {
+  padding: 0.2rem 0.5rem;
+}
+
+html[data-table-density="compact"] .institutional-table th,
+html[data-density="compact"] .institutional-table th {
+  height: 32px;
 }
 
 .institutional-table tbody tr:nth-child(even) td {
@@ -368,8 +576,8 @@ textarea:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  align-items: flex-end;
-  padding: 0.625rem 0.875rem;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
   background: var(--surface-subtle);
   border-bottom: 1px solid var(--border-color);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
@@ -569,10 +777,206 @@ textarea:focus-visible {
 }
 
 .animate-fade-up {
-  animation: fade-in-up 350ms ease both;
+  animation: fade-in-up var(--duration-base, 250ms) var(--ease-out, ease) both;
 }
 .animate-count {
   animation: count-up 300ms cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
+}
+
+@keyframes slide-right {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-right {
+  animation: slide-right var(--duration-slow, 300ms) var(--ease-out, ease) both;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Manager shell — copied from Cleva POS mgr-* (farm colors)
+───────────────────────────────────────────────────────────── */
+.mgr-sidebar {
+  background: var(--farm-sidebar);
+}
+
+.mgr-sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.75rem 0.625rem;
+}
+
+.mgr-sidebar-nav--collapsed {
+  align-items: stretch;
+  gap: 0.25rem;
+  padding: 0.5rem 0.375rem;
+}
+
+.mgr-nav-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  line-height: 1.2;
+  margin: 0 0 3px;
+  /* Group titles sit left of the link text */
+  padding: 0 10px 0 6px;
+}
+
+.mgr-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2rem;
+  padding: 0 0.5rem 0 0.625rem;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.82);
+  transition:
+    background var(--duration-fast, 150ms) var(--ease-in-out, ease),
+    color var(--duration-fast, 150ms) var(--ease-in-out, ease),
+    border-color var(--duration-fast, 150ms) var(--ease-in-out, ease),
+    transform var(--duration-fast, 150ms) var(--ease-in-out, ease);
+  border-left: 2px solid transparent;
+  position: relative;
+}
+
+.mgr-nav-icon {
+  color: var(--mgr-nav-icon, rgba(255, 255, 255, 0.65));
+  transition: color var(--duration-fast, 150ms) var(--ease-in-out, ease);
+}
+
+.mgr-nav-link-label {
+  min-width: 0;
+}
+
+.mgr-nav-link--compact {
+  justify-content: center;
+  gap: 0;
+  min-height: 2rem;
+  min-width: 2rem;
+  padding: 0;
+  border-left-width: 0;
+}
+
+@media (min-width: 768px) {
+  .mgr-nav-link:not(.mgr-nav-link--compact) {
+    min-height: 1.875rem;
+    font-size: 0.75rem;
+  }
+}
+
+.mgr-nav-link:hover {
+  background: var(--mgr-nav-hover, rgba(255, 255, 255, 0.12));
+  color: #fff;
+}
+
+.mgr-nav-link:hover .mgr-nav-icon {
+  color: #fff;
+}
+
+.mgr-nav-link:active {
+  transform: scale(0.98);
+}
+
+.mgr-nav-link.active {
+  background: var(--mgr-nav-active, rgba(255, 255, 255, 0.2));
+  color: #fff;
+  border-left-color: var(--accent-warning, #f59e0b);
+  font-weight: 700;
+}
+
+.mgr-nav-link.active .mgr-nav-icon {
+  color: #fff;
+}
+
+.mgr-nav-link--compact.active {
+  border-left-color: transparent;
+  box-shadow: inset 0 0 0 1.5px rgba(245, 158, 11, 0.85);
+}
+
+.mgr-nav-group + .mgr-nav-group {
+  margin-top: 0;
+}
+
+.mgr-nav-group__items {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  /* Soft indent under titles — no tree line (reads noisy with many groups) */
+  padding-left: 4px;
+}
+
+.mgr-sidebar-nav--collapsed .mgr-nav-group__items,
+.mgr-sidebar-footer--collapsed .mgr-nav-group__items {
+  padding-left: 0;
+  align-items: center;
+  gap: 2px;
+}
+
+.mgr-sidebar-footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.5rem 0.625rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.mgr-sidebar-footer--collapsed {
+  padding: 0.5rem 0.375rem 0.75rem;
+  align-items: stretch;
+}
+
+.mgr-page-title {
+  font-size: 1.375rem;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.mgr-sidebar-brand {
+  color: #fff;
+}
+
+.mgr-sidebar-brand .mgr-brand-name {
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+/* Opaque plate so the green farm mark stays visible on the green sidebar */
+.mgr-sidebar-logo-plate {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+}
+
+.mgr-sidebar-select {
+  width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.12);
+  padding: 0.45rem 0.625rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #fff;
+  outline: none;
+}
+
+.mgr-sidebar-select option {
+  color: var(--text-primary);
+  background: var(--surface-color);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -602,4 +1006,13 @@ textarea:focus-visible {
   button:active, a:active, .bounce-tap:active {
     transform: none !important;
   }
+}
+
+/* Locale crossfade when switching EN ↔ RW */
+html[data-locale="rw"] .locale-fade,
+html[data-locale="en"] .locale-fade {
+  transition: opacity 120ms ease;
+}
+html[data-locale-switching="1"] .locale-fade {
+  opacity: 0.92;
 }

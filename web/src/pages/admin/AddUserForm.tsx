@@ -4,6 +4,7 @@ import type { BusinessUnitAccess, UserRole } from "../../auth/types";
 import { isSuperuser } from "../../auth/permissions";
 import { useApiFetch } from "../../api/fetchClient";
 import { useToast } from "../../components/Toast";
+import { Button } from "../../components/ui/Button";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 
 export type AddUserPayload = {
@@ -21,6 +22,7 @@ const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: "dispatcher", label: "Dispatcher" },
   { value: "procurement_officer", label: "Procurement officer" },
   { value: "sales_coordinator", label: "Sales coordinator" },
+  { value: "buyer", label: "Buyer (market)" },
   { value: "vet", label: "Veterinarian" },
   { value: "vet_manager", label: "Vet manager" },
   { value: "investor", label: "Investor (read-oriented)" },
@@ -120,7 +122,7 @@ export function AddUserForm({ onCreated }: Props) {
   return (
     <form
       onSubmit={(e) => void handleSubmit(e)}
-      className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm"
+      className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-card shadow-sm"
     >
       <h2 className="text-lg font-semibold text-neutral-900">Add user</h2>
       <p className="mt-1 text-sm text-neutral-600">
@@ -251,13 +253,9 @@ export function AddUserForm({ onCreated }: Props) {
         </p>
       )}
 
-      <button
-        type="submit"
-        disabled={busy}
-        className="mt-6 w-full min-h-[48px] rounded-xl bg-neutral-900 py-3 text-sm font-semibold text-white hover:bg-black disabled:opacity-50 sm:w-auto sm:px-8"
-      >
+      <Button type="submit" size="lg" disabled={busy} loading={busy} className="mt-6 w-full sm:w-auto">
         {busy ? "Saving…" : "Create user"}
-      </button>
+      </Button>
     </form>
   );
 }

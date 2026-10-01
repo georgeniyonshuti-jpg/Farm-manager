@@ -36,7 +36,7 @@ export function PhotoCaptureInput({
     <div className="space-y-2">
       <label
         htmlFor={id}
-        className="flex min-h-[52px] cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-emerald-500/45 bg-emerald-500/10 px-4 py-3 text-center text-sm font-semibold text-emerald-400 hover:bg-emerald-500/15"
+        className="flex min-h-[52px] cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border border-dashed border-[var(--border-strong)] bg-[var(--surface-card)] px-4 py-4 text-center text-sm font-semibold text-[var(--text-primary)] hover:border-[var(--primary-color)] hover:bg-[var(--primary-color-soft)]"
       >
         {pickerLabel ?? defaultPicker}
       </label>

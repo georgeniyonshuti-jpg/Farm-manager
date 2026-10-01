@@ -6,7 +6,15 @@ import { PersistentPageSlot } from "../components/layout/PersistentPageSlot";
 import { PersistentRouteGuard } from "./PersistentRouteGuard";
 import { PersistentWorkspaceGate } from "./PersistentWorkspaceGate";
 import { pathExact } from "./persistentPaths";
+import { stripTenantPrefix } from "../lib/tenancy";
 import { ErpnextAccessGate } from "../components/guards/ErpnextAccessGate";
+import { LaborerHome } from "../pages/dashboards/LaborerHome";
+import { VetHome } from "../pages/dashboards/VetHome";
+import { FarmCheckinPage } from "../pages/farm/FarmCheckinPage";
+import { FarmMortalityLogPage } from "../pages/farm/FarmMortalityLogPage";
+import { FarmFeedPage } from "../pages/farm/FarmFeedPage";
+import { FarmVetLogsPage } from "../pages/farm/FarmVetLogsPage";
+import { FarmTreatmentPage } from "../pages/farm/FarmTreatmentPage";
 
 const FLOCK_ROLES = [
   "manager",
@@ -14,10 +22,9 @@ const FLOCK_ROLES = [
   "vet",
   "superuser",
   "procurement_officer",
-  "sales_coordinator",
 ] as const;
 
-const MANAGEMENT_ROLES = ["manager", "superuser", "procurement_officer", "sales_coordinator"] as const;
+const MANAGEMENT_ROLES = ["manager", "superuser", "procurement_officer"] as const;
 
 function lazyNamed<T extends Record<string, unknown>>(
   loader: () => Promise<T>,
@@ -29,20 +36,30 @@ function lazyNamed<T extends Record<string, unknown>>(
   });
 }
 
-const LaborerHome = lazyNamed(() => import("../pages/dashboards/LaborerHome"), "LaborerHome");
-const VetHome = lazyNamed(() => import("../pages/dashboards/VetHome"), "VetHome");
 const ManagementHome = lazyNamed(() => import("../pages/dashboards/ManagementHome"), "ManagementHome");
 const LaborerEarningsPage = lazyNamed(() => import("../pages/laborer/LaborerEarningsPage"), "LaborerEarningsPage");
 const FlockListPage = lazyNamed(() => import("../pages/farm/FlockListPage"), "FlockListPage");
-const FarmCheckinPage = lazyNamed(() => import("../pages/farm/FarmCheckinPage"), "FarmCheckinPage");
-const FarmMortalityLogPage = lazyNamed(() => import("../pages/farm/FarmMortalityLogPage"), "FarmMortalityLogPage");
 const FarmDailyLogPage = lazyNamed(() => import("../pages/farm/FarmDailyLogPage"), "FarmDailyLogPage");
-const FarmFeedPage = lazyNamed(() => import("../pages/farm/FarmFeedPage"), "FarmFeedPage");
 const FarmMortalityPage = lazyNamed(() => import("../pages/farm/FarmMortalityPage"), "FarmMortalityPage");
-const FarmVetLogsPage = lazyNamed(() => import("../pages/farm/FarmVetLogsPage"), "FarmVetLogsPage");
 const FarmInventoryPage = lazyNamed(() => import("../pages/farm/FarmInventoryPage"), "FarmInventoryPage");
-const FarmTreatmentPage = lazyNamed(() => import("../pages/farm/FarmTreatmentPage"), "FarmTreatmentPage");
 const FarmSlaughterPage = lazyNamed(() => import("../pages/farm/FarmSlaughterPage"), "FarmSlaughterPage");
+const MarketOpsPage = lazyNamed(() => import("../pages/market/MarketOpsPage"), "MarketOpsPage");
+const RedirectMarketBuyers = lazyNamed(() => import("../pages/market/MarketHubRedirect"), "RedirectMarketBuyers");
+const RedirectMarketPricing = lazyNamed(() => import("../pages/market/MarketHubRedirect"), "RedirectMarketPricing");
+const RedirectMarketJobs = lazyNamed(() => import("../pages/market/MarketHubRedirect"), "RedirectMarketJobs");
+const RedirectMarketLeads = lazyNamed(() => import("../pages/market/MarketHubRedirect"), "RedirectMarketLeads");
+const RedirectMarketVerify = lazyNamed(() => import("../pages/market/MarketHubRedirect"), "RedirectMarketVerify");
+const RedirectMarketWeighQueue = lazyNamed(
+  () => import("../pages/market/MarketHubRedirect"),
+  "RedirectMarketWeighQueue"
+);
+const DeskCommissionsGate = lazyNamed(() => import("../pages/market/MarketHubRedirect"), "DeskCommissionsGate");
+const PipelineScoutPage = lazyNamed(() => import("../pages/farm/PipelineScoutPage"), "PipelineScoutPage");
+const PipelineWeighPage = lazyNamed(() => import("../pages/farm/PipelineWeighPage"), "PipelineWeighPage");
+const MarketHomePage = lazyNamed(() => import("../pages/market/MarketHomePage"), "MarketHomePage");
+const MarketOrdersPage = lazyNamed(() => import("../pages/market/MarketOrdersPage"), "MarketOrdersPage");
+const MarketListingsPage = lazyNamed(() => import("../pages/market/MarketListingsPage"), "MarketListingsPage");
+const MarketPendingPage = lazyNamed(() => import("../pages/market/MarketPendingPage"), "MarketPendingPage");
 const FlockScheduleSettingsPage = lazyNamed(
   () => import("../pages/farm/FlockScheduleSettingsPage"),
   "FlockScheduleSettingsPage"
@@ -56,10 +73,6 @@ const FarmCheckinReviewPage = lazyNamed(
   "FarmCheckinReviewPage"
 );
 const PayrollImpactPage = lazyNamed(() => import("../pages/farm/PayrollImpactPage"), "PayrollImpactPage");
-const AccountingApprovalsPage = lazyNamed(
-  () => import("../pages/farm/AccountingApprovalsPage"),
-  "AccountingApprovalsPage"
-);
 const ERPNextSetupPage = lazyNamed(() => import("../pages/farm/ERPNextSetupPage"), "ERPNextSetupPage");
 const ERPNextEmbedPage = lazyNamed(() => import("../pages/farm/ERPNextEmbedPage"), "ERPNextEmbedPage");
 const ReportsCenterPage = lazyNamed(() => import("../pages/farm/ReportsCenterPage"), "ReportsCenterPage");
@@ -74,7 +87,16 @@ const CreditScoringPage = lazyNamed(() => import("../pages/cleva/CreditScoringPa
 const UserManagementPage = lazyNamed(() => import("../pages/admin/UserManagementPage"), "UserManagementPage");
 const SystemConfigPage = lazyNamed(() => import("../pages/admin/SystemConfigPage"), "SystemConfigPage");
 const SuperAdminPanelPage = lazyNamed(() => import("../pages/admin/SuperAdminPanelPage"), "SuperAdminPanelPage");
-
+const SuperAdminCompanyDetailPage = lazyNamed(
+  () => import("../pages/admin/SuperAdminCompanyDetailPage"),
+  "SuperAdminCompanyDetailPage"
+);
+const SuperAdminPlansPage = lazyNamed(() => import("../pages/admin/SuperAdminPlansPage"), "SuperAdminPlansPage");
+const SuperAdminAnnouncePage = lazyNamed(
+  () => import("../pages/admin/SuperAdminAnnouncePage"),
+  "SuperAdminAnnouncePage"
+);
+const SuperAdminRepairPage = lazyNamed(() => import("../pages/admin/SuperAdminRepairPage"), "SuperAdminRepairPage");
 function PageFallback() {
   return (
     <div className="mx-auto w-full max-w-[960px] animate-pulse space-y-3 p-4" aria-busy="true">
@@ -213,6 +235,132 @@ export function PersistentAppPages() {
           </LazyPage>
         </PersistentPageSlot>
 
+        <PersistentPageSlot active={pathExact(p, "/farm/pipeline")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
+              <MarketOpsPage />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/farm/pipeline/buyers")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
+              <RedirectMarketBuyers />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/farm/pipeline/scout")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard
+              roles={["superuser", "sales_coordinator", "vet", "vet_manager", "manager", "company_admin"]}
+            >
+              <PipelineScoutPage />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/farm/pipeline/weigh")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard
+              roles={["superuser", "sales_coordinator", "vet", "vet_manager", "manager", "company_admin"]}
+            >
+              <RedirectMarketWeighQueue />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot
+          active={(() => {
+            const inner = stripTenantPrefix(p);
+            return inner.startsWith("/farm/pipeline/weigh/");
+          })()}
+          mountDelayMs={0}
+        >
+          <LazyPage>
+            <PersistentRouteGuard
+              roles={["superuser", "sales_coordinator", "vet", "vet_manager", "manager", "company_admin"]}
+            >
+              <PipelineWeighPage />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/market")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard roles={["buyer", "superuser", "sales_coordinator"]}>
+              <MarketHomePage />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/market/orders")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard roles={["buyer", "superuser", "sales_coordinator"]}>
+              <MarketOrdersPage />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/market/listings")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard roles={["company_admin", "manager", "superuser"]}>
+              <MarketListingsPage />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/market/pending")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard roles={["buyer", "company_admin", "manager", "superuser"]}>
+              <MarketPendingPage />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/market/verify")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
+              <RedirectMarketVerify />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/market/leads")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
+              <RedirectMarketLeads />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/market/rates")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
+              <RedirectMarketPricing />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/market/jobs")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
+              <RedirectMarketJobs />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/market/commissions")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard
+              roles={["superuser", "sales_coordinator", "vet", "vet_manager", "manager", "company_admin"]}
+            >
+              <DeskCommissionsGate />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
         <PersistentPageSlot active={pathExact(p, "/farm/batch-schedule")} mountDelayMs={0}>
           <LazyPage>
             <PersistentRouteGuard roles={["superuser", "manager", "vet_manager", "vet"]}>
@@ -245,20 +393,7 @@ export function PersistentAppPages() {
           </LazyPage>
         </PersistentPageSlot>
 
-        <PersistentPageSlot active={pathExact(p, "/farm/accounting-approvals")} mountDelayMs={0}>
-          <LazyPage>
-            <PersistentRouteGuard roles={["manager", "superuser"]}>
-              <ErpnextAccessGate>
-                <AccountingApprovalsPage />
-              </ErpnextAccessGate>
-            </PersistentRouteGuard>
-          </LazyPage>
-        </PersistentPageSlot>
-
-        <PersistentPageSlot
-          active={pathExact(p, "/farm/odoo-setup") || pathExact(p, "/farm/erpnext-setup")}
-          mountDelayMs={0}
-        >
+        <PersistentPageSlot active={pathExact(p, "/farm/erpnext-setup")} mountDelayMs={0}>
           <LazyPage>
             <PersistentRouteGuard roles={["manager", "superuser"]}>
               <ErpnextAccessGate>
@@ -339,6 +474,41 @@ export function PersistentAppPages() {
         <LazyPage>
           <PersistentRouteGuard superuserOnly>
             <SuperAdminPanelPage />
+          </PersistentRouteGuard>
+        </LazyPage>
+      </PersistentPageSlot>
+
+      <PersistentPageSlot
+        active={/^\/admin\/super\/companies\/[^/]+$/.test(stripTenantPrefix(p))}
+        mountDelayMs={0}
+      >
+        <LazyPage>
+          <PersistentRouteGuard superuserOnly>
+            <SuperAdminCompanyDetailPage />
+          </PersistentRouteGuard>
+        </LazyPage>
+      </PersistentPageSlot>
+
+      <PersistentPageSlot active={pathExact(p, "/admin/super/plans")} mountDelayMs={0}>
+        <LazyPage>
+          <PersistentRouteGuard superuserOnly>
+            <SuperAdminPlansPage />
+          </PersistentRouteGuard>
+        </LazyPage>
+      </PersistentPageSlot>
+
+      <PersistentPageSlot active={pathExact(p, "/admin/super/announce")} mountDelayMs={0}>
+        <LazyPage>
+          <PersistentRouteGuard superuserOnly>
+            <SuperAdminAnnouncePage />
+          </PersistentRouteGuard>
+        </LazyPage>
+      </PersistentPageSlot>
+
+      <PersistentPageSlot active={pathExact(p, "/admin/super/repair")} mountDelayMs={0}>
+        <LazyPage>
+          <PersistentRouteGuard superuserOnly>
+            <SuperAdminRepairPage />
           </PersistentRouteGuard>
         </LazyPage>
       </PersistentPageSlot>

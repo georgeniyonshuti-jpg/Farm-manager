@@ -1,25 +1,28 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
+import { FarmTreatmentFieldView } from "./FarmTreatmentFieldView";
 import { readAuthHeaders, jsonAuthHeaders } from "../../lib/authHeaders";
 import { API_BASE_URL } from "../../api/config";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
-import { EmptyState } from "../../components/EmptyState";
 import { SectionCard } from "../../components/ui/SectionCard";
+import { Button } from "../../components/ui/Button";
+import { TextLink } from "../../components/ui/TextLink";
 import { useToast } from "../../components/Toast";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
-import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
-import type { FieldPerformanceSummary } from "../../hooks/useFlockFieldContext";
-import type { CheckinStatus } from "./checkinStatusTypes";
-import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
 import { syncTreatmentToERPNext } from "../../api/erpnext.api";
-import { SegmentedControl } from "../../components/ui";
+import { DataTable, Modal, PageTabs, StatusPill, TableToolbar, FacetFilter } from "../../components/ui";
+import { ERPNextSyncBadge } from "../../components/accounting/ERPNextSyncBadge";
+import { ManagerPage } from "../../components/layout/ManagerPage";
 import {
   getStoredErpnextCompany,
   getStoredErpnextCostCenter,
   CLIENT_ERPNEXT_ENTITY_SYNC,
 } from "../../lib/erpnextPrefs";
 import { useFarmCapabilities } from "../../hooks/useFarmCapabilities";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
+import { useErpnextSyncBySource } from "../../hooks/useErpnextSyncBySource";
 
 type Flock = { id: string; label: string; code?: string | null; initialCount?: number };
 type Medicine = {
@@ -122,8 +125,20 @@ function treatmentReasonLabel(row: Treatment, reasons: { value: string; label: s
 }
 
 export function FarmTreatmentPage() {
-  const { token } = useAuth();
+  const { user } = useAuth();
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  if (user?.role === "vet" && (!tabParam || tabParam === "treatments")) {
+    return <FarmTreatmentFieldView />;
+  }
+  return <FarmTreatmentManagerPage />;
+}
+
+function FarmTreatmentManagerPage() {
+  const { token, user } = useAuth();
   const { erpnextAccess } = useFarmCapabilities();
+  const { companyHref } = useCompanyNav();
+  const { bySource } = useErpnextSyncBySource(user?.erpnextAccess || erpnextAccess ? token : null);
   const { showToast } = useToast();
   const treatmentReasonOptions = useReferenceOptions("treatment_reason", token, TREATMENT_REASON_OPTIONS);
   const routeOptions = useReferenceOptions("treatment_route", token, FALLBACK_ROUTE_OPTIONS);
@@ -187,54 +202,6 @@ export function FarmTreatmentPage() {
     expiryDate: "",
     receivedAt: new Date().toISOString().slice(0, 10),
   });
-  const [flockStrip, setFlockStrip] = useState<CheckinStatus | null>(null);
-  const [flockPerformance, setFlockPerformance] = useState<FieldPerformanceSummary | null>(null);
-
-  useEffect(() => {
-    if (!flockId || !token) {
-      setFlockStrip(null);
-      setFlockPerformance(null);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const [r, pr] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/checkin-status`, {
-            headers: readAuthHeaders(token),
-          }),
-          fetch(`${API_BASE_URL}/api/flocks/${encodeURIComponent(flockId)}/performance-summary`, {
-            headers: readAuthHeaders(token),
-          }),
-        ]);
-        const d = await r.json();
-        const pd = await pr.json();
-        if (!r.ok) throw new Error((d as { error?: string }).error ?? "status");
-        if (!cancelled) setFlockStrip(d as CheckinStatus);
-        if (!cancelled) {
-          if (pr.ok) {
-            setFlockPerformance({
-              birdsLiveEstimate: Number((pd as { birdsLiveEstimate?: number }).birdsLiveEstimate) || 0,
-              computedBirdsLiveEstimate: (pd as { computedBirdsLiveEstimate?: number })
-                .computedBirdsLiveEstimate,
-              verifiedLiveCount: (pd as { verifiedLiveCount?: number | null }).verifiedLiveCount ?? null,
-              mortalityToDate: Number((pd as { mortalityToDate?: number }).mortalityToDate) || 0,
-            });
-          } else {
-            setFlockPerformance(null);
-          }
-        }
-      } catch {
-        if (!cancelled) {
-          setFlockStrip(null);
-          setFlockPerformance(null);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [flockId, token]);
 
   const preset = useMemo(() => ({
     set7d: () => {
@@ -507,7 +474,7 @@ export function FarmTreatmentPage() {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Save failed");
-      const costMsg = lotForm.unitCostRwf ? " Draft bill queued for Odoo." : "";
+      const costMsg = lotForm.unitCostRwf ? " Cost saved for ERPNext sync." : "";
       showToast("success", `Lot received (${qty} units).${costMsg}`);
       setLotForm((v) => ({ ...v, lotNumber: "", quantityReceived: "", unitCostRwf: "", supplier: "", expiryDate: "" }));
       setShowLotForm(false);
@@ -520,32 +487,19 @@ export function FarmTreatmentPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <ManagerPage>
       <PageHeader
         title="Medicine tracking"
-        subtitle="Record treatments and withdrawal windows by flock."
         action={
-          <div className="flex items-center gap-2">
-            <a
-              href={`${API_BASE_URL}/api/reports/medicine-tracking.csv${flockId ? `?flockId=${encodeURIComponent(flockId)}` : ""}`}
-              className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
-              download
-            >
-              Export CSV
-            </a>
-            {tab === "treatments" ? (
-              <button
-                type="button"
-                onClick={() => setShowTreatmentForm((v) => !v)}
-                className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)]"
-              >
-                {showTreatmentForm ? "Close" : "Record new treatment"}
-              </button>
-            ) : null}
-          </div>
+          tab === "treatments" ? (
+            <Button size="sm" onClick={() => setShowTreatmentForm(true)}>
+              Record treatment
+            </Button>
+          ) : null
         }
         tabs={
-          <SegmentedControl
+          <PageTabs
+            aria-label="Medicine sections"
             value={tab}
             onChange={(v) => setTab(v as MedTab)}
             options={[
@@ -556,19 +510,6 @@ export function FarmTreatmentPage() {
           />
         }
       />
-      {!loading && flockId && flockStrip ? (
-        <FlockContextStrip
-          label={flockStrip.label}
-          code={flocks.find((x) => x.id === flockId)?.code}
-          placementDate={flockStrip.placementDate}
-          ageDays={flockStrip.ageDays}
-          feedToDateKg={flockStrip.feedToDateKg}
-          initialCount={flocks.find((x) => x.id === flockId)?.initialCount}
-          birdsLiveEstimate={flockPerformance?.birdsLiveEstimate}
-          verifiedLiveCount={flockPerformance?.verifiedLiveCount}
-          mortalityToDate={flockPerformance?.mortalityToDate}
-        />
-      ) : null}
       {loading && <SkeletonList rows={3} />}
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
       {!loading && !error ? (
@@ -576,78 +517,116 @@ export function FarmTreatmentPage() {
           {tab === "treatments" ? (
             <>
               {overdueRounds.length > 0 ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-                  <span className="font-semibold">{overdueRounds.length} overdue round(s).</span>{" "}
-                  <button type="button" className="font-medium text-amber-900 underline" onClick={() => setTab("rounds")}>
-                    Open Rounds tab
-                  </button>
+                <div className="rounded-lg border px-3 py-2 text-sm" style={{ borderColor: "var(--status-warning)", backgroundColor: "var(--status-warning-soft)", color: "var(--text-primary)" }}>
+                  <span className="font-semibold">{overdueRounds.length} overdue round{overdueRounds.length === 1 ? "" : "s"}.</span>{" "}
+                  <TextLink className="font-medium text-[var(--status-warning)]" onClick={() => setTab("rounds")}>
+                    Open rounds
+                  </TextLink>
                 </div>
-              ) : (
-                <EmptyState title="No overdue rounds" description="All scheduled medicine rounds are on track." />
-              )}
+              ) : null}
 
-              <SectionCard
-                title="Recent treatments"
-                description="Filtered by flock and date range"
-                controls={
-                  <>
-                    <button type="button" onClick={preset.set7d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 7d</button>
-                    <button type="button" onClick={preset.set30d} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Last 30d</button>
-                    <button type="button" onClick={preset.setCycle} className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700">Cycle to date</button>
-                    <a
-                      className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-700"
-                      href={`${API_BASE_URL}/api/reports/treatments.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Download CSV
-                    </a>
-                  </>
-                }
-              >
-                <div className="mb-4 grid gap-3 sm:grid-cols-2">
-                  <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={startAt} onChange={(e) => setStartAt(e.target.value)} />
-                  <input className="rounded-lg border border-neutral-300 px-3 py-2" type="date" value={endAt} onChange={(e) => setEndAt(e.target.value)} />
-                  <select className="rounded-lg border border-neutral-300 px-3 py-2 sm:col-span-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
-                    <option value="">All flocks</option>
-                    {flocks.map((f) => (
-                      <option key={f.id} value={f.id}>{f.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-2">
-                  {rows.map((r) => (
-                    <div key={r.id} className="rounded-lg border border-neutral-200 p-3 text-sm">
-                      <p className="font-medium">
-                        {r.medicineName} - {treatmentReasonLabel(r, treatmentReasonOptions)}
+              <SectionCard flushBody>
+                <DataTable
+                  columns={[
+                    {
+                      key: "med",
+                      header: "Medicine",
+                      render: (r: (typeof rows)[number]) => (
+                        <span className="font-medium">
+                          {r.medicineName} — {treatmentReasonLabel(r, treatmentReasonOptions)}
+                        </span>
+                      ),
+                    },
+                    {
+                      key: "dose",
+                      header: "Dose",
+                      render: (r: (typeof rows)[number]) => `${r.dose} ${r.doseUnit} · ${r.route}`,
+                    },
+                    {
+                      key: "withdrawal",
+                      header: "Withdrawal",
+                      badge: true,
+                      render: (r: (typeof rows)[number]) => {
+                        const endsAt = new Date(new Date(r.at).getTime() + r.withdrawalDays * 24 * 60 * 60 * 1000).getTime();
+                        const leftDays = Math.ceil((endsAt - Date.now()) / (24 * 60 * 60 * 1000));
+                        return leftDays > 0 ? (
+                          <StatusPill tone="warning">{leftDays}d left</StatusPill>
+                        ) : (
+                          <StatusPill tone="success">Cleared</StatusPill>
+                        );
+                      },
+                    },
+                    {
+                      key: "days",
+                      header: "Days",
+                      numeric: true,
+                      render: (r: (typeof rows)[number]) => r.withdrawalDays,
+                    },
+                  ]}
+                  rows={rows}
+                  rowKey={(r: (typeof rows)[number]) => r.id}
+                  isFiltered={Boolean(flockId) || Boolean(startAt) || Boolean(endAt)}
+                  emptyTitle="No treatments yet"
+                  emptyDescription="Recorded treatments for this flock and date range will appear here."
+                  emptyAction={<Button variant="primary" size="sm" onClick={() => setShowTreatmentForm(true)}>Record treatment</Button>}
+                  toolbar={
+                    <TableToolbar
+                      filters={
+                        <>
+                          <FacetFilter
+                            label="Flock"
+                            value={flockId || "all"}
+                            allValue="all"
+                            allLabel="All flocks"
+                            onChange={(v) => setFlockId(v === "all" ? "" : v)}
+                            options={flocks.map((f) => ({ value: f.id, label: f.label }))}
+                          />
+                          <Button variant="secondary" size="xs" onClick={preset.set7d}>Last 7d</Button>
+                          <Button variant="secondary" size="xs" onClick={preset.set30d}>Last 30d</Button>
+                          <Button variant="secondary" size="xs" onClick={preset.setCycle}>Cycle to date</Button>
+                          <input
+                            className="h-control-sm rounded-control border border-[var(--border-input)] bg-[var(--surface-input)] px-2 text-xs"
+                            type="date"
+                            value={startAt}
+                            onChange={(e) => setStartAt(e.target.value)}
+                            aria-label="Start date"
+                          />
+                          <input
+                            className="h-control-sm rounded-control border border-[var(--border-input)] bg-[var(--surface-input)] px-2 text-xs"
+                            type="date"
+                            value={endAt}
+                            onChange={(e) => setEndAt(e.target.value)}
+                            aria-label="End date"
+                          />
+                        </>
+                      }
+                      actions={
+                        <a
+                          className="inline-flex h-control-sm items-center rounded-control px-2.5 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--status-neutral-soft)] hover:text-[var(--text-primary)]"
+                          href={`${API_BASE_URL}/api/reports/treatments.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          Download CSV
+                        </a>
+                      }
+                    />
+                  }
+                  renderMobileCard={(r: (typeof rows)[number]) => (
+                    <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3">
+                      <p className="font-medium text-sm">
+                        {r.medicineName} — {treatmentReasonLabel(r, treatmentReasonOptions)}
                       </p>
-                      <p className="text-neutral-600">{r.dose} {r.doseUnit} via {r.route}, withdrawal {r.withdrawalDays} day(s)</p>
-                      <p className="text-xs text-neutral-500">
-                        {(() => {
-                          const endsAt = new Date(new Date(r.at).getTime() + r.withdrawalDays * 24 * 60 * 60 * 1000).getTime();
-                          const leftDays = Math.ceil((endsAt - Date.now()) / (24 * 60 * 60 * 1000));
-                          return leftDays > 0 ? `Withdrawal active: ${leftDays} day(s) left` : "Withdrawal cleared";
-                        })()}
+                      <p className="mt-1 text-xs text-[var(--text-secondary)]">
+                        {r.dose} {r.doseUnit} via {r.route}
                       </p>
                     </div>
-                  ))}
-                  {!rows.length ? (
-                    <EmptyState
-                      title="No treatments yet"
-                      description="Recorded treatments for this flock and date range will appear here."
-                    />
-                  ) : null}
-                </div>
+                  )}
+                />
               </SectionCard>
 
-              {showTreatmentForm ? (
-                <form onSubmit={submit} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-sm font-semibold text-neutral-800">New treatment</p>
-                    <button type="button" onClick={() => setShowTreatmentForm(false)} className="text-sm font-medium text-neutral-600 underline">
-                      Cancel
-                    </button>
-                  </div>
+              <Modal open={showTreatmentForm} title="Record treatment" onClose={() => setShowTreatmentForm(false)} wide>
+                <form onSubmit={submit} className="space-y-3">
                   <div className="grid gap-3 sm:grid-cols-2">
                     <select className="rounded-lg border border-neutral-300 px-3 py-2" value={form.reasonCode} onChange={(e) => setForm((v) => ({ ...v, reasonCode: e.target.value }))}>
                       {treatmentReasonOptions.map((o) => (
@@ -674,37 +653,42 @@ export function FarmTreatmentPage() {
                     <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Duration days" inputMode="numeric" value={form.durationDays} onChange={(e) => setForm((v) => ({ ...v, durationDays: e.target.value }))} />
                     <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Withdrawal days" inputMode="numeric" value={form.withdrawalDays} onChange={(e) => setForm((v) => ({ ...v, withdrawalDays: e.target.value }))} />
                   </div>
-                  <textarea className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} placeholder="Notes" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
-                  <div className="mt-3 flex justify-end">
-                    <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">{busy ? "Saving..." : "Save treatment"}</button>
+                  <textarea className="w-full rounded-lg border border-neutral-300 px-3 py-2" rows={3} placeholder="Notes" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
+                  <div className="flex justify-end">
+                    <Button variant="primary" size="sm" type="submit" disabled={busy} loading={busy}>Save treatment</Button>
                   </div>
                 </form>
-              ) : null}
+              </Modal>
             </>
           ) : null}
 
           {tab === "rounds" ? (
             <>
-              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+              <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-sm">
                 <p className="mb-2 text-sm font-semibold text-neutral-800">Overdue rounds</p>
                 <div className="space-y-2">
                   {overdueRounds.slice(0, 8).map((r) => (
-                    <div key={r.id} className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-900">
+                    <div key={r.id} className="rounded-lg border p-2 text-xs" style={{ borderColor: "var(--status-warning)", backgroundColor: "var(--status-warning-soft)", color: "var(--text-primary)" }}>
                       {r.medicineName} overdue by {Math.max(1, Math.floor(r.overdueMinutes / 60))}h ({r.flockId})
                     </div>
                   ))}
-                  {!overdueRounds.length ? <p className="text-sm text-emerald-700">No overdue rounds.</p> : null}
+                  {!overdueRounds.length ? <p className="text-sm text-[var(--status-success)]">No overdue rounds.</p> : null}
                 </div>
               </div>
 
-              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-                <p className="mb-2 text-sm font-semibold text-neutral-800">Flock</p>
-                <select className="w-full max-w-md rounded-lg border border-neutral-300 px-3 py-2" value={flockId} onChange={(e) => setFlockId(e.target.value)}>
-                  <option value="">All flocks</option>
-                  {flocks.map((f) => (
-                    <option key={f.id} value={f.id}>{f.label}</option>
-                  ))}
-                </select>
+              <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-sm">
+                <TableToolbar
+                  filters={
+                    <FacetFilter
+                      label="Flock"
+                      value={flockId || "all"}
+                      allValue="all"
+                      allLabel="All flocks"
+                      onChange={(v) => setFlockId(v === "all" ? "" : v)}
+                      options={flocks.map((f) => ({ value: f.id, label: f.label }))}
+                    />
+                  }
+                />
                 <p className="mt-4 mb-2 text-sm font-semibold text-neutral-800">Scheduled rounds</p>
                 <div className="space-y-2">
                   {rounds.slice(0, 12).map((r) => (
@@ -712,8 +696,8 @@ export function FarmTreatmentPage() {
                       <p className="font-medium">{r.medicineName} · {new Date(r.plannedFor).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}</p>
                       <p className="text-neutral-600">Status: {r.status} · Qty {r.plannedQuantity}</p>
                       <div className="mt-2 flex gap-2">
-                        {r.status !== "completed" ? <button type="button" className="rounded border border-neutral-300 px-2 py-1 text-xs" onClick={() => void updateRoundStatus(r.id, "completed")}>Mark completed</button> : null}
-                        {r.status !== "missed" ? <button type="button" className="rounded border border-neutral-300 px-2 py-1 text-xs" onClick={() => void updateRoundStatus(r.id, "missed")}>Mark missed</button> : null}
+                        {r.status !== "completed" ? <Button variant="secondary" size="sm" onClick={() => void updateRoundStatus(r.id, "completed")}>Mark completed</Button> : null}
+                        {r.status !== "missed" ? <Button variant="secondary" size="sm" onClick={() => void updateRoundStatus(r.id, "missed")}>Mark missed</Button> : null}
                       </div>
                     </div>
                   ))}
@@ -722,20 +706,14 @@ export function FarmTreatmentPage() {
               </div>
 
               {!showRoundForm ? (
-                <button
-                  type="button"
-                  onClick={() => setShowRoundForm(true)}
-                  className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
-                >
-                  Schedule new round
-                </button>
+                <Button variant="secondary" size="sm" onClick={() => setShowRoundForm(true)}>Schedule round</Button>
               ) : (
-                <form onSubmit={submitRound} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                <form onSubmit={submitRound} className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-sm">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <p className="text-sm font-semibold text-neutral-800">Schedule medicine / vaccine round</p>
-                    <button type="button" onClick={() => setShowRoundForm(false)} className="text-sm font-medium text-neutral-600 underline">
+                    <TextLink className="text-sm text-neutral-600" onClick={() => setShowRoundForm(false)}>
                       Cancel
-                    </button>
+                    </TextLink>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-3">
                     <select className="rounded-lg border border-neutral-300 px-3 py-2" value={roundForm.medicineId} onChange={(e) => setRoundForm((v) => ({ ...v, medicineId: e.target.value }))}>
@@ -755,9 +733,7 @@ export function FarmTreatmentPage() {
                     <input className="rounded-lg border border-neutral-300 px-3 py-2 sm:col-span-2" placeholder="Assign to user id (optional)" value={roundForm.assignedToUserId} onChange={(e) => setRoundForm((v) => ({ ...v, assignedToUserId: e.target.value }))} />
                   </div>
                   <div className="mt-3 flex justify-end">
-                    <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">
-                      Schedule round
-                    </button>
+                    <Button variant="primary" size="sm" type="submit" disabled={busy} loading={busy}>Schedule round</Button>
                   </div>
                 </form>
               )}
@@ -765,8 +741,8 @@ export function FarmTreatmentPage() {
           ) : null}
 
           {tab === "inventory" ? (
-            <div className="space-y-6">
-              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+            <div className="space-y-stack">
+              <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-sm">
                 <p className="mb-3 text-sm font-semibold text-neutral-800">Stock forecast (30 days)</p>
                 <div className="mb-6 grid gap-2 sm:grid-cols-2">
                   {forecastRows.slice(0, 6).map((f) => (
@@ -775,7 +751,7 @@ export function FarmTreatmentPage() {
                       <p className="text-neutral-700">
                         Cover: {f.daysOfCover != null ? `${f.daysOfCover} days` : "insufficient usage data"} · Avg/day {Number(f.avgDailyUse).toFixed(2)} {f.unit}
                       </p>
-                      {f.stockoutRisk7d ? <p className="font-semibold text-red-700">Risk: stockout within 7 days</p> : null}
+                      {f.stockoutRisk7d ? <p className="font-semibold text-[var(--status-danger)]">Risk: stockout within 7 days</p> : null}
                     </div>
                   ))}
                   {!forecastRows.length ? <p className="text-sm text-neutral-500">No forecast data yet.</p> : null}
@@ -789,7 +765,7 @@ export function FarmTreatmentPage() {
                       <div key={m.id} className="rounded-lg border border-neutral-200 p-3 text-sm">
                         <p className="font-medium">{m.name}</p>
                         <p className="text-neutral-600">{m.category} · withdrawal {m.withdrawalDays} day(s)</p>
-                        <p className={low ? "font-semibold text-red-700" : "font-semibold text-neutral-800"}>
+                        <p className={low ? "font-semibold text-[var(--status-danger)]" : "font-semibold text-neutral-800"}>
                           Stock: {m.quantity} {m.unit}{low ? " (LOW)" : ""}
                         </p>
                       </div>
@@ -799,20 +775,14 @@ export function FarmTreatmentPage() {
                 </div>
 
                 {!showMedicineForm ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowMedicineForm(true)}
-                    className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
-                  >
-                    Add catalog item
-                  </button>
+                  <Button variant="secondary" size="sm" onClick={() => setShowMedicineForm(true)}>Add catalog item</Button>
                 ) : (
                   <div className="rounded-lg border border-neutral-200 bg-neutral-50 p-4">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <p className="text-sm font-semibold text-neutral-800">New catalog item</p>
-                      <button type="button" onClick={() => setShowMedicineForm(false)} className="text-sm font-medium text-neutral-600 underline">
+                      <TextLink className="text-sm text-neutral-600" onClick={() => setShowMedicineForm(false)}>
                         Cancel
-                      </button>
+                      </TextLink>
                     </div>
                     <form onSubmit={submitMedicine} className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6">
                       <input className="rounded-lg border border-neutral-300 px-3 py-2 lg:col-span-2" placeholder="Medicine name" value={medForm.name} onChange={(e) => setMedForm((v) => ({ ...v, name: e.target.value }))} />
@@ -831,9 +801,7 @@ export function FarmTreatmentPage() {
                         ))}
                       </select>
                       <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Opening qty" inputMode="decimal" value={medForm.quantity} onChange={(e) => setMedForm((v) => ({ ...v, quantity: e.target.value }))} />
-                      <button disabled={busy} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">
-                        Add item
-                      </button>
+                      <Button variant="primary" size="sm" type="submit" disabled={busy} loading={busy}>Add item</Button>
                       <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Withdrawal days" inputMode="numeric" value={medForm.withdrawalDays} onChange={(e) => setMedForm((v) => ({ ...v, withdrawalDays: e.target.value }))} />
                       <input className="rounded-lg border border-neutral-300 px-3 py-2" placeholder="Low-stock alert at" inputMode="numeric" value={medForm.lowStockThreshold} onChange={(e) => setMedForm((v) => ({ ...v, lowStockThreshold: e.target.value }))} />
                     </form>
@@ -842,66 +810,87 @@ export function FarmTreatmentPage() {
               </div>
 
               {/* ── Medicine lot receipts ── */}
-              <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+              <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-sm">
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-neutral-800">Medicine lot receipts</p>
-                  <span className="text-xs text-neutral-500">Received batches — add unit cost to generate a draft vendor bill in Odoo</span>
+                  <span className="text-xs text-neutral-500">Received batches — add unit cost to record cost for ERPNext sync</span>
                 </div>
 
-                {lots.length > 0 && (
-                  <div className="mb-4 overflow-x-auto">
-                    <table className="institutional-table w-full text-xs">
-                      <thead>
-                        <tr>
-                          <th>Medicine</th>
-                          <th>Lot #</th>
-                          <th>Received</th>
-                          <th className="tbl-num">Qty received</th>
-                          <th className="tbl-num">Remaining</th>
-                          <th className="tbl-num">Unit cost (RWF)</th>
-                          <th>Supplier</th>
-                          <th>Odoo</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {lots.map((l) => (
-                          <tr key={String(l.id)}>
-                            <td className="font-medium">{l.medicineName}</td>
-                            <td className="tbl-mono">{l.lotNumber ?? "—"}</td>
-                            <td className="tbl-mono whitespace-nowrap">
-                              {new Date(l.receivedAt).toLocaleDateString(undefined, { timeZone: "Africa/Kigali" })}
-                            </td>
-                            <td className="tbl-num">{l.quantityReceived}</td>
-                            <td className="tbl-num">{l.quantityRemaining}</td>
-                            <td className="tbl-num">{l.unitCostRwf != null ? l.unitCostRwf.toLocaleString() : "—"}</td>
-                            <td>{l.supplier ?? "—"}</td>
-                            <td><OdooSyncBadge status={l.accountingStatus} compact approvalsHref="/farm/accounting-approvals" /></td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                {lots.length > 0 ? (
+                  <div className="mb-4">
+                    <DataTable<MedicineLot>
+                      columns={[
+                        { key: "med", header: "Medicine", render: (l) => <span className="font-medium">{l.medicineName}</span> },
+                        { key: "lot", header: "Lot #", className: "tbl-mono", render: (l) => l.lotNumber ?? "—" },
+                        {
+                          key: "received",
+                          header: "Received",
+                          className: "tbl-mono",
+                          render: (l) =>
+                            new Date(l.receivedAt).toLocaleDateString("en-GB", {
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                              timeZone: "Africa/Kigali",
+                            }),
+                        },
+                        { key: "qty", header: "Qty received", numeric: true, render: (l) => l.quantityReceived },
+                        { key: "rem", header: "Remaining", numeric: true, render: (l) => l.quantityRemaining },
+                        {
+                          key: "cost",
+                          header: "Unit cost (RWF)",
+                          numeric: true,
+                          render: (l) => (l.unitCostRwf != null ? l.unitCostRwf.toLocaleString() : "—"),
+                        },
+                        { key: "supplier", header: "Supplier", render: (l) => l.supplier ?? "—" },
+                        ...(user?.erpnextAccess || erpnextAccess
+                          ? [
+                              {
+                                key: "erpnext",
+                                header: "ERPNext",
+                                badge: true,
+                                render: (l: MedicineLot) => {
+                                  const hint = bySource.get(String(l.id));
+                                  if (!hint) return null;
+                                  return (
+                                    <ERPNextSyncBadge
+                                      state={hint.state}
+                                      reference={hint.reference}
+                                      compact
+                                      href={companyHref(`farm/erpnext-setup?q=${encodeURIComponent(String(l.id))}`)}
+                                    />
+                                  );
+                                },
+                              },
+                            ]
+                          : []),
+                      ]}
+                      rows={lots}
+                      rowKey={(l) => String(l.id)}
+                      renderMobileCard={(l) => (
+                        <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3">
+                          <p className="font-semibold text-sm">{l.medicineName}</p>
+                          <p className="text-xs text-[var(--text-muted)]">
+                            Lot {l.lotNumber ?? "—"} · rem {l.quantityRemaining}
+                          </p>
+                        </div>
+                      )}
+                    />
                   </div>
-                )}
-                {!lots.length && (
-                  <p className="mb-4 text-sm text-neutral-500">No lots received yet.</p>
+                ) : (
+                  <p className="mb-4 text-sm text-[var(--text-muted)]">No lots received yet.</p>
                 )}
 
                 {!showLotForm ? (
-                  <button
-                    type="button"
-                    onClick={() => {
+                  <Button variant="secondary" size="sm" onClick={() => {
                       setLotForm((v) => ({ ...v, medicineId: v.medicineId || medicines[0]?.id || "" }));
                       setShowLotForm(true);
-                    }}
-                    className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
-                  >
-                    Receive medicine lot
-                  </button>
+                    }}>Receive medicine lot</Button>
                 ) : (
-                  <form onSubmit={submitLot} className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+                  <form onSubmit={submitLot} className="rounded-lg border p-4" style={{ borderColor: "var(--status-success)", backgroundColor: "var(--status-success-soft)" }}>
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-neutral-800">Receive lot — adds to inventory &amp; queues Odoo bill if cost is set</p>
-                      <button type="button" onClick={() => setShowLotForm(false)} className="text-sm font-medium text-neutral-600 underline">Cancel</button>
+                      <p className="text-sm font-semibold text-neutral-800">Receive lot — adds to inventory &amp; records cost for ERPNext if set</p>
+                      <TextLink className="text-sm text-neutral-600" onClick={() => setShowLotForm(false)}>Cancel</TextLink>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       <div>
@@ -930,7 +919,7 @@ export function FarmTreatmentPage() {
                         />
                       </div>
                       <div>
-                        <label className="mb-1 block text-xs font-medium text-neutral-600">Unit cost (RWF) — enables Odoo bill</label>
+                        <label className="mb-1 block text-xs font-medium text-neutral-600">Unit cost (RWF)</label>
                         <input
                           className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
                           placeholder="e.g. 1200"
@@ -977,18 +966,12 @@ export function FarmTreatmentPage() {
                       </div>
                     </div>
                     {lotForm.unitCostRwf && (
-                      <p className="mt-2 text-xs text-emerald-700">
-                        A draft vendor bill will be queued for Odoo on save.
+                      <p className="mt-2 text-xs text-[var(--status-success)]">
+                        Cost will sync to ERPNext on save.
                       </p>
                     )}
                     <div className="mt-3">
-                      <button
-                        disabled={busy || !lotForm.medicineId || !lotForm.quantityReceived}
-                        className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                        type="submit"
-                      >
-                        {busy ? "Saving…" : "Save lot receipt"}
-                      </button>
+                      <Button variant="primary" size="sm" type="submit" disabled={busy || !lotForm.medicineId || !lotForm.quantityReceived} loading={busy}>Save lot receipt</Button>
                     </div>
                   </form>
                 )}
@@ -997,6 +980,6 @@ export function FarmTreatmentPage() {
           ) : null}
         </>
       ) : null}
-    </div>
+    </ManagerPage>
   );
 }

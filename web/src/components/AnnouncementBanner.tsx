@@ -58,21 +58,21 @@ export function AnnouncementBanner() {
   const current = visible[0];
   const tone =
     current.type === "warning"
-      ? "border-amber-500/40 bg-amber-500/10 text-amber-100"
+      ? "bg-amber-500/10 text-amber-900 dark:text-amber-100"
       : current.type === "maintenance"
-        ? "border-blue-500/40 bg-blue-500/10 text-blue-100"
-        : "border-[var(--primary-color)]/40 bg-[var(--primary-color)]/10 text-[var(--text-primary)]";
+        ? "bg-sky-500/10 text-sky-900 dark:text-sky-100"
+        : "bg-[var(--primary-color-soft)] text-[var(--text-primary)]";
 
   return (
-    <div className={`border-b px-4 py-3 text-sm ${tone}`} role="status">
-      <div className="mx-auto flex max-w-6xl items-start justify-between gap-3">
-        <div>
+    <div className={`px-shell-x py-2.5 text-sm ${tone}`} role="status">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <p className="font-semibold">{current.title}</p>
           <p className="mt-0.5 opacity-90">{current.message}</p>
         </div>
         <button
           type="button"
-          className="shrink-0 rounded px-2 py-1 text-xs underline opacity-80"
+          className="shrink-0 rounded px-2 py-1 text-xs font-medium underline underline-offset-2 opacity-80 hover:opacity-100"
           onClick={() => {
             const next = new Set(dismissed);
             next.add(current.id);

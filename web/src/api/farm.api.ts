@@ -116,6 +116,41 @@ export async function createMortalityEvent(
   });
 }
 
+export type MortalityEventRow = {
+  id: string;
+  at?: string;
+  logDate?: string;
+  count?: number;
+  deadCount?: number;
+  isEmergency?: boolean;
+  notes?: string;
+  submissionStatus?: string;
+};
+
+export async function fetchMortalityEvents(
+  token: string | null,
+  flockId: string,
+  limit = 25
+): Promise<{ events: MortalityEventRow[] }> {
+  if (IS_FRAPPE_MODE) {
+    const data = await callFrappe<{ events: MortalityEventRow[] }>("mortality.get_mortality_events", {
+      flock_id: flockId,
+    });
+    const events = (data.events ?? []).slice(0, limit).map((e) => ({
+      ...e,
+      at: e.at ?? e.logDate,
+      count: e.count ?? e.deadCount,
+    }));
+    return { events };
+  }
+  const data = await legacyFetch<{ events: MortalityEventRow[] }>(
+    `/api/flocks/${encodeURIComponent(flockId)}/mortality-events`,
+    token
+  );
+  const events = (data.events ?? []).slice(0, limit);
+  return { events };
+}
+
 export async function createRoundCheckin(
   token: string | null,
   flockId: string,
@@ -129,6 +164,28 @@ export async function createRoundCheckin(
     headers: jsonAuthHeaders(token),
     body: JSON.stringify(body),
   });
+}
+
+export type FeedStockRow = {
+  feedType: string | null;
+  balanceKg: number;
+  purchasedKg?: number;
+  usedKg?: number;
+  adjustmentsKg?: number;
+};
+
+export async function fetchFeedStockSummary(
+  token: string | null,
+  feedType?: string | null
+): Promise<{ summary: FeedStockRow[] }> {
+  if (IS_FRAPPE_MODE) {
+    const args: Record<string, string> = { slug: tenantSlug() ?? "" };
+    if (feedType) args.feed_type = feedType;
+    const data = await callFrappe<{ summary: FeedStockRow[] }>("inventory.get_stock_summary", args);
+    return { summary: data.summary ?? [] };
+  }
+  const q = feedType ? `?feedType=${encodeURIComponent(feedType)}` : "";
+  return legacyFetch<{ summary: FeedStockRow[] }>(`/api/inventory/stock-summary${q}`, token);
 }
 
 export async function fetchPendingFeed(token: string | null) {
@@ -304,6 +361,15 @@ export type VetLogListRow = {
   hasWeightSample?: boolean;
   treatmentId?: string | null;
   medicineName?: string | null;
+  /** Present on list when photo_urls column exists — no image blobs. */
+  hasPhotos?: boolean;
+  /** Full structured slots — returned on detail only. */
+  photoUrls?: unknown;
+  visitSlot?: string | null;
+  visitedAt?: string | null;
+  coopTemperatureC?: number | null;
+  feedAvailable?: boolean | null;
+  waterAvailable?: boolean | null;
 };
 
 export async function fetchVetLogsList(
@@ -358,6 +424,50 @@ export async function fetchFlockFcrSnapshot(
   flockId: string
 ): Promise<FcrBroilerSnapshot> {
   return legacyFetch(`/api/flocks/${encodeURIComponent(flockId)}/fcr-snapshot`, token);
+}
+
+export type TreatmentRow = {
+  id: string;
+  at: string;
+  reasonCode?: string;
+  diseaseOrReason: string;
+  medicineName: string;
+  dose: number;
+  doseUnit: string;
+  route: string;
+  durationDays: number;
+  withdrawalDays: number;
+  notes: string;
+};
+
+export async function fetchTreatments(
+  token: string | null,
+  flockId: string,
+  opts?: { startAt?: string; endAt?: string; limit?: number }
+): Promise<{ treatments: TreatmentRow[] }> {
+  const q = new URLSearchParams();
+  if (opts?.startAt) q.set("start_at", `${opts.startAt}T00:00:00.000Z`);
+  if (opts?.endAt) q.set("end_at", `${opts.endAt}T23:59:59.999Z`);
+  const qs = q.toString();
+  const data = await legacyFetch<{ treatments?: TreatmentRow[] }>(
+    `/api/flocks/${encodeURIComponent(flockId)}/treatments${qs ? `?${qs}` : ""}`,
+    token
+  );
+  const treatments = (data.treatments ?? []).sort((a, b) => (a.at < b.at ? 1 : -1));
+  const limit = opts?.limit;
+  return { treatments: limit ? treatments.slice(0, limit) : treatments };
+}
+
+export async function createTreatment(
+  token: string | null,
+  flockId: string,
+  body: Record<string, unknown>
+): Promise<unknown> {
+  return legacyFetch(`/api/flocks/${encodeURIComponent(flockId)}/treatments`, token, {
+    method: "POST",
+    headers: jsonAuthHeaders(token),
+    body: JSON.stringify(body),
+  });
 }
 
 export { IS_FRAPPE_MODE, API_BASE_URL };

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { CheckinUrgencyBadge } from "../../components/farm/CheckinUrgencyBadge";
@@ -8,10 +9,13 @@ import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { API_BASE_URL } from "../../api/config";
 import type { CheckinStatus } from "./checkinStatusTypes";
+import { Button } from "../../components/ui/Button";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
 
 type Band = { untilDay: number; intervalHours: number };
 
 export function FlockScheduleSettingsPage() {
+  const navigate = useNavigate();
   const { token } = useAuth();
   const { showToast } = useToast();
   const [flockId, setFlockId] = useState<string | null>(null);
@@ -24,6 +28,7 @@ export function FlockScheduleSettingsPage() {
   const [busy, setBusy] = useState(false);
   const [pageLoading, setPageLoading] = useState(true);
   const [withdrawalWarning, setWithdrawalWarning] = useState<string | null>(null);
+  const [confirmRemoveBand, setConfirmRemoveBand] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -119,7 +124,6 @@ export function FlockScheduleSettingsPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <PageHeader
         title="Check-in schedule (batch)"
-        subtitle="Set how often laborers must complete photo check-ins by bird age. Target slaughter window is informational for the crew (default ~days 45–50)."
       />
 
       {pageLoading && <SkeletonList rows={4} />}
@@ -127,7 +131,7 @@ export function FlockScheduleSettingsPage() {
       {!pageLoading && error && !status && <ErrorState message={error} onRetry={() => void load()} />}
 
       {!pageLoading && !error && flockId == null ? (
-        <EmptyState title="No flock on this farm yet" description="Add a flock to configure check-in bands." />
+        <EmptyState title="No flock on this farm yet" description="Add a flock to configure check-in bands." action={<Button variant="primary" onClick={() => navigate("../flocks")}>Go to flocks</Button>} />
       ) : null}
 
       {!pageLoading && status && (
@@ -139,7 +143,7 @@ export function FlockScheduleSettingsPage() {
           {/* FIX: same check-in urgency as flock list / detail */}
           <CheckinUrgencyBadge badge={status.checkinBadge} />
           {withdrawalWarning ? (
-            <span className="inline-flex rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-800">
+            <span className="inline-flex rounded-full border border-[var(--status-danger)]/30 bg-[var(--status-danger-soft)] px-2 py-0.5 text-xs font-semibold text-[var(--status-danger)]">
               🔴 Withdrawal
             </span>
           ) : null}
@@ -147,13 +151,13 @@ export function FlockScheduleSettingsPage() {
       )}
 
       {!pageLoading && withdrawalWarning ? (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-900">
+        <p className="rounded-lg border border-[var(--status-danger)]/30 bg-[var(--status-danger-soft)] px-3 py-2 text-sm font-semibold text-[var(--status-danger)]">
           {withdrawalWarning}
         </p>
       ) : null}
 
       {!pageLoading && status && error && (
-        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800" role="alert">
+        <p className="rounded-lg bg-[var(--status-danger-soft)] px-3 py-2 text-sm text-[var(--status-danger)]" role="alert">
           {error}
         </p>
       )}
@@ -161,7 +165,7 @@ export function FlockScheduleSettingsPage() {
       {!pageLoading && status ? (
       <form
         onSubmit={(e) => void handleSave(e)}
-        className="space-y-6 rounded-xl border border-neutral-200 bg-white p-6 shadow-sm"
+        className="space-y-stack rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] p-card shadow-sm"
       >
         <div className="grid gap-4 sm:grid-cols-3">
           <div>
@@ -198,6 +202,9 @@ export function FlockScheduleSettingsPage() {
               value={targetMax}
               onChange={(e) => setTargetMax(Number(e.target.value))}
             />
+            <p className="mt-1 type-caption text-[var(--text-muted)]">
+              Target slaughter window is informational for the crew (default ~days 45–50).
+            </p>
           </div>
         </div>
 
@@ -223,13 +230,9 @@ export function FlockScheduleSettingsPage() {
                 value={b.intervalHours}
                 onChange={(e) => updateBand(i, "intervalHours", e.target.value)}
               />
-              <button
-                type="button"
-                onClick={() => removeBand(i)}
-                className="mt-3 text-sm text-red-700 hover:underline"
-              >
+              <Button variant="danger" size="xs" onClick={() => setConfirmRemoveBand(i)}>
                 Remove band
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
@@ -267,13 +270,9 @@ export function FlockScheduleSettingsPage() {
                     />
                   </td>
                   <td>
-                    <button
-                      type="button"
-                      onClick={() => removeBand(i)}
-                      className="text-sm text-red-700 hover:underline"
-                    >
+                    <Button variant="danger" size="xs" onClick={() => setConfirmRemoveBand(i)}>
                       Remove
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -281,23 +280,28 @@ export function FlockScheduleSettingsPage() {
           </table>
         </div>
 
-        <button
-          type="button"
-          onClick={addBand}
-          className="rounded-lg border border-neutral-300 bg-neutral-50 px-4 py-2 text-sm font-medium"
-        >
+        <Button variant="secondary" onClick={addBand}>
           Add band
-        </button>
+        </Button>
 
-        <button
-          type="submit"
-          disabled={busy || !flockId}
-          className="rounded-xl bg-emerald-800 px-6 py-3 font-semibold text-white hover:bg-emerald-900 disabled:opacity-50"
-        >
-          {busy ? "Saving…" : "Save schedule for batch"}
-        </button>
+        <Button type="submit" variant="primary" loading={busy} disabled={!flockId}>
+          Save schedule for batch
+        </Button>
       </form>
       ) : null}
+
+      <ConfirmDialog
+        open={confirmRemoveBand !== null}
+        title="Remove band"
+        message={confirmRemoveBand !== null ? `Remove band ${confirmRemoveBand + 1}? This won't take effect until you save.` : ""}
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={() => {
+          if (confirmRemoveBand !== null) removeBand(confirmRemoveBand);
+          setConfirmRemoveBand(null);
+        }}
+        onCancel={() => setConfirmRemoveBand(null)}
+      />
     </div>
   );
 }

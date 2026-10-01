@@ -1,872 +1,285 @@
 /**
- * Command Center — premium analytics dashboard
- *
- * Sections (superuser-configurable visibility):
- *   exec_kpis      — Executive KPI strip
- *   health_score   — Farm health gauge + insights
- *   risk_intel     — Risk distribution + top risk bars
- *   growth_metrics — Weight vs target, FCR, weigh-in trends
- *   ops_trends     — Mortality trend
- *   blockers       — Operational blockers
- *   flock_table    — Live flock scanner table
- *   finance        — Biomass, fair value, IAS 41 snapshot
+ * Command Center — Today (native) + Trends (embedded Superset Insights).
  */
 
-import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
-import { PermissionGuard } from "../../components/PermissionGuard";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
-import { ChartPanel } from "../../components/dashboard/ChartPanel";
-import { MiniStat } from "../../components/dashboard/MiniStat";
-import {
-  BlockersStacked,
-  FlockWeightTrendLines,
-  FcrTargetBars,
-  MortalityTrendLine,
-  RiskDonut,
-  TopRiskBars,
-  WeightVsTargetBars,
-} from "../../components/dashboard/charts/OpsCharts";
+import { isPipelineSalesRole } from "../../auth/permissions";
 import { useOpsBoardData } from "../../hooks/useOpsBoardData";
-import { useWeighInTrends } from "../../hooks/useWeighInTrends";
-import {
-  biomassSummary,
-  blockersSeries,
-  flockWeightTrendChartData,
-  fcrVsTargetSeries,
-  mortalityTrendPseudoDaily,
-  riskClassCount,
-  topBiomassFlocks,
-  topRiskSeries,
-  weighInTrendFlockOptions,
-  weightVsTargetSeries,
-  type OpsBoardFlock,
-} from "../../lib/dashboardAdapters";
-import { readAuthHeaders } from "../../lib/authHeaders";
-import { API_BASE_URL } from "../../api/config";
-import { useOdooConnection } from "../../context/OdooConnectionContext";
 import { useCompanyNav } from "../../hooks/useCompanyNav";
+import {
+  fetchInsightsPacks,
+  saveInsightsPacks,
+  type InsightsPack,
+} from "../../api/insights.api";
+import { ManagementToday, fcrKpiLabel } from "./ManagementToday";
+import { PageHeader } from "../../components/PageHeader";
+import { PageTabs, TableToolbar, FacetFilter } from "../../components/ui";
+import { Button } from "../../components/ui/Button";
+import { IconButton } from "../../components/ui/IconButton";
+import {
+  SupersetInsightsEmbed,
+  useInsightsScopeOptions,
+  type InsightsScope,
+} from "../../components/insights/SupersetInsightsEmbed";
+import type { GrowthInsight } from "../../lib/dashboardAdapters";
 
-// ─── Widget definitions ────────────────────────────────────────────────────────
-
-const ALL_WIDGETS = [
-  { id: "exec_kpis", label: "Executive KPIs" },
-  { id: "health_score", label: "Farm health score" },
-  { id: "risk_intel", label: "Risk intelligence" },
-  { id: "growth_metrics", label: "Growth & conversion (weight & FCR)" },
-  { id: "ops_trends", label: "Ops trends (mortality)" },
-  { id: "blockers", label: "Operational blockers" },
-  { id: "flock_table", label: "Flock scanner table" },
-  { id: "finance", label: "Financial pulse" },
-];
-
-const DEFAULT_VISIBLE = ALL_WIDGETS.map(w => w.id);
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function riskBadge(rc: OpsBoardFlock["riskClass"]) {
-  const m: Record<string, string> = {
-    healthy: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
-    watch: "bg-amber-500/15 text-amber-400 border-amber-500/20",
-    at_risk: "bg-orange-500/15 text-orange-400 border-orange-500/20",
-    critical: "bg-red-500/15 text-red-400 border-red-500/20",
-  };
-  return m[rc] ?? "bg-[var(--surface-subtle)] text-[var(--text-muted)]";
+function isManagerTier(role: string | undefined): boolean {
+  return role === "superuser" || role === "manager" || role === "company_admin";
 }
 
-function riskLabel(rc: OpsBoardFlock["riskClass"]) {
-  return { healthy: "Healthy", watch: "Watch", at_risk: "At risk", critical: "Critical" }[rc] ?? rc;
-}
-
-function formatRwf(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return "—";
-  return new Intl.NumberFormat("en-RW", { style: "currency", currency: "RWF", maximumFractionDigits: 0 }).format(n);
-}
-
-function formatKg(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return "—";
-  return `${n.toLocaleString(undefined, { maximumFractionDigits: 1 })} kg`;
-}
-
-function formatWeighDate(d: string | null | undefined): string {
-  if (!d) return "—";
-  const ms = new Date(d).getTime();
-  if (!Number.isFinite(ms)) return d;
-  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-}
-
-// ─── Section header ────────────────────────────────────────────────────────────
-
-function SectionHeader({ label, sub, action, num }: { label: string; sub?: string; action?: ReactNode; num: string }) {
-  return (
-    <div className="flex items-center justify-between gap-3 pt-2 pb-1 border-b border-[var(--border-color)] mb-1">
-      <div className="flex items-baseline gap-2.5 min-w-0">
-        <span className="section-num shrink-0">{num}</span>
-        <h2 className="font-display text-sm font-semibold tracking-tight text-[var(--text-primary)] truncate">{label}</h2>
-        {sub && <span className="hidden sm:inline text-[11px] text-[var(--text-muted)] truncate">{sub}</span>}
-      </div>
-      {action}
-    </div>
-  );
-}
-
-// ─── Live badge ────────────────────────────────────────────────────────────────
-
-function LiveBadge() {
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--primary-color)]/30 bg-[var(--primary-color)]/10 px-2.5 py-0.5 text-[11px] font-semibold text-[var(--primary-color)]">
-      <span className="live-dot" />
-      LIVE
-    </span>
-  );
-}
-
-function OdooStatusPill() {
-  const { companyHref } = useCompanyNav();
-  const { status, loading } = useOdooConnection();
-  if (loading && !status) {
-    return (
-      <span
-        className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-color)] bg-[var(--surface-card)] px-2.5 py-0.5 text-[11px] font-medium text-[var(--text-muted)]"
-        title="Checking ERPNext connection"
-      >
-        ERPNext…
-      </span>
-    );
-  }
-  const ok = status?.connected === true;
-  const err = status?.error?.trim() || null;
-  return (
-    <Link
-      to={companyHref("farm/erpnext-setup")}
-      className={
-        ok
-          ? "inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-400 transition-colors hover:bg-emerald-500/15"
-          : "inline-flex max-w-[min(20rem,55vw)] items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-amber-200 transition-colors hover:bg-amber-500/15"
-      }
-      title={ok ? "ERPNext integration is connected" : err || "ERPNext is not connected — open settings"}
-    >
-      <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${ok ? "bg-emerald-400" : "bg-amber-400"}`} />
-      <span className="min-w-0 truncate">{ok ? "ERPNext connected" : "ERPNext not connected"}</span>
-    </Link>
-  );
-}
-
-// ─── Finance card helpers ──────────────────────────────────────────────────────
-
-function FinanceCard({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)] p-5 flex flex-col gap-2">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">{label}</p>
-      {children}
-    </div>
-  );
-}
-
-function FinanceLockedCard({ label, reason }: { label: string; reason: string }) {
-  return (
-    <div className="rounded-[var(--radius-lg)] border border-dashed border-[var(--border-color)] bg-[var(--surface-card)] p-5 flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--text-muted)]">{label}</p>
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-[var(--text-muted)] opacity-60 shrink-0">
-          <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
-        </svg>
-      </div>
-      <p className="text-sm text-[var(--text-muted)]">{reason}</p>
-    </div>
-  );
-}
-
-function FinanceBarPlaceholder({ bars, color = "var(--primary-color)" }: { bars: number[]; color?: string }) {
-  return (
-    <div className="mt-3 flex items-end gap-1 h-10">
-      {bars.map((h, i) => (
-        <div
-          key={i}
-          className="flex-1 rounded-sm opacity-25"
-          style={{ height: `${Math.round(h * 100)}%`, background: color }}
-        />
-      ))}
-    </div>
-  );
-}
-
-// ─── Widget config hook ────────────────────────────────────────────────────────
-
-function useWidgetVisibility(token: string | null, _isSuperuser: boolean) {
-  const [visible, setVisible] = useState<string[]>(DEFAULT_VISIBLE);
+function useInsightsPacks(token: string | null, canConfigure: boolean) {
+  const [note, setNote] = useState<string>("");
   const [configOpen, setConfigOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState<string[]>(DEFAULT_VISIBLE);
+  const [draft, setDraft] = useState<InsightsPack[]>([]);
+  const [applied, setApplied] = useState<InsightsPack[]>([]);
 
   useEffect(() => {
-    fetch(`${API_BASE_URL}/api/admin/dashboard-widgets`, { headers: readAuthHeaders(token) })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (d?.widgets && Array.isArray(d.widgets)) {
-          setVisible(d.widgets);
-          setDraft(d.widgets);
-        }
+    if (!token) return;
+    fetchInsightsPacks(token)
+      .then((d) => {
+        const packs = d.packs ?? [];
+        setDraft(packs);
+        setApplied(packs);
+        setNote(d.note ?? "");
       })
       .catch(() => {});
-  }, [token]);
+  }, [token, canConfigure]);
 
   async function save() {
     setSaving(true);
     try {
-      await fetch(`${API_BASE_URL}/api/admin/dashboard-widgets`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ widgets: draft }),
-      });
-      setVisible(draft);
+      const next = await saveInsightsPacks(token, draft);
+      const packs = next.packs ?? draft;
+      setDraft(packs);
+      setApplied(packs);
+      setNote(next.note ?? note);
       setConfigOpen(false);
-    } catch {}
+    } catch {
+      /* keep modal open */
+    }
     setSaving(false);
   }
 
   function toggle(id: string) {
-    setDraft(prev => prev.includes(id) ? prev.filter(w => w !== id) : [...prev, id]);
+    setDraft((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, enabled: !p.enabled } : p))
+    );
   }
 
-  return { visible, configOpen, setConfigOpen, draft, toggle, save, saving };
+  return { note, configOpen, setConfigOpen, draft, applied, toggle, save, saving };
 }
-
-// ─── Main component ────────────────────────────────────────────────────────────
-
-const SYNC_POLL_MS = 5 * 60 * 1000;
 
 export function ManagementHome() {
   const { token, user } = useAuth();
   const { companyHref } = useCompanyNav();
-  const { data, loading, error, reload } = useOpsBoardData(token);
-  const weighTrends = useWeighInTrends(token, 90);
-  const [weighTrendFlockFilter, setWeighTrendFlockFilter] = useState<string | null>(null);
-  const isSuperuser = user?.role === "superuser";
+  const [searchParams, setSearchParams] = useSearchParams();
+  const homeTab = searchParams.get("tab") === "trends" ? "trends" : "today";
+  const { data, reload } = useOpsBoardData(token);
   const role = user?.role ?? "manager";
-  const canOpenAccountingApprovals = user?.role === "manager" || user?.role === "superuser";
-  const [outboxNotSentCount, setOutboxNotSentCount] = useState<number | null>(null);
-
-  const { visible, configOpen, setConfigOpen, draft, toggle, save, saving } = useWidgetVisibility(token, isSuperuser);
-  const show = (id: string) => visible.includes(id);
-
-  useEffect(() => {
-    if (!token) return;
-    let cancelled = false;
-    const run = async () => {
-      try {
-        const r = await fetch(`${API_BASE_URL}/api/accounting-reconciliation/sync-health`, {
-          headers: readAuthHeaders(token),
-        });
-        const d = r.ok ? ((await r.json()) as { notSentToOdoo?: number }) : null;
-        if (cancelled) return;
-        setOutboxNotSentCount(typeof d?.notSentToOdoo === "number" ? d.notSentToOdoo : null);
-      } catch {
-        if (!cancelled) setOutboxNotSentCount(null);
-      }
-    };
-    void run();
-    const id = window.setInterval(() => void run(), SYNC_POLL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [token]);
+  const canConfigurePacks = isManagerTier(role);
+  const { note, configOpen, setConfigOpen, draft, applied, toggle, save, saving } = useInsightsPacks(
+    token,
+    canConfigurePacks
+  );
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [dataAsOf, setDataAsOf] = useState<string | null>(null);
+  const onDataAsOf = useCallback((v: string | null) => setDataAsOf(v), []);
+  const [scopeBarn, setScopeBarn] = useState<string>("");
+  const [scopeFlock, setScopeFlock] = useState<string>("");
 
   const flocks = data?.flocks ?? [];
-  const insights = data?.insights ?? [];
+  const growthInsights = (data?.growthInsights ?? []) as GrowthInsight[];
   const farmScore = data?.farmHealthScore ?? null;
-  const farmTotals = data?.farmTotals;
-  const growth = biomassSummary(flocks);
+  const { barns, flockLabels } = useInsightsScopeOptions(flocks);
 
-  const criticalCount = flocks.filter(f => f.riskClass === "critical").length;
-  const watchCount = flocks.filter(f => f.riskClass === "watch" || f.riskClass === "at_risk").length;
-  const healthyCount = flocks.filter(f => f.riskClass === "healthy").length;
-  const avgRisk = flocks.length ? Math.round(flocks.reduce((s, f) => s + Number(f.riskScore || 0), 0) / flocks.length) : 0;
-  const avgMortDelta = flocks.length ? Number((flocks.reduce((s, f) => s + Number(f.mortality24hDeltaPct || 0), 0) / flocks.length).toFixed(2)) : 0;
-  const totalBlockers = flocks.reduce((s, f) => s + f.overdueRounds + f.withdrawalBlockers, 0);
+  const flockOptions = useMemo(() => {
+    if (!scopeBarn) return flockLabels;
+    return flocks
+      .filter((f) => String(f.barn || "") === scopeBarn)
+      .map((f) => String(f.label || "").trim())
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+  }, [flocks, flockLabels, scopeBarn]);
 
-  const sortedFlocks = [...flocks].sort((a, b) => b.riskScore - a.riskScore);
-  const mortalityData = mortalityTrendPseudoDaily(flocks);
-  const fcrData = fcrVsTargetSeries(flocks, 10);
-  const weightData = weightVsTargetSeries(flocks, 8);
-  const weighTrendFlockOptionsList = useMemo(
-    () => weighInTrendFlockOptions(weighTrends.points),
-    [weighTrends.points],
+  const insightsScope: InsightsScope = useMemo(
+    () => ({
+      barn: scopeBarn || null,
+      flock: scopeFlock || null,
+    }),
+    [scopeBarn, scopeFlock]
   );
-  const flockWeightTrend = useMemo(
-    () =>
-      flockWeightTrendChartData(weighTrends.points, {
-        flockId: weighTrendFlockFilter,
-        limit: 8,
-      }),
-    [weighTrends.points, weighTrendFlockFilter],
-  );
-  const topBiomass = topBiomassFlocks(flocks, 5);
-  const biomassKg = farmTotals?.totalBiomassKg ?? growth.totalBiomassKg;
-  const fairValueRwf = farmTotals?.estimatedFairValueRwf ?? growth.estimatedFairValueRwf;
+
+  function handleRefresh() {
+    reload();
+    if (homeTab === "trends") setRefreshKey((k) => k + 1);
+  }
+
+  async function handleSavePacks() {
+    await save();
+    setRefreshKey((k) => k + 1);
+  }
+
+  if (isPipelineSalesRole(user)) {
+    return <Navigate to={companyHref("/farm/pipeline")} replace />;
+  }
 
   return (
-    <div className="mx-auto w-full max-w-[1280px] space-y-0 pb-12">
-
-      {/* ── Page header strip ── */}
-      <div className="flex flex-col gap-3 pt-2 pb-5 mb-6 border-b border-[var(--border-color)]">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="font-display text-3xl font-bold tracking-tight leading-none"
-              style={{ background: "var(--primary-gradient)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>
-              Command Center
-            </h1>
-            <p className="mt-1.5 text-[12px] text-[var(--text-muted)] flex items-center gap-2">
-              <span className="live-dot" />
-              Cross-unit KPIs — Clevafarm operations and finance
-            </p>
-          </div>
+    <div
+      className={
+        homeTab === "trends"
+          ? "flex w-full flex-col gap-3 pb-4"
+          : "w-full space-y-stack pb-12"
+      }
+    >
+      <PageHeader
+        title={homeTab === "trends" ? "Trends" : "Today"}
+        tabs={
+          <PageTabs
+            aria-label="Home view"
+            value={homeTab}
+            onChange={(v) => {
+              const next = new URLSearchParams(searchParams);
+              if (v === "trends") next.set("tab", "trends");
+              else next.delete("tab");
+              setSearchParams(next, { replace: true });
+            }}
+            options={[
+              { value: "today", label: "Today" },
+              { value: "trends", label: "Trends" },
+            ]}
+          />
+        }
+        action={
           <div className="flex items-center gap-2 flex-wrap justify-end">
+            {homeTab === "trends" && dataAsOf ? (
+              <span className="type-caption text-[var(--text-muted)]">Data as of {dataAsOf}</span>
+            ) : null}
             <Link
               to={`${companyHref("farm/reports")}?type=farm_operations`}
               className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] transition-colors"
             >
               Reports
             </Link>
-            <OdooStatusPill />
-            <LiveBadge />
-            <button onClick={reload}
-              className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] transition-colors">
+            <Button variant="secondary" size="sm" onClick={handleRefresh}>
               Refresh
-            </button>
-            {isSuperuser && (
-              <button onClick={() => setConfigOpen(true)}
-                className="rounded-[var(--radius-md)] border border-[var(--primary-color)]/30 bg-[var(--primary-color)]/10 px-3 py-1.5 text-xs font-semibold text-[var(--primary-color)] hover:bg-[var(--primary-color)]/15 transition-colors">
+            </Button>
+            {canConfigurePacks && homeTab === "trends" ? (
+              <Button variant="secondary" size="sm" onClick={() => setConfigOpen(true)}>
                 Widgets
-              </button>
-            )}
+              </Button>
+            ) : null}
           </div>
-        </div>
-      </div>
+        }
+      />
 
-      {outboxNotSentCount != null && outboxNotSentCount > 0 && (
-        <div
-          role="status"
-          className="mb-6 flex flex-col gap-2 rounded-[var(--radius-lg)] border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-[var(--text-primary)] sm:flex-row sm:items-center sm:justify-between"
-        >
-          <p className="min-w-0">
-            <span className="font-semibold text-amber-200">{outboxNotSentCount}</span>
-            {outboxNotSentCount === 1
-              ? " accounting transaction is not yet in Odoo."
-              : " accounting transactions are not yet in Odoo."}
-            {!canOpenAccountingApprovals && (
-              <span className="text-[var(--text-muted)]"> A manager can sync or retry them from Accounting approvals.</span>
-            )}
-          </p>
-          {canOpenAccountingApprovals ? (
-            <Link
-              to={`${companyHref("farm/accounting-approvals")}?tab=action`}
-              className="shrink-0 font-medium text-[var(--primary-color)] underline decoration-[var(--primary-color)]/40 underline-offset-2 hover:decoration-[var(--primary-color)]"
-            >
-              Open Accounting approvals
-            </Link>
-          ) : null}
-        </div>
-      )}
+      {homeTab === "today" ? (
+        <ManagementToday
+          flocks={flocks}
+          farmScore={farmScore}
+          growthInsights={growthInsights}
+          totalLive={flocks.reduce((s, f) => s + Number(f.birdsLiveEstimate ?? 0), 0)}
+          mort7d={flocks.reduce((s, f) => s + Number(f.mortality7d ?? 0), 0)}
+          fcrLabel={fcrKpiLabel(flocks)}
+          overdueCount={flocks.reduce((s, f) => s + Number(f.overdueRounds ?? 0), 0)}
+          companyHref={companyHref}
+          role={role}
+        />
+      ) : null}
 
-      {/* ── Widget config panel ── */}
-      {configOpen && isSuperuser && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-[var(--radius-xl)] border border-[var(--border-color)] bg-[var(--surface-elevated)] p-6 shadow-[var(--shadow-elevated)] space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-bold text-[var(--text-primary)]">Dashboard widgets</h2>
-              <button onClick={() => setConfigOpen(false)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-xl leading-none">×</button>
-            </div>
-            <p className="text-xs text-[var(--text-muted)]">Choose which sections appear on the Command Center for all users.</p>
-            <div className="space-y-2">
-              {ALL_WIDGETS.map(w => (
-                <label key={w.id} className="flex items-center gap-3 cursor-pointer rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-2.5 hover:bg-[var(--surface-elevated)] transition-colors">
-                  <input type="checkbox" checked={draft.includes(w.id)} onChange={() => toggle(w.id)}
-                    className="h-4 w-4 rounded accent-[var(--primary-color)]" />
-                  <span className="text-sm text-[var(--text-primary)]">{w.label}</span>
-                </label>
-              ))}
-            </div>
-            <div className="flex gap-2 justify-end pt-2">
-              <button onClick={() => setConfigOpen(false)} className="rounded-[var(--radius-md)] border border-[var(--border-color)] px-4 py-2 text-sm text-[var(--text-muted)] hover:bg-[var(--surface-card)]">Cancel</button>
-              <button onClick={save} disabled={saving} className="rounded-[var(--radius-md)] bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)] disabled:opacity-50">
-                {saving ? "Saving…" : "Save"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ══════════════ EXEC KPIs ══════════════ */}
-      {show("exec_kpis") && (
-        <section className="space-y-3 mb-8">
-          <SectionHeader num="01" label="Executive overview" sub="Live farm operations snapshot" />
-          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
-            <MiniStat label="Active flocks" value={loading ? "…" : flocks.length} icon="🐔" glow />
-            <MiniStat label="Healthy" value={loading ? "…" : healthyCount} tone="good" icon="✓" glow />
-            <MiniStat label="Watch/At risk" value={loading ? "…" : watchCount} tone={watchCount > 0 ? "warn" : "good"} icon="⚠" glow={watchCount > 0} />
-            <MiniStat label="Critical" value={loading ? "…" : criticalCount} tone={criticalCount > 0 ? "bad" : "good"} icon="🚨" glow={criticalCount > 0} />
-            <MiniStat
-              label="Farm biomass"
-              value={loading ? "…" : formatKg(biomassKg)}
-              tone="good"
-              icon="⚖"
-            />
-            <MiniStat
-              label="Est. fair value"
-              value={loading ? "…" : fairValueRwf != null ? formatRwf(fairValueRwf) : "Set ref. price"}
-              tone={fairValueRwf != null ? "good" : "warn"}
-              icon="💰"
-            />
-          </div>
-          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
-            <MiniStat label="Avg risk score" value={loading ? "…" : `${avgRisk}/100`} tone={avgRisk > 65 ? "bad" : avgRisk > 35 ? "warn" : "good"} icon="📊" />
-            <MiniStat
-              label="Mortality 24h Δ"
-              value={loading ? "…" : `${avgMortDelta >= 0 ? "+" : ""}${avgMortDelta}%`}
-              tone={avgMortDelta > 0.5 ? "bad" : avgMortDelta > 0.1 ? "warn" : "good"}
-              change={totalBlockers > 0 ? `${totalBlockers} blockers` : undefined}
-              icon="📉"
-            />
-            <MiniStat
-              label="Wt vs target (avg)"
-              value={loading ? "…" : growth.avgWeightDeviationPct != null ? `${growth.avgWeightDeviationPct >= 0 ? "+" : ""}${growth.avgWeightDeviationPct}%` : "—"}
-              tone={(growth.avgWeightDeviationPct ?? 0) < -5 ? "bad" : (growth.avgWeightDeviationPct ?? 0) < 0 ? "warn" : "good"}
-              icon="📏"
-            />
-            <MiniStat
-              label="Avg FCR"
-              value={loading ? "…" : growth.avgFcr != null ? String(growth.avgFcr) : "—"}
-              icon="🌾"
-            />
-          </div>
-        </section>
-      )}
-
-      {/* ══════════════ FARM HEALTH SCORE ══════════════ */}
-      {show("health_score") && (
-        <section className="mb-8 space-y-3">
-          <SectionHeader num="02" label="Farm health" />
-          <div className="grid gap-4 md:grid-cols-3">
-            {/* Score card */}
-            <div className="rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)] p-5 flex flex-col items-center justify-center gap-3">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Farm health score</p>
-              {loading ? (
-                <div className="skeleton-shimmer h-16 w-24 rounded-lg" />
-              ) : (
-                <>
-                  <div
-                    className="text-6xl font-extrabold tabular-nums animate-count"
-                    style={{
-                      color: farmScore == null ? "var(--text-muted)" :
-                        farmScore >= 75 ? "#22c78a" : farmScore >= 50 ? "#fbbf24" : "#f87171"
-                    }}
-                  >
-                    {farmScore ?? "—"}
-                  </div>
-                  <div className="text-xs text-[var(--text-muted)]">/ 100</div>
-                  {farmScore != null && (
-                    <div className={["text-xs font-semibold px-3 py-1 rounded-full border",
-                      farmScore >= 75 ? "bg-emerald-500/15 text-emerald-400 border-emerald-500/20" :
-                      farmScore >= 50 ? "bg-amber-500/15 text-amber-400 border-amber-500/20" :
-                      "bg-red-500/15 text-red-400 border-red-500/20"
-                    ].join(" ")}>
-                      {farmScore >= 75 ? "Good standing" : farmScore >= 50 ? "Needs attention" : "Critical — action required"}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-
-            {/* Insights */}
-            <div className="md:col-span-2 rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)] p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">AI Insights</p>
-                <LiveBadge />
+      {homeTab === "trends" ? (
+        <>
+          {configOpen && canConfigurePacks ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+              <div className="w-full max-w-md rounded-[var(--radius-xl)] border border-[var(--border-color)] bg-[var(--surface-elevated)] p-card shadow-[var(--shadow-elevated)] space-y-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-bold text-[var(--text-primary)]">Insights packs</h2>
+                  <IconButton size="sm" label="Close" onClick={() => setConfigOpen(false)}>
+                    ×
+                  </IconButton>
+                </div>
+                <p className="text-xs text-[var(--text-muted)]">
+                  {note ||
+                    "With all packs on you get the full Command Center. Turn some off to show only those packs."}
+                </p>
+                <div className="space-y-2">
+                  {draft.map((p) => (
+                    <label
+                      key={p.id}
+                      className="flex items-center gap-3 cursor-pointer rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-2.5 hover:bg-[var(--surface-elevated)] transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={p.enabled}
+                        onChange={() => toggle(p.id)}
+                        className="h-4 w-4 rounded accent-[var(--primary-color)]"
+                      />
+                      <span className="text-sm text-[var(--text-primary)]">{p.label}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="flex gap-2 justify-end pt-2">
+                  <Button variant="ghost" size="sm" onClick={() => setConfigOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button size="sm" onClick={handleSavePacks} disabled={saving} loading={saving}>
+                    {saving ? "Saving…" : "Save"}
+                  </Button>
+                </div>
               </div>
-              {loading ? (
-                <div className="space-y-2">
-                  <div className="skeleton-shimmer h-4 w-full rounded" />
-                  <div className="skeleton-shimmer h-4 w-4/5 rounded" />
-                  <div className="skeleton-shimmer h-4 w-3/5 rounded" />
-                </div>
-              ) : insights.length > 0 ? (
-                <ul className="space-y-2">
-                  {insights.slice(0, 5).map((ins, i) => (
-                    <li key={i} className="flex items-start gap-2.5 text-sm text-[var(--text-secondary)]">
-                      <span className="mt-0.5 shrink-0 text-[var(--primary-color)] font-bold text-xs">›</span>
-                      {ins}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <div className="space-y-2">
-                  {role === "manager" || role === "superuser" ? (
-                    <>
-                      <p className="text-sm text-[var(--text-secondary)] flex items-start gap-2"><span className="text-[var(--primary-color)] font-bold text-xs mt-0.5">›</span> Monitor critical flocks, blockers, and trend direction daily.</p>
-                      <p className="text-sm text-[var(--text-secondary)] flex items-start gap-2"><span className="text-[var(--primary-color)] font-bold text-xs mt-0.5">›</span> Use risk + FCR charts to prioritize farm-level interventions.</p>
-                    </>
-                  ) : null}
-                  {watchCount > 0 && <p className="text-sm text-amber-400 flex items-start gap-2"><span className="font-bold text-xs mt-0.5">›</span> {watchCount} flock{watchCount !== 1 ? "s" : ""} in watch/at-risk state.</p>}
-                  {criticalCount > 0 && <p className="text-sm text-red-400 flex items-start gap-2"><span className="font-bold text-xs mt-0.5">›</span> {criticalCount} critical flock{criticalCount !== 1 ? "s" : ""} require immediate action.</p>}
-                  {insights.length === 0 && flocks.length === 0 && <p className="text-sm text-[var(--text-muted)]">No flock data loaded yet.</p>}
-                </div>
-              )}
             </div>
-          </div>
-        </section>
-      )}
+          ) : null}
 
-      {/* ══════════════ RISK INTELLIGENCE ══════════════ */}
-      {show("risk_intel") && (
-        <section className="mb-8 space-y-3">
-          <SectionHeader num="03" label="Risk intelligence" sub="Flock distribution and priority ranking" />
-          <div className="grid gap-4 lg:grid-cols-3 lg:items-stretch">
-            <ChartPanel title="Risk distribution" subtitle="Healthy vs watch vs at-risk vs critical" loading={loading} error={error} empty={!loading && !error && flocks.length === 0}>
-              <RiskDonut data={riskClassCount(flocks)} />
-            </ChartPanel>
-            <ChartPanel title="Top risk flocks" subtitle="Highest priority flocks by risk score" loading={loading} error={error} empty={!loading && !error && flocks.length === 0} className="lg:col-span-2">
-              <TopRiskBars data={topRiskSeries(flocks, 8)} />
-            </ChartPanel>
-          </div>
-        </section>
-      )}
-
-      {/* ══════════════ GROWTH & CONVERSION ══════════════ */}
-      {show("growth_metrics") && (
-        <section className="mb-8 space-y-3">
-          <SectionHeader num="04" label="Growth & conversion" sub="Weigh-in performance, FCR, and weight trends" />
-          <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 mb-1">
-            <MiniStat
-              label="Avg wt vs target"
-              value={loading ? "…" : growth.avgWeightDeviationPct != null ? `${growth.avgWeightDeviationPct >= 0 ? "+" : ""}${growth.avgWeightDeviationPct}%` : "—"}
-              tone={(growth.avgWeightDeviationPct ?? 0) < -5 ? "bad" : (growth.avgWeightDeviationPct ?? 0) < 0 ? "warn" : "good"}
-            />
-            <MiniStat
-              label="Below target (&lt;5%)"
-              value={loading ? "…" : growth.belowTargetCount}
-              tone={growth.belowTargetCount > 0 ? "warn" : "good"}
-            />
-            <MiniStat
-              label="Stale weigh-ins"
-              value={loading ? "…" : growth.staleWeighInCount}
-              tone={growth.staleWeighInCount > 0 ? "warn" : "good"}
-            />
-            <MiniStat
-              label="Avg FCR"
-              value={loading ? "…" : growth.avgFcr != null ? String(growth.avgFcr) : "—"}
-            />
-          </div>
-          <div className="grid gap-4 xl:grid-cols-2">
-            <ChartPanel
-              title="Weight vs target"
-              subtitle="Actual vs breed expected — worst deviation first"
-              loading={loading}
-              error={error}
-              empty={!loading && !error && weightData.length === 0}
-              emptyLabel="No weigh-in data yet"
-            >
-              <WeightVsTargetBars data={weightData} />
-            </ChartPanel>
-            <ChartPanel
-              title="FCR vs target"
-              subtitle="Latest FCR — red = above target"
-              loading={loading}
-              error={error}
-              empty={!loading && !error && fcrData.length === 0}
-              emptyLabel="No FCR data available yet"
-            >
-              <FcrTargetBars data={fcrData} />
-            </ChartPanel>
-          </div>
-          <ChartPanel
-            title="Weigh-in trend"
-            subtitle="Per-flock actual (solid) vs breed target (dotted) — 90 days"
-            loading={weighTrends.loading}
-            error={weighTrends.error}
-            empty={!weighTrends.loading && !weighTrends.error && flockWeightTrend.rows.length === 0}
-            emptyLabel="No weigh-in history in the selected period"
-            action={
-              weighTrendFlockOptionsList.length > 0 ? (
-                <select
-                  className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-1 text-xs text-[var(--text-secondary)]"
-                  value={weighTrendFlockFilter ?? ""}
-                  onChange={(e) => setWeighTrendFlockFilter(e.target.value || null)}
-                  aria-label="Filter weigh-in trend by flock"
+          <TableToolbar
+            filters={
+              <>
+                <FacetFilter
+                  label="Barn"
+                  value={scopeBarn || "all"}
+                  allValue="all"
+                  allLabel="All barns"
+                  onChange={(v) => {
+                    setScopeBarn(v === "all" ? "" : v);
+                    setScopeFlock("");
+                  }}
+                  options={barns.map((b) => ({ value: b, label: b }))}
+                />
+                <FacetFilter
+                  label="Flock"
+                  value={scopeFlock || "all"}
+                  allValue="all"
+                  allLabel="All flocks"
+                  onChange={(v) => setScopeFlock(v === "all" ? "" : v)}
+                  options={flockOptions.map((label) => ({ value: label, label }))}
+                />
+              </>
+            }
+            actions={
+              scopeBarn || scopeFlock ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setScopeBarn("");
+                    setScopeFlock("");
+                  }}
                 >
-                  <option value="">All flocks (top 8)</option>
-                  {weighTrendFlockOptionsList.map((f) => (
-                    <option key={f.flockId} value={f.flockId}>
-                      {f.label}
-                    </option>
-                  ))}
-                </select>
+                  Clear scope
+                </Button>
               ) : null
             }
-          >
-            <FlockWeightTrendLines rows={flockWeightTrend.rows} series={flockWeightTrend.series} />
-          </ChartPanel>
-        </section>
-      )}
-
-      {/* ══════════════ OPS TRENDS ══════════════ */}
-      {show("ops_trends") && (
-        <section className="mb-8 space-y-3">
-          <SectionHeader num="05" label="Ops trends" sub="Mortality performance over time" />
-          <div className="grid gap-4 xl:grid-cols-1">
-            <ChartPanel title="Mortality trend" subtitle="7-day farm average mortality rate" loading={loading} error={error} empty={!loading && !error && flocks.length === 0}>
-              <MortalityTrendLine data={mortalityData} />
-            </ChartPanel>
-          </div>
-        </section>
-      )}
-
-      {/* ══════════════ BLOCKERS ══════════════ */}
-      {show("blockers") && (
-        <section className="mb-8 space-y-3">
-          <SectionHeader num="06" label="Operational blockers" sub="Overdue rounds and withdrawal blockers per flock"
-            action={
-              totalBlockers > 0 ? (
-                <span className="rounded-full border border-red-500/20 bg-red-500/10 px-2.5 py-0.5 text-xs font-semibold text-red-400">{totalBlockers} active</span>
-              ) : (
-                <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-400">All clear</span>
-              )
-            }
           />
-          <ChartPanel title="Blockers by flock" subtitle="Overdue rounds + withdrawal blockers" loading={loading} error={error} empty={!loading && !error && flocks.length === 0}>
-            <BlockersStacked data={blockersSeries(flocks, 10)} />
-          </ChartPanel>
-        </section>
-      )}
 
-      {/* ══════════════ FLOCK SCANNER TABLE ══════════════ */}
-      {show("flock_table") && (
-        <section className="mb-8 space-y-3">
-          <SectionHeader num="07" label="Flock scanner" sub="Live status of all active flocks"
-            action={<Link to={companyHref("farm/flocks")} className="text-xs text-[var(--primary-color)] hover:underline font-medium">View all →</Link>}
+          <SupersetInsightsEmbed
+            refreshKey={refreshKey}
+            onDataAsOf={onDataAsOf}
+            packs={applied}
+            scope={insightsScope}
           />
-          <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="border-b border-[var(--border-color)] text-left text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] bg-[var(--table-header-bg)]">
-                    <th className="px-4 py-3">Flock</th>
-                    <th className="px-4 py-3">Barn</th>
-                    <th className="px-4 py-3 text-center">Age</th>
-                    <th className="px-4 py-3 text-right">Risk</th>
-                    <th className="px-4 py-3 text-right">Latest wt</th>
-                    <th className="px-4 py-3 text-right">Wt vs tgt</th>
-                    <th className="px-4 py-3 text-right">Last weigh-in</th>
-                    <th className="px-4 py-3 text-right">Proj. harvest</th>
-                    <th className="px-4 py-3 text-right">FCR</th>
-                    <th className="px-4 py-3 text-right">Mortality 7d</th>
-                    <th className="px-4 py-3 text-center">Blockers</th>
-                    <th className="px-4 py-3">Issue</th>
-                    <th className="px-4 py-3 text-center">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loading && (
-                    <tr>
-                      <td colSpan={13} className="px-4 py-8 text-center text-sm text-[var(--text-muted)] animate-pulse">Loading flock data…</td>
-                    </tr>
-                  )}
-                  {!loading && sortedFlocks.length === 0 && (
-                    <tr>
-                      <td colSpan={13} className="px-4 py-10 text-center text-sm text-[var(--text-muted)]">No active flocks found.</td>
-                    </tr>
-                  )}
-                  {sortedFlocks.map(f => (
-                    <tr key={f.flockId}
-                      className="border-b border-[var(--border-color)] hover:bg-[var(--table-row-hover)] transition-colors group">
-                      <td className="px-4 py-2.5">
-                        <Link to={`${companyHref(`farm/flocks/${f.flockId}`)}#weigh-in`}
-                          className="font-semibold text-[var(--text-primary)] group-hover:text-[var(--primary-color)] transition-colors">
-                          {f.label}
-                        </Link>
-                      </td>
-                      <td className="px-4 py-2.5 text-xs text-[var(--text-muted)]">{f.barn}</td>
-                      <td className="px-4 py-2.5 text-center text-xs text-[var(--text-secondary)] tabular-nums">{f.ageDays}d</td>
-                      <td className="px-4 py-2.5 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <span className="font-bold tabular-nums text-xs" style={{
-                            color: f.riskScore >= 75 ? "#f87171" : f.riskScore >= 50 ? "#f97316" : f.riskScore >= 25 ? "#fbbf24" : "#22c78a"
-                          }}>{Math.round(f.riskScore)}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-2.5 text-right text-xs tabular-nums text-[var(--text-secondary)]">
-                        {f.latestWeightKg != null ? Number(f.latestWeightKg).toFixed(2) : <span className="text-[var(--text-muted)]">—</span>}
-                      </td>
-                      <td className={["px-4 py-2.5 text-right text-xs tabular-nums", (f.weightDeviationPct ?? 0) < -5 ? "text-red-400 font-semibold" : ""].join(" ")}>
-                        {f.weightDeviationPct != null ? `${f.weightDeviationPct >= 0 ? "+" : ""}${Number(f.weightDeviationPct).toFixed(1)}%` : <span className="text-[var(--text-muted)]">—</span>}
-                      </td>
-                      <td className="px-4 py-2.5 text-right text-xs text-[var(--text-muted)] tabular-nums">
-                        {formatWeighDate(f.latestWeighDate)}
-                      </td>
-                      <td className="px-4 py-2.5 text-right text-xs tabular-nums text-[var(--text-secondary)]">
-                        {f.projections?.projectedHarvestWeightKg != null
-                          ? Number(f.projections.projectedHarvestWeightKg).toFixed(2)
-                          : <span className="text-[var(--text-muted)]">—</span>}
-                      </td>
-                      <td className="px-4 py-2.5 text-right text-xs tabular-nums">
-                        {f.latestFcr != null ? (
-                          <span style={{ color: f.latestFcr > f.expectedFcrRange.max ? "#f87171" : "var(--text-secondary)" }}>
-                            {Number(f.latestFcr).toFixed(2)}
-                          </span>
-                        ) : <span className="text-[var(--text-muted)]">—</span>}
-                      </td>
-                      <td className="px-4 py-2.5 text-right text-xs tabular-nums">
-                        <span style={{ color: f.mortality7d > 2 ? "#f87171" : f.mortality7d > 0.5 ? "#fbbf24" : "var(--text-secondary)" }}>
-                          {Number(f.mortality7d).toFixed(2)}%
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5 text-center">
-                        {f.overdueRounds + f.withdrawalBlockers > 0 ? (
-                          <span className="rounded-full bg-red-500/15 text-red-400 text-[11px] font-bold px-2 py-0.5 border border-red-500/20">
-                            {f.overdueRounds + f.withdrawalBlockers}
-                          </span>
-                        ) : (
-                          <span className="text-emerald-500 text-xs">✓</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 text-xs text-[var(--text-muted)] max-w-[240px] truncate" title={f.topIssue || undefined}>{f.topIssue || "—"}</td>
-                      <td className="px-4 py-2.5 text-center">
-                        <span className={["text-[11px] font-semibold border px-2 py-0.5 rounded-full", riskBadge(f.riskClass)].join(" ")}>
-                          {riskLabel(f.riskClass)}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* ══════════════ FINANCIAL PULSE ══════════════ */}
-      {show("finance") && (
-        <section className="mb-8 space-y-3">
-          <SectionHeader
-            num="08"
-            label="Financial pulse"
-            sub="Biomass valuation and IAS 41 snapshots"
-            action={
-              canOpenAccountingApprovals ? (
-                <Link to={companyHref("farm/accounting-approvals")} className="text-xs text-[var(--primary-color)] hover:underline font-medium">
-                  Accounting approvals →
-                </Link>
-              ) : undefined
-            }
-          />
-          <div className="grid gap-4 lg:grid-cols-3">
-            <FinanceCard label="Farm biomass">
-              <p className="font-mono-data text-2xl font-bold text-[var(--text-primary)]">
-                {loading ? "…" : formatKg(biomassKg)}
-              </p>
-              <p className="text-xs text-[var(--text-muted)] mt-1">
-                {growth.flocksWithWeight} flock{growth.flocksWithWeight !== 1 ? "s" : ""} with weigh-in data
-              </p>
-            </FinanceCard>
-
-            <FinanceCard label="Est. fair value (reference market)">
-              <p className="font-mono-data text-2xl font-bold text-[var(--text-primary)]">
-                {loading ? "…" : fairValueRwf != null ? formatRwf(fairValueRwf) : "—"}
-              </p>
-              <p className="text-xs text-[var(--text-muted)] mt-1">
-                {farmTotals?.referenceMarketPriceRwfPerKg != null
-                  ? `At ${formatRwf(farmTotals.referenceMarketPriceRwfPerKg)}/kg reference price`
-                  : "Set reference market price in System config"}
-              </p>
-            </FinanceCard>
-
-            <FinanceCard label="Approved IAS 41 snapshots">
-              <p className="font-mono-data text-2xl font-bold text-[var(--text-primary)]">
-                {loading ? "…" : farmTotals?.approvedValuationTotalRwf != null ? formatRwf(farmTotals.approvedValuationTotalRwf) : "—"}
-              </p>
-              <p className="text-xs text-[var(--text-muted)] mt-1">Latest approved/posted snapshot totals per flock</p>
-            </FinanceCard>
-          </div>
-
-          {topBiomass.length > 0 && (
-            <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]">
-              <div className="px-4 py-3 border-b border-[var(--border-color)]">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)]">Top flocks by biomass</p>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm border-collapse">
-                  <thead>
-                    <tr className="border-b border-[var(--border-color)] text-left text-[11px] font-bold uppercase tracking-wider text-[var(--text-muted)] bg-[var(--table-header-bg)]">
-                      <th className="px-4 py-2">Flock</th>
-                      <th className="px-4 py-2 text-right">Biomass</th>
-                      <th className="px-4 py-2 text-right">Wt vs tgt</th>
-                      <th className="px-4 py-2 text-right">FCR</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {topBiomass.map((row) => (
-                      <tr key={row.flockId} className="border-b border-[var(--border-color)] hover:bg-[var(--table-row-hover)]">
-                        <td className="px-4 py-2">
-                          <Link to={companyHref(`farm/flocks/${row.flockId}`)} className="font-medium text-[var(--text-primary)] hover:text-[var(--primary-color)]">
-                            {row.label}
-                          </Link>
-                        </td>
-                        <td className="px-4 py-2 text-right tabular-nums">{formatKg(row.biomassKg)}</td>
-                        <td className={["px-4 py-2 text-right tabular-nums text-xs", (row.weightDeviationPct ?? 0) < -5 ? "text-red-400" : ""].join(" ")}>
-                          {row.weightDeviationPct != null ? `${row.weightDeviationPct >= 0 ? "+" : ""}${row.weightDeviationPct.toFixed(1)}%` : "—"}
-                        </td>
-                        <td className="px-4 py-2 text-right tabular-nums text-xs">
-                          {row.latestFcr != null ? (
-                            <span style={{ color: row.latestFcr > row.expectedFcrRange.max ? "#f87171" : "var(--text-secondary)" }}>
-                              {Number(row.latestFcr).toFixed(2)}
-                            </span>
-                          ) : "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          <div className="grid gap-4 lg:grid-cols-3">
-            <PermissionGuard
-              permission="view_net_profit"
-              fallback={<FinanceLockedCard label="Net margin" reason="Financial clearance required." />}
-            >
-              <FinanceCard label="Net profit outlook">
-                <p className="font-mono-data text-2xl font-bold text-[var(--text-muted)]">Pending</p>
-                <p className="text-xs text-[var(--text-muted)] mt-1">Ledger consolidation in progress.</p>
-                <FinanceBarPlaceholder bars={[0.4, 0.6, 0.5, 0.7, 0.55, 0.8, 0.65]} />
-              </FinanceCard>
-            </PermissionGuard>
-
-            <FinanceCard label="Finance portfolio">
-              <p className="text-sm text-[var(--text-secondary)]">Exposure and PAR summary</p>
-              <FinanceBarPlaceholder bars={[0.9, 0.7, 0.8, 0.6, 0.75, 0.85, 0.7]} color="var(--secondary-color)" />
-            </FinanceCard>
-
-            <PermissionGuard permission="view_bank_balances"
-              fallback={<FinanceLockedCard label="Liquidity" reason="Bank balances require clearance." />}
-            >
-              <FinanceCard label="Liquidity">
-                <p className="text-sm text-[var(--text-secondary)]">Bank balances available with clearance.</p>
-                <FinanceBarPlaceholder bars={[0.5, 0.6, 0.7, 0.65, 0.8, 0.75, 0.9]} color="var(--primary-color)" />
-              </FinanceCard>
-            </PermissionGuard>
-          </div>
-        </section>
-      )}
-
-      {/* Error state */}
-      {error && (
-        <div className="rounded-[var(--radius-lg)] border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-          {error}
-        </div>
-      )}
+        </>
+      ) : null}
     </div>
   );
 }

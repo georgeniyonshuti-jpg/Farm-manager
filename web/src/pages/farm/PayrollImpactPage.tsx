@@ -1,16 +1,29 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
+import { isCompanyLevelAdmin } from "../../auth/permissions";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { formatRwf } from "../../lib/formatRwf";
-import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
+import { Button } from "../../components/ui/Button";
+import {
+  DataTable,
+  Field,
+  Input,
+  PageTabs,
+  StatusPill,
+  TableToolbar,
+  type DataColumn,
+} from "../../components/ui";
+import { ERPNextSyncBadge } from "../../components/accounting/ERPNextSyncBadge";
 import { useToast } from "../../components/Toast";
 import { API_BASE_URL } from "../../api/config";
 import { getPayrollFromERPNext } from "../../api/erpnext.api";
 import { getStoredErpnextCompany } from "../../lib/erpnextPrefs";
-import { useERPNextConnection } from "../../context/OdooConnectionContext";
+import { useERPNextConnection } from "../../context/ERPNextConnectionContext";
+import { ManagerPage } from "../../components/layout/ManagerPage";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
+import { formatManagerDateTime } from "../../lib/formatManagerDateTime";
 
 type PayrollRow = {
   id: string;
@@ -30,6 +43,28 @@ type PayrollRow = {
   accountingStatus?: string;
 };
 
+type PayrollClosure = {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  netPayrollRwf: number;
+  workerCount: number;
+  notes: string | null;
+};
+
+type FieldPayrollRates = {
+  checkInRwf: number;
+  feedRwf: number;
+  missedCheckInRwf: number;
+  missedFeedRwf: number;
+  lateDeductionRwf: number;
+  vetVisitRwf: number;
+  missedVetVisitRwf: number;
+  lateVetVisitDeductionRwf: number;
+};
+
+type PayrollTab = "lines" | "rates" | "closures";
+
 function monthRange(): { from: string; to: string } {
   const n = new Date();
   const from = new Date(Date.UTC(n.getFullYear(), n.getMonth(), 1));
@@ -40,22 +75,25 @@ function monthRange(): { from: string; to: string } {
   };
 }
 
-type FieldPayrollRates = {
-  checkInRwf: number;
-  feedRwf: number;
-  missedCheckInRwf: number;
-  missedFeedRwf: number;
-  lateDeductionRwf: number;
-};
+const mgrInput = "!min-h-10 h-10 box-border py-0 text-sm leading-10";
 
 export function PayrollImpactPage() {
   const { token, user } = useAuth();
   const { showToast } = useToast();
+  const { navTo } = useCompanyNav();
   const { status: erpnextStatus } = useERPNextConnection();
-  const canEditFieldRates = user?.role === "manager" || user?.role === "superuser";
+  const canEditFieldRates = isCompanyLevelAdmin(user);
   const canDecidePayments =
-    user?.role === "superuser"
-    || (user?.role === "manager" && Array.isArray(user.pageAccess) && user.pageAccess.includes("odoo_send"));
+    user?.role === "superuser" || user?.role === "company_admin" || user?.role === "manager";
+
+  const tabOptions = useMemo(() => {
+    const opts: { value: PayrollTab; label: string }[] = [{ value: "lines", label: "Lines" }];
+    if (canEditFieldRates) opts.push({ value: "rates", label: "Rates" });
+    if (canDecidePayments) opts.push({ value: "closures", label: "Closures" });
+    return opts;
+  }, [canEditFieldRates, canDecidePayments]);
+
+  const [tab, setTab] = useState<PayrollTab>("lines");
   const initial = useMemo(() => monthRange(), []);
   const [from, setFrom] = useState(initial.from);
   const [to, setTo] = useState(initial.to);
@@ -63,8 +101,8 @@ export function PayrollImpactPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  const [fieldRates, setFieldRates] = useState<FieldPayrollRates | null>(null);
   const [fieldRatesBusy, setFieldRatesBusy] = useState(false);
   const [fieldRatesForm, setFieldRatesForm] = useState({
     checkInRwf: "",
@@ -72,8 +110,18 @@ export function PayrollImpactPage() {
     missedCheckInRwf: "",
     missedFeedRwf: "",
     lateDeductionRwf: "",
+    vetVisitRwf: "",
+    missedVetVisitRwf: "",
+    lateVetVisitDeductionRwf: "",
   });
   const [erpnextPayrollTotal, setErpnextPayrollTotal] = useState<number | null>(null);
+  const [closures, setClosures] = useState<PayrollClosure[]>([]);
+  const [closureForm, setClosureForm] = useState({ periodStart: "", periodEnd: "", notes: "" });
+  const [closureBusy, setClosureBusy] = useState(false);
+
+  useEffect(() => {
+    if (!tabOptions.some((o) => o.value === tab)) setTab("lines");
+  }, [tab, tabOptions]);
 
   const loadFieldRates = useCallback(async () => {
     if (!canEditFieldRates || !token) return;
@@ -84,13 +132,15 @@ export function PayrollImpactPage() {
       const d = await r.json();
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Load failed");
       const fr = d as FieldPayrollRates;
-      setFieldRates(fr);
       setFieldRatesForm({
         checkInRwf: String(fr.checkInRwf),
         feedRwf: String(fr.feedRwf),
         missedCheckInRwf: String(fr.missedCheckInRwf),
         missedFeedRwf: String(fr.missedFeedRwf),
         lateDeductionRwf: String(fr.lateDeductionRwf),
+        vetVisitRwf: String(fr.vetVisitRwf ?? fr.checkInRwf),
+        missedVetVisitRwf: String(fr.missedVetVisitRwf ?? fr.missedCheckInRwf),
+        lateVetVisitDeductionRwf: String(fr.lateVetVisitDeductionRwf ?? fr.lateDeductionRwf),
       });
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "Could not load field payroll rates");
@@ -106,8 +156,9 @@ export function PayrollImpactPage() {
     setLoading(true);
     try {
       const qs = new URLSearchParams({ period_start: from, period_end: to });
-      // ENV: moved to environment variable
-      const r = await fetch(`${API_BASE_URL}/api/payroll-impact?${qs}`, { headers: readAuthHeaders(token) });
+      const r = await fetch(`${API_BASE_URL}/api/payroll-impact?${qs}`, {
+        headers: readAuthHeaders(token),
+      });
       const d = await r.json();
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Load failed");
       setEntries((d.entries as PayrollRow[]) ?? []);
@@ -122,6 +173,58 @@ export function PayrollImpactPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadClosures = useCallback(async () => {
+    if (!token || !canDecidePayments) return;
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/farm-payroll/payroll-closures`, {
+        headers: readAuthHeaders(token),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return;
+      setClosures(
+        Array.isArray((d as { closures?: PayrollClosure[] }).closures)
+          ? (d as { closures: PayrollClosure[] }).closures
+          : []
+      );
+    } catch {
+      setClosures([]);
+    }
+  }, [token, canDecidePayments]);
+
+  useEffect(() => {
+    void loadClosures();
+  }, [loadClosures]);
+
+  async function createClosure(e: React.FormEvent) {
+    e.preventDefault();
+    if (!token || !canDecidePayments) return;
+    if (!closureForm.periodStart || !closureForm.periodEnd) {
+      showToast("error", "Period start and end are required.");
+      return;
+    }
+    setClosureBusy(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/farm-payroll/payroll-closures`, {
+        method: "POST",
+        headers: jsonAuthHeaders(token),
+        body: JSON.stringify({
+          periodStart: closureForm.periodStart,
+          periodEnd: closureForm.periodEnd,
+          notes: closureForm.notes.trim() || undefined,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Could not create closure");
+      showToast("success", "Period closure saved.");
+      setClosureForm({ periodStart: "", periodEnd: "", notes: "" });
+      await loadClosures();
+    } catch (err) {
+      showToast("error", err instanceof Error ? err.message : "Could not create closure");
+    } finally {
+      setClosureBusy(false);
+    }
+  }
 
   useEffect(() => {
     const company = getStoredErpnextCompany() || erpnextStatus?.company;
@@ -157,7 +260,6 @@ export function PayrollImpactPage() {
   async function approveOne(id: string) {
     setBusyId(id);
     try {
-      // ENV: moved to environment variable
       const r = await fetch(`${API_BASE_URL}/api/payroll-impact/${id}/approve`, {
         method: "PATCH",
         headers: jsonAuthHeaders(token),
@@ -177,7 +279,6 @@ export function PayrollImpactPage() {
   async function approveAllPending() {
     setBusyId("all");
     try {
-      // ENV: moved to environment variable
       const r = await fetch(`${API_BASE_URL}/api/payroll-impact/bulk-approve`, {
         method: "POST",
         headers: jsonAuthHeaders(token),
@@ -186,12 +287,56 @@ export function PayrollImpactPage() {
       const d = await r.json();
       if (!r.ok) throw new Error((d as { error?: string }).error);
       await load();
+      setSelectedIds(new Set());
       showToast("success", "All pending lines approved.");
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "Bulk approve failed");
     } finally {
       setBusyId(null);
     }
+  }
+
+  async function approveSelected() {
+    const ids = [...selectedIds].filter((id) => {
+      const row = entries.find((e) => e.id === id);
+      return row && !row.approvedAt;
+    });
+    if (!ids.length) return;
+    setBusyId("selected");
+    try {
+      for (const id of ids) {
+        const r = await fetch(`${API_BASE_URL}/api/payroll-impact/${id}/approve`, {
+          method: "PATCH",
+          headers: jsonAuthHeaders(token),
+          body: "{}",
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error((d as { error?: string }).error);
+      }
+      await load();
+      setSelectedIds(new Set());
+      showToast("success", `Approved ${ids.length} line(s).`);
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Approve failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const pendingOnPage = entries.filter((e) => !e.approvedAt);
+  const allPendingSelected =
+    pendingOnPage.length > 0 && pendingOnPage.every((e) => selectedIds.has(e.id));
+
+  function toggleSelectAllPending() {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allPendingSelected) {
+        for (const e of pendingOnPage) next.delete(e.id);
+      } else {
+        for (const e of pendingOnPage) next.add(e.id);
+      }
+      return next;
+    });
   }
 
   function exportCsv() {
@@ -237,6 +382,9 @@ export function PayrollImpactPage() {
       missedCheckInRwf: Number(fieldRatesForm.missedCheckInRwf),
       missedFeedRwf: Number(fieldRatesForm.missedFeedRwf),
       lateDeductionRwf: Number(fieldRatesForm.lateDeductionRwf),
+      vetVisitRwf: Number(fieldRatesForm.vetVisitRwf),
+      missedVetVisitRwf: Number(fieldRatesForm.missedVetVisitRwf),
+      lateVetVisitDeductionRwf: Number(fieldRatesForm.lateVetVisitDeductionRwf),
     };
     for (const v of Object.values(parsed)) {
       if (!Number.isFinite(v) || v < 0) {
@@ -253,7 +401,17 @@ export function PayrollImpactPage() {
       });
       const d = await r.json();
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Save failed");
-      setFieldRates(d as FieldPayrollRates);
+      const fr = d as FieldPayrollRates;
+      setFieldRatesForm({
+        checkInRwf: String(fr.checkInRwf),
+        feedRwf: String(fr.feedRwf),
+        missedCheckInRwf: String(fr.missedCheckInRwf),
+        missedFeedRwf: String(fr.missedFeedRwf),
+        lateDeductionRwf: String(fr.lateDeductionRwf),
+        vetVisitRwf: String(fr.vetVisitRwf ?? fr.checkInRwf),
+        missedVetVisitRwf: String(fr.missedVetVisitRwf ?? fr.missedCheckInRwf),
+        lateVetVisitDeductionRwf: String(fr.lateVetVisitDeductionRwf ?? fr.lateDeductionRwf),
+      });
       showToast("success", "Field payroll rates saved.");
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "Save failed");
@@ -262,263 +420,488 @@ export function PayrollImpactPage() {
     }
   }
 
+  const linesMeta = useMemo(() => {
+    if (loading) return undefined;
+    const parts = [
+      `Bonuses ${formatRwf(summary.bonuses)}`,
+      `Deductions ${formatRwf(summary.deductions)}`,
+      `Net ${formatRwf(summary.net)}`,
+      `${summary.pending} pending`,
+      `${entries.length} rows`,
+    ];
+    if (erpnextPayrollTotal != null) {
+      parts.push(`ERPNext ${formatRwf(erpnextPayrollTotal)}`);
+    }
+    return parts.join(" · ");
+  }, [loading, summary, entries.length, erpnextPayrollTotal]);
+
+  const payrollColumns: DataColumn<PayrollRow>[] = useMemo(
+    () => [
+      {
+        key: "select",
+        header: (
+          <input
+            type="checkbox"
+            checked={allPendingSelected}
+            onChange={toggleSelectAllPending}
+            disabled={!canDecidePayments || pendingOnPage.length === 0}
+            aria-label="Select all pending on page"
+          />
+        ),
+        className: "tbl-actions",
+        render: (e) =>
+          e.approvedAt ? (
+            <span className="text-[var(--text-muted)]">—</span>
+          ) : (
+            <input
+              type="checkbox"
+              checked={selectedIds.has(e.id)}
+              disabled={!canDecidePayments}
+              aria-label={`Select ${e.workerName}`}
+              onChange={() => {
+                setSelectedIds((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(e.id)) next.delete(e.id);
+                  else next.add(e.id);
+                  return next;
+                });
+              }}
+            />
+          ),
+      },
+      {
+        key: "worker",
+        header: "Worker",
+        render: (e) => <span className="whitespace-nowrap font-medium">{e.workerName}</span>,
+      },
+      {
+        key: "role",
+        header: "Role",
+        render: (e) => (
+          <span className="whitespace-nowrap text-[var(--text-secondary)]">{e.workerRole}</span>
+        ),
+      },
+      { key: "logType", header: "Log type", render: (e) => e.logType },
+      {
+        key: "submitted",
+        header: "Submitted",
+        className: "tbl-mono",
+        render: (e) => formatManagerDateTime(e.submittedAt),
+      },
+      {
+        key: "onTime",
+        header: "On-time",
+        badge: true,
+        render: (e) =>
+          e.onTime == null ? (
+            "—"
+          ) : (
+            <StatusPill tone={e.onTime ? "success" : "danger"}>{e.onTime ? "Yes" : "No"}</StatusPill>
+          ),
+      },
+      {
+        key: "delta",
+        header: "RWF delta",
+        numeric: true,
+        render: (e) => (
+          <span
+            className={`font-semibold ${
+              e.rwfDelta >= 0 ? "text-[var(--status-success)]" : "text-[var(--status-danger)]"
+            }`}
+          >
+            {formatRwf(e.rwfDelta)}
+          </span>
+        ),
+      },
+      {
+        key: "reason",
+        header: "Reason",
+        render: (e) => <span className="max-w-[14rem] block truncate">{e.reason}</span>,
+      },
+      {
+        key: "approved",
+        header: "Approved",
+        badge: true,
+        render: (e) => (
+          <StatusPill tone={e.approvedAt ? "success" : "warning"}>
+            {e.approvedAt ? "Yes" : "Pending"}
+          </StatusPill>
+        ),
+      },
+      {
+        key: "accounting",
+        header: "Accounting",
+        badge: true,
+        render: (e) => {
+          const s = e.accountingStatus ?? "not_applicable";
+          if (s === "not_applicable" || s === "none") {
+            return <StatusPill tone="neutral">No accounting</StatusPill>;
+          }
+          if (s === "failed") return <ERPNextSyncBadge state="failed" />;
+          if (s === "sent_to_odoo" || s === "synced" || s === "success") {
+            return <ERPNextSyncBadge state="synced" />;
+          }
+          if (s === "pending_approval") return <StatusPill tone="warning">Awaiting approval</StatusPill>;
+          return <ERPNextSyncBadge state="pending" />;
+        },
+      },
+      {
+        key: "action",
+        header: "Action",
+        className: "tbl-actions",
+        render: (e) =>
+          e.approvedAt == null && canDecidePayments ? (
+            <Button
+              variant="ghost"
+              size="xs"
+              disabled={busyId != null}
+              onClick={() => void approveOne(e.id)}
+            >
+              Approve
+            </Button>
+          ) : (
+            <span className="text-[var(--text-muted)]">{canDecidePayments ? "—" : "Read only"}</span>
+          ),
+      },
+    ],
+    [busyId, canDecidePayments, selectedIds, allPendingSelected, pendingOnPage.length]
+  );
+
+  const closureColumns: DataColumn<PayrollClosure>[] = useMemo(
+    () => [
+      {
+        key: "period",
+        header: "Period",
+        render: (c) => (
+          <span className="tabular-nums">
+            {String(c.periodStart).slice(0, 10)} → {String(c.periodEnd).slice(0, 10)}
+          </span>
+        ),
+      },
+      {
+        key: "net",
+        header: "Net",
+        numeric: true,
+        render: (c) => formatRwf(Number(c.netPayrollRwf) || 0),
+      },
+      {
+        key: "workers",
+        header: "Workers",
+        numeric: true,
+        render: (c) => c.workerCount,
+      },
+      {
+        key: "notes",
+        header: "Notes",
+        render: (c) => <span className="max-w-[16rem] block truncate">{c.notes || "—"}</span>,
+      },
+    ],
+    []
+  );
+
+  const headerPrimary =
+    tab === "rates" && canEditFieldRates
+      ? { label: "Save rates", onClick: () => void saveFieldRates(), disabled: fieldRatesBusy }
+      : tab === "closures" && canDecidePayments
+        ? {
+            label: "Create closure",
+            onClick: () => {
+              const form = document.getElementById("payroll-closure-form") as HTMLFormElement | null;
+              form?.requestSubmit();
+            },
+            disabled: closureBusy,
+          }
+        : undefined;
+
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <ManagerPage>
       <PageHeader
         title="Payroll impact"
-        subtitle="Bonuses and deductions from log timing. Payment decisions are restricted to Odoo send access."
-        action={
-          <Link
-            to="/farm/checkin-review"
-            className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
-          >
-            Review check-ins
-          </Link>
+        secondaryAction={{
+          label: "Review check-ins",
+          onClick: () => navTo("/farm/checkin-review"),
+        }}
+        primaryAction={headerPrimary}
+        tabs={
+          tabOptions.length > 1 ? (
+            <PageTabs
+              aria-label="Payroll sections"
+              value={tab}
+              onChange={(v) => setTab(v as PayrollTab)}
+              options={tabOptions}
+            />
+          ) : undefined
         }
       />
 
-      {canEditFieldRates ? (
-        <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-          <h2 className="text-sm font-semibold text-neutral-900">Laborer payroll rates (RWF)</h2>
-          <p className="mt-1 text-xs text-neutral-600">
-            These are the <strong>effective</strong> rates applied to every laborer check-in and feed log.
-            Changes take effect on the next submitted log.
-          </p>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <label className="block text-xs font-medium text-neutral-700">
-              On-time check-in credit (RWF)
-              <input
+      {tab === "lines" ? (
+        <>
+          {loading ? <SkeletonList rows={5} /> : null}
+          {!loading && error ? <ErrorState message={error} onRetry={() => void load()} /> : null}
+          {!loading && !error ? (
+            <div className="table-block">
+              {selectedIds.size > 0 && canDecidePayments ? (
+                <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border-color)] bg-[var(--surface-subtle)] px-3 py-2">
+                  <span className="text-xs font-semibold tabular-nums text-[var(--text-primary)]">
+                    {selectedIds.size} selected
+                  </span>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    disabled={busyId != null}
+                    loading={busyId === "selected"}
+                    onClick={() => void approveSelected()}
+                  >
+                    Approve selected
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+                    Clear
+                  </Button>
+                </div>
+              ) : null}
+              <DataTable<PayrollRow>
+                flush
+                columns={payrollColumns}
+                rows={entries}
+                rowKey={(e) => e.id}
+                emptyTitle="No payroll lines in this range"
+                emptyDescription=""
+                filteredEmptyTitle="No payroll lines in this range"
+                filteredEmptyDescription=""
+                toolbar={
+                  <TableToolbar
+                    filters={
+                      <>
+                        <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--text-primary)]">
+                          From
+                          <input
+                            type="date"
+                            className="h-8 rounded-control border border-[var(--border-input)] bg-[var(--surface-input)] px-2 text-xs text-[var(--text-primary)]"
+                            value={from}
+                            onChange={(e) => setFrom(e.target.value)}
+                          />
+                        </label>
+                        <label className="inline-flex items-center gap-1.5 text-xs font-medium text-[var(--text-primary)]">
+                          To
+                          <input
+                            type="date"
+                            className="h-8 rounded-control border border-[var(--border-input)] bg-[var(--surface-input)] px-2 text-xs text-[var(--text-primary)]"
+                            value={to}
+                            onChange={(e) => setTo(e.target.value)}
+                          />
+                        </label>
+                      </>
+                    }
+                    meta={linesMeta}
+                    actions={
+                      <>
+                        <Button variant="ghost" size="sm" onClick={() => void exportCsv()}>
+                          Export CSV
+                        </Button>
+                        {canDecidePayments && summary.pending > 0 ? (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            disabled={busyId != null}
+                            onClick={() => void approveAllPending()}
+                          >
+                            Approve all pending ({summary.pending})
+                          </Button>
+                        ) : null}
+                      </>
+                    }
+                  />
+                }
+                renderMobileCard={(e) => (
+                  <div className="space-y-1.5 rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold">{e.workerName}</span>
+                      <StatusPill tone={e.approvedAt ? "success" : "warning"}>
+                        {e.approvedAt ? "Approved" : "Pending"}
+                      </StatusPill>
+                    </div>
+                    <p className="type-caption tabular-nums text-[var(--text-primary)]">
+                      {e.logType} · {formatManagerDateTime(e.submittedAt)}
+                    </p>
+                    <p
+                      className={`text-sm font-semibold ${
+                        e.rwfDelta >= 0
+                          ? "text-[var(--status-success)]"
+                          : "text-[var(--status-danger)]"
+                      }`}
+                    >
+                      {formatRwf(e.rwfDelta)}
+                    </p>
+                    {e.approvedAt == null && canDecidePayments ? (
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        disabled={busyId != null}
+                        onClick={() => void approveOne(e.id)}
+                      >
+                        Approve
+                      </Button>
+                    ) : null}
+                  </div>
+                )}
+              />
+            </div>
+          ) : null}
+        </>
+      ) : null}
+
+      {tab === "rates" && canEditFieldRates ? (
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void saveFieldRates();
+          }}
+        >
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Field label="Check-in credit">
+              <Input
                 type="number"
                 min={0}
-                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                className={mgrInput}
                 value={fieldRatesForm.checkInRwf}
                 onChange={(e) => setFieldRatesForm((f) => ({ ...f, checkInRwf: e.target.value }))}
               />
-            </label>
-            <label className="block text-xs font-medium text-neutral-700">
-              Late check-in deduction (subtracted from credit)
-              <input
+            </Field>
+            <Field label="Late check-in deduction">
+              <Input
                 type="number"
                 min={0}
-                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                className={mgrInput}
                 value={fieldRatesForm.lateDeductionRwf}
-                onChange={(e) => setFieldRatesForm((f) => ({ ...f, lateDeductionRwf: e.target.value }))}
+                onChange={(e) =>
+                  setFieldRatesForm((f) => ({ ...f, lateDeductionRwf: e.target.value }))
+                }
               />
-              <span className="block mt-0.5 text-neutral-400 font-normal">
-                e.g. credit 500 − deduction 300 = 200 for late
-              </span>
-            </label>
-            <label className="block text-xs font-medium text-neutral-700">
-              Missed check-in deduction (RWF)
-              <input
+            </Field>
+            <Field label="Missed check-in deduction">
+              <Input
                 type="number"
                 min={0}
-                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                className={mgrInput}
                 value={fieldRatesForm.missedCheckInRwf}
-                onChange={(e) => setFieldRatesForm((f) => ({ ...f, missedCheckInRwf: e.target.value }))}
+                onChange={(e) =>
+                  setFieldRatesForm((f) => ({ ...f, missedCheckInRwf: e.target.value }))
+                }
               />
-            </label>
-            <label className="block text-xs font-medium text-neutral-700">
-              On-time feed log credit (RWF)
-              <input
+            </Field>
+            <Field label="Feed log credit">
+              <Input
                 type="number"
                 min={0}
-                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                className={mgrInput}
                 value={fieldRatesForm.feedRwf}
                 onChange={(e) => setFieldRatesForm((f) => ({ ...f, feedRwf: e.target.value }))}
               />
-            </label>
-            <label className="block text-xs font-medium text-neutral-700">
-              Missed feed log deduction (RWF)
-              <input
+            </Field>
+            <Field label="Missed feed deduction">
+              <Input
                 type="number"
                 min={0}
-                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+                className={mgrInput}
                 value={fieldRatesForm.missedFeedRwf}
-                onChange={(e) => setFieldRatesForm((f) => ({ ...f, missedFeedRwf: e.target.value }))}
+                onChange={(e) =>
+                  setFieldRatesForm((f) => ({ ...f, missedFeedRwf: e.target.value }))
+                }
               />
-            </label>
+            </Field>
+            <Field label="Vet visit credit">
+              <Input
+                type="number"
+                min={0}
+                className={mgrInput}
+                value={fieldRatesForm.vetVisitRwf}
+                onChange={(e) => setFieldRatesForm((f) => ({ ...f, vetVisitRwf: e.target.value }))}
+              />
+            </Field>
+            <Field label="Late vet visit deduction">
+              <Input
+                type="number"
+                min={0}
+                className={mgrInput}
+                value={fieldRatesForm.lateVetVisitDeductionRwf}
+                onChange={(e) =>
+                  setFieldRatesForm((f) => ({ ...f, lateVetVisitDeductionRwf: e.target.value }))
+                }
+              />
+            </Field>
+            <Field label="Missed vet visit deduction">
+              <Input
+                type="number"
+                min={0}
+                className={mgrInput}
+                value={fieldRatesForm.missedVetVisitRwf}
+                onChange={(e) =>
+                  setFieldRatesForm((f) => ({ ...f, missedVetVisitRwf: e.target.value }))
+                }
+              />
+            </Field>
           </div>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={fieldRatesBusy}
-              onClick={() => void saveFieldRates()}
-              className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            >
+          <div className="flex lg:hidden">
+            <Button type="submit" variant="primary" size="sm" disabled={fieldRatesBusy} loading={fieldRatesBusy}>
               Save rates
-            </button>
-            <button
-              type="button"
-              disabled={fieldRatesBusy}
-              onClick={() => void loadFieldRates()}
-              className="rounded-lg border border-neutral-300 bg-neutral-50 px-4 py-2 text-sm font-medium disabled:opacity-50"
-            >
-              Reload
-            </button>
+            </Button>
           </div>
-          {fieldRates ? (
-            <p className="mt-3 text-xs text-neutral-500">
-              Active: on-time check-in +{fieldRates.checkInRwf} · late check-in +{Math.max(0, fieldRates.checkInRwf - fieldRates.lateDeductionRwf)} · missed check-in −{fieldRates.missedCheckInRwf}
-              {" · "}feed log +{fieldRates.feedRwf} · missed feed −{fieldRates.missedFeedRwf}
-            </p>
-          ) : null}
-        </div>
+        </form>
       ) : null}
 
-      <div className="flex flex-wrap gap-2 items-end">
-        <label className="text-xs font-medium text-neutral-600">
-          From
-          <input
-            id="p-from"
-            type="date"
-            className="mt-1 block rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-          />
-        </label>
-        <label className="text-xs font-medium text-neutral-600">
-          To
-          <input
-            id="p-to"
-            type="date"
-            className="mt-1 block rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-          />
-        </label>
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="rounded border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-neutral-50"
-        >
-          Apply range
-        </button>
-        <button
-          type="button"
-          onClick={() => void exportCsv()}
-          className="rounded border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium"
-        >
-          Export CSV
-        </button>
-        <button
-          type="button"
-          disabled={busyId != null || summary.pending === 0 || !canDecidePayments}
-          onClick={() => void approveAllPending()}
-          className="rounded bg-emerald-800 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
-        >
-          Approve all pending ({summary.pending})
-        </button>
-      </div>
+      {tab === "closures" && canDecidePayments ? (
+        <div className="space-y-stack">
+          <form
+            id="payroll-closure-form"
+            onSubmit={createClosure}
+            className="grid gap-3 sm:grid-cols-3"
+          >
+            <Field label="Period start">
+              <Input
+                type="date"
+                className={mgrInput}
+                value={closureForm.periodStart}
+                onChange={(e) => setClosureForm((f) => ({ ...f, periodStart: e.target.value }))}
+                required
+              />
+            </Field>
+            <Field label="Period end">
+              <Input
+                type="date"
+                className={mgrInput}
+                value={closureForm.periodEnd}
+                onChange={(e) => setClosureForm((f) => ({ ...f, periodEnd: e.target.value }))}
+                required
+              />
+            </Field>
+            <Field label="Notes">
+              <Input
+                className={mgrInput}
+                value={closureForm.notes}
+                onChange={(e) => setClosureForm((f) => ({ ...f, notes: e.target.value }))}
+                placeholder="Optional"
+              />
+            </Field>
+            <div className="flex sm:col-span-3 lg:hidden">
+              <Button type="submit" size="sm" disabled={closureBusy} loading={closureBusy}>
+                Create closure
+              </Button>
+            </div>
+          </form>
 
-      {!loading && !error ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-            <p className="text-xs font-medium text-emerald-900">Total bonuses</p>
-            <p className="mt-1 text-lg font-semibold text-emerald-950">{formatRwf(summary.bonuses)}</p>
-          </div>
-          <div className="rounded-xl border border-red-200 bg-red-50 p-4">
-            <p className="text-xs font-medium text-red-900">Total deductions</p>
-            <p className="mt-1 text-lg font-semibold text-red-950">{formatRwf(summary.deductions)}</p>
-          </div>
-          <div className="rounded-xl border border-neutral-200 bg-white p-4">
-            <p className="text-xs font-medium text-neutral-600">Net delta</p>
-            <p className="mt-1 text-lg font-semibold text-neutral-900">{formatRwf(summary.net)}</p>
-          </div>
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-            <p className="text-xs font-medium text-amber-900">Pending approvals</p>
-            <p className="mt-1 text-lg font-semibold text-amber-950">{summary.pending}</p>
-          </div>
-          <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4">
-            <p className="text-xs font-medium text-indigo-900">ERPNext payroll (range)</p>
-            <p className="mt-1 text-lg font-semibold text-indigo-950">
-              {erpnextPayrollTotal != null ? formatRwf(erpnextPayrollTotal) : erpnextStatus?.connected ? "—" : "Not connected"}
-            </p>
-            {erpnextPayrollTotal != null && (
-              <p className="mt-1 text-[10px] text-indigo-800">Farm net delta: {formatRwf(summary.net)}</p>
-            )}
+          <div className="table-block">
+            <DataTable<PayrollClosure>
+              flush
+              columns={closureColumns}
+              rows={closures}
+              rowKey={(c) => c.id}
+              emptyTitle="No closures yet"
+              emptyDescription=""
+            />
           </div>
         </div>
       ) : null}
-
-      {loading && <SkeletonList rows={5} />}
-
-      {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
-
-      {!loading && !error && entries.length === 0 ? (
-        <EmptyState
-          title="No payroll lines in this range"
-          description="Adjust the date range or apply filters, then reload."
-        />
-      ) : null}
-
-      {!loading && !error && entries.length > 0 ? (
-        <div className="table-block">
-          <div className="table-toolbar">
-            <span className="text-xs font-medium text-neutral-600">{entries.length} rows</span>
-            <span className="ml-auto text-xs text-amber-700 font-semibold">{summary.pending} pending approval</span>
-          </div>
-          <div className="institutional-table-wrapper">
-            <table className="institutional-table min-w-[56rem]">
-              <thead>
-                <tr>
-                  <th>Worker</th>
-                  <th>Role</th>
-                  <th>Log type</th>
-                  <th>Submitted</th>
-                  <th>On-time</th>
-                  <th className="tbl-num">RWF delta</th>
-                  <th>Reason</th>
-                  <th>Approved</th>
-                  <th>Accounting</th>
-                  <th className="tbl-actions">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((e) => (
-                  <tr key={e.id}>
-                    <td className="whitespace-nowrap font-medium">{e.workerName}</td>
-                    <td className="whitespace-nowrap text-neutral-600">{e.workerRole}</td>
-                    <td className="whitespace-nowrap">{e.logType}</td>
-                    <td className="tbl-mono">{e.submittedAt}</td>
-                    <td className="tbl-badge">
-                      {e.onTime == null ? "—" : e.onTime
-                        ? <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-800">Yes</span>
-                        : <span className="inline-block rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-800">No</span>
-                      }
-                    </td>
-                    <td className={["tbl-num font-semibold", e.rwfDelta >= 0 ? "text-emerald-800" : "text-red-800"].join(" ")}>
-                      {formatRwf(e.rwfDelta)}
-                    </td>
-                    <td style={{ maxWidth: "14rem" }}>{e.reason}</td>
-                    <td className="tbl-badge">
-                      {e.approvedAt
-                        ? <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-800">Yes</span>
-                        : <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-800">Pending</span>
-                      }
-                    </td>
-                    <td className="tbl-badge">{e.accountingStatus ?? "not_applicable"}</td>
-                    <td className="tbl-actions">
-                      {e.approvedAt == null && canDecidePayments ? (
-                        <button
-                          type="button"
-                          disabled={busyId != null}
-                          onClick={() => void approveOne(e.id)}
-                          className="rounded bg-emerald-700 px-2 py-0.5 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
-                        >
-                          Approve
-                        </button>
-                      ) : (
-                        <span className="text-neutral-400">{canDecidePayments ? "—" : "Read only"}</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : null}
-    </div>
+    </ManagerPage>
   );
 }

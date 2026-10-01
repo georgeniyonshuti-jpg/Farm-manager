@@ -38,6 +38,35 @@ export type FarmTodayPayload = {
   slug?: string;
 };
 
+export type FarmFeedContext = {
+  can_log?: boolean;
+  block_reason?: "no_flocks" | "no_stock" | null;
+  default_flock_id?: string | null;
+  stock_kg?: number | null;
+  feed_type?: string | null;
+};
+
+export type FarmCheckinContext = {
+  can_submit?: boolean;
+  block_reason?: "no_flocks" | "field_reporting_mode" | null;
+  default_flock_id?: string | null;
+  due_in_minutes?: number | null;
+  overdue_minutes?: number | null;
+  done_today?: boolean;
+};
+
+export type FarmVetVisitContext = {
+  can_submit?: boolean;
+  block_reason?: "no_flocks" | null;
+  default_flock_id?: string | null;
+  due_in_minutes?: number | null;
+  overdue_minutes?: number | null;
+  done_today?: boolean;
+  suggested_visit_slot?: "am" | "pm" | "spot" | null;
+};
+
+export type FieldReportingMode = "laborer_rounds" | "vet_only" | "both" | "none";
+
 export type FarmBootstrapFarm = {
   name: string;
   slug: string;
@@ -48,6 +77,10 @@ export type FarmBootstrapFarm = {
   capabilities?: FarmCapabilities;
   barns?: Array<{ id: string; name: string }>;
   flocks?: Array<{ id: string; name: string; barn?: string; status?: string }>;
+  feed_context?: FarmFeedContext;
+  checkin_context?: FarmCheckinContext;
+  vet_visit_context?: FarmVetVisitContext;
+  field_reporting_mode?: FieldReportingMode;
   today?: FarmTodayPayload | null;
 };
 
@@ -66,6 +99,7 @@ export type FarmBootstrap = {
   farms?: FarmBootstrapFarm[];
   pwa_base_url?: string;
   today?: FarmTodayPayload | null;
+  field_reporting_mode?: FieldReportingMode;
 };
 
 /** ERP contract route key → tenant-relative PWA path (under /app/:slug). */
@@ -150,6 +184,12 @@ export function erpnextAccessForFarm(
   return true;
 }
 
+export function normalizeFieldReportingMode(mode: string | null | undefined): FieldReportingMode {
+  const m = String(mode ?? "").trim().toLowerCase();
+  if (m === "laborer_rounds" || m === "both" || m === "none") return m;
+  return "vet_only";
+}
+
 export function hasCapability(
   capabilities: FarmCapabilities | null | undefined,
   key: keyof FarmCapabilities
@@ -181,5 +221,14 @@ export function applyBootstrapToUser(
   if (!bootstrap) return user;
   const erpnextAccess =
     typeof bootstrap.erpnext_access === "boolean" ? bootstrap.erpnext_access : user.erpnextAccess;
-  return { ...user, erpnextAccess, erpAppRole: bootstrap.role ?? user.erpAppRole };
+  const preferredLanguage =
+    typeof bootstrap.language === "string" && bootstrap.language.trim()
+      ? (bootstrap.language.trim() as "rw" | "en")
+      : user.preferredLanguage;
+  return {
+    ...user,
+    erpnextAccess,
+    erpAppRole: bootstrap.role ?? user.erpAppRole,
+    preferredLanguage,
+  };
 }

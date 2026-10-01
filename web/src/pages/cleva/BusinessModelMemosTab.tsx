@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Button } from "../../components/ui/Button";
 import { jsonAuthHeaders } from "../../lib/authHeaders";
 import { API_BASE_URL } from "../../api/config";
 
@@ -43,7 +44,7 @@ export function BusinessModelMemosTab(props: { token: string | null; paygoCtl: P
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
 
       {/* PAYGO investor / lender PDF */}
-      <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm space-y-4">
+      <div className="rounded-xl border border-neutral-200 bg-white p-card shadow-sm space-y-4">
         <div>
           <h2 className="text-base font-semibold text-neutral-900">PAYGO Investment / Credit Memorandum</h2>
           <p className="mt-1 text-sm text-neutral-600">
@@ -89,14 +90,9 @@ export function BusinessModelMemosTab(props: { token: string | null; paygoCtl: P
           </select>
         </label>
 
-        <button
-          type="button"
-          disabled={busy || !paygoCtl}
-          onClick={() => void downloadPaygoPdf()}
-          className="rounded-lg bg-violet-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-violet-900 disabled:opacity-50"
-        >
+        <Button size="sm" disabled={busy || !paygoCtl} loading={busy} onClick={() => void downloadPaygoPdf()}>
           {busy ? "Generating PDF…" : "Download PAYGO memorandum PDF"}
-        </button>
+        </Button>
       </div>
 
       {/* Broiler PDF */}
@@ -140,7 +136,7 @@ function BroilerPdfPanel({ token }: { token: string | null }) {
   };
 
   return (
-    <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm space-y-4">
+    <div className="rounded-xl border border-neutral-200 bg-white p-card shadow-sm space-y-4">
       <div>
         <h2 className="text-base font-semibold text-neutral-900">Broiler Batch Performance Report</h2>
         <p className="mt-1 text-sm text-neutral-600">
@@ -189,14 +185,9 @@ function BroilerPdfPanel({ token }: { token: string | null }) {
         </label>
       </div>
 
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => void downloadBroilerPdf()}
-        className="rounded-lg bg-emerald-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-900 disabled:opacity-50"
-      >
+      <Button size="sm" disabled={busy} loading={busy} onClick={() => void downloadBroilerPdf()}>
         {busy ? "Generating PDF…" : "Download broiler batch report PDF"}
-      </button>
+      </Button>
     </div>
   );
 }

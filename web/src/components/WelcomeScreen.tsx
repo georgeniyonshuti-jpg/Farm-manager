@@ -12,6 +12,13 @@ export function WelcomeScreen({ companyName }: { companyName: string }) {
         <li>[ ] Add your first flock</li>
         <li>[ ] Invite your team</li>
         <li>[ ] Set your check-in schedule</li>
+        <li>
+          [ ] Connect accounting &amp; analytics — ERPNext linking is set up by our platform team. Email{" "}
+          <a href="mailto:support@clevacredit.com" className="underline">
+            support@clevacredit.com
+          </a>{" "}
+          or use in-app contact when you are ready. Cleva credit and portfolio modules are available once linked.
+        </li>
       </ul>
       <div className="mt-6 flex flex-wrap gap-3">
         <button

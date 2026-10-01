@@ -71,6 +71,11 @@ async function fetchBootstrap(token: string): Promise<BootstrapPayload> {
     signal: AbortSignal.timeout(8000),
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 429) {
+    const err = new Error((data as { error?: string }).error ?? "Too many requests. Wait a moment.");
+    (err as Error & { status?: number }).status = 429;
+    throw err;
+  }
   if (!res.ok) {
     throw new Error((data as { error?: string }).error ?? "Session expired");
   }
@@ -162,7 +167,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setToken(t);
           seedFieldHub(t, boot.fieldHub);
           setActiveWorkspaceState(defaultWorkspaceForUser(applied.user));
-        } catch {
+        } catch (e) {
+          if ((e as { status?: number }).status === 429) {
+            if (!cancelled) setBootstrapped(true);
+            return;
+          }
           // Token present but bootstrap failed — clear session so login is reachable.
           if (!cancelled) {
             setUser(null);

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { CheckinStatusBlock, type CheckinStatus, type OpsGlanceSummary } from "../farm/FarmCheckinPage";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
+import { OpsScorecardTable } from "../../components/farm/OpsScorecardTable";
 import { PageHeader } from "../../components/PageHeader";
 import { HubCheckinBanner, type HubCheckinBannerVariant } from "../../components/farm/HubCheckinBanner";
 import { ChartPanel } from "../../components/dashboard/ChartPanel";
@@ -13,9 +14,10 @@ import { useHubAggregatePoll } from "../../hooks/useHubAggregatePoll";
 import { useVetDashboardData } from "../../hooks/useVetDashboardData";
 import {
   blockersSeries,
-  biomassSummary,
   flockWeightTrendChartData,
   fcrVsTargetSeries,
+  growthScorecardRows,
+  growthTrackerSummary,
   mortalityTrendPseudoDaily,
   topRiskSeries,
   weighInTrendFlockOptions,
@@ -23,7 +25,8 @@ import {
 } from "../../lib/dashboardAdapters";
 import { BlockersStacked, FcrTargetBars, FlockWeightTrendLines, MortalityTrendLine, SimpleCategoryBars, TopRiskBars, WeightVsTargetBars } from "../../components/dashboard/charts/OpsCharts";
 import { useWeighInTrends } from "../../hooks/useWeighInTrends";
-import { MobileFieldBottomNav, type MobileFieldNavItem } from "../../components/layout/MobileFieldBottomNav";
+import { ManagerPage } from "../../components/layout/ManagerPage";
+import { Button } from "../../components/ui/Button";
 import { VetFieldHub } from "./VetFieldHub";
 import { readAuthHeaders } from "../../lib/authHeaders";
 
@@ -43,11 +46,18 @@ type VetHubFlockRow = {
 
 function vetChip(label: string, ok: boolean) {
   return (
-    <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${ok ? "border-emerald-500/30 text-emerald-300" : "border-amber-500/30 text-amber-300"}`}>
+    <span
+      className="rounded-full border px-2 py-0.5 text-[11px] font-medium"
+      style={{
+        borderColor: ok ? "color-mix(in srgb, var(--status-success) 30%, transparent)" : "color-mix(in srgb, var(--status-warning) 30%, transparent)",
+        color: ok ? "var(--status-success)" : "var(--status-warning)",
+      }}
+    >
       {label} {ok ? "done" : "pending"}
     </span>
   );
 }
+
 
 export function VetHome() {
   const { user } = useAuth();
@@ -69,7 +79,6 @@ function VetManagerDashboard() {
   const didInitialLoadRef = useRef(false);
 
   const hTitle = useLaborerT("Vet hub");
-  const hSub = useLaborerT("Track rounds, flock health, and urgent work.");
   const medTitle = useLaborerT("Medicine");
   const medBody = useLaborerT("Record treatments, doses, and withdrawal periods by flock.");
   const medLink = useLaborerT("Open medicine tracking");
@@ -101,13 +110,6 @@ function VetManagerDashboard() {
   const tLastCheckin = useLaborerT("Last check-in");
   const tLastFeedLog = useLaborerT("Last feed log");
   const tLastVetRecord = useLaborerT("Last vet record");
-  const tabHome = useLaborerT("Home");
-  const tabRounds = useLaborerT("Rounds");
-  const tabMort = useLaborerT("Mortality");
-  const tabFeed = useLaborerT("Feed");
-  const tabLog = useLaborerT("Log");
-  const tabHistory = useLaborerT("History");
-  const tabSchedule = useLaborerT("Schedule");
 
   const [bannerSummary, setBannerSummary] = useState<{
     anyOverdue: boolean;
@@ -251,80 +253,10 @@ function VetManagerDashboard() {
     status && bannerSummary?.anyOverdue ? Math.max(0, bannerSummary.overdueCount - 1) : 0;
   const hasList = flockList.length > 0;
 
-  const bottomNav: MobileFieldNavItem[] = [
-    {
-      to: "/dashboard/vet",
-      label: tabHome,
-      end: true,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" strokeLinejoin="round" />
-          <polyline points="9 22 9 12 15 12 15 22" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/checkin",
-      label: tabRounds,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <circle cx="12" cy="12" r="10" />
-          <path d="M12 6v6l4 2" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/mortality-log",
-      label: tabMort,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-          <path d="M12 9v4M12 17h.01" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/feed",
-      label: tabFeed,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/daily-log",
-      label: tabLog,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-          <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/mortality",
-      label: tabHistory,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <path d="M3 3v18h18" strokeLinecap="round" />
-          <path d="M7 16l4-4 4 4 5-6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      ),
-    },
-    {
-      to: "/farm/batch-schedule",
-      label: tabSchedule,
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-          <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-          <path d="M16 2v4M8 2v4M3 10h18" strokeLinecap="round" />
-        </svg>
-      ),
-    },
-  ];
   const vetFlocks = vetDash.data.opsBoard?.flocks ?? [];
-  const growth = biomassSummary(vetFlocks);
+  const farmTotals = vetDash.data.opsBoard?.farmTotals;
+  const growth = growthTrackerSummary(vetFlocks, farmTotals);
+  const scorecardFlocks = growthScorecardRows(vetFlocks, 8);
   const weightData = weightVsTargetSeries(vetFlocks, 8);
   const weighTrendFlockOptionsList = useMemo(
     () => weighInTrendFlockOptions(weighTrends.points),
@@ -340,6 +272,32 @@ function VetManagerDashboard() {
   );
   const tWeighTrendSub = useLaborerT("Per-flock actual (solid) vs breed target (dotted) — 90 days");
   const tAllFlocksTop8 = useLaborerT("All flocks (top 8)");
+  const tClinicalAnalytics = useLaborerT("Clinical analytics");
+  const tTreatmentRoundStatus = useLaborerT("Treatment round status");
+  const tTreatmentRoundSub = useLaborerT("Current treatment workflow distribution");
+  const tMedicineStockRunway = useLaborerT("Medicine stock runway");
+  const tMedicineStockSub = useLaborerT("Days remaining before stockout");
+  const tGrowthConversion = useLaborerT("Growth & conversion");
+  const tAvgWtVsTarget = useLaborerT("Avg wt vs target");
+  const tBelowTarget = useLaborerT("Below target");
+  const tStaleWeighIns = useLaborerT("Stale weigh-ins");
+  const tAvgFcr = useLaborerT("Avg FCR");
+  const tFarmFeedKg = useLaborerT("Farm feed (kg)");
+  const tFeedPerBirdKg = useLaborerT("Feed / bird (kg)");
+  const tFcrAboveTarget = useLaborerT("FCR above target");
+  const tAvgAdg = useLaborerT("Avg ADG (g/d)");
+  const tGrowthScorecard = useLaborerT("Growth scorecard");
+  const tWeightVsTarget = useLaborerT("Weight vs target");
+  const tWeightVsTargetSub = useLaborerT("Actual vs expected by flock");
+  const tFcrVsTarget = useLaborerT("FCR vs target");
+  const tFcrVsTargetSub = useLaborerT("Top flocks by FCR variance");
+  const tWeighInTrend = useLaborerT("Weigh-in trend");
+  const tMortalityTrend = useLaborerT("Mortality trend");
+  const tMortalityTrendSub = useLaborerT("Farm-level mortality direction");
+  const tHighestRiskFlocks = useLaborerT("Highest risk flocks");
+  const tHighestRiskSub = useLaborerT("Immediate vet-manager attention queue");
+  const tOperationalBlockers = useLaborerT("Operational blockers");
+  const tOperationalBlockersSub = useLaborerT("Overdue rounds and withdrawal blockers");
   const treatmentStatusData = Object.entries(
     vetDash.data.treatmentRounds.reduce<Record<string, number>>((acc, r) => {
       const k = r.status ?? "planned";
@@ -355,9 +313,9 @@ function VetManagerDashboard() {
     }));
 
   return (
-    <div className="mx-auto w-full max-w-[960px] space-y-6">
+    <ManagerPage>
       {roundBanner ? <HubCheckinBanner variant={roundBanner.variant} message={roundBanner.text} /> : null}
-      <PageHeader className="mb-3 gap-3" title={hTitle} subtitle={hSub} />
+      <PageHeader className="mb-3 gap-3" title={hTitle} />
 
       {loading && <SkeletonList rows={2} />}
       {!loading && loadError ? (
@@ -381,19 +339,19 @@ function VetManagerDashboard() {
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-[var(--text-primary)]">{row.label}</p>
-                      <p className={`text-xs ${row.isOverdue ? "text-red-400" : "text-[var(--text-muted)]"}`}>
+                      <p className={`text-xs ${row.isOverdue ? "text-[var(--status-danger)]" : "text-[var(--text-muted)]"}`}>
                         {row.isOverdue
                           ? `${tOverdue} ${Math.max(1, row.overdueMinutes)}m`
                           : `${tNextDue} ${new Date(row.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}`}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      className="rounded-md border border-[var(--border-color)] px-2 py-1 text-[11px] font-semibold text-[var(--text-secondary)]"
+                    <Button
+                      variant="secondary"
+                      size="sm"
                       onClick={() => setExpandedFlocks((prev) => ({ ...prev, [row.flockId]: !expanded }))}
                     >
                       {expanded ? tShowLess : tShowMore}
-                    </button>
+                    </Button>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {vetChip(tCheckin, row.checkinDoneToday)}
@@ -456,15 +414,11 @@ function VetManagerDashboard() {
       </div>
 
       <div className="space-y-4">
-        <PageHeader
-          className="mb-2"
-          title={useLaborerT("Clinical analytics")}
-          subtitle={useLaborerT("Trends and blockers across treatment, mortality, and feed efficiency.")}
-        />
+        <h2 className="text-sm font-semibold text-[var(--text-primary)]">{tClinicalAnalytics}</h2>
         <div className="grid gap-4 xl:grid-cols-2">
           <ChartPanel
-            title={useLaborerT("Treatment round status")}
-            subtitle={useLaborerT("Current treatment workflow distribution")}
+            title={tTreatmentRoundStatus}
+            metricNote={tTreatmentRoundSub}
             loading={vetDash.loading}
             error={vetDash.error}
             empty={!vetDash.loading && !vetDash.error && treatmentStatusData.length === 0}
@@ -472,8 +426,8 @@ function VetManagerDashboard() {
             <SimpleCategoryBars data={treatmentStatusData} xKey="status" barKey="count" barName="Rounds" color="#8b5cf6" />
           </ChartPanel>
           <ChartPanel
-            title={useLaborerT("Medicine stock runway")}
-            subtitle={useLaborerT("Days remaining before stockout")}
+            title={tMedicineStockRunway}
+            metricNote={tMedicineStockSub}
             loading={vetDash.loading}
             error={vetDash.error}
             empty={!vetDash.loading && !vetDash.error && medicineForecastData.length === 0}
@@ -482,36 +436,57 @@ function VetManagerDashboard() {
           </ChartPanel>
         </div>
         <div className="space-y-2">
-          <PageHeader
-            className="mb-0"
-            title={useLaborerT("Growth & conversion")}
-            subtitle={useLaborerT("Weigh-in vs breed target, FCR, and farm weight trend.")}
-          />
-          <div className="grid gap-2 sm:grid-cols-4 text-center text-xs">
+          <h2 className="text-sm font-semibold text-[var(--text-primary)]">{tGrowthConversion}</h2>
+          <div className="grid gap-2 grid-cols-2 sm:grid-cols-4 text-center text-xs">
             <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-2">
-              <p className="text-[var(--text-muted)]">{useLaborerT("Avg wt vs target")}</p>
+              <p className="text-[var(--text-muted)]">{tAvgWtVsTarget}</p>
               <p className="font-semibold tabular-nums text-[var(--text-primary)]">
                 {growth.avgWeightDeviationPct != null ? `${growth.avgWeightDeviationPct >= 0 ? "+" : ""}${growth.avgWeightDeviationPct}%` : "—"}
               </p>
             </div>
             <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-2">
-              <p className="text-[var(--text-muted)]">{useLaborerT("Below target")}</p>
+              <p className="text-[var(--text-muted)]">{tBelowTarget}</p>
               <p className="font-semibold tabular-nums text-[var(--text-primary)]">{growth.belowTargetCount}</p>
             </div>
             <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-2">
-              <p className="text-[var(--text-muted)]">{useLaborerT("Stale weigh-ins")}</p>
+              <p className="text-[var(--text-muted)]">{tStaleWeighIns}</p>
               <p className="font-semibold tabular-nums text-[var(--text-primary)]">{growth.staleWeighInCount}</p>
             </div>
             <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-2">
-              <p className="text-[var(--text-muted)]">{useLaborerT("Avg FCR")}</p>
+              <p className="text-[var(--text-muted)]">{tAvgFcr}</p>
               <p className="font-semibold tabular-nums text-[var(--text-primary)]">{growth.avgFcr ?? "—"}</p>
             </div>
+            <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-2">
+              <p className="text-[var(--text-muted)]">{tFarmFeedKg}</p>
+              <p className="font-semibold tabular-nums text-[var(--text-primary)]">
+                {growth.totalFeedToDateKg > 0 ? growth.totalFeedToDateKg.toLocaleString() : "—"}
+              </p>
+            </div>
+            <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-2">
+              <p className="text-[var(--text-muted)]">{tFeedPerBirdKg}</p>
+              <p className="font-semibold tabular-nums text-[var(--text-primary)]">{growth.avgFeedPerBirdKg ?? "—"}</p>
+            </div>
+            <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-2">
+              <p className="text-[var(--text-muted)]">{tFcrAboveTarget}</p>
+              <p className="font-semibold tabular-nums text-[var(--text-primary)]">{growth.flocksAboveTargetFcr}</p>
+            </div>
+            <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-2 py-2">
+              <p className="text-[var(--text-muted)]">{tAvgAdg}</p>
+              <p className="font-semibold tabular-nums text-[var(--text-primary)]">{growth.avgAdgGramsPerDay ?? "—"}</p>
+            </div>
           </div>
+          <OpsScorecardTable
+            flocks={scorecardFlocks}
+            loading={vetDash.loading}
+            variant="vet"
+            title={tGrowthScorecard}
+          />
         </div>
+
         <div className="grid gap-4 xl:grid-cols-2">
           <ChartPanel
-            title={useLaborerT("Weight vs target")}
-            subtitle={useLaborerT("Actual vs expected by flock")}
+            title={tWeightVsTarget}
+            metricNote={tWeightVsTargetSub}
             loading={vetDash.loading}
             error={vetDash.error}
             empty={!vetDash.loading && !vetDash.error && weightData.length === 0}
@@ -519,8 +494,8 @@ function VetManagerDashboard() {
             <WeightVsTargetBars data={weightData} />
           </ChartPanel>
           <ChartPanel
-            title={useLaborerT("FCR vs target")}
-            subtitle={useLaborerT("Top flocks by FCR variance")}
+            title={tFcrVsTarget}
+            metricNote={tFcrVsTargetSub}
             loading={vetDash.loading}
             error={vetDash.error}
             empty={!vetDash.loading && !vetDash.error && fcrVsTargetSeries(vetFlocks).length === 0}
@@ -529,8 +504,8 @@ function VetManagerDashboard() {
           </ChartPanel>
         </div>
         <ChartPanel
-          title={useLaborerT("Weigh-in trend")}
-          subtitle={tWeighTrendSub}
+          title={tWeighInTrend}
+          metricNote={tWeighTrendSub}
           loading={weighTrends.loading}
           error={weighTrends.error}
           empty={!weighTrends.loading && !weighTrends.error && flockWeightTrend.rows.length === 0}
@@ -556,8 +531,8 @@ function VetManagerDashboard() {
         </ChartPanel>
         <div className="grid gap-4 xl:grid-cols-2">
           <ChartPanel
-            title={useLaborerT("Mortality trend")}
-            subtitle={useLaborerT("Farm-level mortality direction")}
+            title={tMortalityTrend}
+            metricNote={tMortalityTrendSub}
             loading={vetDash.loading}
             error={vetDash.error}
             empty={!vetDash.loading && !vetDash.error && vetFlocks.length === 0}
@@ -565,8 +540,8 @@ function VetManagerDashboard() {
             <MortalityTrendLine data={mortalityTrendPseudoDaily(vetFlocks)} />
           </ChartPanel>
           <ChartPanel
-            title={useLaborerT("Highest risk flocks")}
-            subtitle={useLaborerT("Immediate vet-manager attention queue")}
+            title={tHighestRiskFlocks}
+            metricNote={tHighestRiskSub}
             loading={vetDash.loading}
             error={vetDash.error}
             empty={!vetDash.loading && !vetDash.error && vetFlocks.length === 0}
@@ -574,8 +549,8 @@ function VetManagerDashboard() {
             <TopRiskBars data={topRiskSeries(vetFlocks, 8)} />
           </ChartPanel>
           <ChartPanel
-            title={useLaborerT("Operational blockers")}
-            subtitle={useLaborerT("Overdue rounds and withdrawal blockers")}
+            title={tOperationalBlockers}
+            metricNote={tOperationalBlockersSub}
             loading={vetDash.loading}
             error={vetDash.error}
             empty={!vetDash.loading && !vetDash.error && vetFlocks.length === 0}
@@ -585,7 +560,6 @@ function VetManagerDashboard() {
         </div>
       </div>
 
-      <MobileFieldBottomNav items={bottomNav} />
-    </div>
+    </ManagerPage>
   );
 }

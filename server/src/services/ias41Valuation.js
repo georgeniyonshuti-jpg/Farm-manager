@@ -9,13 +9,11 @@
  *  3. Computes fair value = (market_price - costs_to_sell) × total_live_weight_kg.
  *  4. Compares to previous snapshot to derive fair value change (gain/loss).
  *  5. Creates a flock_valuation_snapshots record (status=draft).
- *  6. Manager approves snapshot → enqueues IAS 41 journal entry to Odoo outbox.
+ *  6. Manager approves snapshot (entity sync to ERPNext via clevaSync).
  *
  * The gain/loss flows through P&L as per IAS 41.11.
  */
 
-import { enqueueOdooSync } from "./odoo/odooSyncWorker.js";
-import { mapValuationSnapshotToJournalEntry } from "./odoo/odooFarmMappers.js";
 import { emitEntitySync } from "./clevafarm/emitEntitySync.js";
 
 let _dbQuery = null;
@@ -38,7 +36,7 @@ function hasDb() {
 /**
  * Build a valuation snapshot for a flock.
  * Reads latest weigh-in, live count, computes fair value.
- * Saves as draft (status='draft') for manager review before Odoo push.
+ * Saves as draft (status='draft') for manager review before approval.
  *
  * @param {{ flockId: string, snapshotDate: string, marketPricePerKgRwf: number, costsToSellPerKgRwf?: number, createdBy: string }} opts
  */
@@ -162,12 +160,11 @@ export async function buildValuationSnapshot({ flockId, snapshotDate, marketPric
 }
 
 /**
- * Approve a valuation snapshot.
- * Sets status=approved and enqueues IAS 41 adjustment journal entry to Odoo outbox.
+ * Approve a valuation snapshot. Sets status=approved; ERPNext sync via emitEntitySync.
  *
  * @param {{ snapshotId: string, approvedBy: string, approvedByRole: string }} opts
  */
-export async function approveValuationSnapshot({ snapshotId, approvedBy, approvedByRole }) {
+export async function approveValuationSnapshot({ snapshotId, approvedBy, approvedByRole: _approvedByRole }) {
   if (!hasDb()) throw new Error("Database unavailable.");
 
   const r = await dbQuery(
@@ -182,27 +179,6 @@ export async function approveValuationSnapshot({ snapshotId, approvedBy, approve
   if ((r.rowCount ?? 0) === 0) throw new Error("Snapshot not found or already approved.");
   const snapshot = r.rows[0];
   void emitEntitySync("farm_valuation_snapshot", snapshotId).catch(() => {});
-
-  // Fetch flock code for labels
-  let flockCode = null;
-  try {
-    const fRow = await dbQuery(`SELECT code FROM poultry_flocks WHERE id::text = $1`, [snapshot.flockId]);
-    flockCode = fRow.rows[0]?.code ?? null;
-  } catch {}
-
-  const journalPayload = mapValuationSnapshotToJournalEntry({ ...snapshot, flockCode });
-
-  if (journalPayload) {
-    await enqueueOdooSync({
-      sourceTable: "flock_valuation_snapshots",
-      sourceId: snapshotId,
-      eventType: "fcr_fair_value_adjustment",
-      payload: journalPayload,
-      triggeredByUserId: approvedBy,
-      triggeredByRole: approvedByRole,
-    });
-  }
-
   return snapshot;
 }
 

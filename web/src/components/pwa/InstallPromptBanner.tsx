@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   dismissInstallPromptForToday,
   subscribeInstallPrompt,
@@ -28,6 +29,7 @@ function useInstallFallbackText() {
 }
 
 export function InstallPromptBanner() {
+  const { pathname } = useLocation();
   const [promptState, setPromptState] = useState<PromptState>(initialState);
   const [showFallbackInstructions, setShowFallbackInstructions] = useState(false);
 
@@ -45,11 +47,19 @@ export function InstallPromptBanner() {
   const tNotNow = useLaborerT("Not now");
   const fallbackText = useInstallFallbackText();
 
-  if (!visible) return null;
+  const hideOnAuth =
+    pathname.startsWith("/market") ||
+    pathname.startsWith("/signup") ||
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/forgot") ||
+    pathname.startsWith("/reset") ||
+    pathname.startsWith("/auth");
+
+  if (hideOnAuth || !visible) return null;
 
   return (
     <div className="fixed inset-x-0 bottom-3 z-[85] px-3 pb-[max(0.25rem,env(safe-area-inset-bottom))] sm:px-4">
-      <div className="mx-auto max-w-2xl rounded-2xl border border-[var(--border-color)] bg-white/95 p-3 shadow-2xl backdrop-blur">
+      <div className="mx-auto max-w-2xl rounded-2xl border border-[var(--border-color)] bg-[var(--surface-card)]/95 p-3 shadow-2xl backdrop-blur">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-[var(--text-primary)]">{tTitle}</p>

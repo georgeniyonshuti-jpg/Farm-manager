@@ -301,6 +301,28 @@ router.get("/companies", async (req, res) => {
   }
 });
 
+router.get("/chart-readiness", async (req, res) => {
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  const company = await resolveCompany(req);
+  if (!company) return res.status(400).json({ error: "company is required. Link an ERPNext company first." });
+  try {
+    res.json(await erp.getChartReadiness(company, getSessionCookie(req)));
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+router.post("/bootstrap-chart", async (req, res) => {
+  if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
+  const company = (req.body?.company ? String(req.body.company) : null) || (await resolveCompany(req));
+  if (!company) return res.status(400).json({ error: "company is required. Link an ERPNext company first." });
+  try {
+    res.json(await erp.bootstrapChartForCompany(company, getSessionCookie(req)));
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 router.get("/accounts", async (req, res) => {
   if (!isManagerOrAbove(req.authUser)) return res.status(403).json({ error: "Manager or above required." });
   const company = await resolveCompany(req);

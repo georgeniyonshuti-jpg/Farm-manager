@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
+import { FarmVetLogsFieldView } from "./FarmVetLogsFieldView";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { PageHeader } from "../../components/PageHeader";
-import { EmptyState } from "../../components/EmptyState";
+import { FieldBlockedScreen } from "../../components/field/FieldBlockedScreen";
+import { useLaborerT } from "../../i18n/laborerI18n";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
+import { Button } from "../../components/ui/Button";
 import { API_BASE_URL } from "../../api/config";
 import {
   fetchFlockFcrSnapshot,
@@ -16,7 +18,6 @@ import {
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { canReviewVetLog, canSubmitVetLog, vetLogNeedsManagerReview } from "../../auth/permissions";
-import { FlockPerformancePanel } from "../../components/farm/FlockPerformancePanel";
 import { VetLogValuePreview } from "../../components/farm/VetLogValuePreview";
 import {
   VetLogMortalityReviewSection,
@@ -24,10 +25,18 @@ import {
 } from "../../components/farm/VetLogMortalityReviewSection";
 import { VetLogReport } from "../../components/farm/reports/VetLogReport";
 import { SubmissionReportModal } from "../../components/farm/reports/SubmissionReportModal";
-import { SectionCard } from "../../components/ui/SectionCard";
 import { DataTable, type DataColumn } from "../../components/ui/DataTable";
 import { StatusPill } from "../../components/ui/StatusPill";
-import { SegmentedControl } from "../../components/ui";
+import {
+  FacetFilter,
+  Modal,
+  SegmentedControl,
+  TablePagination,
+  TableToolbar,
+  ToolbarSearch,
+} from "../../components/ui";
+import { formatManagerDate } from "../../lib/formatManagerDateTime";
+import { ManagerPage } from "../../components/layout/ManagerPage";
 
 type VetLog = VetLogListRow & {
   reviewedByUserId?: string;
@@ -85,11 +94,18 @@ function resetFormState() {
 }
 
 export function FarmVetLogsPage() {
+  const { user } = useAuth();
+  if (user?.role === "vet") {
+    return <FarmVetLogsFieldView />;
+  }
+  return <FarmVetLogsManagerPage />;
+}
+
+function FarmVetLogsManagerPage() {
   const { token, user } = useAuth();
   const { showToast } = useToast();
   const medicineRouteOptions = useReferenceOptions("medicine_admin_route", token, FALLBACK_MEDICINE_ROUTES);
   const medicineDoseUnitOptions = useReferenceOptions("treatment_dose_unit", token, FALLBACK_MEDICINE_DOSE_UNITS);
-  const [searchParams] = useSearchParams();
   const {
     flocks,
     flockId,
@@ -99,13 +115,12 @@ export function FarmVetLogsPage() {
     loadFlocks,
   } = useFlockFieldContext(token, { defaultFlockId: "" });
 
+  const noFlockTitle = useLaborerT("No flock available");
+  const noFlockBody = useLaborerT("Add a flock before logging mortality. Log only birds that died naturally or were culled.");
+
   const isReviewer = user ? canReviewVetLog(user) : false;
   const canSubmit = user ? canSubmitVetLog(user) : false;
   const needsManagerReview = user ? vetLogNeedsManagerReview(user) : false;
-  const selectedFlock = useMemo(
-    () => flocks.find((f) => f.id === flockId) ?? null,
-    [flocks, flockId]
-  );
 
   const [logs, setLogs] = useState<VetLog[]>([]);
   const [total, setTotal] = useState(0);
@@ -130,11 +145,6 @@ export function FarmVetLogsPage() {
     setMortalityReview(payload);
     setMortalityReviewValid(valid);
   }, []);
-
-  useEffect(() => {
-    const preselect = searchParams.get("flockId");
-    if (preselect) setFlockId(preselect);
-  }, [searchParams, setFlockId]);
 
   useEffect(() => {
     if (!token || !flockId || !showNewLog) {
@@ -297,7 +307,7 @@ export function FarmVetLogsPage() {
 
   const vetLogColumns = useMemo((): DataColumn<VetLog>[] => {
     const cols: DataColumn<VetLog>[] = [
-      { key: "date", header: "Log date", className: "tbl-mono", render: (l) => l.logDate },
+      { key: "date", header: "Log date", render: (l) => <span title={l.logDate}>{formatManagerDate(l.logDate)}</span> },
       { key: "author", header: "Author", render: (l) => l.authorName ?? l.authorUserId?.slice(0, 8) },
       {
         key: "weight",
@@ -323,16 +333,16 @@ export function FarmVetLogsPage() {
         header: "Report",
         badge: true,
         render: (l) => (
-          <button
-            type="button"
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={(e) => {
               e.stopPropagation();
               void openReport(l.id);
             }}
-            className="rounded-md border border-[var(--border-color)] px-2 py-1 text-xs font-semibold text-[var(--primary-color)]"
           >
             View
-          </button>
+          </Button>
         ),
       },
     ];
@@ -344,8 +354,8 @@ export function FarmVetLogsPage() {
         render: (l) =>
           l.submissionStatus === "pending_review" ? (
             <span className="flex flex-wrap justify-center gap-1">
-              <button type="button" onClick={(e) => { e.stopPropagation(); void handleReview(l.id, "approve"); }} className="rounded bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">Approve</button>
-              <button type="button" onClick={(e) => { e.stopPropagation(); void handleReview(l.id, "reject"); }} className="rounded bg-red-600 px-2 py-0.5 text-xs font-semibold text-white">Reject</button>
+              <Button variant="success" size="xs" onClick={(e) => { e.stopPropagation(); void handleReview(l.id, "approve"); }}>Approve</Button>
+              <Button variant="danger" size="xs" onClick={(e) => { e.stopPropagation(); void handleReview(l.id, "reject"); }}>Reject</Button>
             </span>
           ) : (
             <span className="text-neutral-400">—</span>
@@ -356,25 +366,14 @@ export function FarmVetLogsPage() {
   }, [isReviewer]);
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5">
+    <ManagerPage>
       <PageHeader
         title="Vet logs"
-        subtitle={
-          needsManagerReview
-            ? "Record visits with optional weight samples and medicine. Submissions need vet manager (or manager) approval before ERPNext valuation updates."
-            : isReviewer
-              ? "Submit visits or review junior vet logs. Weight samples drive live-bird value in ERPNext."
-              : "Clinical visits per flock — weight samples drive live-bird value; medicine feeds flock spend in ERPNext."
-        }
         action={
           canSubmit ? (
-            <button
-              type="button"
-              onClick={() => setShowNewLog((v) => !v)}
-              className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)]"
-            >
-              {showNewLog ? "Close" : "Create new vet log"}
-            </button>
+            <Button size="sm" onClick={() => setShowNewLog(true)}>
+              Create vet log
+            </Button>
           ) : null
         }
       />
@@ -385,87 +384,105 @@ export function FarmVetLogsPage() {
       )}
 
       {!listLoading && !ctxError && flocks.length === 0 ? (
-        <EmptyState title="No flocks" description="Create a flock first." />
+        <FieldBlockedScreen title={noFlockTitle} description={noFlockBody} />
       ) : null}
 
       {!listLoading && !ctxError && flocks.length > 0 ? (
         <>
-          {flockId ? (
-            <FlockPerformancePanel
-              flockId={flockId}
-              flockLabel={selectedFlock?.label}
-              flockCode={selectedFlock?.code}
-              placementDate={selectedFlock?.placementDate}
-            />
-          ) : (
-            <p className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] px-4 py-3 text-sm text-[var(--text-muted)]">
-              Select a flock to view cumulative FCR and performance context.
-            </p>
-          )}
-
-          <SectionCard
-            title="Vet log history"
-            description={`${total} row${total === 1 ? "" : "s"} matching filters`}
-            controls={
-              <>
-                <input
-                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
-                  placeholder="Search keywords…"
-                  value={searchQ}
-                  onChange={(e) => { setSearchQ(e.target.value); setPage(1); }}
-                />
-                <select
-                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
-                  value={flockId}
-                  onChange={(e) => { setFlockId(e.target.value); setPage(1); }}
-                >
-                  <option value="">All flocks</option>
-                  {flocks.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
-                </select>
-                <SegmentedControl
-                  size="sm"
-                  value={statusFilter}
-                  onChange={(v) => { setStatusFilter(v); setPage(1); }}
-                  options={[
-                    { value: "all", label: "All" },
-                    { value: "pending_review", label: "Pending" },
-                    { value: "approved", label: "Approved" },
-                    { value: "rejected", label: "Rejected" },
-                  ]}
-                />
-              </>
-            }
-            flushBody
-          >
-            {logsLoading ? <div className="p-4"><SkeletonList rows={4} /></div> : null}
-            {!logsLoading ? (
+        <div className="table-block">
+            {logsLoading ? (
+              <div className="p-card">
+                <SkeletonList rows={4} />
+              </div>
+            ) : (
               <DataTable<VetLog>
+                flush
                 columns={vetLogColumns}
                 rows={logs}
                 rowKey={(l) => l.id}
                 onRowClick={(l) => void openReport(l.id)}
+                isFiltered={statusFilter !== "all" || Boolean(flockId) || searchQ.trim().length > 0}
                 emptyTitle="No vet logs"
-                emptyDescription="Create a new log when you have observations to record."
+                emptyDescription=""
+                filteredEmptyTitle="No matching vet logs"
+                filteredEmptyDescription=""
+                toolbar={
+                  <TableToolbar
+                    filters={
+                      <>
+                        <SegmentedControl
+                          size="sm"
+                          value={statusFilter}
+                          onChange={(v) => {
+                            setStatusFilter(v);
+                            setPage(1);
+                          }}
+                          options={[
+                            { value: "all", label: "All" },
+                            { value: "pending_review", label: "Pending" },
+                            { value: "approved", label: "Approved" },
+                            { value: "rejected", label: "Rejected" },
+                          ]}
+                        />
+                        <FacetFilter
+                          label="Flock"
+                          value={flockId || "all"}
+                          allValue="all"
+                          onChange={(v) => {
+                            setFlockId(v === "all" ? "" : v);
+                            setPage(1);
+                          }}
+                          options={flocks.map((f) => ({ value: f.id, label: f.label }))}
+                        />
+                      </>
+                    }
+                    search={
+                      <ToolbarSearch
+                        placeholder="Search keywords…"
+                        value={searchQ}
+                        onChange={(e) => {
+                          setSearchQ(e.target.value);
+                          setPage(1);
+                        }}
+                        label="Search vet logs"
+                      />
+                    }
+                    meta={`${total} rows`}
+                  />
+                }
+                renderMobileCard={(l) => (
+                  <button
+                    type="button"
+                    onClick={() => void openReport(l.id)}
+                    className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 text-left"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-semibold text-[var(--text-primary)]">{formatManagerDate(l.logDate)}</p>
+                      <StatusBadge status={l.submissionStatus} />
+                    </div>
+                    <p className="mt-1 text-sm text-[var(--text-primary)]">
+                      {l.authorName ?? l.authorUserId?.slice(0, 8)}
+                    </p>
+                    <p className="mt-2 text-sm text-[var(--text-primary)] line-clamp-2">{l.observations || "—"}</p>
+                  </button>
+                )}
               />
-            ) : null}
-          </SectionCard>
+            )}
+          </div>
 
           {!logsLoading && logs.length > 0 ? (
-            <div className="flex items-center justify-between text-xs text-neutral-500">
-              <span>{total} total</span>
-              <span className="flex gap-1.5">
-                <button type="button" disabled={page <= 1} className="rounded border px-2 py-1 disabled:opacity-40" onClick={() => setPage((p) => Math.max(1, p - 1))}>← Prev</button>
-                <span className="px-1 py-1">Page {page} of {Math.ceil(total / 30) || 1}</span>
-                <button type="button" disabled={page * 30 >= total} className="rounded border px-2 py-1 disabled:opacity-40" onClick={() => setPage((p) => p + 1)}>Next →</button>
-              </span>
-            </div>
+            <TablePagination page={page} pageSize={30} total={total} onPageChange={setPage} />
           ) : null}
 
-          {showNewLog && canSubmit ? (
-            <form onSubmit={(ev) => void handleSubmit(ev)} className="space-y-4 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-              <p className="text-sm font-semibold text-neutral-800">New vet log</p>
+          <Modal
+            open={showNewLog && canSubmit}
+            title="Create vet log"
+            onClose={() => setShowNewLog(false)}
+            wide
+          >
+            <form onSubmit={(ev) => void handleSubmit(ev)} className="space-y-4">
               {!flockId ? (
-                <p className="text-sm text-amber-800">Select a flock above before saving.</p>
+                <p className="text-sm text-[var(--status-warning)]">Select a flock in the table filters before saving.</p>
               ) : null}
 
               {flockId ? (
@@ -511,8 +528,8 @@ export function FarmVetLogsPage() {
                 </label>
               </fieldset>
 
-              <fieldset className="space-y-2 rounded-xl border border-emerald-200/70 bg-emerald-50/30 p-3">
-                <legend className="flex items-center gap-2 px-1 text-sm font-semibold text-emerald-900">
+              <fieldset className="space-y-2 rounded-xl border p-3" style={{ borderColor: "color-mix(in srgb, var(--status-success) 70%, transparent)", backgroundColor: "color-mix(in srgb, var(--status-success-soft) 30%, transparent)" }}>
+                <legend className="flex items-center gap-2 px-1 text-sm font-semibold text-[var(--status-success)]">
                   <input
                     type="checkbox"
                     checked={form.includeWeight}
@@ -615,21 +632,21 @@ export function FarmVetLogsPage() {
                 )}
               </fieldset>
 
-              <button type="submit" disabled={busy || !flockId || !mortalityReviewValid} className="rounded-xl bg-emerald-700 px-6 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
-                {busy ? "Saving…" : needsManagerReview ? "Submit for review" : "Save vet log"}
-              </button>
+              <Button variant="primary" type="submit" disabled={busy || !flockId || !mortalityReviewValid} loading={busy}>
+                {needsManagerReview ? "Submit for review" : "Save vet log"}
+              </Button>
             </form>
-          ) : null}
+          </Modal>
 
           <SubmissionReportModal open={reportOpen} onClose={() => setReportOpen(false)}>
             {reportLoading ? (
-              <p className="p-8 text-center text-sm text-[var(--text-muted)] animate-pulse">Loading report…</p>
+              <div className="p-card"><SkeletonList rows={4} /></div>
             ) : reportLog ? (
               <VetLogReport log={reportLog} onClose={() => setReportOpen(false)} />
             ) : null}
           </SubmissionReportModal>
         </>
       ) : null}
-    </div>
+    </ManagerPage>
   );
 }

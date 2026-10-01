@@ -79,4 +79,12 @@ export const vetLogSchema = z.object({
       confirmedSinceLastVisit: z.coerce.number().int().nonnegative().optional(),
     })
     .optional(),
+  visitSlot: z.enum(["am", "pm", "spot"]).optional(),
+  photosFlockSign: z.array(z.string().min(20)).max(6).optional(),
+  photosThermometer: z.array(z.string().min(20)).max(3).optional(),
+  photosFeed: z.array(z.string().min(20)).max(6).optional(),
+  photosWater: z.array(z.string().min(20)).max(6).optional(),
+  coopTemperatureC: z.coerce.number().min(-10).max(60).optional(),
+  feedAvailable: z.boolean().optional(),
+  waterAvailable: z.boolean().optional(),
 });

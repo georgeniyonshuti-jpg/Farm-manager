@@ -17,6 +17,8 @@ type OnboardingStatus = {
   flockCount: number;
   teamCount: number;
   trialExpired: boolean;
+  trialDaysRemaining: number | null;
+  trialEndsAt: string | null;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
@@ -28,6 +30,8 @@ export function useOnboardingStatus(): OnboardingStatus {
   const [flockCount, setFlockCount] = useState(0);
   const [teamCount, setTeamCount] = useState(0);
   const [trialExpired, setTrialExpired] = useState(false);
+  const [trialDaysRemaining, setTrialDaysRemaining] = useState<number | null>(null);
+  const [trialEndsAt, setTrialEndsAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,6 +56,12 @@ export function useOnboardingStatus(): OnboardingStatus {
       setFlockCount(body.flockCount ?? 0);
       setTeamCount(body.teamCount ?? 0);
       setTrialExpired(Boolean(body.trialExpired));
+      setTrialDaysRemaining(
+        typeof (body as { trialDaysRemaining?: number }).trialDaysRemaining === "number"
+          ? (body as { trialDaysRemaining: number }).trialDaysRemaining
+          : null
+      );
+      setTrialEndsAt((body as { trialEndsAt?: string | null }).trialEndsAt ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load workspace status.");
     } finally {
@@ -63,5 +73,5 @@ export function useOnboardingStatus(): OnboardingStatus {
     void refresh();
   }, [refresh]);
 
-  return { company, flockCount, teamCount, trialExpired, loading, error, refresh };
+  return { company, flockCount, teamCount, trialExpired, trialDaysRemaining, trialEndsAt, loading, error, refresh };
 }

@@ -7,16 +7,12 @@ function ContractAliasRedirect({ target }: { target: string }) {
 }
 
 /** Map ERP farm_pwa_urls contract paths to existing farm/* routes. */
-export function ContractRouteAliases() {
-  return (
-    <>
-      {Object.entries(CONTRACT_ROUTE_ALIASES).map(([contractPath, farmPath]) => (
-        <Route
-          key={contractPath}
-          path={contractPath}
-          element={<ContractAliasRedirect target={farmPath} />}
-        />
-      ))}
-    </>
-  );
+export function contractRouteAliasRoutes() {
+  return Object.entries(CONTRACT_ROUTE_ALIASES).map(([contractPath, farmPath]) => (
+    <Route
+      key={contractPath}
+      path={contractPath}
+      element={<ContractAliasRedirect target={farmPath} />}
+    />
+  ));
 }

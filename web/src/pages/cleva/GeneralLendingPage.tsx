@@ -2,10 +2,11 @@ import { useMemo, useState } from "react";
 import { PageHeader } from "../../components/PageHeader";
 import { Area, AreaChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useAuth } from "../../auth/AuthContext";
-import { useERPNextConnection } from "../../context/OdooConnectionContext";
+import { useERPNextConnection } from "../../context/ERPNextConnectionContext";
 import { createLoanApplication } from "../../api/erpnext.api";
 import { getStoredErpnextCompany } from "../../lib/erpnextPrefs";
 import { useToast } from "../../components/Toast";
+import { Button } from "../../components/ui/Button";
 
 type ScheduleRow = {
   month: number;
@@ -131,14 +132,9 @@ export function GeneralLendingPage() {
 
   return (
     <div className="space-y-4 pb-8">
-      <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm md:p-6">
-        <PageHeader
-          title="General lending (non-deposit taking)"
-          subtitle="Model a standard lending book for asset purchases: pricing, losses, operating cost, cash generation, and portfolio runoff."
-        />
-      </div>
+      <PageHeader title="General lending (non-deposit taking)" />
 
-      <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm md:p-6">
+      <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm md:p-card">
         <h3 className="mb-3 text-sm font-semibold text-neutral-900">Portfolio assumptions</h3>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
@@ -189,13 +185,9 @@ export function GeneralLendingPage() {
       <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
         <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="text-sm font-semibold text-neutral-900">Portfolio runoff and cash profile</h3>
-          <button
-            type="button"
-            onClick={exportCsv}
-            className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
-          >
+          <Button variant="secondary" size="sm" onClick={exportCsv}>
             Export schedule CSV
-          </button>
+          </Button>
         </div>
         <p className="mb-3 text-xs text-neutral-500">
           Opening balance shows portfolio at risk each month. Net cash reflects installment inflow minus expected losses and operating cost assumptions.
@@ -290,9 +282,9 @@ function ERPNextLoanApplicationForm() {
             <input type="number" className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2" value={periods} onChange={(e) => setPeriods(e.target.value)} required />
           </label>
           <div className="sm:col-span-2 flex items-center gap-3">
-            <button type="submit" disabled={busy} className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+            <Button type="submit" size="sm" disabled={busy} loading={busy}>
               {busy ? "Submitting…" : "Submit to ERPNext"}
-            </button>
+            </Button>
             {lastRef && <span className="text-xs font-mono text-emerald-700">Last: {lastRef}</span>}
           </div>
         </form>

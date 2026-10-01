@@ -1,12 +1,31 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../../api/config";
 import { useBillingPlans } from "../../hooks/useBillingPlans";
 import type { Plan } from "../../lib/plans";
+import {
+  Button,
+  Checkbox,
+  DataTable,
+  Field,
+  Input,
+  Modal,
+  StatusPill,
+  TableToolbar,
+  TextLink,
+  Textarea,
+  type DataColumn,
+} from "../../components/ui";
 
 type Props = {
   token: string | null;
   onError: (msg: string) => void;
+  /** Drop outer card; parent owns page chrome. */
+  embedded?: boolean;
+  /** Increment to open the create plan modal. */
+  createSignal?: number;
 };
+
+const mgrInput = "!min-h-10 h-10 box-border py-0 text-sm leading-10";
 
 const emptyDraft = (): Partial<Plan> & { featuresText: string } => ({
   id: "",
@@ -21,12 +40,17 @@ const emptyDraft = (): Partial<Plan> & { featuresText: string } => ({
   isActive: true,
 });
 
-export function SuperAdminPlansSection({ token, onError }: Props) {
+export function SuperAdminPlansSection({ token, onError, embedded = false, createSignal = 0 }: Props) {
   const { plans, loading, reload } = useBillingPlans({ activeOnly: false, token });
   const [editing, setEditing] = useState<Plan | null>(null);
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState(emptyDraft());
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (createSignal > 0) openCreate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- external CTA pulse
+  }, [createSignal]);
 
   function openCreate() {
     setCreating(true);
@@ -109,192 +133,196 @@ export function SuperAdminPlansSection({ token, onError }: Props) {
     }
   }
 
-  const formOpen = creating || editing;
+  const formOpen = creating || editing != null;
+
+  const columns: DataColumn<Plan>[] = [
+    {
+      key: "name",
+      header: "Plan",
+      render: (p) => (
+        <div className="min-w-0">
+          <p className="font-medium text-[var(--text-primary)]">{p.name}</p>
+          <p className="type-caption text-[var(--text-muted)]">{p.id}</p>
+        </div>
+      ),
+    },
+    { key: "usd", header: "USD", numeric: true, render: (p) => `$${p.price}/mo` },
+    {
+      key: "rwf",
+      header: "RWF",
+      numeric: true,
+      render: (p) => p.priceRWF.toLocaleString(),
+    },
+    {
+      key: "limits",
+      header: "Limits",
+      render: (p) => `${p.maxUsers} users · ${p.maxFlocks} flocks`,
+    },
+    {
+      key: "status",
+      header: "Status",
+      badge: true,
+      render: (p) => (
+        <StatusPill tone={p.isActive === false ? "neutral" : "success"}>
+          {p.isActive === false ? "Inactive" : "Active"}
+        </StatusPill>
+      ),
+    },
+    {
+      key: "actions",
+      header: "Actions",
+      className: "tbl-actions",
+      render: (p) => (
+        <div className="flex flex-wrap gap-2">
+          <TextLink disabled={busy} onClick={() => openEdit(p)}>
+            Edit
+          </TextLink>
+          <TextLink className="text-[var(--status-danger)]" disabled={busy} onClick={() => void removePlan(p)}>
+            Remove
+          </TextLink>
+        </div>
+      ),
+    },
+  ];
+
+  const table = (
+    <div className="table-block">
+      <DataTable<Plan>
+        flush
+        columns={columns}
+        rows={plans}
+        rowKey={(p) => p.id}
+        emptyTitle={loading ? "Loading plans…" : "No billing plans"}
+        emptyDescription="Create a plan for pricing and signup."
+        emptyAction={
+          <Button size="sm" onClick={openCreate}>
+            New plan
+          </Button>
+        }
+        toolbar={<TableToolbar meta={`${plans.length} plan${plans.length === 1 ? "" : "s"}`} />}
+      />
+    </div>
+  );
 
   return (
-    <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">Billing plans</h2>
-          <p className="text-sm text-[var(--text-secondary)]">Shown on pricing and signup pages.</p>
-        </div>
-        <button
-          type="button"
-          onClick={openCreate}
-          className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white"
-        >
-          New plan
-        </button>
-      </div>
+    <>
+      {!embedded ? (
+        <section className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">Billing plans</h2>
+            <Button size="sm" onClick={openCreate}>
+              New plan
+            </Button>
+          </div>
+          {table}
+        </section>
+      ) : (
+        table
+      )}
 
-      {loading ? <p className="mt-3 text-sm text-[var(--text-muted)]">Loading plans…</p> : null}
-
-      {!loading ? (
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full min-w-[40rem] text-left text-sm">
-            <thead>
-              <tr className="border-b border-[var(--border-color)] text-[var(--text-muted)]">
-                <th className="py-2">Plan</th>
-                <th className="py-2">USD</th>
-                <th className="py-2">RWF</th>
-                <th className="py-2">Limits</th>
-                <th className="py-2">Status</th>
-                <th className="py-2">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {plans.map((plan) => (
-                <tr key={plan.id} className="border-b border-[var(--border-color)]/60">
-                  <td className="py-2 font-medium text-[var(--text-primary)]">
-                    {plan.name}
-                    <span className="ml-2 text-xs text-[var(--text-muted)]">({plan.id})</span>
-                  </td>
-                  <td className="py-2">${plan.price}/mo</td>
-                  <td className="py-2">{plan.priceRWF.toLocaleString()}</td>
-                  <td className="py-2 text-[var(--text-secondary)]">
-                    {plan.maxUsers} users · {plan.maxFlocks} flocks
-                  </td>
-                  <td className="py-2">{plan.isActive === false ? "Inactive" : "Active"}</td>
-                  <td className="py-2">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => openEdit(plan)}
-                      className="mr-2 text-[var(--primary-color)] underline"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void removePlan(plan)}
-                      className="text-red-400 underline"
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : null}
-
-      {formOpen ? (
-        <div className="mt-4 space-y-3 rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)]/30 p-4">
-          <h3 className="font-semibold text-[var(--text-primary)]">{creating ? "New plan" : `Edit ${editing?.name}`}</h3>
+      <Modal
+        open={formOpen}
+        title={creating ? "New plan" : `Edit ${editing?.name ?? "plan"}`}
+        onClose={closeForm}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={closeForm}>
+              Cancel
+            </Button>
+            <Button size="sm" loading={busy} disabled={busy} onClick={() => void savePlan()}>
+              Save plan
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3">
           {creating ? (
-            <label className="block text-sm">
-              <span className="text-[var(--text-secondary)]">Plan id (slug)</span>
-              <input
+            <Field label="Plan id">
+              <Input
+                className={mgrInput}
                 value={draft.id ?? ""}
                 onChange={(e) => setDraft((d) => ({ ...d, id: e.target.value.toLowerCase() }))}
-                className="mt-1 w-full rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-3 py-2"
                 placeholder="e.g. enterprise"
               />
-            </label>
+            </Field>
           ) : null}
-          <label className="block text-sm">
-            <span className="text-[var(--text-secondary)]">Name</span>
-            <input
+          <Field label="Name">
+            <Input
+              className={mgrInput}
               value={draft.name ?? ""}
               onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-              className="mt-1 w-full rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-3 py-2"
             />
-          </label>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="block text-sm">
-              <span className="text-[var(--text-secondary)]">USD / month</span>
-              <input
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="USD / month" className="min-w-0">
+              <Input
                 type="number"
                 min={0}
+                className={`${mgrInput} w-full min-w-0`}
                 value={draft.price ?? 0}
                 onChange={(e) => setDraft((d) => ({ ...d, price: Number(e.target.value) }))}
-                className="mt-1 w-full rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-3 py-2"
               />
-            </label>
-            <label className="block text-sm">
-              <span className="text-[var(--text-secondary)]">RWF / month</span>
-              <input
+            </Field>
+            <Field label="RWF / month" className="min-w-0">
+              <Input
                 type="number"
                 min={0}
+                className={`${mgrInput} w-full min-w-0`}
                 value={draft.priceRWF ?? 0}
                 onChange={(e) => setDraft((d) => ({ ...d, priceRWF: Number(e.target.value) }))}
-                className="mt-1 w-full rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-3 py-2"
               />
-            </label>
-            <label className="block text-sm">
-              <span className="text-[var(--text-secondary)]">Max users</span>
-              <input
+            </Field>
+            <Field label="Max users" className="min-w-0">
+              <Input
                 type="number"
                 min={1}
+                className={`${mgrInput} w-full min-w-0`}
                 value={draft.maxUsers ?? 1}
                 onChange={(e) => setDraft((d) => ({ ...d, maxUsers: Number(e.target.value) }))}
-                className="mt-1 w-full rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-3 py-2"
               />
-            </label>
-            <label className="block text-sm">
-              <span className="text-[var(--text-secondary)]">Max flocks</span>
-              <input
+            </Field>
+            <Field label="Max flocks" className="min-w-0">
+              <Input
                 type="number"
                 min={1}
+                className={`${mgrInput} w-full min-w-0`}
                 value={draft.maxFlocks ?? 1}
                 onChange={(e) => setDraft((d) => ({ ...d, maxFlocks: Number(e.target.value) }))}
-                className="mt-1 w-full rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-3 py-2"
               />
-            </label>
+            </Field>
           </div>
-          <label className="block text-sm">
-            <span className="text-[var(--text-secondary)]">Features (one per line)</span>
-            <textarea
+          <Field label="Features" help="One per line">
+            <Textarea
               value={draft.featuresText}
               onChange={(e) => setDraft((d) => ({ ...d, featuresText: e.target.value }))}
-              className="mt-1 min-h-28 w-full rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-3 py-2"
             />
-          </label>
-          <label className="block text-sm">
-            <span className="text-[var(--text-secondary)]">Stripe price id (optional)</span>
-            <input
+          </Field>
+          <Field label="Stripe price id" help="Optional">
+            <Input
+              className={mgrInput}
               value={draft.stripePriceId ?? ""}
               onChange={(e) => setDraft((d) => ({ ...d, stripePriceId: e.target.value }))}
-              className="mt-1 w-full rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-3 py-2"
-              placeholder="price_..."
+              placeholder="price_…"
             />
-          </label>
-          <div className="flex flex-wrap items-center gap-4">
-            <label className="block text-sm">
-              <span className="text-[var(--text-secondary)]">Sort order</span>
-              <input
+          </Field>
+          <div className="flex flex-wrap items-end gap-4">
+            <Field label="Sort order">
+              <Input
                 type="number"
+                className={`${mgrInput} w-24`}
                 value={draft.sortOrder ?? 0}
                 onChange={(e) => setDraft((d) => ({ ...d, sortOrder: Number(e.target.value) }))}
-                className="mt-1 w-24 rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-3 py-2"
               />
-            </label>
-            <label className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-              <input
-                type="checkbox"
-                checked={draft.isActive !== false}
-                onChange={(e) => setDraft((d) => ({ ...d, isActive: e.target.checked }))}
-              />
-              Active on pricing page
-            </label>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void savePlan()}
-              className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-            >
-              {busy ? "Saving…" : "Save plan"}
-            </button>
-            <button type="button" onClick={closeForm} className="rounded-lg border border-[var(--border-color)] px-4 py-2 text-sm">
-              Cancel
-            </button>
+            </Field>
+            <Checkbox
+              className="pb-1"
+              label="Active on pricing page"
+              checked={draft.isActive !== false}
+              onChange={(e) => setDraft((d) => ({ ...d, isActive: e.target.checked }))}
+            />
           </div>
         </div>
-      ) : null}
-    </section>
+      </Modal>
+    </>
   );
 }

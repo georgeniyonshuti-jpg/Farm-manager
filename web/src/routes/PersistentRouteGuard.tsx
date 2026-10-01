@@ -1,5 +1,5 @@
 import { useAuth } from "../auth/AuthContext";
-import { isSuperuser, roleAtLeast, canManageUsers } from "../auth/permissions";
+import { isSuperuser, roleAtLeast, canManageUsers, roleInAllowList } from "../auth/permissions";
 import type { UserRole } from "../auth/types";
 
 type Props = {
@@ -19,7 +19,7 @@ export function PersistentRouteGuard({ roles, superuserOnly, userManagementAcces
   if (!user) return null;
   if (superuserOnly && !isSuperuser(user)) return null;
   if (userManagementAccess && !canManageUsers(user)) return null;
-  if (roles?.length && !isSuperuser(user) && !roles.includes(user.role)) return null;
+  if (roles?.length && !isSuperuser(user) && !roleInAllowList(user.role, roles)) return null;
   if (minimumRole && !roleAtLeast(user, minimumRole) && !isSuperuser(user)) return null;
   return <>{children}</>;
 }

@@ -1,36 +1,33 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { ClipboardCheck } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
+import { shouldShowRoundCheckin } from "../../auth/permissions";
+import { useFarmCapabilities } from "../../hooks/useFarmCapabilities";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { CheckinBandLine } from "./CheckinBandLine";
 import { CheckinUrgencyBadge } from "../../components/farm/CheckinUrgencyBadge";
-import { EmptyState } from "../../components/EmptyState";
-import { PageHeader } from "../../components/PageHeader";
+import { FieldBlockedScreen } from "../../components/field/FieldBlockedScreen";
 import { FieldPageHeader } from "../../components/layout/FieldPageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
-import { createRoundCheckin } from "../../api/farm.api";
+import { createRoundCheckin, fetchCheckinsList } from "../../api/farm.api";
 import { PhotoTile } from "../../components/farm/PhotoTile";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import type { CheckinStatus } from "./checkinStatusTypes";
 import { SubmissionStageScreen } from "../../components/farm/SubmissionStageScreen";
 import { Button, Card, Field, Input, Metric, SegmentedControl, Textarea } from "../../components/ui";
 import { useCompanyNav } from "../../hooks/useCompanyNav";
+import { useFieldTaskState } from "../../hooks/useFieldTaskState";
+import { FieldFlockContextBar } from "../../components/field/FieldFlockContextBar";
+import { buildFlockPassportMetrics } from "../../components/field/fieldFlockMetrics";
+import { FieldTaskHub } from "../../components/field/FieldTaskHub";
+import { FieldStepSheet } from "../../components/field/FieldStepSheet";
+import { RecordMeta } from "../../components/farm/RecordMeta";
 
 export type { CheckinBadge, CheckinStatus } from "./checkinStatusTypes";
-export type OpsGlanceSummary = {
-  activeFlockCount: number;
-  checkinDoneTodayCount: number;
-  feedLoggedTodayCount: number;
-  vetLoggedRecentCount: number;
-  vetRecentWindowDays: number;
-  oldestMissing?: {
-    checkin?: { flockId: string; label: string; hours: number } | null;
-    feed?: { flockId: string; label: string; hours: number } | null;
-    vet?: { flockId: string; label: string; days: number } | null;
-  } | null;
-  focus?: "checkin" | "feed" | "vet" | null;
-};
+export type { OpsGlanceSummary } from "./opsGlanceTypes";
+import type { OpsGlanceSummary } from "./opsGlanceTypes";
 
 function formatDurationMs(ms: number): string {
   const abs = Math.max(0, Math.floor(ms / 1000));
@@ -168,14 +165,17 @@ function CheckinPhotoBlock({
 }
 
 export function FarmCheckinPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const { fieldReportingMode } = useFarmCapabilities();
   const { showToast } = useToast();
   const { companyHref } = useCompanyNav();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const logOpen = searchParams.get("log") === "1";
+  const step = Math.min(3, Math.max(1, Number(searchParams.get("step") || "1") || 1));
+
   const lblFlock = useLaborerT("Flock");
   const title = useLaborerT("Round check-in");
-  const subtitle = useLaborerT(
-    "Photos required • confirm feed & water available • optional birds lost"
-  );
   const linkAction = useLaborerT("Action center");
   const lblFeedAvail = useLaborerT("Feed is available");
   const lblWaterAvail = useLaborerT("Water is available");
@@ -190,14 +190,27 @@ export function FarmCheckinPage() {
   const phZero = useLaborerT("0");
   const btnSaving = useLaborerT("Saving…");
   const btnSubmit = useLaborerT("Submit round check-in");
-  const detailsTitle = useLaborerT("Age → frequency curve");
-  const detailsFoot = useLaborerT(
-    "Management, vet, or superuser can customize this batch under Check-in schedule."
-  );
   const savedMsg = useLaborerT("Round check-in saved.");
   const errSave = useLaborerT("Save failed");
   const noFlockTitle = useLaborerT("No flock available");
   const noFlockBody = useLaborerT("Add a flock before submitting round check-ins.");
+  const tGoHome = useLaborerT("Back to home");
+  const tStartRound = useLaborerT("Start round");
+  const tNext = useLaborerT("Next");
+  const tBack = useLaborerT("Back");
+  const tStepFlock = useLaborerT("Flock proof");
+  const tStepBarn = useLaborerT("Barn check");
+  const tStepFinish = useLaborerT("Finish");
+  const tOnTrack = useLaborerT("On track — next round in {time}");
+  const tOverdue = useLaborerT("Round overdue — inspect flock now");
+  const tRoundHint = useLaborerT("Tap below to start this round.");
+  const tRecent = useLaborerT("Last round");
+  const tNoRecent = useLaborerT("No rounds logged yet for this flock.");
+  const tDay = useLaborerT("Day");
+  const tLiveBirds = useLaborerT("Live birds");
+  const tAddNotes = useLaborerT("Add notes");
+  const tSubmitSuccess = useLaborerT("Round check-in submitted successfully.");
+  const tScheduleLink = useLaborerT("Check-in schedule");
 
   const {
     flocks,
@@ -208,10 +221,21 @@ export function FarmCheckinPage() {
     listLoading,
     detailLoading,
     error: loadError,
-    flockSync,
     loadDetails,
     loadFlocks,
   } = useFlockFieldContext(token);
+
+  useEffect(() => {
+    if (!user) return;
+    if (!shouldShowRoundCheckin(user, fieldReportingMode)) {
+      if (user.role === "vet") {
+        navigate(companyHref("/farm/vet-logs"), { replace: true });
+      } else {
+        navigate(companyHref("/dashboard/laborer"), { replace: true });
+      }
+    }
+  }, [user, fieldReportingMode, navigate, companyHref]);
+
   const [photosFlockSign, setPhotosFlockSign] = useState<string[]>([]);
   const [photosThermometer, setPhotosThermometer] = useState<string[]>([]);
   const [photosFeed, setPhotosFeed] = useState<string[]>([]);
@@ -225,39 +249,92 @@ export function FarmCheckinPage() {
   const [waterLevel, setWaterLevel] = useState<"yes" | "no">("yes");
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [fcrHintDismissed, setFcrHintDismissed] = useState(false);
   const [submitStage, setSubmitStage] = useState<"idle" | "submitting" | "success">("idle");
+  const [recentCheckin, setRecentCheckin] = useState<{ id: string; recordedAt?: string; coopTemperatureC?: number } | null>(null);
 
-  const pageLoading = listLoading;
+  const pageState = useFieldTaskState({
+    listLoading,
+    error: loadError,
+    flockCount: flocks.length,
+    needsStock: false,
+  });
+
+  const loadRecent = useCallback(async () => {
+    if (!flockId || !token) {
+      setRecentCheckin(null);
+      return;
+    }
+    try {
+      const data = await fetchCheckinsList(token, { flockId, pageSize: 1 });
+      const row = data.checkins?.[0];
+      setRecentCheckin(
+        row ? { id: row.id, recordedAt: row.at, coopTemperatureC: row.coopTemperatureC ?? undefined } : null
+      );
+    } catch {
+      setRecentCheckin(null);
+    }
+  }, [flockId, token]);
 
   useEffect(() => {
-    setFcrHintDismissed(false);
-  }, [flockId, status?.fcrCheckinHint?.message]);
+    void loadRecent();
+  }, [loadRecent]);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  const openLog = () => setSearchParams({ log: "1", step: "1" });
+  const closeLog = () => setSearchParams({});
+  const goStep = (n: number) => setSearchParams({ log: "1", step: String(n) });
+
+  const feedAvailable = feedLevel !== "empty";
+  const waterAvailable = waterLevel === "yes";
+  const minPhotos = status?.photosRequiredPerRound ?? 1;
+  const tempExpectedMin = 27;
+  const tempExpectedMax = 30;
+  const tempVal = Number(coopTemperatureC);
+  const tempVerdict =
+    !Number.isFinite(tempVal) || coopTemperatureC === ""
+      ? null
+      : tempVal < tempExpectedMin || tempVal > tempExpectedMax
+        ? "out"
+        : "ok";
+
+  const hubStatus = useMemo(() => {
+    if (!status) return { title: "", subtitle: "" };
+    const nextDueMs = new Date(status.nextDueAt).getTime();
+    const remainingMs = Math.max(0, nextDueMs - Date.now());
+    if (status.isOverdue) {
+      return { title: tOverdue, subtitle: status.fcrCheckinHint?.message ?? tRoundHint };
+    }
+    return {
+      title: tOnTrack.replace("{time}", formatDurationMs(remainingMs)),
+      subtitle: status.fcrCheckinHint?.message ?? tRoundHint,
+    };
+  }, [status, tOverdue, tOnTrack, tRoundHint]);
+
+  function validateStep(s: number): string | null {
+    if (s === 1) {
+      if (photosFlockSign.length < minPhotos) {
+        return `Add at least ${minPhotos} flock sign photo(s).`;
+      }
+    }
+    if (s === 2) {
+      if (!Number.isFinite(Number(coopTemperatureC))) return "Coop temperature is required.";
+      if (photosThermometer.length < 1) return "Add at least one thermometer photo.";
+    }
+    if (s === 3) {
+      if (feedAvailable && photosFeed.length < 1) {
+        return "Add at least one feed photo when feed is available.";
+      }
+      if (waterAvailable && photosWater.length < 1) {
+        return "Add at least one water photo when water is available.";
+      }
+    }
+    return null;
+  }
+
+  async function handleSubmit() {
     if (!flockId) return;
-    const minP = status?.photosRequiredPerRound ?? 1;
-    if (!Number.isFinite(Number(coopTemperatureC))) {
-      setSubmitError("Coop temperature is required.");
-      return;
-    }
-    if (photosFlockSign.length < minP) {
-      setSubmitError(`Add at least ${minP} flock sign photo(s).`);
-      return;
-    }
-    if (photosThermometer.length < 1) {
-      setSubmitError("Add at least one thermometer photo.");
-      return;
-    }
-    const feedAvailable = feedLevel !== "empty";
-    const waterAvailable = waterLevel === "yes";
-    if (feedAvailable && photosFeed.length < 1) {
-      setSubmitError("Add at least one feed photo when feed is available.");
-      return;
-    }
-    if (waterAvailable && photosWater.length < 1) {
-      setSubmitError("Add at least one water photo when water is available.");
+    const err = validateStep(3);
+    if (err) {
+      setSubmitError(err);
       return;
     }
     setSubmitError(null);
@@ -292,9 +369,11 @@ export function FarmCheckinPage() {
       setMortalityReportedInMortalityLog(false);
       setNotes("");
       if (typeof window !== "undefined") {
-        window.dispatchEvent(new CustomEvent("farm:checkin-submitted"));
+        window.dispatchEvent(new CustomEvent("farm:checkin-submitted", { detail: { flockId } }));
       }
       void loadDetails();
+      await loadRecent();
+      closeLog();
       const pay = (data as { payrollImpact?: { rwfDelta?: number } }).payrollImpact;
       const flockDay = (data as { flockDay?: number }).flockDay;
       const bonus =
@@ -319,262 +398,273 @@ export function FarmCheckinPage() {
     return (
       <SubmissionStageScreen
         stage={submitStage === "submitting" ? "submitting" : "success"}
-        successText="Round check-in submitted successfully."
+        successText={tSubmitSuccess}
       />
     );
   }
 
-  const tempVal = Number(coopTemperatureC);
-  const tempExpectedMin = 27;
-  const tempExpectedMax = 30;
-  const tempVerdict =
-    !Number.isFinite(tempVal) || coopTemperatureC === ""
-      ? null
-      : tempVal < tempExpectedMin || tempVal > tempExpectedMax
-        ? "out"
-        : "ok";
-  const feedAvailable = feedLevel !== "empty";
-  const waterAvailable = waterLevel === "yes";
+  const stepLabels = [tStepFlock, tStepBarn, tStepFinish];
+  const isManager = user?.role === "vet_manager" || user?.role === "manager" || user?.role === "company_admin";
+
+  if (logOpen && pageState === "ready" && status) {
+    const stepLabel = stepLabels[step - 1];
+    const onBack = () => (step > 1 ? goStep(step - 1) : closeLog());
+    const onNext = () => {
+      const err = validateStep(step);
+      if (err) {
+        setSubmitError(err);
+        return;
+      }
+      setSubmitError(null);
+      goStep(step + 1);
+    };
+
+    return (
+      <FieldStepSheet
+        title={title}
+        backLabel={tBack}
+        onBack={onBack}
+        step={step}
+        totalSteps={3}
+        stepLabel={stepLabel}
+        nextLabel={tNext}
+        nextDisabled={busy}
+        onNext={step < 3 ? onNext : undefined}
+        submitLabel={btnSubmit}
+        submittingLabel={btnSaving}
+        busy={busy}
+        onSubmit={() => void handleSubmit()}
+        submitDisabled={busy || !flockId}
+      >
+        {step === 1 ? (
+          <CheckinPhotoBlock
+            title={lblFlockSignPhoto}
+            help="Required for this round"
+            minCount={minPhotos}
+            maxCount={6}
+            allowMultiple
+            busy={busy}
+            pickerLabel={lblFlockSignPhoto}
+            onPhotos={setPhotosFlockSign}
+          />
+        ) : null}
+
+        {step === 2 ? (
+          <>
+            <Field label={lblCoopTemp} htmlFor="coop-temperature" help={`Expected ${tempExpectedMin}–${tempExpectedMax}°C`}>
+              <Input
+                id="coop-temperature"
+                inputMode="decimal"
+                className="text-lg"
+                value={coopTemperatureC}
+                placeholder="28.4"
+                onChange={(e) => setCoopTemperatureC(e.target.value)}
+              />
+            </Field>
+            {tempVerdict === "ok" ? (
+              <p className="text-xs font-semibold text-[var(--status-success)]">✓ Normal — within expected range</p>
+            ) : null}
+            {tempVerdict === "out" ? (
+              <p className="text-xs font-semibold text-[var(--status-danger)]">
+                Out of expected range ({tempExpectedMin}–{tempExpectedMax}°C)
+              </p>
+            ) : null}
+            <CheckinPhotoBlock
+              title={lblThermometerPhoto}
+              minCount={1}
+              maxCount={1}
+              allowMultiple={false}
+              busy={busy}
+              pickerLabel={lblThermometerPhoto}
+              onPhotos={setPhotosThermometer}
+            />
+            <SegmentedControl
+              variant="grid"
+              label={lblFeedAvail}
+              value={feedLevel}
+              onChange={(v) => setFeedLevel(v as "full" | "low" | "empty")}
+              options={[
+                { value: "full", label: "Full" },
+                { value: "low", label: "Low" },
+                { value: "empty", label: "Empty" },
+              ]}
+            />
+            <SegmentedControl
+              variant="grid"
+              label={lblWaterAvail}
+              value={waterLevel}
+              onChange={(v) => setWaterLevel(v as "yes" | "no")}
+              options={[
+                { value: "yes", label: "Yes" },
+                { value: "no", label: "No" },
+              ]}
+            />
+          </>
+        ) : null}
+
+        {step === 3 ? (
+          <>
+            {feedAvailable ? (
+              <CheckinPhotoBlock
+                title={lblFeedPhoto}
+                minCount={1}
+                maxCount={1}
+                allowMultiple={false}
+                busy={busy}
+                pickerLabel={lblFeedPhoto}
+                onPhotos={setPhotosFeed}
+              />
+            ) : null}
+            {waterAvailable ? (
+              <CheckinPhotoBlock
+                title={lblWaterPhoto}
+                minCount={1}
+                maxCount={1}
+                allowMultiple={false}
+                busy={busy}
+                pickerLabel={lblWaterPhoto}
+                onPhotos={setPhotosWater}
+              />
+            ) : null}
+            <Field label={lblMort} htmlFor="mort">
+              <Input
+                id="mort"
+                inputMode="numeric"
+                className="text-lg"
+                value={mortalityAtCheckin}
+                placeholder={phZero}
+                onChange={(e) => setMortalityAtCheckin(e.target.value)}
+              />
+            </Field>
+            {mortalityAtCheckin && Number(mortalityAtCheckin) > 0 ? (
+              <label className="flex items-center gap-3 rounded-xl border border-[var(--status-warning)]/30 bg-[var(--status-warning-soft)] px-4 py-3 text-sm font-medium text-[var(--status-warning)] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={mortalityReportedInMortalityLog}
+                  onChange={(e) => setMortalityReportedInMortalityLog(e.target.checked)}
+                  className="h-5 w-5 rounded"
+                />
+                {lblMortLogged}
+              </label>
+            ) : null}
+            {!showNotes ? (
+              <Button type="button" variant="ghost" size="sm" onClick={() => setShowNotes(true)}>
+                {tAddNotes}
+              </Button>
+            ) : (
+              <Field label={lblNotes} htmlFor="notes">
+                <Textarea id="notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+              </Field>
+            )}
+          </>
+        ) : null}
+
+        {submitError ? (
+          <p className="text-sm text-[var(--status-danger)]" role="alert">
+            <TranslatedText text={submitError} />
+          </p>
+        ) : null}
+      </FieldStepSheet>
+    );
+  }
 
   return (
-    <div className="mx-auto max-w-lg space-y-4 md:max-w-3xl md:space-y-6">
+    <div className="mx-auto max-w-lg space-y-5 sm:max-w-xl">
       <FieldPageHeader
         title={title}
         backTo={companyHref("/dashboard/laborer")}
         backLabel={linkAction}
-        context={status?.label}
+        showAccount
       />
-      <div className="hidden md:block">
-        <PageHeader
-          title={title}
-          subtitle={subtitle}
-          action={
-            <Link to={companyHref("/dashboard/laborer")} className="bounce-tap rounded-lg px-2 py-1 text-sm font-medium text-[var(--primary-color-dark)] hover:bg-[var(--primary-color-soft)]">
-              {linkAction}
-            </Link>
-          }
-        />
-      </div>
 
-      {flockSync?.stale && !loadError ? (
-        <div
-          className="rounded-lg border border-[var(--status-warning)]/40 bg-[var(--status-warning-soft)] px-3 py-2 text-sm text-[var(--status-warning)]"
-          role="status"
-        >
-          Flock list may be slightly out of date. Refresh if a batch is missing.
-        </div>
-      ) : null}
+      {pageState === "loading" ? <SkeletonList rows={3} /> : null}
 
-      {pageLoading && <SkeletonList rows={3} />}
-      {!pageLoading && loadError && (
+      {pageState === "error" ? (
         <ErrorState
-          message={loadError}
+          message={loadError ?? ""}
           onRetry={() => {
             void loadFlocks();
             void loadDetails();
+            void loadRecent();
           }}
         />
-      )}
-
-      {!pageLoading && !loadError && flocks.length === 0 ? (
-        <EmptyState title={noFlockTitle} description={noFlockBody} />
       ) : null}
 
-      {!pageLoading && !loadError && flocks.length > 0 ? (
-        <Field label={lblFlock}>
-          <select
-            className="mt-1 w-full min-h-[48px] rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-3 text-base text-[var(--text-primary)]"
-            value={flockId}
-            onChange={(e) => setFlockId(e.target.value)}
-          >
-            {flocks.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-      ) : null}
-
-      {!pageLoading && !loadError && flockId && !status && detailLoading ? <SkeletonList rows={2} /> : null}
-
-      {!pageLoading && !loadError && status?.fcrCheckinHint && !fcrHintDismissed ? (
-        <div
-          className={
-            status.fcrCheckinHint.severity === "warning"
-              ? "rounded-xl border border-[var(--status-danger)]/25 bg-[var(--status-danger-soft)] px-4 py-3 text-sm text-[var(--status-danger)]"
-              : "rounded-xl border border-[var(--status-warning)]/25 bg-[var(--status-warning-soft)] px-4 py-3 text-sm text-[var(--status-warning)]"
+      {pageState === "no_flocks" ? (
+        <FieldBlockedScreen
+          title={noFlockTitle}
+          description={noFlockBody}
+          icon={<ClipboardCheck className="h-10 w-10 text-[var(--status-warning)]" aria-hidden />}
+          action={
+            <Button type="button" size="field" className="w-full" onClick={() => navigate(companyHref("/dashboard/laborer"))}>
+              {tGoHome}
+            </Button>
           }
-          role="status"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <p className="font-medium">{status.fcrCheckinHint.message}</p>
-            <button
-              type="button"
-              className="shrink-0 text-xs font-semibold underline"
-              onClick={() => setFcrHintDismissed(true)}
+        />
+      ) : null}
+
+      {pageState === "ready" ? (
+        <>
+          <FieldFlockContextBar
+            flocks={flocks}
+            flockId={flockId}
+            onFlockChange={setFlockId}
+            flockLabel={lblFlock}
+            flockLabelText={status?.label}
+            badge={status?.checkinBadge}
+            loading={Boolean(flockId && !status && detailLoading)}
+            metrics={
+              status
+                ? buildFlockPassportMetrics(status, performance, {
+                    day: tDay,
+                    liveBirds: tLiveBirds,
+                  })
+                : []
+            }
+          />
+
+          {status ? (
+            <FieldTaskHub
+              statusTitle={hubStatus.title}
+              statusSubtitle={hubStatus.subtitle}
+              primaryAction={
+                <Button type="button" size="field" className="w-full" onClick={openLog}>
+                  {tStartRound}
+                </Button>
+              }
             >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      ) : null}
+              <section className="space-y-2">
+                <p className="type-h3 text-[var(--text-primary)]">{tRecent}</p>
+                {recentCheckin ? (
+                  <Card level="default" className="!p-3 text-sm">
+                    <p className="font-semibold text-[var(--text-primary)]">
+                      {recentCheckin.coopTemperatureC != null
+                        ? `${recentCheckin.coopTemperatureC}°C`
+                        : "Round logged"}
+                    </p>
+                    <RecordMeta className="mt-1" createdAt={recentCheckin.recordedAt} />
+                  </Card>
+                ) : (
+                  <p className="text-sm text-[var(--text-muted)]">{tNoRecent}</p>
+                )}
+              </section>
+            </FieldTaskHub>
+          ) : null}
 
-      {!pageLoading && !loadError && status ? (
-        <CheckinStatusBlock
-          status={status}
-          birdsLive={performance?.birdsLiveEstimate ?? performance?.verifiedLiveCount}
-          mortalityToDate={performance?.mortalityToDate}
-        />
-      ) : null}
-
-      {!pageLoading && !loadError && status ? (
-      <form
-        onSubmit={(e) => void handleSubmit(e)}
-        className="space-y-4 rounded-2xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-[var(--shadow-card)]"
-      >
-        <CheckinPhotoBlock
-          title={lblFlockSignPhoto}
-          help="Required for this round"
-          minCount={status?.photosRequiredPerRound ?? 1}
-          maxCount={6}
-          allowMultiple
-          busy={busy}
-          pickerLabel={lblFlockSignPhoto}
-          onPhotos={setPhotosFlockSign}
-        />
-
-        <Field label={lblCoopTemp} htmlFor="coop-temperature" help={`Expected ${tempExpectedMin}–${tempExpectedMax}°C`}>
-          <Input
-            id="coop-temperature"
-            inputMode="decimal"
-            className="text-lg"
-            value={coopTemperatureC}
-            placeholder="28.4"
-            onChange={(e) => setCoopTemperatureC(e.target.value)}
-            required
-          />
-        </Field>
-        {tempVerdict === "ok" ? (
-          <p className="text-xs font-semibold text-[var(--status-success)]">✓ Normal — within expected range</p>
-        ) : null}
-        {tempVerdict === "out" ? (
-          <p className="text-xs font-semibold text-[var(--status-danger)]">Out of expected range ({tempExpectedMin}–{tempExpectedMax}°C)</p>
-        ) : null}
-
-        <CheckinPhotoBlock
-          title={lblThermometerPhoto}
-          minCount={1}
-          maxCount={1}
-          allowMultiple={false}
-          busy={busy}
-          pickerLabel={lblThermometerPhoto}
-          onPhotos={setPhotosThermometer}
-        />
-
-        <SegmentedControl
-          variant="grid"
-          label={lblFeedAvail}
-          value={feedLevel}
-          onChange={(v) => setFeedLevel(v as "full" | "low" | "empty")}
-          options={[
-            { value: "full", label: "Full" },
-            { value: "low", label: "Low" },
-            { value: "empty", label: "Empty" },
-          ]}
-        />
-        {feedAvailable ? (
-          <CheckinPhotoBlock
-            title={lblFeedPhoto}
-            minCount={1}
-            maxCount={1}
-            allowMultiple={false}
-            busy={busy}
-            pickerLabel={lblFeedPhoto}
-            onPhotos={setPhotosFeed}
-          />
-        ) : null}
-
-        <SegmentedControl
-          variant="grid"
-          label={lblWaterAvail}
-          value={waterLevel}
-          onChange={(v) => setWaterLevel(v as "yes" | "no")}
-          options={[
-            { value: "yes", label: "Yes" },
-            { value: "no", label: "No" },
-          ]}
-        />
-        {waterAvailable ? (
-          <CheckinPhotoBlock
-            title={lblWaterPhoto}
-            minCount={1}
-            maxCount={1}
-            allowMultiple={false}
-            busy={busy}
-            pickerLabel={lblWaterPhoto}
-            onPhotos={setPhotosWater}
-          />
-        ) : null}
-
-        <Field label={lblMort} htmlFor="mort">
-          <Input
-            id="mort"
-            inputMode="numeric"
-            className="text-lg"
-            value={mortalityAtCheckin}
-            placeholder={phZero}
-            onChange={(e) => setMortalityAtCheckin(e.target.value)}
-          />
-        </Field>
-        {mortalityAtCheckin && Number(mortalityAtCheckin) > 0 ? (
-          <label className="flex items-center gap-3 rounded-xl border border-[var(--status-warning)]/30 bg-[var(--status-warning-soft)] px-4 py-3 text-sm font-medium text-[var(--status-warning)] cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={mortalityReportedInMortalityLog}
-              onChange={(e) => setMortalityReportedInMortalityLog(e.target.checked)}
-              className="h-5 w-5 rounded"
-            />
-            {lblMortLogged}
-          </label>
-        ) : null}
-
-        {!showNotes ? (
-          <Button type="button" variant="ghost" size="sm" onClick={() => setShowNotes(true)}>
-            + {lblNotes}
-          </Button>
-        ) : (
-          <Field label={lblNotes} htmlFor="notes">
-            <Textarea id="notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
-          </Field>
-        )}
-
-        {submitError && (
-          <p className="text-sm text-[var(--status-danger)]" role="alert">
-            <TranslatedText text={submitError} />
-          </p>
-        )}
-        <div className="sticky bottom-[calc(3.75rem+env(safe-area-inset-bottom,0px))] z-[5] bg-[var(--surface-card)] pt-2 md:static md:bg-transparent">
-          <Button type="submit" size="field" className="w-full" disabled={busy || !flockId || !status}>
-            {busy ? btnSaving : btnSubmit}
-          </Button>
-        </div>
-      </form>
-      ) : null}
-
-      {!pageLoading && !loadError && status ? (
-        <details className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] p-4 text-sm text-[var(--text-secondary)]">
-          <summary className="cursor-pointer font-medium text-[var(--text-primary)]">{detailsTitle}</summary>
-          <ul className="mt-2 space-y-1 pl-4">
-            {status.bands.map((b) => (
-              <CheckinBandLine key={`${b.untilDay}-${b.intervalHours}`} untilDay={b.untilDay} hours={b.intervalHours} />
-            ))}
-          </ul>
-          <p className="mt-2 text-xs text-[var(--text-muted)]">{detailsFoot}</p>
-          <Link to={companyHref("/farm/feed")} className="mt-2 inline-block text-xs font-semibold text-[var(--primary-color)] underline">
-            Log feed only
-          </Link>
-        </details>
+          {isManager && status ? (
+            <details className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] p-4 text-sm text-[var(--text-secondary)]">
+              <summary className="cursor-pointer font-medium text-[var(--text-primary)]">{tScheduleLink}</summary>
+              <ul className="mt-2 space-y-1 pl-4">
+                {status.bands.map((b) => (
+                  <CheckinBandLine key={`${b.untilDay}-${b.intervalHours}`} untilDay={b.untilDay} hours={b.intervalHours} />
+                ))}
+              </ul>
+              <Link to={companyHref("/farm/feed")} className="mt-2 inline-block text-xs font-semibold text-[var(--primary-color)] underline">
+                Log feed only
+              </Link>
+            </details>
+          ) : null}
+        </>
       ) : null}
     </div>
   );

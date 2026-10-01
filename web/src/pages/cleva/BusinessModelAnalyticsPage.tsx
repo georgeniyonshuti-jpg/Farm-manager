@@ -26,6 +26,7 @@ import { BusinessModelBroilerOpsTab } from "./BusinessModelBroilerOpsTab";
 import BatchResults from "../../components/analytics/BatchResults";
 import { broilerInputsFromRecord, runBroilerModel, type BroilerModelResults } from "../../lib/broilerModel";
 import { SegmentedControl } from "../../components/ui";
+import { Button } from "../../components/ui/Button";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -285,14 +286,16 @@ function MetricCard({
       <div className="flex items-start justify-between gap-1">
         <p className="text-xs font-medium text-neutral-700">{label}</p>
         {meta && onToggle ? (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="sm"
             onClick={onToggle}
             title="Explain this metric"
-            className="shrink-0 rounded-full border border-neutral-300 px-1.5 py-0.5 text-[9px] font-semibold text-neutral-500 hover:bg-neutral-100"
+            className="shrink-0 !min-h-0 !px-1.5 !py-0.5 text-[9px]"
           >
             {expanded ? "▲" : "?"}
-          </button>
+          </Button>
         ) : null}
       </div>
       <p className="mt-1 text-lg font-semibold text-neutral-900">{value}</p>
@@ -322,15 +325,17 @@ function ExportCsvButton({
   disabled?: boolean;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="secondary"
+      size="sm"
       disabled={busy || disabled}
+      loading={busy}
       onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
     >
       <span>↓</span>
       {busy ? "Exporting…" : label}
-    </button>
+    </Button>
   );
 }
 
@@ -360,14 +365,17 @@ function SensitivitySliders({
       <div className="flex flex-wrap items-center gap-2">
         <p className="text-sm font-semibold text-neutral-800">Interactive sensitivity sliders</p>
         <p className="text-xs text-neutral-500">Drag a lever, then re-run to see impact.</p>
-        <button
+        <Button
           type="button"
+          variant="primary"
+          size="sm"
+          className="ml-auto"
           disabled={busy}
+          loading={busy}
           onClick={onRun}
-          className="ml-auto rounded-lg bg-emerald-800 px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
         >
           {busy ? "Running…" : "Re-run model"}
-        </button>
+        </Button>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -524,14 +532,17 @@ function LiveDataPanel({
             Pulls slaughter revenue, birds sold, and feed costs from the live farm DB — maps to PAYGO actuals format.
           </p>
         </div>
-        <button
+        <Button
           type="button"
+          variant="primary"
+          size="sm"
+          className="ml-auto"
           disabled={busy}
+          loading={busy}
           onClick={onLoad}
-          className="ml-auto rounded-lg bg-emerald-800 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
         >
           {busy ? "Loading…" : "Pull live data"}
-        </button>
+        </Button>
       </div>
 
       {loadedAt ? (
@@ -619,7 +630,7 @@ function LiveDataPanel({
           </div>
         </>
       ) : (
-        <div className="rounded-xl border border-dashed border-neutral-300 p-8 text-center">
+        <div className="rounded-xl border border-dashed border-neutral-300 p-card text-center">
           <p className="text-sm text-neutral-500">Click "Pull live data" to load farm operations actuals.</p>
           <p className="mt-1 text-xs text-neutral-400">
             Requires slaughter events with price_per_kg and avg_carcass_weight_kg populated.
@@ -987,10 +998,9 @@ export function BusinessModelAnalyticsPage() {
   return (
     <div className="space-y-4 pb-8">
       {/* Header */}
-      <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm md:p-6">
+      <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm md:p-card">
         <PageHeader
           title="Business model analytics"
-          subtitle="Hybrid PAYGO workspace — live DB actuals + CSV uploads + manual overrides. Interactive scenario analysis, sensitivity heatmaps, detailed exports, and report-grade PDFs."
         />
         {runTimestamp ? (
           <p className="mt-2 text-xs text-neutral-400">
@@ -1050,7 +1060,7 @@ export function BusinessModelAnalyticsPage() {
 
           {/* ── Scenario builder (always shown when on scenario view) ── */}
           {paygoCtl && paygoView === "scenario" ? (
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm md:p-6 space-y-6">
+            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm md:p-card space-y-6">
               <div>
                 <h3 className="text-sm font-semibold text-neutral-900">Core scenario</h3>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -1259,18 +1269,22 @@ export function BusinessModelAnalyticsPage() {
               ) : null}
 
               <div className="flex flex-wrap gap-2">
-                <button
-                  type="button" disabled={busy} onClick={() => void runPaygo()}
-                  className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900 disabled:opacity-50"
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={busy}
+                  loading={busy}
+                  onClick={() => void runPaygo()}
                 >
                   {busy ? "Running…" : "Run PAYGO model"}
-                </button>
-                <button
-                  type="button" onClick={() => void loadPaygoDefaults()}
-                  className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium hover:bg-neutral-50"
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void loadPaygoDefaults()}
                 >
                   Reset defaults
-                </button>
+                </Button>
                 <ExportCsvButton label="Export projection CSV" onClick={() => void exportProjectionCsv()} busy={exportBusy} disabled={!paygoCtl} />
               </div>
             </div>
@@ -1675,12 +1689,16 @@ export function BusinessModelAnalyticsPage() {
                   <p className="text-xs text-neutral-500">
                     Re-runs the model across default rate × volume, debt × tier, and deposit × mix axes.
                   </p>
-                  <button
-                    type="button" disabled={busy || !paygoCtl} onClick={() => void runHeatmaps()}
-                    className="rounded-lg bg-slate-800 px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    disabled={busy || !paygoCtl}
+                    loading={busy}
+                    onClick={() => void runHeatmaps()}
                   >
                     {busy ? "Computing…" : "Compute heatmaps"}
-                  </button>
+                  </Button>
                   {heatmaps ? <ExportCsvButton label="Export heatmaps CSV" onClick={() => void exportHeatmapsCsv()} busy={exportBusy} /> : null}
                 </div>
                 {heatmaps ? (
@@ -1743,13 +1761,14 @@ export function BusinessModelAnalyticsPage() {
                   A is the current builder. Edit B below, then run. Charts show cumulative EBITDA and NI for both scenarios.
                 </p>
               </div>
-              <button
+              <Button
                 type="button"
-                className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium hover:bg-neutral-50"
+                variant="secondary"
+                size="sm"
                 onClick={() => paygoCtl && setPaygoCtlB({ ...paygoCtl })}
               >
                 Copy A → B
-              </button>
+              </Button>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {[
                   ["B — Default rate %", "def_rate_pct", "number"],
@@ -1800,12 +1819,15 @@ export function BusinessModelAnalyticsPage() {
                 </label>
               </div>
               <div className="flex flex-wrap gap-2">
-                <button
-                  type="button" disabled={busy} onClick={() => void runCompare()}
-                  className="rounded-lg bg-slate-800 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={busy}
+                  loading={busy}
+                  onClick={() => void runCompare()}
                 >
                   {busy ? "Running…" : "Run A vs B"}
-                </button>
+                </Button>
                 <ExportCsvButton label="Export compare CSV" onClick={() => void exportCompareCsv()} busy={exportBusy} />
               </div>
 
@@ -1915,7 +1937,7 @@ export function BusinessModelAnalyticsPage() {
           {broilerSub === "economics" ? (
             <>
               {broilerInputs ? (
-                <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm md:p-6">
+                <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm md:p-card">
                   <h3 className="mb-3 text-sm font-semibold text-neutral-900">Batch inputs</h3>
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     {[
@@ -1947,19 +1969,20 @@ export function BusinessModelAnalyticsPage() {
                     ))}
                   </div>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <button
+                    <Button
                       type="button"
+                      variant="primary"
                       onClick={() => runBroiler()}
-                      className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
                     >
                       Run broiler model
-                    </button>
-                    <button
-                      type="button" onClick={() => void loadBroilerDefaults()}
-                      className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium hover:bg-neutral-50"
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      onClick={() => void loadBroilerDefaults()}
                     >
                       Reset defaults
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ) : null}

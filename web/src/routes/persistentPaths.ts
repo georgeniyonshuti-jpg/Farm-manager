@@ -10,6 +10,7 @@ export function isAppShellPersistentPath(pathname: string): boolean {
     p.startsWith("/dashboard/") ||
     p.startsWith("/laborer/") ||
     p.startsWith("/farm") ||
+    p.startsWith("/market") ||
     p.startsWith("/cleva") ||
     p.startsWith("/admin/")
   );

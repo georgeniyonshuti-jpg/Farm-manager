@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { API_BASE_URL } from "../../api/config";
+import { Button } from "../../components/ui/Button";
 
 type BroilerInputs = Record<string, number>;
 
@@ -135,22 +136,21 @@ export function BusinessModelBroilerOpsTab(props: {
             onChange={(e) => onCycleIdChange(e.target.value)}
           />
         </label>
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           disabled={busy}
           onClick={() => void postJson(`${API_BASE_URL}/api/business-model/broiler-ops/seed-demo`, { cycleId })}
-          className="rounded-lg border border-neutral-300 px-3 py-2 text-xs font-medium"
         >
           Seed demo logs
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
+          size="sm"
           disabled={busy || !broilerInputs}
           onClick={() => void downloadBroilerPdf()}
-          className="rounded-lg bg-violet-800 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
         >
           Download broiler PDF
-        </button>
+        </Button>
       </div>
 
       {compliance ? (
@@ -169,7 +169,7 @@ export function BusinessModelBroilerOpsTab(props: {
         </div>
       ) : null}
 
-      <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm space-y-3">
+      <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-sm space-y-3">
         <h3 className="text-sm font-semibold">Daily check-in</h3>
         <div className="flex flex-wrap gap-4 text-xs">
           <label className="flex items-center gap-2">
@@ -191,8 +191,8 @@ export function BusinessModelBroilerOpsTab(props: {
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
         />
-        <button
-          type="button"
+        <Button
+          size="sm"
           disabled={busy}
           onClick={() =>
             void postJson(`${API_BASE_URL}/api/business-model/broiler-ops/checkin`, {
@@ -203,13 +203,12 @@ export function BusinessModelBroilerOpsTab(props: {
               notes,
             })
           }
-          className="rounded-lg bg-emerald-800 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
         >
           Save check-in
-        </button>
+        </Button>
       </div>
 
-      <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm space-y-3">
+      <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-sm space-y-3">
         <h3 className="text-sm font-semibold">Mortality event</h3>
         <input
           type="number"
@@ -218,17 +217,16 @@ export function BusinessModelBroilerOpsTab(props: {
           min={0}
           onChange={(e) => setBirdsLost(Number(e.target.value))}
         />
-        <button
-          type="button"
+        <Button
+          size="sm"
           disabled={busy}
           onClick={() => void postJson(`${API_BASE_URL}/api/business-model/broiler-ops/mortality`, { cycleId, birdsLost, notes: "" })}
-          className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
         >
           Log mortality
-        </button>
+        </Button>
       </div>
 
-      <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm space-y-3">
+      <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-sm space-y-3">
         <h3 className="text-sm font-semibold">Vet report</h3>
         <textarea
           className="w-full min-h-[72px] rounded-lg border border-neutral-300 p-2 text-sm"
@@ -245,8 +243,8 @@ export function BusinessModelBroilerOpsTab(props: {
           <option value="Moderate">Moderate</option>
           <option value="Risk">Risk</option>
         </select>
-        <button
-          type="button"
+        <Button
+          size="sm"
           disabled={busy}
           onClick={() =>
             void postJson(`${API_BASE_URL}/api/business-model/broiler-ops/vet-report`, {
@@ -255,13 +253,12 @@ export function BusinessModelBroilerOpsTab(props: {
               status: vetStatus,
             })
           }
-          className="rounded-lg bg-emerald-800 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
         >
           Save vet report
-        </button>
+        </Button>
       </div>
 
-      <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm space-y-3">
+      <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 shadow-sm space-y-3">
         <h3 className="text-sm font-semibold">Snapshot inputs</h3>
         <input
           className="w-full max-w-md rounded-lg border border-neutral-300 px-2 py-1.5 text-sm"
@@ -269,8 +266,9 @@ export function BusinessModelBroilerOpsTab(props: {
           onChange={(e) => setSnapLabel(e.target.value)}
           placeholder="Label"
         />
-        <button
-          type="button"
+        <Button
+          variant="secondary"
+          size="sm"
           disabled={busy || !broilerInputs}
           onClick={() =>
             void postJson(`${API_BASE_URL}/api/business-model/broiler-ops/snapshot`, {
@@ -278,10 +276,9 @@ export function BusinessModelBroilerOpsTab(props: {
               inputs: broilerInputs,
             })
           }
-          className="rounded-lg border border-neutral-300 px-3 py-2 text-xs font-medium disabled:opacity-50"
         >
           Save snapshot
-        </button>
+        </Button>
         <ul className="max-h-32 overflow-auto text-xs text-neutral-600">
           {snapshots.map((s) => (
             <li key={String(s.id)}>

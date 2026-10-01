@@ -1,18 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { API_BASE_URL } from "../../api/config";
-import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
+import { ErrorState } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 import { useSuppliers } from "../../hooks/useSuppliers";
-import { FeedBalanceSidebar } from "../../components/inventory/FeedBalanceSidebar";
 import { FeedInventoryLedger } from "../../components/inventory/FeedInventoryLedger";
-import { FeedInventoryStatsStrip } from "../../components/inventory/FeedInventoryStatsStrip";
 import { ReceiveStockModal } from "../../components/inventory/ReceiveStockModal";
 import { AdjustStockModal } from "../../components/inventory/AdjustStockModal";
+import { ManagerPage } from "../../components/layout/ManagerPage";
 
 type StockRow = {
   feedType: string | null;
@@ -36,13 +34,6 @@ type LedgerRow = {
   reference: string;
   supplierName?: string | null;
   accountingStatus: string | null;
-};
-
-type OdooApprover = {
-  id: string;
-  displayName: string;
-  role: string;
-  email: string;
 };
 
 type TxTypeFilter = "all" | "procurement_receipt" | "feed_consumption" | "adjustment";
@@ -103,8 +94,6 @@ export function FarmInventoryPage() {
   const [procSupplierMode, setProcSupplierMode] = useState<"existing" | "new">("existing");
   const [procSupplierExistingId, setProcSupplierExistingId] = useState("");
   const [procSupplierNew, setProcSupplierNew] = useState("");
-  const [approvers, setApprovers] = useState<OdooApprover[]>([]);
-  const [requestedApproverUserId, setRequestedApproverUserId] = useState("");
 
   const [adjDelta, setAdjDelta] = useState("");
   const [adjFeedType, setAdjFeedType] = useState("starter");
@@ -114,10 +103,10 @@ export function FarmInventoryPage() {
     user?.role === "procurement_officer" ||
     user?.role === "vet_manager" ||
     user?.role === "manager" ||
+    user?.role === "company_admin" ||
     user?.role === "superuser";
-  const canAdjust = user?.role === "manager" || user?.role === "superuser";
-  const canSendToOdoo =
-    user?.role === "superuser" || (user?.role === "manager" && Array.isArray(user?.pageAccess) && user.pageAccess.includes("odoo_send"));
+  const canAdjust =
+    user?.role === "manager" || user?.role === "company_admin" || user?.role === "superuser";
 
   const loadStock = useCallback(async () => {
     setLoadingStock(true);
@@ -164,26 +153,10 @@ export function FarmInventoryPage() {
     [token, feedTypeFilter]
   );
 
-  const loadApprovers = useCallback(async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/users/odoo-approvers`, { headers: readAuthHeaders(token) });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) return;
-      const list = Array.isArray((data as { approvers?: OdooApprover[] }).approvers) ? (data as { approvers: OdooApprover[] }).approvers : [];
-      setApprovers(list);
-      if (!requestedApproverUserId && list.length > 0) {
-        setRequestedApproverUserId(list[0].id);
-      }
-    } catch {
-      setApprovers([]);
-    }
-  }, [token, requestedApproverUserId]);
-
   useEffect(() => {
     void loadStock();
     void loadSuppliers();
-    if (!canSendToOdoo) void loadApprovers();
-  }, [loadStock, loadSuppliers, loadApprovers, canSendToOdoo]);
+  }, [loadStock, loadSuppliers]);
 
   useEffect(() => {
     void loadLedger(1);
@@ -213,10 +186,6 @@ export function FarmInventoryPage() {
       showToast("error", "Enter a valid quantity in kg.");
       return;
     }
-    if (!canSendToOdoo && !requestedApproverUserId) {
-      showToast("error", "Select who should approve and send this to Odoo.");
-      return;
-    }
 
     setBusy(true);
     try {
@@ -232,15 +201,12 @@ export function FarmInventoryPage() {
           unitCostRwfPerKg: procUnitCost ? Number(procUnitCost) : undefined,
           supplierId: procSupplierMode === "existing" ? procSupplierExistingId || undefined : undefined,
           supplierName: procSupplierMode === "new" ? procSupplierNew.trim() || undefined : undefined,
-          requestedApproverUserId: !canSendToOdoo ? requestedApproverUserId : undefined,
         }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error((data as { error?: string }).error ?? "Request failed");
 
-      const acctStatus = (data as { row?: { accountingStatus?: string | null } }).row?.accountingStatus ?? null;
-      const acctMsg = acctStatus === "approved" ? " Sent to Odoo." : " Waiting for selected approver to push to Odoo.";
-      showToast("success", `Received ${qty} kg of ${feedTypeLabel(procFeedType)}.${acctMsg}`);
+      showToast("success", `Received ${qty} kg of ${feedTypeLabel(procFeedType)}.`);
 
       setProcQty("");
       setProcRef("");
@@ -289,113 +255,58 @@ export function FarmInventoryPage() {
     }
   }
 
-  const totalPages = Math.ceil(ledgerTotal / PAGE_SIZE);
-  const loading = loadingStock && loadingLedger;
   const exportHref = useMemo(
     () => `${API_BASE_URL}/api/reports/feed-inventory.csv${feedTypeFilter ? `?feed_type=${encodeURIComponent(feedTypeFilter)}` : ""}`,
     [feedTypeFilter]
   );
 
   return (
-    <div className="mx-auto max-w-7xl space-y-4">
+    <ManagerPage>
       <PageHeader
         title="Feed inventory"
-        subtitle="Ledger-first view of feed stock movement and balances."
-        action={
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
-              onClick={() => void refreshAll()}
-            >
-              Refresh
-            </button>
-
-            <details className="group relative">
-              <summary className="list-none cursor-pointer rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-3 py-2 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]">
-                Actions
-              </summary>
-              <div className="absolute right-0 z-20 mt-2 min-w-[12rem] rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] p-1 shadow-elevated">
-                {canAdjust ? (
-                  <button
-                    type="button"
-                    className="w-full rounded px-3 py-2 text-left text-xs text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
-                    onClick={() => setShowAdjustModal(true)}
-                  >
-                    Adjust stock
-                  </button>
-                ) : null}
-                <a
-                  href={exportHref}
-                  className="block rounded px-3 py-2 text-xs text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
-                  download
-                >
-                  Export CSV
-                </a>
-                <Link
-                  to="/farm/reports?type=farm_operations"
-                  className="block rounded px-3 py-2 text-xs text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
-                >
-                  Operations report
-                </Link>
-              </div>
-            </details>
-
-            {canProcure ? (
-              <button
-                type="button"
-                className="rounded-lg bg-[var(--primary-color)] px-3 py-2 text-xs font-semibold text-white hover:bg-[var(--primary-color-dark)]"
-                onClick={() => setShowReceiveModal(true)}
-              >
-                + Receive stock
-              </button>
-            ) : null}
-          </div>
+        primaryAction={
+          canProcure
+            ? { label: "Receive stock", onClick: () => setShowReceiveModal(true) }
+            : undefined
         }
       />
 
-      {loading ? <SkeletonList rows={4} /> : null}
-      {!loading && error ? <ErrorState message={error} onRetry={() => { void loadStock(); void loadLedger(1); }} /> : null}
-
-      {!error ? (
-        <>
-          <FeedInventoryStatsStrip summary={summary} />
-
-          <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
-            <FeedBalanceSidebar
-              summary={summary}
-              feedTypeFilter={feedTypeFilter}
-              onFeedTypeFilterChange={setFeedTypeFilter}
-              feedTypeOptions={FEED_TYPE_OPTIONS}
-            />
-            <FeedInventoryLedger
-              rows={ledger}
-              loading={loadingLedger}
-              totalRows={ledgerTotal}
-              page={ledgerPage}
-              totalPages={totalPages}
-              feedTypeFilter={feedTypeFilter}
-              txTypeFilter={txTypeFilter}
-              feedTypeOptions={FEED_TYPE_OPTIONS}
-              exportHref={exportHref}
-              onFeedTypeFilterChange={setFeedTypeFilter}
-              onTxTypeFilterChange={setTxTypeFilter}
-              onPrevPage={() => void loadLedger(ledgerPage - 1)}
-              onNextPage={() => void loadLedger(ledgerPage + 1)}
-            />
-          </div>
-        </>
-      ) : null}
+      {error ? (
+        <ErrorState
+          message={error}
+          onRetry={() => {
+            void loadStock();
+            void loadLedger(1);
+          }}
+        />
+      ) : (
+        <FeedInventoryLedger
+          rows={ledger}
+          summary={summary}
+          loading={loadingStock || loadingLedger}
+          totalRows={ledgerTotal}
+          page={ledgerPage}
+          feedTypeFilter={feedTypeFilter}
+          txTypeFilter={txTypeFilter}
+          feedTypeOptions={FEED_TYPE_OPTIONS}
+          exportHref={exportHref}
+          onFeedTypeFilterChange={setFeedTypeFilter}
+          onTxTypeFilterChange={setTxTypeFilter}
+          onPageChange={(p) => void loadLedger(p)}
+          pageSize={PAGE_SIZE}
+          onRefresh={() => void refreshAll()}
+          onAdjust={canAdjust ? () => setShowAdjustModal(true) : undefined}
+          operationsReportHref="/farm/reports?type=farm_operations"
+        />
+      )}
 
       {canProcure ? (
         <ReceiveStockModal
           open={showReceiveModal}
           busy={busy}
-          canSendToOdoo={canSendToOdoo}
           feedTypeOptions={FEED_TYPE_OPTIONS}
           procurementReasons={procurementReasons}
           suppliers={suppliers}
-          approvers={approvers}
           procQty={procQty}
           procFeedType={procFeedType}
           procReasonCode={procReasonCode}
@@ -404,7 +315,6 @@ export function FarmInventoryPage() {
           procSupplierMode={procSupplierMode}
           procSupplierExistingId={procSupplierExistingId}
           procSupplierNew={procSupplierNew}
-          requestedApproverUserId={requestedApproverUserId}
           onClose={() => setShowReceiveModal(false)}
           onSubmit={() => void postProcurement()}
           onCreateSupplier={handleCreateSupplier}
@@ -416,7 +326,6 @@ export function FarmInventoryPage() {
           setProcSupplierMode={setProcSupplierMode}
           setProcSupplierExistingId={setProcSupplierExistingId}
           setProcSupplierNew={setProcSupplierNew}
-          setRequestedApproverUserId={setRequestedApproverUserId}
         />
       ) : null}
 
@@ -436,6 +345,6 @@ export function FarmInventoryPage() {
           setAdjReasonCode={setAdjReasonCode}
         />
       ) : null}
-    </div>
+    </ManagerPage>
   );
 }

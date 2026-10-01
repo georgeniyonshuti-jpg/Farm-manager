@@ -3,6 +3,7 @@ import type { ActiveWorkspace, SessionUser, UserRole } from "./types";
 const ROLE_ORDER: UserRole[] = [
   "laborer",
   "dispatcher",
+  "buyer",
   "procurement_officer",
   "sales_coordinator",
   "vet",
@@ -24,6 +25,18 @@ export function roleAtLeast(user: SessionUser | null, minRole: UserRole): boolea
 
 export function isCompanyAdmin(user: SessionUser | null): boolean {
   return user?.role === "company_admin";
+}
+
+/** Company-level operator on farm.cleva.rw (not platform superuser-only). */
+export function isCompanyLevelAdmin(user: SessionUser | null): boolean {
+  if (!user) return false;
+  return user.role === "company_admin" || user.role === "manager" || user.role === "superuser";
+}
+
+/** Vet lead or company operator — reviews, payroll, schedule. */
+export function isFarmOpsLead(user: SessionUser | null): boolean {
+  if (!user) return false;
+  return isCompanyLevelAdmin(user) || user.role === "vet_manager";
 }
 
 export function canManageUsers(user: SessionUser | null): boolean {
@@ -56,8 +69,118 @@ export function vetLogNeedsManagerReview(user: SessionUser | null): boolean {
   return user.role === "vet" && user.departmentKeys.includes("junior_vet");
 }
 
+export function isJuniorVet(user: SessionUser | null): boolean {
+  if (!user) return false;
+  return user.role === "vet" && user.departmentKeys.includes("junior_vet");
+}
+
+export type FieldReportingMode = "laborer_rounds" | "vet_only" | "both" | "none";
+
+export function normalizeFieldReportingMode(mode: string | null | undefined): FieldReportingMode {
+  const m = String(mode ?? "").trim().toLowerCase();
+  if (m === "laborer_rounds" || m === "both" || m === "none") return m;
+  return "vet_only";
+}
+
+/** Laborer/dispatcher round check-in nav — never for field vets; hidden when vet_only or none. */
+export function shouldShowRoundCheckin(
+  user: SessionUser | null,
+  fieldReportingMode?: string | null
+): boolean {
+  if (!user) return false;
+  // All PWA vets (junior + mapped ERP junior_vet) use scheduled vet visits only.
+  if (user.role === "vet") return false;
+  if (isJuniorVet(user)) return false;
+  const mode = normalizeFieldReportingMode(fieldReportingMode);
+  if (mode === "vet_only" || mode === "none") return false;
+  return user.role === "laborer" || user.role === "dispatcher";
+}
+
 export function isSuperuser(user: SessionUser | null): boolean {
   return user?.role === "superuser";
+}
+
+/** Sales matcher only (not superuser) — mobile sales shell, no farm OS. */
+export function isPipelineSalesRole(user: SessionUser | null): boolean {
+  return user?.role === "sales_coordinator";
+}
+
+/** Marketplace buyer — browse / book lots only. */
+export function isBuyerRole(user: SessionUser | null): boolean {
+  return user?.role === "buyer";
+}
+
+/** Market signup seller — pageAccess is only farm_market, no Farm OS. */
+export function isMarketOnlySeller(user: SessionUser | null): boolean {
+  if (!user) return false;
+  if (user.role !== "manager" && user.role !== "company_admin") return false;
+  const access = Array.isArray(user.pageAccess) ? user.pageAccess.filter(Boolean) : [];
+  return access.length > 0 && access.every((key) => key === "farm_market");
+}
+
+/** Chocolate market chrome: buyers, market-only sellers, farmers on /market, desk on /market. */
+export function usesMarketPartnerShell(user: SessionUser | null, appPath: string): boolean {
+  if (!user) return false;
+  if (isBuyerRole(user) || isMarketOnlySeller(user)) return true;
+  const path = (appPath || "/").replace(/\/+$/, "") || "/";
+  const onMarket = path === "/market" || path.startsWith("/market/");
+  if (canAccessPipelineDesk(user)) return onMarket;
+  return canListFarmerMarketLots(user) && onMarket;
+}
+
+/** Pipeline desk: Cleva matcher (sales coordinator + platform superuser). */
+export function canAccessPipelineDesk(user: SessionUser | null): boolean {
+  if (!user) return false;
+  return user.role === "superuser" || user.role === "sales_coordinator";
+}
+
+/** Verified farmer tenant operators who can self-list lots. */
+export function canListFarmerMarketLots(user: SessionUser | null): boolean {
+  if (!user) return false;
+  return user.role === "company_admin" || user.role === "manager" || user.role === "superuser";
+}
+
+/** Browse live market (buyers + ops). */
+export function canBrowseMarket(user: SessionUser | null): boolean {
+  if (!user) return false;
+  return isBuyerRole(user) || canAccessPipelineDesk(user);
+}
+
+/** Vet / manager inventory scout (managed or off-platform lots). */
+export function canScoutPipeline(user: SessionUser | null): boolean {
+  if (!user) return false;
+  const r = user.role;
+  return (
+    r === "superuser" ||
+    r === "sales_coordinator" ||
+    r === "vet" ||
+    r === "vet_manager" ||
+    r === "manager" ||
+    r === "company_admin"
+  );
+}
+
+/** Opt a company flock into the pipeline. */
+export function canOptInPipelineFlock(user: SessionUser | null): boolean {
+  if (!user) return false;
+  const r = user.role;
+  return (
+    r === "superuser" ||
+    r === "sales_coordinator" ||
+    r === "manager" ||
+    r === "company_admin" ||
+    r === "vet_manager"
+  );
+}
+
+/**
+ * Whether `role` is allowed by an explicit roles allow-list.
+ * Company admins inherit any page that allows managers (sidebar already does).
+ */
+export function roleInAllowList(role: UserRole, roles: UserRole[]): boolean {
+  if (roles.includes(role)) return true;
+  if (role === "company_admin" && roles.includes("manager")) return true;
+  return false;
 }
 
 export function canAccessWorkspace(user: SessionUser | null, workspace: ActiveWorkspace): boolean {
@@ -83,23 +206,45 @@ export function farmFieldOpsNavEligible(user: SessionUser | null): boolean {
   return FARM_FIELD_OPS_ROLES.includes(user.role);
 }
 
-export type FarmNavItem = { to: string; label: string; end?: boolean };
+/** Desk/office roles: sidebar IA without field capture items. */
+export function isOfficeFarmDesktopRole(user: SessionUser | null): boolean {
+  if (!user) return false;
+  return (
+    user.role === "vet_manager" ||
+    user.role === "manager" ||
+    user.role === "company_admin" ||
+    user.role === "superuser"
+  );
+}
 
-const FARM_CORE_FULL: FarmNavItem[] = [
-  { to: "/farm/checkin", label: "Round check-in" },
-  { to: "/farm/feed", label: "Feed request / log" },
-  { to: "/farm/mortality-log", label: "Log mortality" },
-  { to: "/farm/inventory", label: "Feed inventory" },
-];
+export type FarmNavItem = { to: string; label: string; end?: boolean };
 
 /**
  * Core farm sidebar links (before clinical/workforce extras).
  * Office roles: procurement sees inventory only; sales/investor see none here (flocks etc. stay in extras).
  */
-export function farmCoreNavItems(user: SessionUser | null): FarmNavItem[] {
+export function farmCoreNavItems(
+  user: SessionUser | null,
+  fieldReportingMode?: string | null
+): FarmNavItem[] {
   if (!user || !canAccessWorkspace(user, "farm")) return [];
+  if (isOfficeFarmDesktopRole(user)) {
+    const items: FarmNavItem[] = [];
+    items.push({ to: "/farm/inventory", label: "Feed inventory" });
+    if (canSubmitVetLog(user)) {
+      items.push({ to: "/farm/vet-logs", label: "Vet logs" });
+    }
+    items.push({ to: "/farm/mortality", label: "Mortality tracking" });
+    return items;
+  }
   if (farmFieldOpsNavEligible(user)) {
-    const items: FarmNavItem[] = [...FARM_CORE_FULL];
+    const items: FarmNavItem[] = [];
+    if (shouldShowRoundCheckin(user, fieldReportingMode)) {
+      items.push({ to: "/farm/checkin", label: "Round check-in" });
+    }
+    items.push({ to: "/farm/feed", label: "Feed request / log" });
+    items.push({ to: "/farm/mortality-log", label: "Log mortality" });
+    items.push({ to: "/farm/inventory", label: "Feed inventory" });
     if (canSubmitVetLog(user)) {
       items.push({ to: "/farm/vet-logs", label: "Vet logs" });
     }
@@ -125,7 +270,7 @@ export function canViewClevaSensitive(user: SessionUser | null): boolean {
 }
 
 /** Mirrors server: manager / vet_manager / superuser, or Command Center read roles. */
-export function canViewOdooConnectionStatus(user: SessionUser | null): boolean {
+export function canViewERPNextConnectionStatus(user: SessionUser | null): boolean {
   if (!user) return false;
   if (user.role === "superuser" || user.role === "manager" || user.role === "company_admin" || user.role === "vet_manager") return true;
   if (user.role === "procurement_officer" || user.role === "sales_coordinator") return true;
@@ -150,7 +295,7 @@ export type PermissionKey =
 export const PAGE_ACCESS_DEFS: Array<{ key: string; label: string; prefixes: string[] }> = [
   { key: "dashboard_laborer", label: "Action center", prefixes: ["/dashboard/laborer"] },
   { key: "dashboard_vet", label: "Vet home", prefixes: ["/dashboard/vet"] },
-  { key: "dashboard_management", label: "Command center", prefixes: ["/dashboard/management"] },
+  { key: "dashboard_management", label: "Today", prefixes: ["/dashboard/management"] },
   { key: "laborer_earnings", label: "My earnings", prefixes: ["/laborer/earnings"] },
   { key: "farm_checkin", label: "Round check-in", prefixes: ["/farm/checkin"] },
   { key: "farm_feed", label: "Feed log", prefixes: ["/farm/feed"] },
@@ -166,6 +311,8 @@ export const PAGE_ACCESS_DEFS: Array<{ key: string; label: string; prefixes: str
   { key: "farm_checkin_review", label: "Review check-ins", prefixes: ["/farm/checkin-review"] },
   { key: "farm_treatments", label: "Medicine tracking", prefixes: ["/farm/treatments"] },
   { key: "farm_slaughter", label: "Slaughter & FCR", prefixes: ["/farm/slaughter"] },
+  { key: "farm_pipeline", label: "Supply pipeline", prefixes: ["/farm/pipeline"] },
+  { key: "farm_market", label: "Broiler market", prefixes: ["/market"] },
   { key: "farm_reports", label: "Reports center", prefixes: ["/farm/reports"] },
   { key: "cleva_portfolio", label: "Portfolio analytics", prefixes: ["/cleva/portfolio"] },
   {
@@ -177,18 +324,24 @@ export const PAGE_ACCESS_DEFS: Array<{ key: string; label: string; prefixes: str
   { key: "cleva_credit_scoring", label: "Credit scoring", prefixes: ["/cleva/credit-scoring"] },
   { key: "admin_system_config", label: "Type settings", prefixes: ["/admin/system-config"] },
   { key: "admin_users", label: "User management", prefixes: ["/admin/users"] },
-  { key: "odoo_send", label: "Can send data to Odoo", prefixes: [] },
 ];
 const PAGE_KEYS = new Set(PAGE_ACCESS_DEFS.map((d) => d.key));
 
 export function canAccessPageByKey(user: SessionUser | null, key: string): boolean {
   if (!user) return false;
   if (isSuperuser(user)) return true;
-  if (isCompanyAdmin(user) && key === "admin_users") return true;
+  // Company admin is the tenant sovereign for company-scoped pages (incl. Reports).
+  if (isCompanyAdmin(user)) return true;
   if (!PAGE_KEYS.has(key)) return true;
   const access = Array.isArray(user.pageAccess) ? user.pageAccess : [];
   if (access.length === 0) return true;
-  return access.includes(key);
+  if (access.includes(key)) return true;
+  // Legacy pageAccess snapshots predate farm_market; pipeline desk ops need market routes.
+  if (key === "farm_market") {
+    if (user.role === "sales_coordinator") return true;
+    if (access.includes("farm_pipeline")) return true;
+  }
+  return false;
 }
 
 export function canAccessPathByPageVisibility(user: SessionUser | null, path: string): boolean {
@@ -227,6 +380,8 @@ export function canFlockAction(user: SessionUser | null, action: FlockActionKey)
   if (!user) return false;
   if (!canAccessWorkspace(user, "farm")) return false;
   if (user.role === "superuser") return true;
+  // Coordinators sell via pipeline lots — no flock OS browse/ops.
+  if (isPipelineSalesRole(user)) return false;
   return roleAtLeast(user, FLOCK_ACTION_MIN_ROLE[action]);
 }
 

@@ -2,20 +2,31 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
-import { canFlockAction } from "../../auth/permissions";
+import { canFlockAction, canOptInPipelineFlock } from "../../auth/permissions";
 import { API_BASE_URL } from "../../api/config";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { SectionCard } from "../../components/ui/SectionCard";
+import { Button } from "../../components/ui/Button";
 import { DataTable, type DataColumn } from "../../components/ui/DataTable";
 import { useToast } from "../../components/Toast";
 import { useReferenceOptions } from "../../hooks/useReferenceOptions";
-import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
 import { syncSlaughterSaleToERPNext } from "../../api/erpnext.api";
 import { getStoredErpnextCompany, getStoredErpnextCostCenter, CLIENT_ERPNEXT_ENTITY_SYNC } from "../../lib/erpnextPrefs";
-import { useERPNextConnection } from "../../context/OdooConnectionContext";
+import { useERPNextConnection } from "../../context/ERPNextConnectionContext";
 import { useFarmCapabilities } from "../../hooks/useFarmCapabilities";
-import { SegmentedControl } from "../../components/ui";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
+import { useErpnextSyncBySource } from "../../hooks/useErpnextSyncBySource";
+import { ERPNextSyncBadge } from "../../components/accounting/ERPNextSyncBadge";
+import { SegmentedControl, Metric, Modal, Field, Input, Select, PageTabs, TableToolbar, FacetFilter } from "../../components/ui";
+import { DistrictSelect } from "../../components/DistrictSelect";
+import { ManagerPage } from "../../components/layout/ManagerPage";
+import { formatManagerDateTime } from "../../lib/formatManagerDateTime";
+import {
+  fetchFlockPipelineLot,
+  optInFlockToPipeline,
+  type PipelineLot,
+} from "../../api/pipeline.api";
 
 type Flock = { id: string; label: string; birdsLiveEstimate?: number | null };
 type Slaughter = {
@@ -38,6 +49,17 @@ type Eligibility = {
   eligibleForSlaughter: boolean;
   blockers: Array<{ type: string; medicineName?: string; safeAfter?: string; plannedFor?: string }>;
 };
+type MeatSale = {
+  id: string;
+  flockId: string;
+  flockCode?: string | null;
+  orderDate: string;
+  numberOfBirds: number;
+  totalWeightKg: number;
+  pricePerKg: number;
+  buyerName: string | null;
+  submissionStatus?: string;
+};
 const FALLBACK_SLAUGHTER_REASONS = [
   { value: "planned_market", label: "Planned market harvest" },
   { value: "target_weight_reached", label: "Target weight reached" },
@@ -55,9 +77,12 @@ export function FarmSlaughterPage() {
   const { token, user } = useAuth();
   const { status: erpnextStatus } = useERPNextConnection();
   const { erpnextAccess } = useFarmCapabilities();
+  const { companyHref } = useCompanyNav();
+  const { bySource } = useErpnextSyncBySource(user?.erpnextAccess || erpnextAccess ? token : null);
   const slaughterReasonOptions = useReferenceOptions("slaughter_reason", token, FALLBACK_SLAUGHTER_REASONS);
   const { showToast } = useToast();
   const canRecordSlaughter = canFlockAction(user, "slaughter.record");
+  const canOptIn = canOptInPipelineFlock(user);
   const [flocks, setFlocks] = useState<Flock[]>([]);
   const [flockId, setFlockId] = useState("");
   const [rows, setRows] = useState<Slaughter[]>([]);
@@ -68,6 +93,17 @@ export function FarmSlaughterPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pipelineLot, setPipelineLot] = useState<PipelineLot | null>(null);
+  const [pipelineBusy, setPipelineBusy] = useState(false);
+  const [optInOpen, setOptInOpen] = useState(false);
+  const [optInForm, setOptInForm] = useState({
+    district: "",
+    askPricePerKg: "",
+    contactPhone: "",
+    farmerCanSlaughter: false,
+    deliveryAvailable: false,
+    minOrderBirds: "",
+  });
   const [form, setForm] = useState({
     reasonCode: "planned_market",
     birdsSlaughtered: "",
@@ -78,7 +114,21 @@ export function FarmSlaughterPage() {
     notes: "",
   });
   const [showRecordSlaughter, setShowRecordSlaughter] = useState(false);
+  const [showRecordSale, setShowRecordSale] = useState(false);
+  const [hubTab, setHubTab] = useState<"slaughter" | "sales">("slaughter");
   const [datePreset, setDatePreset] = useState<"7d" | "30d" | "cycle" | "custom">("custom");
+  const [sales, setSales] = useState<MeatSale[]>([]);
+  const [saleBusy, setSaleBusy] = useState(false);
+  const [saleForm, setSaleForm] = useState({
+    flockId: "",
+    orderDate: new Date().toISOString().slice(0, 10),
+    numberOfBirds: "",
+    totalWeightKg: "",
+    pricePerKg: "",
+    buyerName: "",
+  });
+
+  const mgrInput = "!min-h-10 h-10 box-border py-0 text-sm leading-10";
 
   const applyDatePreset = useCallback((value: "7d" | "30d" | "cycle") => {
     setDatePreset(value);
@@ -172,6 +222,114 @@ export function FarmSlaughterPage() {
     void load();
   }, [load]);
 
+  const loadSales = useCallback(async () => {
+    if (!token) return;
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/farm-sales/sales-orders`, {
+        headers: readAuthHeaders(token),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return;
+      setSales(Array.isArray((d as { orders?: MeatSale[] }).orders) ? (d as { orders: MeatSale[] }).orders : []);
+    } catch {
+      setSales([]);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    void loadSales();
+  }, [loadSales]);
+
+  useEffect(() => {
+    if (!token || !flockId || !canOptIn) {
+      setPipelineLot(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetchFlockPipelineLot(token, flockId);
+        if (!cancelled) setPipelineLot(r.lot);
+      } catch {
+        if (!cancelled) setPipelineLot(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, flockId, canOptIn]);
+
+  async function submitPipelineOptIn() {
+    if (!token || !flockId) return;
+    if (!optInForm.district.trim()) {
+      showToast("error", "District is required to list the lot on the pipeline desk.");
+      return;
+    }
+    setPipelineBusy(true);
+    try {
+      const r = await optInFlockToPipeline(token, {
+        flockId,
+        district: optInForm.district.trim(),
+        askPricePerKg: optInForm.askPricePerKg ? Number(optInForm.askPricePerKg) : null,
+        contactPhone: optInForm.contactPhone || null,
+        farmerCanSlaughter: optInForm.farmerCanSlaughter,
+        deliveryAvailable: optInForm.deliveryAvailable,
+        minOrderBirds: optInForm.minOrderBirds ? Number(optInForm.minOrderBirds) : null,
+      });
+      setPipelineLot(r.lot);
+      setOptInOpen(false);
+      showToast("success", "Flock opted into supply pipeline");
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Opt-in failed");
+    } finally {
+      setPipelineBusy(false);
+    }
+  }
+
+  async function submitSale(e: React.FormEvent) {
+    e.preventDefault();
+    if (!canRecordSlaughter) {
+      showToast("error", "Only vet manager or manager can record meat sales.");
+      return;
+    }
+    const flockIdValue = saleForm.flockId || flockId;
+    if (!flockIdValue) {
+      showToast("error", "Select a flock for the sale.");
+      return;
+    }
+    setSaleBusy(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/farm-sales/sales-orders`, {
+        method: "POST",
+        headers: jsonAuthHeaders(token),
+        body: JSON.stringify({
+          flockId: flockIdValue,
+          orderDate: saleForm.orderDate,
+          numberOfBirds: Number(saleForm.numberOfBirds),
+          totalWeightKg: Number(saleForm.totalWeightKg),
+          pricePerKg: Number(saleForm.pricePerKg),
+          buyerName: saleForm.buyerName.trim() || undefined,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Could not save sale");
+      showToast("success", "Meat sale recorded.");
+      setSaleForm((v) => ({
+        ...v,
+        numberOfBirds: "",
+        totalWeightKg: "",
+        pricePerKg: "",
+        buyerName: "",
+      }));
+      setShowRecordSale(false);
+      await loadSales();
+    } catch (err) {
+      showToast("error", err instanceof Error ? err.message : "Could not save sale");
+    } finally {
+      setSaleBusy(false);
+    }
+  }
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!flockId) return;
@@ -245,7 +403,7 @@ export function FarmSlaughterPage() {
           showToast("success", `Slaughter recorded.${liveMsg} ERPNext sync pending.`);
         }
       } else {
-        showToast("success", `Slaughter recorded.${liveMsg} Accounting entry sent to Odoo.`);
+        showToast("success", `Slaughter recorded.${liveMsg} Synced to ERPNext.`);
       }
       setForm((v) => ({ ...v, birdsSlaughtered: "", avgLiveWeightKg: "", avgCarcassWeightKg: "", pricePerKgRwf: "", fairValueRwf: "", notes: "" }));
       setShowRecordSlaughter(false);
@@ -258,185 +416,403 @@ export function FarmSlaughterPage() {
     }
   }
 
-  const slaughterColumns = useMemo((): DataColumn<Slaughter>[] => [
-    {
-      key: "at",
-      header: "Date / Time",
-      className: "tbl-mono",
-      render: (r) => new Date(r.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" }),
-    },
-    { key: "reason", header: "Reason", render: (r) => slaughterReasonLabel(r, slaughterReasonOptions) },
-    { key: "birds", header: "Birds slaughtered", numeric: true, render: (r) => <span className="font-semibold">{r.birdsSlaughtered}</span> },
-    { key: "live", header: "Avg live wt (kg)", numeric: true, render: (r) => r.avgLiveWeightKg },
-    { key: "carcass", header: "Avg carcass wt (kg)", numeric: true, render: (r) => (r.avgCarcassWeightKg != null ? r.avgCarcassWeightKg : "—") },
-    { key: "notes", header: "Notes", render: (r) => <span className="block max-w-[14rem] truncate">{r.notes || "—"}</span> },
-    { key: "odoo", header: "Odoo", badge: true, render: (r) => <OdooSyncBadge status={r.accountingStatus} compact approvalsHref="/farm/accounting-approvals" /> },
-  ], [slaughterReasonOptions]);
+  const slaughterColumns = useMemo((): DataColumn<Slaughter>[] => {
+    const cols: DataColumn<Slaughter>[] = [
+      {
+        key: "at",
+        header: "Date / Time",
+        render: (r) => <span title={r.at}>{formatManagerDateTime(r.at)}</span>,
+      },
+      { key: "reason", header: "Reason", render: (r) => slaughterReasonLabel(r, slaughterReasonOptions) },
+      { key: "birds", header: "Birds slaughtered", numeric: true, render: (r) => <span className="font-semibold">{r.birdsSlaughtered}</span> },
+      { key: "live", header: "Avg live wt (kg)", numeric: true, render: (r) => r.avgLiveWeightKg },
+      { key: "carcass", header: "Avg carcass wt (kg)", numeric: true, render: (r) => (r.avgCarcassWeightKg != null ? r.avgCarcassWeightKg : "—") },
+      { key: "notes", header: "Notes", render: (r) => <span className="block max-w-[14rem] truncate">{r.notes || "—"}</span> },
+    ];
+    if (user?.erpnextAccess || erpnextAccess) {
+      cols.push({
+        key: "erpnext",
+        header: "ERPNext",
+        badge: true,
+        render: (r) => {
+          const hint = bySource.get(r.id);
+          if (!hint) return null;
+          return (
+            <ERPNextSyncBadge
+              state={hint.state}
+              reference={hint.reference}
+              compact
+              href={companyHref(`farm/erpnext-setup?q=${encodeURIComponent(r.id)}`)}
+            />
+          );
+        },
+      });
+    }
+    return cols;
+  }, [slaughterReasonOptions, user?.erpnextAccess, erpnextAccess, bySource, companyHref]);
+
+  const saleColumns = useMemo(
+    (): DataColumn<MeatSale>[] => [
+      {
+        key: "date",
+        header: "Date",
+        render: (r) => String(r.orderDate).slice(0, 10),
+      },
+      {
+        key: "flock",
+        header: "Flock",
+        render: (r) => r.flockCode ?? r.flockId.slice(0, 8),
+      },
+      {
+        key: "birds",
+        header: "Birds",
+        numeric: true,
+        render: (r) => r.numberOfBirds,
+      },
+      {
+        key: "weight",
+        header: "Weight (kg)",
+        numeric: true,
+        render: (r) => Number(r.totalWeightKg).toFixed(1),
+      },
+      {
+        key: "price",
+        header: "Price/kg",
+        numeric: true,
+        render: (r) => `${Number(r.pricePerKg).toLocaleString()} RWF`,
+      },
+      {
+        key: "buyer",
+        header: "Buyer",
+        render: (r) => r.buyerName || "—",
+      },
+    ],
+    []
+  );
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6">
+    <ManagerPage>
       <PageHeader
-        title="Slaughter and FCR"
-        subtitle="Capture slaughter metrics and monitor feed conversion ratio."
-        action={
-          canRecordSlaughter ? (
-            <button
-              type="button"
-              onClick={() => setShowRecordSlaughter((v) => !v)}
-              className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)] disabled:opacity-50"
-              disabled={eligibility != null && !eligibility.eligibleForSlaughter}
-            >
-              {showRecordSlaughter ? "Close" : "Record new slaughter"}
-            </button>
-          ) : null
+        title="Slaughter"
+        tabs={
+          <PageTabs
+            aria-label="Slaughter sections"
+            value={hubTab}
+            onChange={(v) => setHubTab(v as "slaughter" | "sales")}
+            options={[
+              { value: "slaughter", label: "Events" },
+              { value: "sales", label: "Meat sales" },
+            ]}
+          />
+        }
+        primaryAction={
+          canRecordSlaughter
+            ? hubTab === "sales"
+              ? {
+                  label: "Record sale",
+                  onClick: () => {
+                    setSaleForm((v) => ({ ...v, flockId: v.flockId || flockId }));
+                    setShowRecordSale(true);
+                  },
+                }
+              : {
+                  label: "Record slaughter",
+                  onClick: () => setShowRecordSlaughter(true),
+                  disabled: eligibility != null && !eligibility.eligibleForSlaughter,
+                }
+            : undefined
         }
       />
       {loading && <SkeletonList rows={3} />}
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
       {!loading && !error ? (
         <>
-          <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm text-blue-900">
-            Select the flock from the dropdown below, then click <strong>Record new slaughter</strong>. The bird count for that flock
-            is reduced immediately. Enter a market price per kg or a total fair value so the IAS 41 biological-asset conversion
-            (live birds → meat stock) posts to Odoo right away. Without a price, the record goes to{" "}
-            <strong>Accounting Approvals → Needs Action</strong> for manual follow-up.
-          </div>
-
-          {flockId && eligibility && !eligibility.eligibleForSlaughter ? (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
-              <p className="font-semibold">⛔ Slaughter blocked</p>
-              <ul className="mt-2 space-y-1">
-                {eligibility.blockers.map((b, i) => (
-                  <li key={`${b.type}-${i}`}>
-                    {b.type === "withdrawal"
-                      ? `${b.medicineName ?? "Treatment"} withdrawal active until ${b.safeAfter ?? "clearance"}`
-                      : `Missed medicine round planned for ${b.plannedFor ?? "unknown date"}`}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {flockId ? (
+          {hubTab === "slaughter" ? (
             <>
-              <div className="table-block">
-                <div className="institutional-table-wrapper">
-                  <table className="institutional-table">
-                    <thead>
-                      <tr>
-                        <th className="tbl-num">Feed to date (kg)</th>
-                        <th className="tbl-num">Live estimate</th>
-                        <th className="tbl-num">Mortality to date</th>
-                        <th className="tbl-num">FCR</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td className="tbl-num font-semibold">{summary?.feedToDateKg ?? 0}</td>
-                        <td className="tbl-num font-semibold">{summary?.birdsLiveEstimate ?? 0}</td>
-                        <td className="tbl-num font-semibold">{summary?.mortalityToDate ?? 0}</td>
-                        <td className="tbl-num font-semibold">{summary?.fcr != null ? summary.fcr.toFixed(2) : "—"}</td>
-                      </tr>
-                    </tbody>
-                  </table>
+              {flockId && eligibility && !eligibility.eligibleForSlaughter ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-900">
+                  <p className="font-semibold">⛔ Slaughter blocked</p>
+                  <ul className="mt-2 space-y-1">
+                    {eligibility.blockers.map((b, i) => (
+                      <li key={`${b.type}-${i}`}>
+                        {b.type === "withdrawal"
+                          ? `${b.medicineName ?? "Treatment"} withdrawal active until ${b.safeAfter ?? "clearance"}`
+                          : `Missed medicine round planned for ${b.plannedFor ?? "unknown date"}`}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
+              ) : null}
+              {flockId ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    <Metric label="Feed to date (kg)" value={String(summary?.feedToDateKg ?? 0)} />
+                    <Metric label="Live estimate" value={String(summary?.birdsLiveEstimate ?? 0)} />
+                    <Metric label="Mortality to date" value={String(summary?.mortalityToDate ?? 0)} />
+                    <Metric label="FCR" value={summary?.fcr != null ? summary.fcr.toFixed(2) : "—"} />
+                  </div>
+                  {canOptIn ? (
+                    <SectionCard
+                      title="Supply pipeline"
+                      controls={
+                        pipelineLot ? (
+                          <span className="text-xs font-medium text-[var(--status-success)]">
+                            Listed · {pipelineLot.status}
+                            {pipelineLot.district ? ` · ${pipelineLot.district}` : ""}
+                          </span>
+                        ) : (
+                          <Button type="button" size="sm" onClick={() => setOptInOpen(true)}>
+                            Opt into pipeline
+                          </Button>
+                        )
+                      }
+                    >
+                      <p className="text-sm text-[var(--text-secondary)]">
+                        {pipelineLot
+                          ? "This flock is visible on the Cleva pipeline desk for matching to buyers."
+                          : "Opt in when you want Cleva to find a buyer before harvest. Flock data stays private until then."}
+                      </p>
+                    </SectionCard>
+                  ) : null}
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    This screen focuses on harvest-oriented metrics. For full-cycle broiler FCR (feed ÷ flock weight gained),
+                    open the{" "}
+                    <Link
+                      className="font-medium text-[var(--primary-color-dark)] underline"
+                      to={`/farm/vet-logs?flockId=${encodeURIComponent(flockId)}`}
+                    >
+                      vet logs & flock FCR
+                    </Link>{" "}
+                    for this flock.
+                  </p>
+                </>
+              ) : null}
+
+              {!canRecordSlaughter ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
+                  View-only: only vet manager, manager, or superuser can save slaughter events.
+                </div>
+              ) : null}
+
+              <div className="table-block">
+                <DataTable<Slaughter>
+                  flush
+                  columns={slaughterColumns}
+                  rows={rows}
+                  rowKey={(r) => r.id}
+                  isFiltered={Boolean(flockId) || Boolean(startAt) || Boolean(endAt)}
+                  emptyTitle="No slaughter records yet"
+                  emptyDescription="Slaughter events for the selected flock and date range will appear here once recorded."
+                  emptyAction={
+                    canRecordSlaughter ? (
+                      <Button size="sm" onClick={() => setShowRecordSlaughter(true)}>
+                        Record slaughter
+                      </Button>
+                    ) : undefined
+                  }
+                  toolbar={
+                    <TableToolbar
+                      filters={
+                        <>
+                          <FacetFilter
+                            label="Flock"
+                            value={flockId || "all"}
+                            allValue="all"
+                            allLabel="All flocks"
+                            onChange={(v) => setFlockId(v === "all" ? "" : v)}
+                            options={flocks.map((f) => ({ value: f.id, label: f.label }))}
+                          />
+                          <SegmentedControl
+                            size="sm"
+                            value={datePreset === "custom" ? "" : datePreset}
+                            onChange={(v) => {
+                              if (v === "7d" || v === "30d" || v === "cycle") applyDatePreset(v);
+                            }}
+                            options={[
+                              { value: "7d", label: "Last 7d" },
+                              { value: "30d", label: "Last 30d" },
+                              { value: "cycle", label: "Cycle to date" },
+                            ]}
+                          />
+                          <input
+                            className="h-control-sm rounded-control border border-[var(--border-input)] bg-[var(--surface-input)] px-2 text-xs text-[var(--text-primary)]"
+                            type="date"
+                            value={startAt}
+                            onChange={(e) => {
+                              setDatePreset("custom");
+                              setStartAt(e.target.value);
+                            }}
+                            aria-label="Start date"
+                          />
+                          <input
+                            className="h-control-sm rounded-control border border-[var(--border-input)] bg-[var(--surface-input)] px-2 text-xs text-[var(--text-primary)]"
+                            type="date"
+                            value={endAt}
+                            onChange={(e) => {
+                              setDatePreset("custom");
+                              setEndAt(e.target.value);
+                            }}
+                            aria-label="End date"
+                          />
+                        </>
+                      }
+                      meta={`${rows.length} record${rows.length === 1 ? "" : "s"}`}
+                      actions={
+                        <>
+                          <a
+                            className="inline-flex h-control-sm items-center rounded-control px-2.5 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--status-neutral-soft)] hover:text-[var(--text-primary)]"
+                            href={`${API_BASE_URL}/api/reports/slaughter.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Slaughter CSV
+                          </a>
+                          <a
+                            className="inline-flex h-control-sm items-center rounded-control px-2.5 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--status-neutral-soft)] hover:text-[var(--text-primary)]"
+                            href={`${API_BASE_URL}/api/reports/flock-performance.csv?flock_id=${encodeURIComponent(flockId)}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Performance CSV
+                          </a>
+                        </>
+                      }
+                    />
+                  }
+                />
               </div>
-              <p className="text-xs text-neutral-600">
-                This screen focuses on harvest-oriented metrics. For full-cycle broiler FCR (feed ÷ flock weight gained),
-                open the{" "}
-                <Link className="font-medium text-emerald-800 underline" to={`/farm/vet-logs?flockId=${encodeURIComponent(flockId)}`}>
-                  vet logs & flock FCR
-                </Link>{" "}
-                for this flock.
-              </p>
             </>
+          ) : (
+            <div className="table-block">
+              <DataTable<MeatSale>
+                flush
+                columns={saleColumns}
+                rows={sales}
+                rowKey={(r) => r.id}
+                emptyTitle="No meat sales yet"
+                emptyDescription="Record a sale when birds go to market."
+                emptyAction={
+                  canRecordSlaughter ? (
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setSaleForm((v) => ({ ...v, flockId: v.flockId || flockId }));
+                        setShowRecordSale(true);
+                      }}
+                    >
+                      Record sale
+                    </Button>
+                  ) : undefined
+                }
+                toolbar={
+                  <TableToolbar meta={`${sales.length} sale${sales.length === 1 ? "" : "s"}`} />
+                }
+              />
+            </div>
+          )}
+          {canRecordSlaughter ? (
+            <Modal
+              open={showRecordSale}
+              title="Record sale"
+              onClose={() => setShowRecordSale(false)}
+              footer={
+                <div className="flex justify-end gap-2">
+                  <Button variant="secondary" size="sm" onClick={() => setShowRecordSale(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    loading={saleBusy}
+                    disabled={saleBusy}
+                    onClick={() => {
+                      const form = document.getElementById("record-sale-form") as HTMLFormElement | null;
+                      form?.requestSubmit();
+                    }}
+                  >
+                    Save sale
+                  </Button>
+                </div>
+              }
+            >
+              <form id="record-sale-form" onSubmit={submitSale} className="space-y-3">
+                <Field label="Flock">
+                  <Select
+                    className={mgrInput}
+                    value={saleForm.flockId || flockId}
+                    onChange={(e) => setSaleForm((v) => ({ ...v, flockId: e.target.value }))}
+                    required
+                  >
+                    <option value="">Select flock…</option>
+                    {flocks.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Date">
+                  <Input
+                    type="date"
+                    className={mgrInput}
+                    value={saleForm.orderDate}
+                    onChange={(e) => setSaleForm((v) => ({ ...v, orderDate: e.target.value }))}
+                    required
+                  />
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Birds" className="min-w-0">
+                    <Input
+                      className={`${mgrInput} w-full min-w-0`}
+                      inputMode="numeric"
+                      value={saleForm.numberOfBirds}
+                      onChange={(e) => setSaleForm((v) => ({ ...v, numberOfBirds: e.target.value }))}
+                      required
+                    />
+                  </Field>
+                  <Field label="Weight (kg)" className="min-w-0">
+                    <Input
+                      className={`${mgrInput} w-full min-w-0`}
+                      inputMode="decimal"
+                      value={saleForm.totalWeightKg}
+                      onChange={(e) => setSaleForm((v) => ({ ...v, totalWeightKg: e.target.value }))}
+                      required
+                    />
+                  </Field>
+                </div>
+                <Field label="Price per kg (RWF)">
+                  <Input
+                    className={mgrInput}
+                    inputMode="decimal"
+                    value={saleForm.pricePerKg}
+                    onChange={(e) => setSaleForm((v) => ({ ...v, pricePerKg: e.target.value }))}
+                    required
+                  />
+                </Field>
+                <Field label="Buyer" help="Optional">
+                  <Input
+                    className={mgrInput}
+                    value={saleForm.buyerName}
+                    onChange={(e) => setSaleForm((v) => ({ ...v, buyerName: e.target.value }))}
+                  />
+                </Field>
+              </form>
+            </Modal>
           ) : null}
 
-          <SectionCard
-            title="Slaughter records"
-            description={`${rows.length} record${rows.length === 1 ? "" : "s"} in range`}
-            controls={
-              <>
-                <select
-                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
-                  value={flockId}
-                  onChange={(e) => setFlockId(e.target.value)}
-                >
-                  <option value="">All flocks</option>
-                  {flocks.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
-                </select>
-                <input
-                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
-                  type="date"
-                  value={startAt}
-                  onChange={(e) => {
-                    setDatePreset("custom");
-                    setStartAt(e.target.value);
-                  }}
-                />
-                <input
-                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
-                  type="date"
-                  value={endAt}
-                  onChange={(e) => {
-                    setDatePreset("custom");
-                    setEndAt(e.target.value);
-                  }}
-                />
-                <SegmentedControl
-                  size="sm"
-                  value={datePreset === "custom" ? "" : datePreset}
-                  onChange={(v) => {
-                    if (v === "7d" || v === "30d" || v === "cycle") applyDatePreset(v);
-                  }}
-                  options={[
-                    { value: "7d", label: "Last 7d" },
-                    { value: "30d", label: "Last 30d" },
-                    { value: "cycle", label: "Cycle to date" },
-                  ]}
-                />
-                <a
-                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
-                  href={`${API_BASE_URL}/api/reports/slaughter.csv?flock_id=${encodeURIComponent(flockId)}${startAt ? `&start_at=${encodeURIComponent(`${startAt}T00:00:00.000Z`)}` : ""}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Slaughter CSV
-                </a>
-                <a
-                  className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
-                  href={`${API_BASE_URL}/api/reports/flock-performance.csv?flock_id=${encodeURIComponent(flockId)}${endAt ? `&end_at=${encodeURIComponent(`${endAt}T23:59:59.999Z`)}` : ""}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Performance CSV
-                </a>
-              </>
-            }
-            flushBody
-          >
-            {!canRecordSlaughter ? (
-              <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
-                View-only: only vet manager, manager, or superuser can save slaughter events.
-              </div>
-            ) : null}
-            <DataTable<Slaughter>
-              columns={slaughterColumns}
-              rows={rows}
-              rowKey={(r) => r.id}
-              emptyTitle="No slaughter records yet"
-              emptyDescription="Slaughter events for the selected flock and date range will appear here once recorded."
-            />
-          </SectionCard>
           {canRecordSlaughter ? (
-            <div className="space-y-3">
-              {showRecordSlaughter ? (
-                <form onSubmit={submit} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-                    <p className="mb-1 text-sm font-semibold text-neutral-800">New slaughter record</p>
+            <Modal
+              open={showRecordSlaughter}
+              title="Record slaughter"
+              onClose={() => setShowRecordSlaughter(false)}
+              wide
+            >
+                <form onSubmit={submit} className="space-y-3">
                     {(() => {
                       const selectedFlock = flocks.find((f) => f.id === flockId);
                       const live = selectedFlock?.birdsLiveEstimate ?? summary?.birdsLiveEstimate ?? null;
                       return (
-                        <p className="mb-3 text-xs text-neutral-500">
+                        <p className="text-xs text-neutral-500">
                           Flock: <strong className="text-neutral-800">{selectedFlock?.label ?? flockId}</strong>
                           {live != null ? <> · <strong className="text-emerald-700">{live}</strong> birds estimated live</> : null}
                         </p>
@@ -465,19 +841,94 @@ export function FarmSlaughterPage() {
                       </div>
                       <div>
                         <input className="w-full rounded-lg border border-neutral-300 px-3 py-2" placeholder="Total fair value (RWF, override)" inputMode="decimal" value={form.fairValueRwf} onChange={(e) => setForm((v) => ({ ...v, fairValueRwf: e.target.value }))} />
-                        <p className="mt-1 text-xs text-neutral-400">Enter price/kg or total fair value so the IAS 41 entry posts to Odoo immediately.</p>
+                        <p className="mt-1 text-xs text-neutral-400">Enter price/kg or total fair value so fair value is recorded for ERPNext sync.</p>
                       </div>
                     </div>
-                    <textarea className="mt-3 w-full rounded-lg border border-neutral-300 px-3 py-2" rows={2} placeholder="Notes (optional)" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
-                    <div className="mt-3 flex justify-end">
-                      <button disabled={busy || (eligibility != null && !eligibility.eligibleForSlaughter)} className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60" type="submit">{busy ? "Saving..." : "Save slaughter"}</button>
+                    <textarea className="w-full rounded-lg border border-neutral-300 px-3 py-2" rows={2} placeholder="Notes (optional)" value={form.notes} onChange={(e) => setForm((v) => ({ ...v, notes: e.target.value }))} />
+                    <div className="flex justify-end">
+                      <Button variant="primary" size="sm" type="submit" disabled={busy || (eligibility != null && !eligibility.eligibleForSlaughter)} loading={busy}>Save slaughter</Button>
                     </div>
                 </form>
-              ) : null}
-            </div>
+            </Modal>
           ) : null}
         </>
       ) : null}
-    </div>
+
+      <Modal
+        open={optInOpen}
+        onClose={() => setOptInOpen(false)}
+        title="Opt flock into supply pipeline"
+        footer={
+          <>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setOptInOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={pipelineBusy || !optInForm.district.trim()}
+              onClick={() => void submitPipelineOptIn()}
+            >
+              {pipelineBusy ? "Saving…" : "List on pipeline desk"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-[var(--text-secondary)]">
+            Bird count, weights, and ready window are pulled from this flock. Add commercial fields for the desk.
+          </p>
+          <DistrictSelect
+            value={optInForm.district}
+            onChange={(district) => setOptInForm((f) => ({ ...f, district }))}
+          />
+          <Field label="Ask RWF/kg">
+            <input
+              type="number"
+              min={0}
+              className="w-full rounded-lg border border-[var(--border-color)] bg-transparent px-3 py-2 text-sm"
+              value={optInForm.askPricePerKg}
+              onChange={(e) => setOptInForm((f) => ({ ...f, askPricePerKg: e.target.value }))}
+            />
+          </Field>
+          <Field label="Contact phone">
+            <input
+              className="w-full rounded-lg border border-[var(--border-color)] bg-transparent px-3 py-2 text-sm"
+              value={optInForm.contactPhone}
+              onChange={(e) => setOptInForm((f) => ({ ...f, contactPhone: e.target.value }))}
+            />
+          </Field>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={optInForm.farmerCanSlaughter}
+              onChange={(e) => setOptInForm((f) => ({ ...f, farmerCanSlaughter: e.target.checked }))}
+            />
+            Can slaughter
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={optInForm.deliveryAvailable}
+              onChange={(e) => setOptInForm((f) => ({ ...f, deliveryAvailable: e.target.checked }))}
+            />
+            Can deliver (farm)
+          </label>
+          <p className="text-xs text-[var(--text-muted)]">
+            Unchecked slaughter = live only. Delivery means the farm brings birds for a trip fee.
+          </p>
+          <Field label="Min order (birds)">
+            <input
+              className="w-full rounded-lg border border-[var(--border-color)] bg-transparent px-3 py-2 text-sm"
+              type="number"
+              min={1}
+              placeholder="10"
+              value={optInForm.minOrderBirds}
+              onChange={(e) => setOptInForm((f) => ({ ...f, minOrderBirds: e.target.value }))}
+            />
+          </Field>
+        </div>
+      </Modal>
+    </ManagerPage>
   );
 }

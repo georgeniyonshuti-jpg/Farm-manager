@@ -1,0 +1,9 @@
+Allow: /market
+Allow: /market/
+Disallow: /app/
+Disallow: /api/
+Disallow: /login
+Disallow: /signup
+Disallow: /billing/
+
+Sitemap: https://farm.cleva.rw/market

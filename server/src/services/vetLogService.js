@@ -16,8 +16,21 @@ export const VET_LOG_LIST_EXTRA_SELECT = `
   v.mortality_logged_since_last_visit AS "mortalityLoggedSinceLastVisit",
   v.mortality_confirmed_since_last_visit AS "mortalityConfirmedSinceLastVisit",
   v.confirmed_live_count AS "confirmedLiveCount",
+  (v.photo_urls IS NOT NULL AND v.photo_urls::text NOT IN (
+     'null', '{}', '[]',
+     '{"flockSign":[],"thermometer":[],"feed":[],"water":[]}'
+   )) AS "hasPhotos",
   t.id AS "treatmentId",
   t.medicine_name AS "medicineName"`;
+
+/** House-round / visit media — used on detail (full photo_urls), not list. */
+export const VET_LOG_VISIT_SELECT = `
+  v.photo_urls AS "photoUrls",
+  v.visit_slot AS "visitSlot",
+  v.visited_at AS "visitedAt",
+  v.coop_temperature_c AS "coopTemperatureC",
+  v.feed_available AS "feedAvailable",
+  v.water_available AS "waterAvailable"`;
 
 /** Safe fallback when newer vet-log columns are not migrated yet. */
 export const VET_LOG_LIST_EXTRA_SELECT_MINIMAL = `
@@ -80,11 +93,11 @@ export function isValidVetLogMedicineDoseUnit(systemConfig, doseUnit) {
   return VET_LOG_EXTRA_DOSE_UNITS.includes(doseUnit);
 }
 
-/** vet_manager, manager, superuser — anyone at lead-vet tier or above. */
+/** vet_manager, manager, company_admin, superuser — lead-vet tier or company admin. */
 export function canReviewVetLog(user) {
   if (!user) return false;
   const r = user.role;
-  return r === "vet_manager" || r === "manager" || r === "superuser";
+  return r === "vet_manager" || r === "manager" || r === "company_admin" || r === "superuser";
 }
 
 /** Only junior vets (vet + junior_vet department) need manager review before ERPNext sync. */

@@ -7,14 +7,21 @@
  */
 export type ApiMode = "legacy" | "frappe";
 
+/** Strip quotes/whitespace from docker-compose / .env values (e.g. FARM_API_URL="https://…"). */
+function cleanEnvUrl(raw: string | undefined, fallback = ""): string {
+	const v = String(raw ?? fallback).trim().replace(/^['"]|['"]$/g, "");
+	return v.replace(/\/$/, "");
+}
+
 export const API_MODE: ApiMode =
   (import.meta.env.VITE_API_MODE as ApiMode | undefined) ?? "legacy";
 
-export const API_BASE_URL = import.meta.env.VITE_API_URL ?? "";
+export const API_BASE_URL = cleanEnvUrl(import.meta.env.VITE_API_URL);
 
-export const ERPNEXT_URL =
-  import.meta.env.VITE_ERPNEXT_URL ?? "https://erp.clevacredit.com";
-
+export const ERPNEXT_URL = cleanEnvUrl(
+  import.meta.env.VITE_ERPNEXT_URL,
+  "https://erp.clevacredit.com",
+);
 export const IS_FRAPPE_MODE = API_MODE === "frappe";
 
 /** Build legacy Node API URL. */

@@ -1,3 +1,5 @@
+import { formatManagerDate } from "../../../lib/formatManagerDateTime";
+import { PHOTO_SECTION_LABELS, toPhotoSlots } from "../../../farm/checkinPhotoUtils";
 import { SubmissionStatusBadge } from "./SubmissionStatusBadge";
 
 export type VetLogReportData = {
@@ -27,6 +29,12 @@ export type VetLogReportData = {
   hasWeightSample?: boolean;
   treatmentId?: string | null;
   medicineName?: string | null;
+  photoUrls?: unknown;
+  visitSlot?: string | null;
+  visitedAt?: string | null;
+  coopTemperatureC?: number | null;
+  feedAvailable?: boolean | null;
+  waterAvailable?: boolean | null;
 };
 
 type Props = {
@@ -44,8 +52,24 @@ function ReportBlock({ title, body }: { title: string; body?: string | null }) {
   );
 }
 
+function visitSlotLabel(slot: string | null | undefined): string | null {
+  if (!slot) return null;
+  if (slot === "am") return "AM visit";
+  if (slot === "pm") return "PM visit";
+  if (slot === "spot") return "Spot visit";
+  return slot;
+}
+
 export function VetLogReport({ log, onClose }: Props) {
   const hasWeight = log.hasWeightSample || log.avgWeightKg != null;
+  const photoSlots = toPhotoSlots({ photoUrls: log.photoUrls });
+  const hasAnyPhotos = PHOTO_SECTION_LABELS.some(({ key }) => photoSlots[key].length > 0);
+  const slotLabel = visitSlotLabel(log.visitSlot);
+  const showVisitContext =
+    Boolean(slotLabel) ||
+    log.coopTemperatureC != null ||
+    log.feedAvailable != null ||
+    log.waterAvailable != null;
 
   return (
     <article className="mx-auto max-w-3xl">
@@ -56,7 +80,7 @@ export function VetLogReport({ log, onClose }: Props) {
             <p className="mt-0.5 text-sm text-[var(--text-secondary)]">
               {log.flockCode ?? log.flockId.slice(0, 8)} · {log.authorName ?? log.authorUserId.slice(0, 8)}
             </p>
-            <p className="mt-1 font-mono text-xs text-[var(--text-muted)]">Log date {log.logDate}</p>
+            <p className="mt-1 font-mono text-xs text-[var(--text-muted)]">Log date {formatManagerDate(log.logDate)}</p>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-2">
             <SubmissionStatusBadge status={log.submissionStatus} />
@@ -74,6 +98,38 @@ export function VetLogReport({ log, onClose }: Props) {
       </header>
 
       <div className="space-y-4 px-4 py-5 sm:px-6">
+        {showVisitContext ? (
+          <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] p-4">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-[var(--text-muted)]">House round</h3>
+            <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+              {slotLabel ? (
+                <div>
+                  <dt className="text-[var(--text-muted)]">Visit</dt>
+                  <dd className="font-semibold text-[var(--text-primary)]">{slotLabel}</dd>
+                </div>
+              ) : null}
+              {log.coopTemperatureC != null ? (
+                <div>
+                  <dt className="text-[var(--text-muted)]">Coop temperature</dt>
+                  <dd className="font-mono font-semibold">{Number(log.coopTemperatureC).toFixed(1)} °C</dd>
+                </div>
+              ) : null}
+              {log.feedAvailable != null ? (
+                <div>
+                  <dt className="text-[var(--text-muted)]">Feed available</dt>
+                  <dd className="font-semibold">{log.feedAvailable ? "Yes" : "No"}</dd>
+                </div>
+              ) : null}
+              {log.waterAvailable != null ? (
+                <div>
+                  <dt className="text-[var(--text-muted)]">Water available</dt>
+                  <dd className="font-semibold">{log.waterAvailable ? "Yes" : "No"}</dd>
+                </div>
+              ) : null}
+            </dl>
+          </section>
+        ) : null}
+
         {hasWeight ? (
           <section className="rounded-xl border border-emerald-200/60 bg-emerald-50/40 p-4 dark:border-emerald-500/20 dark:bg-emerald-500/5">
             <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-900 dark:text-emerald-300">Weight sample</h3>
@@ -143,6 +199,38 @@ export function VetLogReport({ log, onClose }: Props) {
         <ReportBlock title="Actions taken" body={log.actionsTaken} />
         <ReportBlock title="Recommendations" body={log.recommendations} />
         <ReportBlock title="Review notes" body={log.reviewNotes} />
+
+        {hasAnyPhotos
+          ? PHOTO_SECTION_LABELS.map(({ key, label }) => {
+              const images = photoSlots[key];
+              if (images.length === 0) return null;
+              return (
+                <section key={key} className="space-y-3">
+                  <h3 className="border-b border-[var(--border-color)] pb-1 text-xs font-bold uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                    {label}
+                  </h3>
+                  <div className="space-y-4">
+                    {images.map((src, idx) => (
+                      <figure
+                        key={`${key}-${idx}`}
+                        className="overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)]"
+                      >
+                        <img
+                          src={src}
+                          alt={`${label} ${idx + 1}`}
+                          className="block h-auto max-h-[min(85vh,720px)] w-full bg-black/5 object-contain"
+                          loading="lazy"
+                        />
+                        <figcaption className="px-3 py-1.5 text-[11px] text-[var(--text-muted)]">
+                          {label} · photo {idx + 1}
+                        </figcaption>
+                      </figure>
+                    ))}
+                  </div>
+                </section>
+              );
+            })
+          : null}
       </div>
     </article>
   );

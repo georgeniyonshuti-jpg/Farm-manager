@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import type { SessionUser } from "../../auth/types";
@@ -9,7 +9,42 @@ import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { AddUserForm } from "./AddUserForm";
 import { API_BASE_URL } from "../../api/config";
 import { useToast } from "../../components/Toast";
+import { Modal } from "../../components/ui/Modal";
+import { Button } from "../../components/ui/Button";
+import {
+  DataTable,
+  FacetFilter,
+  StatusPill,
+  TableToolbar,
+  ToolbarSearch,
+  type DataColumn,
+} from "../../components/ui";
 import { PAGE_ACCESS_DEFS } from "../../auth/permissions";
+import { ManagerPage } from "../../components/layout/ManagerPage";
+
+const ROLE_CAPABILITY_BLURBS: Record<string, string[]> = {
+  laborer: ["Round check-in", "Feed log", "Mortality log"],
+  dispatcher: ["Round check-in", "Feed log", "Mortality log"],
+  vet: ["Vet logs", "Medicine", "Treatments"],
+  vet_manager: ["Review vet logs", "Medicine", "Flocks", "Today"],
+  manager: ["Operations, inventory, slaughter, reviews"],
+  company_admin: ["Users, lists & types, all farm records"],
+  superuser: ["All companies and system configuration"],
+  procurement_officer: ["Feed inventory"],
+  sales_coordinator: ["Market ops: verify, desk, commissions"],
+  buyer: ["Browse market and book lots"],
+  investor: ["Portfolio views"],
+};
+
+function humanAuditAction(action: string): string {
+  const map: Record<string, string> = {
+    "report.export": "Exported a report",
+    "farm.round_checkin.create": "Submitted a round check-in",
+    "flock.slaughter.create": "Recorded slaughter",
+  };
+  if (map[action]) return map[action];
+  return action.replace(/\./g, " · ").replace(/_/g, " ");
+}
 
 type AuditRow = {
   id: string;
@@ -38,16 +73,49 @@ const USER_ROLE_OPTIONS: SessionUser["role"][] = [
   "laborer",
   "procurement_officer",
   "sales_coordinator",
+  "buyer",
   "investor",
   "dispatcher",
 ];
 
 const BU_OPTIONS: SessionUser["businessUnitAccess"][] = ["farm", "clevacredit", "both"];
 
+const ROLE_LABELS: Record<string, string> = {
+  superuser: "Superuser",
+  company_admin: "Company Admin",
+  manager: "Manager",
+  vet: "Veterinarian",
+  vet_manager: "Vet Manager",
+  laborer: "Field Worker",
+  procurement_officer: "Procurement Officer",
+  sales_coordinator: "Sales Coordinator",
+  buyer: "Buyer",
+  investor: "Investor",
+  dispatcher: "Dispatcher",
+};
+function humanRole(role: string): string {
+  return ROLE_LABELS[role] ?? role.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+const BU_LABELS: Record<string, string> = { farm: "Farm", clevacredit: "ClevaCredit", both: "Farm + ClevaCredit" };
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
 export function UserManagementPage() {
   const { token, user } = useAuth();
   const { showToast } = useToast();
   const [users, setUsers] = useState<SessionUser[]>([]);
+  const [userSearch, setUserSearch] = useState("");
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [auditTotal, setAuditTotal] = useState(0);
   const [auditPage, setAuditPage] = useState(1);
@@ -75,8 +143,21 @@ export function UserManagementPage() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [savingPageAccessUserId, setSavingPageAccessUserId] = useState<string | null>(null);
   const [showCreateUser, setShowCreateUser] = useState(false);
+  const [showAdvancedAccess, setShowAdvancedAccess] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<SessionUser | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [expandedAudit, setExpandedAudit] = useState<Set<string>>(new Set());
 
   const pageSize = 20;
+
+  function toggleAuditExpand(id: string) {
+    setExpandedAudit((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const loadUsers = useCallback(async () => {
     // ENV: moved to environment variable
@@ -166,6 +247,50 @@ export function UserManagementPage() {
     [user],
   );
 
+  const filteredUsers = useMemo(() => {
+    const q = userSearch.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter((u) =>
+      [u.displayName, u.email, u.role, u.businessUnitAccess, humanRole(u.role)]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [users, userSearch]);
+
+  const userColumns: DataColumn<SessionUser>[] = useMemo(
+    () => [
+      { key: "name", header: "Name", render: (u) => u.displayName },
+      {
+        key: "role",
+        header: "Role",
+        badge: true,
+        render: (u) => <StatusPill tone="info">{humanRole(u.role)}</StatusPill>,
+      },
+      { key: "unit", header: "Unit", render: (u) => u.businessUnitAccess },
+      { key: "email", header: "Email", render: (u) => u.email },
+      {
+        key: "actions",
+        header: "Actions",
+        className: "tbl-actions",
+        render: (u) => (
+          <div className="flex items-center justify-center gap-1.5">
+            <Button variant="secondary" size="sm" onClick={() => beginEditUser(u.id)}>
+              {editingUserId === u.id ? "Editing" : "Edit"}
+            </Button>
+            {u.id !== user?.id ? (
+              <Button variant="dangerGhost" size="sm" onClick={() => setRemoveTarget(u)}>
+                Remove
+              </Button>
+            ) : null}
+          </div>
+        ),
+      },
+    ],
+    [editingUserId, user?.id]
+  );
+
   const totalPages = Math.max(1, Math.ceil(auditTotal / pageSize));
   const auditBusy = (loading && !loadError) || auditLoading;
 
@@ -227,6 +352,27 @@ export function UserManagementPage() {
     setEditingUserId(userId);
   }
 
+  async function confirmRemoveUser() {
+    if (!removeTarget) return;
+    setRemoving(true);
+    try {
+      const r = await fetch(`${API_BASE_URL}/api/users/${encodeURIComponent(removeTarget.id)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error((d as { error?: string }).error ?? "Remove failed");
+      showToast("success", `${removeTarget.displayName} was removed from this farm.`);
+      setRemoveTarget(null);
+      if (editingUserId === removeTarget.id) setEditingUserId("");
+      await loadUsers();
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Remove failed");
+    } finally {
+      setRemoving(false);
+    }
+  }
+
   async function togglePageAccess(userId: string, pageKey: string, checked: boolean) {
     const target = users.find((u) => u.id === userId);
     if (!target) return;
@@ -264,48 +410,208 @@ export function UserManagementPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-8">
+    <ManagerPage variant="settings">
       <PageHeader
-        title={canManageUsers(user) && !isSuperuser(user) ? "Company users" : "User management"}
-        subtitle={
-          isSuperuser(user)
-            ? "Superuser — invites, roles, and audit trail across companies."
-            : "Manage users, roles, and audit trail for your company."
-        }
+        title={canManageUsers(user) && !isSuperuser(user) ? "Company users" : "Users"}
         action={
-          <Link
-            to="/admin/system-config"
-            className="inline-flex items-center rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
-          >
-            System configuration
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              to="/admin/system-config"
+              className="text-sm font-semibold text-[var(--primary-color)] underline-offset-2 hover:underline"
+            >
+              Lists & types
+            </Link>
+            <Button variant="primary" size="sm" onClick={() => setShowCreateUser(true)}>
+              Create user
+            </Button>
+          </div>
         }
       />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setShowCreateUser((v) => !v)}
-          className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
-        >
-          {showCreateUser ? "Close" : "Create new user"}
-        </button>
-      </div>
-
-      {showCreateUser ? (
+      <Modal open={showCreateUser} title="Create user" onClose={() => setShowCreateUser(false)} wide>
         <AddUserForm
           onCreated={() => {
             setShowCreateUser(false);
             void loadUsers();
           }}
         />
+      </Modal>
+
+      <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-card shadow-sm">
+        {loading ? (
+          <SkeletonList rows={3} />
+        ) : null}
+        {!loading && loadError ? (
+          <ErrorState message={loadError} onRetry={() => setBootstrapKey((k) => k + 1)} />
+        ) : null}
+        {!loading && !loadError ? (
+          <DataTable<SessionUser>
+              columns={userColumns}
+              rows={filteredUsers}
+              rowKey={(u) => u.id}
+              isFiltered={userSearch.trim().length > 0}
+              emptyTitle="No users yet"
+              emptyDescription="Create a user to grant farm access."
+              filteredEmptyTitle="No matching users"
+              filteredEmptyDescription="Try a different name, email, or role."
+              toolbar={
+                <TableToolbar
+                  search={
+                    <ToolbarSearch
+                      placeholder="Search name, email, role…"
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      label="Search users"
+                    />
+                  }
+                  meta={`${filteredUsers.length} of ${users.length}`}
+                />
+              }
+              renderMobileCard={(u) => (
+                <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-semibold text-sm">{u.displayName}</span>
+                    <StatusPill tone="info">{humanRole(u.role)}</StatusPill>
+                  </div>
+                  <p className="text-xs text-[var(--text-muted)]">{u.email}</p>
+                  <div className="flex gap-2">
+                    <Button variant="secondary" size="sm" onClick={() => beginEditUser(u.id)}>
+                      Edit
+                    </Button>
+                    {u.id !== user?.id ? (
+                      <Button variant="dangerGhost" size="sm" onClick={() => setRemoveTarget(u)}>
+                        Remove
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              )}
+            />
+        ) : null}
+      </section>
+
+      {editingUserId ? (
+        <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-card shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-semibold text-neutral-900">Edit user (including password)</h2>
+              <p className="mt-1 text-xs text-neutral-500">
+                Password is optional here. Leave blank to keep current password.
+              </p>
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setEditingUserId("")}
+            >
+              Close editor
+            </Button>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm font-medium text-neutral-700">
+              Display name
+              <input
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
+                value={editForm.displayName}
+                onChange={(e) => setEditForm((f) => ({ ...f, displayName: e.target.value }))}
+              />
+            </label>
+            <label className="block text-sm font-medium text-neutral-700">
+              Email
+              <input
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
+                value={editForm.email}
+                onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+              />
+            </label>
+            <label className="block text-sm font-medium text-neutral-700">
+              Role
+              <select
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
+                value={editForm.role}
+                onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value as SessionUser["role"] }))}
+              >
+                {editableRoleOptions.map((r) => (
+                  <option key={r} value={r}>
+                    {humanRole(r)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="sm:col-span-2 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
+              <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">What this role can do</p>
+              <ul className="mt-1 list-inside list-disc">
+                {(ROLE_CAPABILITY_BLURBS[editForm.role] ?? ["Standard farm access"]).map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </div>
+            <label className="block text-sm font-medium text-neutral-700">
+              Business unit access
+              <select
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
+                value={editForm.businessUnitAccess}
+                onChange={(e) =>
+                  setEditForm((f) => ({
+                    ...f,
+                    businessUnitAccess: e.target.value as SessionUser["businessUnitAccess"],
+                  }))
+                }
+              >
+                {BU_OPTIONS.map((bu) => (
+                  <option key={bu} value={bu}>
+                    {BU_LABELS[bu] ?? bu}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm font-medium text-neutral-700">
+              Department keys (comma-separated)
+              <input
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
+                value={editForm.departmentKeys}
+                onChange={(e) => setEditForm((f) => ({ ...f, departmentKeys: e.target.value }))}
+              />
+            </label>
+            <label className="block text-sm font-medium text-neutral-700">
+              New password (optional)
+              <input
+                type="password"
+                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
+                value={editForm.password}
+                onChange={(e) => setEditForm((f) => ({ ...f, password: e.target.value }))}
+              />
+            </label>
+            <label className="flex items-center gap-2 text-sm font-medium text-neutral-700 sm:col-span-2">
+              <input
+                type="checkbox"
+                checked={editForm.canViewSensitiveFinancial}
+                onChange={(e) => setEditForm((f) => ({ ...f, canViewSensitiveFinancial: e.target.checked }))}
+              />
+              Can view sensitive financial data
+            </label>
+          </div>
+          <div className="mt-4">
+            <Button variant="primary" disabled={savingEdit || !editingUserId} onClick={() => void saveUserEdit()}>
+              {savingEdit ? "Saving..." : "Save user changes"}
+            </Button>
+          </div>
+        </section>
       ) : null}
 
-      <section className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-neutral-900">Page visibility matrix</h2>
-        <p className="mt-1 text-xs text-neutral-500">
-          Superuser can tick which pages each user can see. Unticked pages are hidden and blocked on direct URL access.
-        </p>
+      <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-card shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h2 className="text-lg font-semibold text-neutral-900">Advanced page access</h2>
+            <p className="mt-1 text-xs text-neutral-500">
+              Optional checklist of pages. Prefer changing the role above unless you need a one-off exception.
+            </p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={() => setShowAdvancedAccess((v) => !v)}>
+            {showAdvancedAccess ? "Hide" : "Show matrix"}
+          </Button>
+        </div>
+        {showAdvancedAccess ? (
         <div className="institutional-table-wrapper mt-4">
           <table className="min-w-[980px] w-full border-collapse text-xs">
             <thead>
@@ -344,249 +650,53 @@ export function UserManagementPage() {
             </tbody>
           </table>
         </div>
-      </section>
-      {editingUserId ? (
-        <section className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h2 className="text-lg font-semibold text-neutral-900">Edit user (including password)</h2>
-              <p className="mt-1 text-xs text-neutral-500">
-                Password is optional here. Leave blank to keep current password.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
-              onClick={() => setEditingUserId("")}
-            >
-              Close editor
-            </button>
-          </div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <label className="block text-sm font-medium text-neutral-700">
-              Display name
-              <input
-                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-                value={editForm.displayName}
-                onChange={(e) => setEditForm((f) => ({ ...f, displayName: e.target.value }))}
-              />
-            </label>
-            <label className="block text-sm font-medium text-neutral-700">
-              Email
-              <input
-                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-                value={editForm.email}
-                onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
-              />
-            </label>
-            <label className="block text-sm font-medium text-neutral-700">
-              Role
-              <select
-                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-                value={editForm.role}
-                onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value as SessionUser["role"] }))}
-              >
-                {editableRoleOptions.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm font-medium text-neutral-700">
-              Business unit access
-              <select
-                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-                value={editForm.businessUnitAccess}
-                onChange={(e) =>
-                  setEditForm((f) => ({
-                    ...f,
-                    businessUnitAccess: e.target.value as SessionUser["businessUnitAccess"],
-                  }))
-                }
-              >
-                {BU_OPTIONS.map((bu) => (
-                  <option key={bu} value={bu}>
-                    {bu}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm font-medium text-neutral-700">
-              Department keys (comma-separated)
-              <input
-                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-                value={editForm.departmentKeys}
-                onChange={(e) => setEditForm((f) => ({ ...f, departmentKeys: e.target.value }))}
-              />
-            </label>
-            <label className="block text-sm font-medium text-neutral-700">
-              New password (optional)
-              <input
-                type="password"
-                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-                value={editForm.password}
-                onChange={(e) => setEditForm((f) => ({ ...f, password: e.target.value }))}
-              />
-            </label>
-            <label className="flex items-center gap-2 text-sm font-medium text-neutral-700 sm:col-span-2">
-              <input
-                type="checkbox"
-                checked={editForm.canViewSensitiveFinancial}
-                onChange={(e) => setEditForm((f) => ({ ...f, canViewSensitiveFinancial: e.target.checked }))}
-              />
-              Can view sensitive financial data
-            </label>
-          </div>
-          <div className="mt-4">
-            <button
-              type="button"
-              disabled={savingEdit || !editingUserId}
-              className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              onClick={() => void saveUserEdit()}
-            >
-              {savingEdit ? "Saving..." : "Save user changes"}
-            </button>
-          </div>
-        </section>
-      ) : null}
-
-      <section className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-neutral-900">Active users</h2>
-        {loading ? (
-          <div className="mt-4">
-            <SkeletonList rows={3} />
-          </div>
-        ) : null}
-        {!loading && loadError ? (
-          <div className="mt-4">
-            <ErrorState message={loadError} onRetry={() => setBootstrapKey((k) => k + 1)} />
-          </div>
-        ) : null}
-        {!loading && !loadError ? (
-          <>
-            <div className="institutional-table-wrapper mt-4 overflow-x-auto">
-              <table className="institutional-table text-sm">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Role</th>
-                    <th>Units</th>
-                    <th>Sensitive $</th>
-                    <th>Departments</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((u) => (
-                    <tr key={u.id}>
-                      <td>{u.displayName}</td>
-                      <td>{u.email}</td>
-                      <td>{u.role}</td>
-                      <td>{u.businessUnitAccess}</td>
-                      <td>{u.canViewSensitiveFinancial ? "Yes" : "No"}</td>
-                      <td>{u.departmentKeys.length ? u.departmentKeys.join(", ") : "—"}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="rounded border border-neutral-300 bg-white px-2 py-1 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
-                          onClick={() => beginEditUser(u.id)}
-                        >
-                          {editingUserId === u.id ? "Editing" : "Edit"}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
         ) : null}
       </section>
 
-      <section className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-neutral-900">Audit log</h2>
-        <p className="mt-1 text-xs text-neutral-500">
-          20 events per page. Filter by role (applies immediately) or action substring (apply when ready).
-          POST <code className="rounded bg-neutral-100 px-1">/api/audit</code> records actor, role, and resource.
-        </p>
+      <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-card shadow-sm">
+        <h2 className="text-lg font-semibold text-neutral-900">Activity</h2>
 
-        <div className="mt-3 flex flex-wrap gap-2">
-          <span className="self-center text-xs font-medium text-neutral-500">Quick:</span>
-          {AUDIT_ACTION_QUICK_FILTERS.map((q) => (
-            <button
-              key={q.value}
-              type="button"
-              disabled={loading || auditBusy}
-              className={`rounded-full border px-3 py-1 text-xs font-semibold disabled:opacity-40 ${
-                actionFilter === q.value
-                  ? "border-emerald-700 bg-emerald-50 text-emerald-900"
-                  : "border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-50"
-              }`}
-              onClick={() => applyActionFilter(q.value)}
-            >
-              {q.label}
-            </button>
-          ))}
-          <button
-            type="button"
-            disabled={loading || auditBusy}
-            className="rounded-full border border-dashed border-neutral-400 px-3 py-1 text-xs font-semibold text-neutral-600 hover:bg-neutral-50 disabled:opacity-40"
-            onClick={() => applyActionFilter("")}
-          >
-            Clear action
-          </button>
-        </div>
-
-        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-          <div>
-            <label htmlFor="audit-role" className="mb-1 block text-xs font-medium text-neutral-600">
-              Role
-            </label>
-            <select
-              id="audit-role"
-              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-              value={roleFilter}
-              disabled={loading}
-              onChange={(e) => {
-                setRoleFilter(e.target.value);
-                setAuditPage(1);
-              }}
-            >
-              <option value="">All roles</option>
-              {roleOptions.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="min-w-[12rem] flex-1 sm:max-w-xs">
-            <label htmlFor="audit-action" className="mb-1 block text-xs font-medium text-neutral-600">
-              Action contains
-            </label>
-            <input
-              id="audit-action"
-              type="text"
-              className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-              value={actionDraft}
-              placeholder="e.g. report.export or farm.mortality"
-              disabled={loading}
-              onChange={(e) => setActionDraft(e.target.value)}
-            />
-          </div>
-          <button
-            type="button"
-            disabled={auditBusy}
-            className="rounded-lg border border-neutral-300 bg-neutral-50 px-4 py-2 text-sm font-medium hover:bg-neutral-100 disabled:opacity-50"
-            onClick={() => {
-              setActionFilter(actionDraft.trim());
-              setAuditPage(1);
-            }}
-          >
-            Apply action filter
-          </button>
+        <div className="mt-3">
+          <TableToolbar
+            filters={
+              <>
+                <FacetFilter
+                  label="Action"
+                  value={actionFilter || "all"}
+                  allValue="all"
+                  onChange={(v) => applyActionFilter(v === "all" ? "" : v)}
+                  options={AUDIT_ACTION_QUICK_FILTERS.map((q) => ({
+                    value: q.value,
+                    label: q.label,
+                  }))}
+                />
+                <FacetFilter
+                  label="Role"
+                  value={roleFilter || "all"}
+                  allValue="all"
+                  onChange={(v) => {
+                    setRoleFilter(v === "all" ? "" : v);
+                    setAuditPage(1);
+                  }}
+                  options={roleOptions.map((r) => ({ value: r, label: humanRole(r) }))}
+                />
+              </>
+            }
+            search={
+              <ToolbarSearch
+                placeholder="Action contains…"
+                value={actionDraft}
+                onChange={(e) => {
+                  setActionDraft(e.target.value);
+                  setActionFilter(e.target.value.trim());
+                  setAuditPage(1);
+                }}
+                label="Filter activity by action"
+                disabled={loading}
+              />
+            }
+            meta={auditBusy ? "Loading…" : `${auditTotal} events`}
+          />
         </div>
 
         {auditError ? (
@@ -603,7 +713,7 @@ export function UserManagementPage() {
 
         {!auditBusy && !auditError && auditTotal === 0 ? (
           <div className="mt-4">
-            <EmptyState title="No audit entries" description="Try another page, role, or action filter." />
+            <EmptyState title="No audit entries" description="Try another page, role, or action filter." action={<Button variant="secondary" size="sm" onClick={() => { setRoleFilter(""); setAuditPage(1); }}>Clear filters</Button>} />
           </div>
         ) : null}
 
@@ -613,29 +723,45 @@ export function UserManagementPage() {
               <table className="institutional-table min-w-[36rem] text-sm">
                 <thead>
                   <tr>
-                    <th>Time (UTC)</th>
-                    <th>Actor</th>
+                    <th>When</th>
+                    <th className="sticky left-0 z-10 bg-[var(--surface-elevated)]">Actor</th>
                     <th>Role</th>
                     <th>Action</th>
                     <th>Resource</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {audit.map((row) => (
-                    <tr key={row.id}>
-                      <td className="font-mono text-xs">{row.at}</td>
-                      <td className="font-mono text-xs">{row.actor_id}</td>
-                      <td>{row.role}</td>
-                      <td>{row.action}</td>
-                      <td className="max-w-[12rem] truncate text-xs">
-                        {row.resource}
-                        {row.resource_id ? ` / ${row.resource_id}` : ""}
-                        {row.metadata && Object.keys(row.metadata).length
-                          ? ` ${JSON.stringify(row.metadata)}`
-                          : ""}
-                      </td>
-                    </tr>
-                  ))}
+                  {audit.map((row) => {
+                    const hasMetadata = row.metadata && Object.keys(row.metadata).length > 0;
+                    return (
+                      <Fragment key={row.id}>
+                        <tr
+                          className={hasMetadata ? "cursor-pointer hover:bg-neutral-50" : ""}
+                          onClick={() => (hasMetadata ? toggleAuditExpand(row.id) : undefined)}
+                        >
+                          <td className="font-mono text-xs" title={row.at}>
+                            {relativeTime(row.at)}
+                          </td>
+                          <td className="sticky left-0 z-[1] bg-white font-mono text-xs">{row.actor_id}</td>
+                          <td>{humanRole(row.role)}</td>
+                          <td>{humanAuditAction(row.action)}</td>
+                          <td className="max-w-[12rem] truncate text-xs">
+                            {row.resource}
+                            {row.resource_id ? ` / ${row.resource_id}` : ""}
+                          </td>
+                        </tr>
+                        {expandedAudit.has(row.id) && hasMetadata ? (
+                          <tr>
+                            <td colSpan={5} className="bg-neutral-50 px-4 py-3 text-xs">
+                              <pre className="whitespace-pre-wrap font-mono text-neutral-600">
+                                {JSON.stringify(row.metadata, null, 2)}
+                              </pre>
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -647,25 +773,48 @@ export function UserManagementPage() {
             Page {auditPage} of {totalPages} ({auditTotal} rows)
           </span>
           <div className="flex gap-2">
-            <button
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               disabled={auditPage <= 1 || auditBusy}
-              className="rounded-lg border border-neutral-300 px-3 py-1 disabled:opacity-40"
               onClick={() => setAuditPage((p) => Math.max(1, p - 1))}
             >
               Previous
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
               disabled={auditPage >= totalPages || auditBusy}
-              className="rounded-lg border border-neutral-300 px-3 py-1 disabled:opacity-40"
               onClick={() => setAuditPage((p) => p + 1)}
             >
               Next
-            </button>
+            </Button>
           </div>
         </div>
       </section>
-    </div>
+
+      <Modal
+        open={removeTarget != null}
+        title="Remove user"
+        onClose={() => (removing ? undefined : setRemoveTarget(null))}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setRemoveTarget(null)} disabled={removing}>
+              Cancel
+            </Button>
+            <Button variant="danger" onClick={() => void confirmRemoveUser()} disabled={removing}>
+              {removing ? "Removing…" : "Remove"}
+            </Button>
+          </>
+        }
+      >
+        <p className="type-body text-[var(--text-primary)]">
+          Remove <strong>{removeTarget?.displayName}</strong> from this farm? They will lose access immediately.
+        </p>
+        <p className="mt-2 type-caption">
+          Their historical records (logs, treatments, check-ins) are preserved for audit, but they can no longer sign in.
+        </p>
+      </Modal>
+    </ManagerPage>
   );
 }

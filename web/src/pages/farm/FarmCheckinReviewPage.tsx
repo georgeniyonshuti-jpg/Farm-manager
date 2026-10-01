@@ -14,6 +14,10 @@ import {
 import { SubmissionListTable } from "../../components/farm/reports/SubmissionListTable";
 import { CheckinPhotoReport } from "../../components/farm/reports/CheckinPhotoReport";
 import { SubmissionReportModal } from "../../components/farm/reports/SubmissionReportModal";
+import { Button } from "../../components/ui/Button";
+import { TableToolbar } from "../../components/ui";
+import { ManagerPage } from "../../components/layout/ManagerPage";
+import { formatManagerDateTime } from "../../lib/formatManagerDateTime";
 
 function formatMeta(c: CheckinListRow): string {
   const parts: string[] = [];
@@ -149,7 +153,7 @@ export function FarmCheckinReviewPage() {
     () =>
       checkins.map((c) => ({
         id: c.id,
-        dateLabel: new Date(c.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" }),
+        dateLabel: formatManagerDateTime(c.at),
         flockLabel: c.flockCode ?? c.flockId.slice(0, 8),
         authorLabel: c.laborerName ?? c.laborerId.slice(0, 8),
         status: c.submissionStatus ?? "pending_review",
@@ -161,41 +165,30 @@ export function FarmCheckinReviewPage() {
 
   const reviewButtons = (id: string) => (
     <span className="flex flex-wrap gap-1 justify-center">
-      <button
-        type="button"
-        disabled={busyId === id}
-        onClick={() => void review(id, "approve")}
-        className="rounded bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white disabled:opacity-50"
-      >
+      <Button variant="success" size="xs" disabled={busyId === id} onClick={() => void review(id, "approve")}>
         Approve
-      </button>
-      <button
-        type="button"
-        disabled={busyId === id}
-        onClick={() => void review(id, "reject")}
-        className="rounded bg-red-600 px-2 py-0.5 text-xs font-semibold text-white disabled:opacity-50"
-      >
+      </Button>
+      <Button variant="danger" size="xs" disabled={busyId === id} onClick={() => void review(id, "reject")}>
         Reject
-      </button>
+      </Button>
     </span>
   );
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <ManagerPage>
       <PageHeader
-        title="Review round check-ins"
-        subtitle="Approve laborer and junior vet submissions. Click a row to view photos and full details."
+        title="Review check-ins"
         action={
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-3">
             <Link
               to="/farm/reports?type=field_submissions&tab=checkins"
-              className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
+              className="text-sm font-semibold text-[var(--primary-color)] underline-offset-2 hover:underline"
             >
               View all in Reports
             </Link>
             <Link
               to="/farm/payroll"
-              className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
+              className="text-sm font-semibold text-[var(--primary-color)] underline-offset-2 hover:underline"
             >
               Payroll
             </Link>
@@ -206,30 +199,36 @@ export function FarmCheckinReviewPage() {
       {loading && <SkeletonList rows={4} />}
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
 
-      {!loading && !error && checkins.length > 0 ? (
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={() => downloadCsv(checkins, `checkins-pending-${new Date().toISOString().slice(0, 10)}.csv`)}
-            className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-subtle)]"
-          >
-            Export pending CSV
-          </button>
-        </div>
-      ) : null}
-
       {!loading && !error ? (
         <SubmissionListTable
           rows={rows}
           loading={false}
           emptyLabel="No check-ins pending review."
+          toolbar={
+            checkins.length > 0 ? (
+              <TableToolbar
+                meta={`${checkins.length} pending`}
+                actions={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      downloadCsv(checkins, `checkins-pending-${new Date().toISOString().slice(0, 10)}.csv`)
+                    }
+                  >
+                    Export CSV
+                  </Button>
+                }
+              />
+            ) : undefined
+          }
           renderRowActions={(row) => reviewButtons(row.id)}
         />
       ) : null}
 
       <SubmissionReportModal open={reportOpen} onClose={closeReport}>
         {reportLoading ? (
-          <p className="p-8 text-center text-sm text-[var(--text-muted)] animate-pulse">Loading report…</p>
+          <div className="p-card"><SkeletonList rows={4} /></div>
         ) : reportCheckin ? (
           <CheckinPhotoReport
             checkin={reportCheckin}
@@ -237,35 +236,21 @@ export function FarmCheckinReviewPage() {
             footer={
               selectedId ? (
                 <div className="flex flex-wrap items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={closeReport}
-                    className="rounded-lg border border-[var(--border-color)] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)]"
-                  >
+                  <Button variant="secondary" size="sm" onClick={closeReport}>
                     Close
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busyId === selectedId}
-                    onClick={() => void review(selectedId, "reject")}
-                    className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                  >
+                  </Button>
+                  <Button variant="danger" size="xs" disabled={busyId === selectedId} onClick={() => void review(selectedId, "reject")}>
                     Reject
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busyId === selectedId}
-                    onClick={() => void review(selectedId, "approve")}
-                    className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                  >
+                  </Button>
+                  <Button variant="success" size="xs" disabled={busyId === selectedId} onClick={() => void review(selectedId, "approve")}>
                     Approve
-                  </button>
+                  </Button>
                 </div>
               ) : null
             }
           />
         ) : null}
       </SubmissionReportModal>
-    </div>
+    </ManagerPage>
   );
 }

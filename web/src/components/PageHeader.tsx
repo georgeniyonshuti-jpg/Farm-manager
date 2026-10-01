@@ -1,27 +1,135 @@
-import type { ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, type ReactNode } from "react";
+import { Button } from "./ui/Button";
+import { PageFrame } from "./layout/PageFrame";
+import { usePageChrome } from "./layout/PageChromeContext";
+import { usePageActive } from "./layout/PageActiveContext";
+
+type ActionDef = { label: string; onClick: () => void; disabled?: boolean };
 
 type Props = {
   title: ReactNode;
+  /** @deprecated Ignored — subtitles removed from the desktop shell. */
   subtitle?: ReactNode;
   action?: ReactNode;
+  primaryAction?: ActionDef;
+  secondaryAction?: ActionDef;
+  tabs?: ReactNode;
   className?: string;
+  /** When set, wraps children in PageFrame (preferred). */
+  children?: ReactNode;
+  meta?: ReactNode;
+  variant?: "records" | "settings";
 };
 
-/** Consistent page title row (PART 4): title, optional subtitle & action. */
-export function PageHeader({ title, subtitle, action, className = "" }: Props) {
+function renderAction(action?: ActionDef) {
+  if (!action) return null;
   return (
-    <header
-      className={["mb-6 flex max-w-[100vw] flex-col gap-2 border-b border-[var(--border-color)] pb-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4", className]
-        .filter(Boolean)
-        .join(" ")}
-    >
-      <div className="min-w-0">
-        <h1 className="text-xl font-semibold text-[var(--text-primary)] sm:text-2xl">{title}</h1>
-        {subtitle != null && subtitle !== "" ? (
-          <div className="mt-1 text-sm text-[var(--text-secondary)]">{subtitle}</div>
-        ) : null}
-      </div>
-      {action != null ? <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">{action}</div> : null}
-    </header>
+    <Button variant="primary" size="sm" onClick={action.onClick} disabled={action.disabled}>
+      {action.label}
+    </Button>
+  );
+}
+
+function renderSecondary(action?: ActionDef) {
+  if (!action) return null;
+  return (
+    <Button variant="secondary" size="sm" onClick={action.onClick} disabled={action.disabled}>
+      {action.label}
+    </Button>
+  );
+}
+
+/** Publishes chrome to AppTopBar without occupying layout space. */
+function ChromeOnly({
+  title,
+  actions,
+  tabs,
+  tabsActions,
+}: {
+  title: ReactNode;
+  actions?: ReactNode;
+  tabs?: ReactNode;
+  tabsActions?: ReactNode;
+}) {
+  const owner = useId();
+  const { setChrome, clearChrome } = usePageChrome();
+  const pageActive = usePageActive();
+
+  useLayoutEffect(() => {
+    if (!pageActive) return;
+    setChrome(
+      {
+        title,
+        actions: actions ?? null,
+        tabs: tabs ?? null,
+        tabsActions: tabsActions ?? null,
+      },
+      owner,
+    );
+  }, [pageActive, title, actions, tabs, tabsActions, setChrome, owner]);
+
+  useEffect(() => {
+    if (!pageActive) return;
+    return () => clearChrome(owner);
+  }, [pageActive, clearChrome, owner]);
+
+  return null;
+}
+
+/**
+ * Compatibility shim → PageFrame / AppTopBar.
+ * Does not render a title band or subtitle.
+ */
+export function PageHeader({
+  title,
+  action,
+  primaryAction,
+  secondaryAction,
+  tabs,
+  className = "",
+  children,
+  meta,
+  variant = "records",
+}: Props) {
+  const builtActions = (
+    <>
+      {renderSecondary(secondaryAction)}
+      {renderAction(primaryAction)}
+    </>
+  );
+  const hasBuiltActions = primaryAction != null || secondaryAction != null;
+  const titleRowAction = tabs == null ? (hasBuiltActions ? builtActions : action) : null;
+  const tabsRowAction = tabs != null ? (hasBuiltActions ? builtActions : action) : null;
+
+  if (children != null) {
+    return (
+      <PageFrame
+        title={title}
+        actions={titleRowAction ?? undefined}
+        tabs={tabs}
+        tabsActions={tabsRowAction ?? undefined}
+        meta={meta}
+        variant={variant}
+        className={className}
+      >
+        {children}
+      </PageFrame>
+    );
+  }
+
+  return (
+    <>
+      <ChromeOnly
+        title={title}
+        actions={titleRowAction ?? undefined}
+        tabs={tabs}
+        tabsActions={tabsRowAction ?? undefined}
+      />
+      {meta != null ? (
+        <div className="flex flex-wrap items-center gap-2 text-xs font-medium tabular-nums text-[var(--text-secondary)]">
+          {meta}
+        </div>
+      ) : null}
+    </>
   );
 }

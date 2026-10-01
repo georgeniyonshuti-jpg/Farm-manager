@@ -1,4 +1,4 @@
-import { useERPNextConnection } from "../../context/OdooConnectionContext";
+import { useERPNextConnection } from "../../context/ERPNextConnectionContext";
 import { PageHeader } from "../../components/PageHeader";
 import { Link } from "react-router-dom";
 
@@ -11,10 +11,9 @@ export function ERPNextEmbedPage() {
 
   if (!status?.connected) {
     return (
-      <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
+      <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-card shadow-sm">
         <PageHeader
           title="ERPNext desk"
-          subtitle="Connect ERPNext first, then open the embedded accounting workspace."
         />
         <p className="mt-4 text-sm text-neutral-600">
           Go to{" "}
@@ -29,11 +28,11 @@ export function ERPNextEmbedPage() {
 
   return (
     <div className="flex h-[calc(100vh-5rem)] flex-col gap-2">
-      <PageHeader title="ERPNext desk" subtitle="Embedded Farm manager workspace from ERPNext." />
+      <PageHeader title="ERPNext desk" />
       <iframe
         src={iframeSrc}
         title="ERPNext Farm manager"
-        className="min-h-0 flex-1 w-full rounded-xl border border-neutral-200 bg-white"
+        className="min-h-0 flex-1 w-full rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)]"
         allow="fullscreen"
       />
     </div>

@@ -6,7 +6,6 @@ import { PageHeader } from "../../components/PageHeader";
 import { useToast } from "../../components/Toast";
 import { API_BASE_URL } from "../../api/config";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
-import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
 import { SubmissionStageScreen } from "../../components/farm/SubmissionStageScreen";
 
@@ -15,7 +14,6 @@ export function FarmDailyLogPage() {
   const { showToast } = useToast();
   const savedMsg = useLaborerT("Daily log saved.");
   const pageTitle = useLaborerT("Daily log");
-  const pageSub = useLaborerT("Large fields for quick coop entry.");
   const lblFlock = useLaborerT("Flock");
 
   const {
@@ -79,7 +77,7 @@ export function FarmDailyLogPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title={pageTitle} subtitle={pageSub} />
+      <PageHeader title={pageTitle} />
 
       {loading && <SkeletonList rows={2} />}
       {!loading && error && (
@@ -111,21 +109,17 @@ export function FarmDailyLogPage() {
           </label>
 
           {status ? (
-            <FlockContextStrip
-              label={status.label}
-              code={selected?.code}
-              placementDate={status.placementDate}
-              ageDays={status.ageDays}
-              feedToDateKg={status.feedToDateKg}
-              initialCount={selected?.initialCount}
-              birdsLiveEstimate={performance?.birdsLiveEstimate}
-              verifiedLiveCount={performance?.verifiedLiveCount}
-              mortalityToDate={performance?.mortalityToDate}
-            />
+            <p className="type-caption tabular-nums text-[var(--text-primary)]">
+              Day {status.ageDays}
+              {" · "}
+              Live {performance?.birdsLiveEstimate ?? "—"}
+              {" · "}
+              Mort {performance?.mortalityToDate ?? "—"}
+              {" · "}
+              placed {status.placementDate}
+            </p>
           ) : flockId && detailLoading ? (
-            <SkeletonList rows={2} />
-          ) : flockId ? (
-            <p className="text-sm text-neutral-500">Loading context…</p>
+            <SkeletonList rows={1} />
           ) : null}
 
           {flockId ? (

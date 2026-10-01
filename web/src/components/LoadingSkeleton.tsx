@@ -26,12 +26,15 @@ type Props = {
 
 export function ErrorState({ message, onRetry, retryLabel = "Try again" }: Props) {
   return (
-    <div className="rounded-lg bg-red-50 px-3 py-3 text-sm text-red-800" role="alert">
+    <div
+      className="rounded-lg border border-[var(--status-danger)]/25 bg-[var(--status-danger-soft)] px-3 py-3 text-sm text-[var(--status-danger)]"
+      role="alert"
+    >
       <p>{message}</p>
       {onRetry ? (
         <button
           type="button"
-          className="mt-2 font-semibold text-red-900 underline hover:text-red-950"
+          className="mt-2 font-semibold underline opacity-90 hover:opacity-100"
           onClick={onRetry}
         >
           {retryLabel}

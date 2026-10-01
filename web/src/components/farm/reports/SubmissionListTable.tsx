@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import { SubmissionStatusBadge } from "./SubmissionStatusBadge";
+import { DataTable, type DataColumn } from "../../ui/DataTable";
+import { TextLink } from "../../ui/TextLink";
 
 export type SubmissionRow = {
   id: string;
@@ -15,63 +17,76 @@ type Props = {
   rows: SubmissionRow[];
   emptyLabel: string;
   loading?: boolean;
+  toolbar?: ReactNode;
   renderRowActions?: (row: SubmissionRow) => ReactNode;
 };
 
-export function SubmissionListTable({ rows, emptyLabel, loading = false, renderRowActions }: Props) {
-  if (loading) {
-    return <p className="text-sm text-[var(--text-muted)] animate-pulse">Loading submissions…</p>;
-  }
-  if (rows.length === 0) {
-    return <p className="text-sm text-[var(--text-muted)]">{emptyLabel}</p>;
-  }
+export function SubmissionListTable({ rows, emptyLabel, loading = false, toolbar, renderRowActions }: Props) {
+  const columns: DataColumn<SubmissionRow>[] = [
+    { key: "date", header: "Date", className: "tbl-mono", render: (row) => row.dateLabel },
+    { key: "flock", header: "Flock", render: (row) => <span className="font-medium">{row.flockLabel}</span> },
+    { key: "author", header: "Submitted by", render: (row) => row.authorLabel },
+    {
+      key: "status",
+      header: "Status",
+      badge: true,
+      render: (row) => <SubmissionStatusBadge status={row.status} />,
+    },
+    {
+      key: "details",
+      header: "Details",
+      render: (row) => (
+        <span className="max-w-[12rem] truncate text-[var(--text-muted)]">{row.meta ?? "—"}</span>
+      ),
+    },
+    ...(renderRowActions
+      ? [
+          {
+            key: "review",
+            header: "Review",
+            className: "tbl-actions",
+            render: (row: SubmissionRow) => (
+              <div onClick={(e) => e.stopPropagation()}>{renderRowActions(row)}</div>
+            ),
+          } satisfies DataColumn<SubmissionRow>,
+        ]
+      : []),
+  ];
+
   return (
-    <div className="overflow-hidden rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)]">
-      <div className="overflow-x-auto">
-        <table className="institutional-table min-w-[640px]">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Flock</th>
-              <th>Submitted by</th>
-              <th>Status</th>
-              <th>Details</th>
-              <th className="tbl-actions">Open</th>
-              {renderRowActions ? <th className="tbl-actions">Review</th> : null}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id} className="cursor-pointer hover:bg-[var(--table-row-hover)]" onClick={row.onOpen}>
-                <td className="tbl-mono whitespace-nowrap">{row.dateLabel}</td>
-                <td className="font-medium">{row.flockLabel}</td>
-                <td>{row.authorLabel}</td>
-                <td className="tbl-badge">
-                  <SubmissionStatusBadge status={row.status} />
-                </td>
-                <td className="max-w-[12rem] truncate text-[var(--text-muted)]">{row.meta ?? "—"}</td>
-                <td className="tbl-actions">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      row.onOpen();
-                    }}
-                    className="rounded-md border border-[var(--border-color)] px-2 py-1 text-xs font-semibold text-[var(--primary-color)] hover:bg-[var(--primary-color-soft)]"
-                  >
-                    View report
-                  </button>
-                </td>
-                {renderRowActions ? (
-                  <td className="tbl-actions" onClick={(e) => e.stopPropagation()}>
-                    {renderRowActions(row)}
-                  </td>
-                ) : null}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <DataTable<SubmissionRow>
+      columns={columns}
+      rows={loading ? [] : rows}
+      rowKey={(row) => row.id}
+      onRowClick={(row) => row.onOpen()}
+      emptyTitle={loading ? "Loading submissions…" : emptyLabel}
+      emptyDescription={loading ? undefined : "Nothing needs review right now."}
+      toolbar={toolbar}
+      renderMobileCard={(row) => (
+        <button
+          type="button"
+          onClick={row.onOpen}
+          className="w-full rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 text-left shadow-[var(--shadow-sm)]"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-semibold text-sm">{row.flockLabel}</span>
+            <SubmissionStatusBadge status={row.status} />
+          </div>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            {row.dateLabel} · {row.authorLabel}
+          </p>
+          <p className="mt-1 text-xs text-[var(--text-secondary)]">{row.meta ?? "—"}</p>
+          {renderRowActions ? (
+            <div className="mt-2" onClick={(e) => e.stopPropagation()}>
+              {renderRowActions(row)}
+            </div>
+          ) : (
+            <TextLink className="mt-2 text-xs" onClick={row.onOpen}>
+              Open
+            </TextLink>
+          )}
+        </button>
+      )}
+    />
   );
 }

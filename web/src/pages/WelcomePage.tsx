@@ -5,7 +5,7 @@ export function WelcomePage() {
   const { company, loading } = useOnboardingStatus();
   if (loading) return null;
   return (
-    <div className="p-6">
+    <div className="p-card">
       <WelcomeScreen companyName={company?.name ?? ""} />
     </div>
   );

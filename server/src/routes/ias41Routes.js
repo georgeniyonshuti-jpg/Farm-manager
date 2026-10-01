@@ -2,7 +2,7 @@
  * IAS 41 Biological Asset Valuation Routes
  *
  * POST /api/ias41/valuation-snapshots            — create draft snapshot
- * PATCH /api/ias41/valuation-snapshots/:id/approve — manager approves + enqueues Odoo entry
+ * PATCH /api/ias41/valuation-snapshots/:id/approve — manager approves snapshot
  * GET  /api/ias41/valuation-snapshots             — list snapshots (optional ?flock_id=&status=)
  *
  * All routes require manager or superuser.

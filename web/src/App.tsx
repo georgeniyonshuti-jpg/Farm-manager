@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthContext";
 import { LaborerI18nProvider } from "./i18n/laborerI18n";
 import { AppShell } from "./components/layout/AppShell";
@@ -17,11 +17,19 @@ import { SuperAdminRoute } from "./routes/SuperAdminRoute";
 import { FlockDetailPage } from "./pages/farm/FlockDetailPage";
 import { AccessDeniedRedirect } from "./routes/AccessDeniedRedirect";
 import { ToastProvider } from "./components/Toast";
+import { LocaleToastBridge } from "./components/LocaleToastBridge";
 import { VersionBadge } from "./components/VersionBadge";
 import { SystemStatus } from "./components/SystemStatus";
 import { InstallPromptBanner } from "./components/pwa/InstallPromptBanner";
 import { useAuth } from "./auth/AuthContext";
 import { AppLoadingScreen } from "./components/AppLoadingScreen";
+import { PublicLayout } from "./components/public/PublicLayout";
+import { PublicMarketPage } from "./pages/public/PublicMarketPage";
+import { PublicLotDetailPage } from "./pages/public/PublicLotDetailPage";
+import { PublicFarmPage } from "./pages/public/PublicFarmPage";
+import { PublicFarmsPage } from "./pages/public/PublicFarmsPage";
+import { HowItWorksPage } from "./pages/public/HowItWorksPage";
+import { SellYourBirdsPage } from "./pages/public/SellYourBirdsPage";
 
 function FlockFcrLegacyRedirect() {
   const { id } = useParams<{ id: string }>();
@@ -37,12 +45,15 @@ import { ERPNextOAuthCallbackPage } from "./pages/auth/ERPNextOAuthCallbackPage"
 import { ClevaOAuthCallbackPage } from "./pages/auth/ClevaOAuthCallbackPage";
 import { RootRedirect } from "./routes/RootRedirect";
 import { FarmBootstrapProvider } from "./context/FarmBootstrapContext";
-import { ContractRouteAliases } from "./routes/ContractRouteAliases";
+import { ActiveFlockProvider } from "./context/ActiveFlockContext";
+import { contractRouteAliasRoutes } from "./routes/ContractRouteAliases";
 
 function AppRoutes() {
   const { bootstrapped } = useAuth();
-  const apiStatus = useApiHealthStatus(!bootstrapped);
-  if (!bootstrapped) return <AppLoadingScreen apiStatus={apiStatus} />;
+  const { pathname } = useLocation();
+  const isPublicStore = pathname.startsWith("/market");
+  const apiStatus = useApiHealthStatus(!bootstrapped && !isPublicStore);
+  if (!bootstrapped && !isPublicStore) return <AppLoadingScreen apiStatus={apiStatus} />;
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
@@ -55,6 +66,15 @@ function AppRoutes() {
       <Route path="/billing/success" element={<BillingSuccessPage />} />
       <Route path="/billing/cancelled" element={<BillingCancelledPage />} />
       <Route path="/billing/trial-expired" element={<TrialExpiredPage />} />
+
+      <Route element={<PublicLayout />}>
+        <Route path="/market" element={<PublicMarketPage />} />
+        <Route path="/market/lot/:publicRef" element={<PublicLotDetailPage />} />
+        <Route path="/market/farms" element={<PublicFarmsPage />} />
+        <Route path="/market/farm/:slug" element={<PublicFarmPage />} />
+        <Route path="/market/how-it-works" element={<HowItWorksPage />} />
+        <Route path="/market/sell" element={<SellYourBirdsPage />} />
+      </Route>
 
       <Route element={<ProtectedRoute />}>
         <Route path="/" element={<RootRedirect />} />
@@ -73,7 +93,9 @@ function AppRoutes() {
             <TenantProvider>
               <TenantGuard>
                 <FarmBootstrapProvider>
-                  <AppShell />
+                  <ActiveFlockProvider>
+                    <AppShell />
+                  </ActiveFlockProvider>
                 </FarmBootstrapProvider>
               </TenantGuard>
             </TenantProvider>
@@ -93,7 +115,7 @@ function AppRoutes() {
               path="flocks/:id"
               element={
                 <ProtectedRoute
-                  roles={["manager", "vet_manager", "vet", "superuser", "procurement_officer", "sales_coordinator"]}
+                  roles={["manager", "vet_manager", "vet", "superuser", "procurement_officer"]}
                 >
                   <FlockDetailPage />
                 </ProtectedRoute>
@@ -110,16 +132,29 @@ function AppRoutes() {
             <Route path="inventory" element={null} />
             <Route path="treatments" element={null} />
             <Route path="slaughter" element={null} />
+            <Route path="pipeline" element={null} />
+            <Route path="pipeline/buyers" element={null} />
+            <Route path="pipeline/scout" element={null} />
+            <Route path="pipeline/weigh" element={null} />
+            <Route path="pipeline/weigh/:lotId" element={null} />
             <Route path="batch-schedule" element={null} />
             <Route path="schedule-settings" element={null} />
             <Route path="checkin-review" element={null} />
             <Route path="payroll" element={null} />
-            <Route path="accounting-approvals" element={null} />
-            <Route path="odoo-setup" element={null} />
             <Route path="erpnext-setup" element={null} />
             <Route path="erpnext" element={null} />
             <Route path="reports" element={null} />
           </Route>
+
+          <Route path="market" element={null} />
+          <Route path="market/orders" element={null} />
+          <Route path="market/listings" element={null} />
+          <Route path="market/pending" element={null} />
+          <Route path="market/verify" element={null} />
+          <Route path="market/leads" element={null} />
+          <Route path="market/rates" element={null} />
+          <Route path="market/jobs" element={null} />
+          <Route path="market/commissions" element={null} />
 
           <Route path="cleva" element={<ClevaSection />}>
             <Route path="portfolio" element={null} />
@@ -134,9 +169,13 @@ function AppRoutes() {
 
           <Route element={<SuperAdminRoute />}>
             <Route path="admin/super" element={null} />
+            <Route path="admin/super/companies/:companyId" element={null} />
+            <Route path="admin/super/plans" element={null} />
+            <Route path="admin/super/announce" element={null} />
+            <Route path="admin/super/repair" element={null} />
           </Route>
 
-          <ContractRouteAliases />
+          {contractRouteAliasRoutes()}
 
           <Route path="*" element={<HomeRedirect />} />
         </Route>
@@ -154,6 +193,7 @@ export default function App() {
         <AuthProvider>
           <LaborerI18nProvider>
             <ToastProvider>
+              <LocaleToastBridge />
               <AppRoutes />
               <VersionBadge />
               <SystemStatus />

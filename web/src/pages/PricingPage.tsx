@@ -2,11 +2,13 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { API_BASE_URL } from "../api/config";
 import { useAuth } from "../auth/AuthContext";
-import { PLANS } from "../lib/plans";
+import { useBillingPlans } from "../hooks/useBillingPlans";
 import { formatRwf } from "../lib/formatRwf";
+import { Button } from "../components/ui/Button";
 
 export function PricingPage() {
   const { token } = useAuth();
+  const { plans, loading, error: plansError } = useBillingPlans();
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,19 +35,23 @@ export function PricingPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 p-6">
+    <div className="mx-auto max-w-5xl space-y-stack p-card">
       <div>
         <h1 className="text-2xl font-semibold text-[var(--text-primary)]">Pricing</h1>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          14 days free, no card required. After trial, choose a plan to continue.
+          30 days free, no card required. After trial, choose a plan to continue.
         </p>
       </div>
       {error ? (
         <p className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{error}</p>
       ) : null}
+      {plansError ? (
+        <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">{plansError}</p>
+      ) : null}
+      {loading ? <p className="text-sm text-[var(--text-muted)]">Loading plans…</p> : null}
       <div className="grid gap-4 md:grid-cols-2">
-        {PLANS.map((plan) => (
-          <div key={plan.id} className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-6">
+        {plans.map((plan) => (
+          <div key={plan.id} className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] p-card">
             <h2 className="text-lg font-semibold text-[var(--text-primary)]">{plan.name}</h2>
             <p className="mt-2 text-3xl font-bold text-[var(--text-primary)]">
               ${plan.price}
@@ -57,14 +63,25 @@ export function PricingPage() {
                 <li key={f}>• {f}</li>
               ))}
             </ul>
-            <button
-              type="button"
-              disabled={loadingPlan === plan.id}
-              onClick={() => void startCheckout(plan.id)}
-              className="mt-6 w-full rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-            >
-              {loadingPlan === plan.id ? "Starting…" : "Start free trial"}
-            </button>
+            {token ? (
+              <Button
+                type="button"
+                className="mt-4 w-full"
+                size="lg"
+                disabled={loadingPlan === plan.id}
+                loading={loadingPlan === plan.id}
+                onClick={() => void startCheckout(plan.id)}
+              >
+                Upgrade to this plan
+              </Button>
+            ) : (
+              <Link
+                to="/signup"
+                className="mt-4 block w-full rounded-control bg-[var(--primary-color)] px-4 py-2 text-center text-sm font-semibold text-white"
+              >
+                Start free trial
+              </Link>
+            )}
           </div>
         ))}
       </div>

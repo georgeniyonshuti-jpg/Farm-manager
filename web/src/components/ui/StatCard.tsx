@@ -7,9 +7,9 @@ type ValueColor = "default" | "success" | "warning" | "critical";
 type Props = {
   label: ReactNode;
   value: ReactNode;
-  /** Small gray helper line under the hero value (v2 spec §2.2). */
+  /** @deprecated Ignored — keep cards to label + value. */
   subtext?: ReactNode;
-  /** Color the hero number only when it is itself a health signal (v2 spec §2.2). */
+  /** Color the hero number only when it is itself a health signal. */
   valueColor?: ValueColor;
   trend?: ReactNode;
   trendTone?: TrendTone;
@@ -42,7 +42,6 @@ const statusClass: Record<StatusTone, string> = {
 export function StatCard({
   label,
   value,
-  subtext,
   valueColor = "default",
   trend,
   trendTone = "neutral",
@@ -51,23 +50,26 @@ export function StatCard({
   muted = false,
 }: Props) {
   return (
-    <div className="rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] p-[var(--space-6)] shadow-[var(--shadow-sm)]">
-      <p className="text-[12px] font-semibold uppercase tracking-[0.04em] text-[var(--text-label,var(--text-muted))]">{label}</p>
+    <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] p-card shadow-[var(--shadow-sm)]">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.04em] text-[var(--text-label,var(--text-muted))]">
+        {label}
+      </p>
       <p
         className={[
-          "mt-2 text-[34px] font-bold leading-[38px] tabular-nums",
+          "mt-1 text-[26px] font-bold leading-[30px] tabular-nums",
           valueColorClass[valueColor],
           muted ? "opacity-60" : "",
         ].join(" ")}
       >
         {value}
       </p>
-      {subtext != null ? <p className="mt-1 text-xs text-[var(--text-muted)]">{subtext}</p> : null}
       {(trend != null || status != null) && (
-        <div className="mt-3 flex items-center gap-2">
+        <div className="mt-2 flex items-center gap-2">
           {trend != null ? <span className={`text-xs font-medium ${trendClass[trendTone]}`}>{trend}</span> : null}
           {status != null ? (
-            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClass[statusTone]}`}>
+            <span
+              className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${statusClass[statusTone]}`}
+            >
               {status}
             </span>
           ) : null}

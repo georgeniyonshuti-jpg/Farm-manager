@@ -18,6 +18,12 @@ export type OpsBoardFlock = {
   estimatedFairValueRwf?: number | null;
   lastValuationSnapshotRwf?: number | null;
   lastValuationDate?: string | null;
+  feedToDateKg?: number | null;
+  weightGainedKg?: number | null;
+  feedPerBirdKg?: number | null;
+  fcrStatus?: "on_track" | "watch" | "warning" | "unknown" | string;
+  daysSinceWeighIn?: number | null;
+  adgGramsPerDay?: number | null;
   overdueRounds: number;
   withdrawalBlockers: number;
   mortality7d: number;
@@ -41,6 +47,17 @@ export type OpsBoardFlock = {
   topIssue: string;
 };
 
+export type GrowthInsightSeverity = "info" | "warn" | "critical";
+
+export type GrowthInsight = {
+  id: string;
+  severity: GrowthInsightSeverity;
+  flockId?: string;
+  flockLabel?: string;
+  category: "weigh_in" | "fcr" | "feed" | "projection" | string;
+  message: string;
+};
+
 export type OpsBoardResponse = {
   flocks: OpsBoardFlock[];
   barns: Array<{
@@ -52,6 +69,7 @@ export type OpsBoardResponse = {
     avgFcr: number | null;
   }>;
   insights: string[];
+  growthInsights?: GrowthInsight[];
   farmHealthScore: number;
   mostImprovedFlockId: string | null;
   worstDecliningFlockId: string | null;
@@ -60,6 +78,9 @@ export type OpsBoardResponse = {
     estimatedFairValueRwf: number | null;
     referenceMarketPriceRwfPerKg: number | null;
     approvedValuationTotalRwf: number | null;
+    totalFeedToDateKg?: number;
+    avgFeedPerBirdKg?: number | null;
+    flocksAboveTargetFcr?: number;
   };
 };
 
@@ -215,6 +236,72 @@ export function biomassSummary(flocks: OpsBoardFlock[]): {
   };
 }
 
+export function growthTrackerSummary(
+  flocks: OpsBoardFlock[],
+  farmTotals?: OpsBoardResponse["farmTotals"],
+): {
+  totalFeedToDateKg: number;
+  avgFeedPerBirdKg: number | null;
+  flocksAboveTargetFcr: number;
+  fcrWatchCount: number;
+  avgAdgGramsPerDay: number | null;
+} & ReturnType<typeof biomassSummary> {
+  const base = biomassSummary(flocks);
+  let fcrAbove = 0;
+  let fcrWatch = 0;
+  let adgSum = 0;
+  let adgCount = 0;
+  for (const f of flocks) {
+    if (f.latestFcr != null && f.latestFcr > f.expectedFcrRange.max) fcrAbove += 1;
+    if (f.fcrStatus === "watch" || f.fcrStatus === "warning") fcrWatch += 1;
+    if (f.adgGramsPerDay != null && Number.isFinite(f.adgGramsPerDay)) {
+      adgSum += Number(f.adgGramsPerDay);
+      adgCount += 1;
+    }
+  }
+  return {
+    ...base,
+    totalFeedToDateKg: farmTotals?.totalFeedToDateKg ?? 0,
+    avgFeedPerBirdKg: farmTotals?.avgFeedPerBirdKg ?? null,
+    flocksAboveTargetFcr: farmTotals?.flocksAboveTargetFcr ?? fcrAbove,
+    fcrWatchCount: fcrWatch,
+    avgAdgGramsPerDay: adgCount > 0 ? Number((adgSum / adgCount).toFixed(1)) : null,
+  };
+}
+
+export function growthScorecardRows(flocks: OpsBoardFlock[], limit = 12): OpsBoardFlock[] {
+  return [...flocks]
+    .sort((a, b) => {
+      const scoreA =
+        Math.max(0, -(a.weightDeviationPct ?? 0)) * 2 +
+        (a.latestFcr != null && a.latestFcr > a.expectedFcrRange.max
+          ? (a.latestFcr - a.expectedFcrRange.max) * 10
+          : 0) +
+        (a.daysSinceWeighIn == null ? 50 : a.daysSinceWeighIn > 14 ? 20 : 0);
+      const scoreB =
+        Math.max(0, -(b.weightDeviationPct ?? 0)) * 2 +
+        (b.latestFcr != null && b.latestFcr > b.expectedFcrRange.max
+          ? (b.latestFcr - b.expectedFcrRange.max) * 10
+          : 0) +
+        (b.daysSinceWeighIn == null ? 50 : b.daysSinceWeighIn > 14 ? 20 : 0);
+      return scoreB - scoreA;
+    })
+    .slice(0, limit);
+}
+
+export function trendArrowLabel(arrow?: OpsBoardTrendArrow): string {
+  if (arrow === "up") return "↑";
+  if (arrow === "down") return "↓";
+  return "→";
+}
+
+export function fcrStatusLabel(status?: string | null): string {
+  if (status === "on_track") return "On track";
+  if (status === "watch") return "Watch";
+  if (status === "warning") return "High";
+  return "—";
+}
+
 export function topBiomassFlocks(
   flocks: OpsBoardFlock[],
   limit = 5,
@@ -267,15 +354,34 @@ export function farmAverageWeightTrend(
 }
 
 export const FLOCK_TREND_COLORS = [
-  "#22c78a",
-  "#38bdf8",
-  "#fbbf24",
-  "#a78bfa",
-  "#f472b6",
-  "#2dd4bf",
-  "#fb923c",
-  "#818cf8",
+  "#1d9e75",
+  "#1196b5",
+  "#f59e0b",
+  "#8b5cf6",
+  "#ec4899",
+  "#14b8a6",
+  "#f97316",
+  "#1d4ed8",
 ] as const;
+
+/** Resolve trend colors from live CSS tokens when document is available. */
+export function flockTrendColors(): string[] {
+  if (typeof window === "undefined") return [...FLOCK_TREND_COLORS];
+  const keys = [
+    "--chart-1",
+    "--chart-2",
+    "--chart-3",
+    "--chart-5",
+    "--chart-6",
+    "--chart-7",
+    "--chart-8",
+    "--status-info",
+  ];
+  return keys.map((k, i) => {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(k).trim();
+    return v || FLOCK_TREND_COLORS[i];
+  });
+}
 
 export type FlockWeightTrendSeries = {
   flockId: string;
@@ -346,7 +452,7 @@ export function flockWeightTrendChartData(
     return {
       flockId,
       label,
-      color: FLOCK_TREND_COLORS[index % FLOCK_TREND_COLORS.length],
+      color: flockTrendColors()[index % flockTrendColors().length],
       actualKey,
       targetKey,
     };

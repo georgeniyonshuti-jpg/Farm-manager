@@ -1,3 +1,5 @@
+import crypto from "crypto";
+
 let _dbQuery = null;
 
 export function initErpnextConfigDb(dbQuery) {
@@ -114,7 +116,7 @@ export async function getUserCompanyId(userId) {
   return r.rows[0]?.id || null;
 }
 
-export async function setErpnextCompanyLink(companyId, erpnextCompany) {
+export async function setErpnextCompanyLink(companyId, erpnextCompany, erpnextBaseUrl) {
   if (!_dbQuery || !companyId) {
     throw new Error("Database unavailable for ERPNext company link.");
   }
@@ -122,26 +124,91 @@ export async function setErpnextCompanyLink(companyId, erpnextCompany) {
   if (!name) {
     throw new Error("erpnextCompany is required.");
   }
+  const base = String(erpnextBaseUrl || "https://erp.clevacredit.com").replace(/\/+$/, "");
   const r = await _dbQuery(
     `INSERT INTO erpnext_config (company_id, erpnext_base_url, erpnext_company, updated_at)
      VALUES ($1::uuid, $2, $3, now())
      ON CONFLICT (company_id) DO UPDATE SET
        erpnext_company = EXCLUDED.erpnext_company,
+       erpnext_base_url = EXCLUDED.erpnext_base_url,
        updated_at = now()
-     RETURNING company_id::text AS company_id, erpnext_company`,
-    [companyId, "https://erp.clevacredit.com", name]
+     RETURNING company_id::text AS company_id, erpnext_company, erpnext_base_url`,
+    [companyId, base, name]
   );
   const row = r.rows[0];
-  return { companyId: row.company_id, erpnextCompany: row.erpnext_company };
+  return {
+    companyId: row.company_id,
+    erpnextCompany: row.erpnext_company,
+    erpnextBaseUrl: row.erpnext_base_url,
+  };
 }
 
 export async function getErpnextCompanyLinks() {
   if (!_dbQuery) return [];
   const r = await _dbQuery(
-    `SELECT company_id::text AS "companyId", erpnext_company AS "erpnextCompany"
+    `SELECT company_id::text AS "companyId",
+            erpnext_company AS "erpnextCompany",
+            erpnext_base_url AS "erpnextBaseUrl"
      FROM erpnext_config
      WHERE erpnext_company IS NOT NULL AND erpnext_company <> ''
      ORDER BY company_id`
   );
   return r.rows;
+}
+
+/**
+ * Ensure a Farm company exists for an ERPNext company on a given IdP origin.
+ * Keys on (erpnext_company, erpnext_base_url).
+ */
+export async function ensureFarmCompanyForErp(erpnextCompany, opts = {}) {
+  if (!_dbQuery) {
+    throw new Error("Database unavailable for Farm company provision.");
+  }
+  const name = String(erpnextCompany || "").trim();
+  if (!name) return null;
+  const idpUrl = String(opts.idpUrl || "https://erp.clevacredit.com").replace(/\/+$/, "");
+  const slugHint = String(opts.slug || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+
+  const existing = await _dbQuery(
+    `SELECT c.id::text AS id, c.name, c.slug
+     FROM erpnext_config e
+     JOIN companies c ON c.id = e.company_id
+     WHERE e.erpnext_company = $1
+       AND regexp_replace(COALESCE(e.erpnext_base_url, ''), '/+$', '') = $2
+     LIMIT 1`,
+    [name, idpUrl]
+  );
+  if (existing.rows[0]) {
+    return {
+      companyId: existing.rows[0].id,
+      erpnextCompany: name,
+      erpnextBaseUrl: idpUrl,
+      slug: existing.rows[0].slug,
+      name: existing.rows[0].name,
+    };
+  }
+
+  const companyId = crypto.randomUUID();
+  let slug = slugHint || name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "farm";
+  // Ensure unique slug
+  for (let i = 0; i < 20; i++) {
+    const candidate = i === 0 ? slug : `${slug}-${i + 1}`;
+    const clash = await _dbQuery(`SELECT 1 FROM companies WHERE slug = $1 LIMIT 1`, [candidate]);
+    if (!clash.rows.length) {
+      slug = candidate;
+      break;
+    }
+  }
+
+  await _dbQuery(
+    `INSERT INTO companies (id, name, slug, plan, trial_ends_at, is_active)
+     VALUES ($1::uuid, $2, $3, 'trial', now() + interval '30 days', true)`,
+    [companyId, name, slug]
+  );
+  await setErpnextCompanyLink(companyId, name, idpUrl);
+  return { companyId, erpnextCompany: name, erpnextBaseUrl: idpUrl, slug, name };
 }

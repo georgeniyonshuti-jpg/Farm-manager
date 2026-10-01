@@ -72,6 +72,31 @@ describe("companyAdmin helpers", () => {
 });
 
 describe("server.js company admin wiring", () => {
+  it("PAGE_ACCESS_KEYS includes farm_reports for company Reports center", () => {
+    assert.ok(
+      /PAGE_ACCESS_KEYS\s*=\s*\[[^\]]*["']farm_reports["']/s.test(serverJs),
+      "farm_reports must be in PAGE_ACCESS_KEYS so full pageAccess grants Reports"
+    );
+    assert.ok(
+      serverJs.includes('if (user.role === "company_admin") return true'),
+      "company_admin must pass hasUserPageAccess for all company pages"
+    );
+  });
+
+  it("PAGE_ACCESS_KEYS includes farm_pipeline for supply pipeline desk", () => {
+    assert.ok(
+      /PAGE_ACCESS_KEYS\s*=\s*\[[^\]]*["']farm_pipeline["']/s.test(serverJs),
+      "farm_pipeline must be in PAGE_ACCESS_KEYS so full pageAccess grants Supply pipeline"
+    );
+  });
+
+  it("PAGE_ACCESS_KEYS includes farm_market for broiler market", () => {
+    assert.ok(
+      /PAGE_ACCESS_KEYS\s*=\s*\[[^\]]*["']farm_market["']/s.test(serverJs),
+      "farm_market must be in PAGE_ACCESS_KEYS for buyer market pages"
+    );
+  });
+
   it("user routes use requireUserManagementAccess", () => {
     for (const route of ["/api/users", "/api/users/:id", "/api/users/:id/page-access"]) {
       const block = extractRouteBlock(serverJs, route);
@@ -102,7 +127,8 @@ describe("server.js company admin wiring", () => {
       "utf8"
     );
     assert.ok(saas.includes('"company_admin"'));
-    assert.ok(saas.includes('appendAudit(userId, "company_admin"'));
+    assert.ok(saas.includes('fromMarket ? "manager" : "company_admin"'));
+    assert.ok(saas.includes("appendAudit(userId, role"));
   });
 });
 

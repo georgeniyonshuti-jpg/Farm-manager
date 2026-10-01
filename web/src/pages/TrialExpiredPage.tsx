@@ -4,12 +4,12 @@ import { useOnboardingStatus } from "../hooks/useOnboardingStatus";
 export function TrialExpiredPage() {
   const { company } = useOnboardingStatus();
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center px-4 py-12">
-      <div className="max-w-md rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-8 text-center shadow-[var(--shadow-card)]">
+    <div className="flex min-h-screen flex-col items-center justify-center px-4 py-section">
+      <div className="max-w-md rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-card text-center shadow-[var(--shadow-card)]">
         <h1 className="text-xl font-semibold text-[var(--text-primary)]">Your trial has ended</h1>
         <p className="mt-2 text-sm text-[var(--text-secondary)]">
           {company?.name ? `${company.name}'s ` : ""}
-          14-day trial is over. Upgrade to keep using Clevafarm.
+          30-day trial is over. Upgrade to keep using Clevafarm.
         </p>
         <Link
           to="/billing/pricing"

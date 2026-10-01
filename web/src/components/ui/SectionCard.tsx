@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 type Props = {
   title?: ReactNode;
+  /** @deprecated Ignored — use field help or Notice instead of card descriptions. */
   description?: ReactNode;
   /** Right-aligned control cluster (segmented control, filter pills, action). */
   controls?: ReactNode;
@@ -12,35 +13,33 @@ type Props = {
 };
 
 /**
- * KulaSell "Procurement Cohort Breakdown" card pattern (v2 spec §2.3):
- * title + description on the left of the header, controls on the right,
- * content below with a consistent 24px card padding.
+ * Section card — title + optional controls on one row, content below.
+ * Description prop is accepted but not rendered (density redesign).
  */
-export function SectionCard({ title, description, controls, children, flushBody = false, className = "" }: Props) {
-  const hasHeader = title != null || description != null || controls != null;
+export function SectionCard({ title, controls, children, flushBody = false, className = "" }: Props) {
+  const hasHeader = title != null || controls != null;
   return (
     <section
       className={[
-        "rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]",
+        "rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-card)]",
         className,
       ]
         .filter(Boolean)
         .join(" ")}
     >
       {hasHeader ? (
-        <div className="flex flex-col gap-3 border-b border-[var(--border-color)] px-[var(--space-6)] py-[var(--space-4)] sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-color)] px-card py-stack">
           <div className="min-w-0">
             {title != null ? (
-              <h2 className="text-base font-semibold leading-[22px] text-[var(--text-primary)]">{title}</h2>
-            ) : null}
-            {description != null ? (
-              <p className="mt-0.5 text-sm text-[var(--text-secondary)]">{description}</p>
+              <h2 className="text-sm font-semibold leading-5 text-[var(--text-primary)]">{title}</h2>
             ) : null}
           </div>
-          {controls != null ? <div className="flex shrink-0 flex-wrap items-center gap-2">{controls}</div> : null}
+          {controls != null ? (
+            <div className="flex shrink-0 flex-wrap items-center gap-2">{controls}</div>
+          ) : null}
         </div>
       ) : null}
-      <div className={flushBody ? "" : "p-[var(--space-6)]"}>{children}</div>
+      <div className={flushBody ? "" : "p-card"}>{children}</div>
     </section>
   );
 }

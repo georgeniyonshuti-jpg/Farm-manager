@@ -71,8 +71,10 @@ type SegmentedProps = {
 };
 
 /**
- * POS-matched segmented control (Cleva POS `.cleva-segmented-control` / `.cleva-pill`).
- * Use variant="grid" for large mobile form choices (Full/Low/Empty).
+ * Quiet capsule for filters and mutually exclusive choices (Cleva POS–aligned).
+ * Selected state must read at a glance — soft primary fill, not white-on-subtle.
+ * Use variant="grid" for large mobile form taps (Full/Low/Empty).
+ * Use PageTabs for distinct page jobs in AppTopBar.
  */
 export function SegmentedControl({
   label,
@@ -118,13 +120,16 @@ export function SegmentedControl({
     );
   }
 
-  const pad = size === "sm" ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-sm";
+  const pad = size === "sm" ? "px-3 py-1.5 text-xs leading-4" : "px-3.5 py-2 text-sm leading-5";
+  /** Only stretch when explicitly fullWidth — auto-equalizing squeezes long labels into the chip. */
+  const stretch = fullWidth;
+
   return (
     <div className={className}>
       {label ? <p className="type-label mb-2">{label}</p> : null}
       <div
-        className={`inline-flex max-w-full items-center gap-0.5 overflow-x-auto rounded-[10px] border border-[var(--border-color)] bg-[var(--surface-subtle)] p-[3px] ${
-          fullWidth ? "flex w-full" : ""
+        className={`inline-flex max-w-full items-center gap-0.5 overflow-x-auto rounded-lg border border-[var(--border-color)] bg-[color-mix(in_srgb,var(--surface-subtle)_70%,var(--border-color)_30%)] p-1 ${
+          stretch ? "flex w-full" : ""
         }`}
         role="radiogroup"
         aria-label={label}
@@ -138,19 +143,21 @@ export function SegmentedControl({
               role="radio"
               aria-checked={active}
               onClick={() => onChange(opt.value)}
-              className={`bounce-tap inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border font-semibold transition ${pad} ${
-                fullWidth ? "flex-1" : ""
+              className={`bounce-tap box-border inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border font-semibold transition ${pad} ${
+                stretch ? "min-w-0 flex-1" : "shrink-0"
               } ${
                 active
-                  ? "border-[color-mix(in_srgb,var(--primary-color)_28%,var(--border-color))] bg-[var(--surface-card)] text-[var(--primary-color-dark)] shadow-sm"
-                  : "border-transparent bg-transparent text-[var(--text-muted)] hover:bg-[color-mix(in_srgb,var(--surface-card)_70%,transparent)] hover:text-[var(--text-secondary)]"
+                  ? "border-[var(--primary-color)] bg-[var(--primary-color-soft)] text-[var(--primary-color-dark)]"
+                  : "border-transparent bg-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
               }`}
             >
               {opt.label}
               {opt.badge != null && opt.badge > 0 ? (
                 <span
                   className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
-                    active ? "bg-[var(--primary-color)] text-white" : "bg-[var(--border-color)] text-[var(--text-secondary)]"
+                    active
+                      ? "bg-[var(--primary-color)] text-white"
+                      : "bg-[var(--border-color)] text-[var(--text-secondary)]"
                   }`}
                 >
                   {opt.badge}

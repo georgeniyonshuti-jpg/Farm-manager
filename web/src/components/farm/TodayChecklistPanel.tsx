@@ -17,12 +17,14 @@ function severityClass(severity?: string): string {
 
 type TodayChecklistPanelProps = {
   title?: string;
+  excludeCategories?: string[];
 };
 
-export function TodayChecklistPanel({ title = "Today" }: TodayChecklistPanelProps) {
+export function TodayChecklistPanel({ title = "Today", excludeCategories = [] }: TodayChecklistPanelProps) {
   const navigate = useNavigate();
   const { today, hasBootstrap } = useFarmCapabilities();
-  const items = today?.items ?? [];
+  const exclude = new Set(excludeCategories.map((c) => c.toLowerCase()));
+  const items = (today?.items ?? []).filter((item) => !exclude.has(String(item.category || "").toLowerCase()));
 
   if (!hasBootstrap || !items.length) return null;
 

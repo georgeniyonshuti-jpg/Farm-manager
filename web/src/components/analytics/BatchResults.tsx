@@ -11,8 +11,6 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
 import {
   fmtNum,
   fmtRWF,
@@ -37,7 +35,6 @@ const FLAG_COLOR: Record<string, string> = {
 function SectionHeading({
   number,
   title,
-  subtitle,
 }: {
   number: string;
   title: string;
@@ -69,9 +66,6 @@ function SectionHeading({
           {title}
         </h3>
       </div>
-      {subtitle ? (
-        <p style={{ margin: "4px 0 0 28px", fontSize: 13, color: "#6B7280" }}>{subtitle}</p>
-      ) : null}
     </div>
   );
 }
@@ -163,7 +157,7 @@ function ExecutiveSummary({ results }: { results: BroilerModelResults }) {
 
   return (
     <section style={{ marginBottom: 40 }}>
-      <SectionHeading number="01" title="Executive summary" subtitle="Batch-level profitability at a glance" />
+      <SectionHeading number="01" title="Executive summary" />
       <div
         style={{
           background: isProfit ? "#F0FDF4" : "#FEF2F2",
@@ -410,7 +404,6 @@ function FinancialBreakdown({ results }: { results: BroilerModelResults }) {
       <SectionHeading
         number="02"
         title="Financial breakdown"
-        subtitle="P&L, waterfall, and cost composition"
       />
       <div
         style={{
@@ -546,7 +539,6 @@ function SensitivitySection({ results }: { results: BroilerModelResults }) {
       <SectionHeading
         number="03"
         title="Sensitivity & risk analysis"
-        subtitle="How profit changes as key drivers move"
       />
       <div style={{ marginBottom: 16, fontSize: 13, color: "#6B7280" }}>
         Each cell shows net profit (RWF) as price/kg and FCR shift simultaneously. Green = profitable.
@@ -566,6 +558,10 @@ function SensitivitySection({ results }: { results: BroilerModelResults }) {
 }
 
 async function exportBatchPdf(element: HTMLElement, inputs: BroilerModelInputs) {
+  const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+    import("html2canvas"),
+    import("jspdf"),
+  ]);
   const canvas = await html2canvas(element, {
     scale: 2,
     useCORS: true,
@@ -629,7 +625,7 @@ export default function BatchResults({ results }: Props) {
       </div>
 
       <section style={{ marginTop: 24 }}>
-        <SectionHeading number="04" title="Export" subtitle="Download a shareable PDF report" />
+        <SectionHeading number="04" title="Export" />
         <button
           type="button"
           disabled={exporting}

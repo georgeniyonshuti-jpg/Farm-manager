@@ -225,3 +225,31 @@ describe("fetchVetLogRelatedEntityIds + syncApprovedVetLogEntities", () => {
     ]);
   });
 });
+
+describe("vet log detail photo / visit fields", () => {
+  it("VET_LOG_VISIT_SELECT exposes photoUrls and house-round columns", async () => {
+    const { VET_LOG_VISIT_SELECT, VET_LOG_LIST_EXTRA_SELECT } = await import(
+      "../src/services/vetLogService.js"
+    );
+    assert.match(VET_LOG_VISIT_SELECT, /photo_urls AS "photoUrls"/);
+    assert.match(VET_LOG_VISIT_SELECT, /visit_slot AS "visitSlot"/);
+    assert.match(VET_LOG_VISIT_SELECT, /coop_temperature_c AS "coopTemperatureC"/);
+    assert.match(VET_LOG_VISIT_SELECT, /feed_available AS "feedAvailable"/);
+    assert.match(VET_LOG_VISIT_SELECT, /water_available AS "waterAvailable"/);
+    assert.match(VET_LOG_LIST_EXTRA_SELECT, /"hasPhotos"/);
+  });
+
+  it("GET /api/vet-logs/:id selects visit/photo fields with column fallback", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const path = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const dir = path.dirname(fileURLToPath(import.meta.url));
+    const serverJs = await readFile(path.resolve(dir, "../server.js"), "utf8");
+    const idx = serverJs.indexOf('"/api/vet-logs/:id"');
+    assert.ok(idx > 0, "detail route must exist");
+    const block = serverJs.slice(idx, idx + 2500);
+    assert.match(block, /VET_LOG_VISIT_SELECT/);
+    assert.match(block, /falling back without visit columns/);
+    assert.match(block, /photoUrls|VET_LOG_VISIT_SELECT/);
+  });
+});

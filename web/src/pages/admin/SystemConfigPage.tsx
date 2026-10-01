@@ -1,11 +1,24 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
 import { canAccessPageByKey } from "../../auth/permissions";
 import { API_BASE_URL } from "../../api/config";
 import { useToast } from "../../components/Toast";
-import { ErrorState } from "../../components/LoadingSkeleton";
+import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
+import { Button } from "../../components/ui/Button";
+import { ConfirmDialog } from "../../components/ui/ConfirmDialog";
+import { ManagerPage } from "../../components/layout/ManagerPage";
+import {
+  FacetFilter,
+  Field,
+  Input,
+  Modal,
+  PageTabs,
+  StatusPill,
+  TableToolbar,
+  ToolbarSearch,
+} from "../../components/ui";
 
 type RefRow = {
   category: string;
@@ -23,15 +36,30 @@ type ConfigResponse = {
   breedStandards: unknown;
 };
 
+type ConfigTab = "lists" | "settings" | "breeds";
+
+type IndexedRow = RefRow & { _i: number };
+
+type EditorState = {
+  mode: "add" | "edit";
+  index: number | null;
+  category: string;
+  label: string;
+  value: string;
+  sortOrder: number;
+  active: boolean;
+  valueLocked: boolean;
+};
+
 const CATEGORY_ORDER = [
   "breed",
   "slaughter_reason",
+  "feed_type",
   "treatment_reason",
   "treatment_route",
   "treatment_dose_unit",
   "medicine_stock_unit",
   "medicine_category",
-  "feed_type",
   "medicine_admin_route",
   "inventory_procurement_reason",
   "inventory_consumption_reason",
@@ -40,6 +68,37 @@ const CATEGORY_ORDER = [
   "log_schedule_role",
   "role_label",
 ];
+
+const CATEGORY_LABELS: Record<string, string> = {
+  breed: "Breeds",
+  slaughter_reason: "Slaughter reasons",
+  treatment_reason: "Treatment reasons",
+  treatment_route: "Treatment routes",
+  treatment_dose_unit: "Dose units",
+  medicine_stock_unit: "Medicine stock units",
+  medicine_category: "Medicine categories",
+  feed_type: "Feed types",
+  medicine_admin_route: "Medicine admin routes",
+  inventory_procurement_reason: "Procurement reasons",
+  inventory_consumption_reason: "Consumption reasons",
+  inventory_adjust_reason: "Adjustment reasons",
+  department_key: "Departments",
+  log_schedule_role: "Schedule roles",
+  role_label: "Role labels",
+};
+
+function humanCategory(cat: string): string {
+  return CATEGORY_LABELS[cat] ?? cat.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function slugify(label: string): string {
+  return label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 64);
+}
 
 const SETTING_FIELDS: Array<{ key: string; label: string }> = [
   { key: "rate_limit_login_max", label: "Login attempts per IP (per window)" },
@@ -50,12 +109,17 @@ const SETTING_FIELDS: Array<{ key: string; label: string }> = [
   { key: "rate_limit_api_window_ms", label: "General API window (ms)" },
   { key: "max_image_upload_bytes", label: "Max image upload (bytes)" },
   { key: "demo_initial_count", label: "Demo initial flock count fallback" },
-  { key: "reference_market_price_rwf_per_kg", label: "Reference market price (RWF/kg) — biomass fair value" },
-  { key: "reference_costs_to_sell_rwf_per_kg", label: "Reference costs to sell (RWF/kg) — deducted from fair value" },
+  { key: "reference_market_price_rwf_per_kg", label: "Reference market price (RWF/kg)" },
+  { key: "reference_costs_to_sell_rwf_per_kg", label: "Reference costs to sell (RWF/kg)" },
+  { key: "pipeline_scout_commission_rate_pct", label: "Scout commission rate (%)" },
+  { key: "pipeline_scout_visit_fee_rwf", label: "Scout visit fee (RWF)" },
 ];
+
+const mgrInput = "!min-h-10 h-10 box-border py-0 text-sm leading-10";
 
 export function SystemConfigPage() {
   const { token, user } = useAuth();
+  const navigate = useNavigate();
   const { showToast } = useToast();
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -64,8 +128,17 @@ export function SystemConfigPage() {
   const [rows, setRows] = useState<RefRow[]>([]);
   const [settingsDraft, setSettingsDraft] = useState<Record<string, string>>({});
   const [breedJson, setBreedJson] = useState("");
+  const [confirmTarget, setConfirmTarget] = useState<{ index: number; label: string; category: string } | null>(
+    null
+  );
+  const [tab, setTab] = useState<ConfigTab>("lists");
+  const [listFilter, setListFilter] = useState<string>("all");
+  const [listFilterInitialized, setListFilterInitialized] = useState(false);
+  const [searchQ, setSearchQ] = useState("");
+  const [editor, setEditor] = useState<EditorState | null>(null);
 
   const canLoad = canAccessPageByKey(user, "admin_system_config");
+  const isSuperuser = user?.role === "superuser";
 
   const load = useCallback(async () => {
     if (!canLoad) {
@@ -89,7 +162,7 @@ export function SystemConfigPage() {
           sortOrder: x.sortOrder ?? 0,
           active: x.active !== false,
           metadata: x.metadata ?? {},
-        })),
+        }))
       );
       const nextSettings = { ...(d.appSettings ?? {}) };
       delete nextSettings.config_version;
@@ -106,9 +179,8 @@ export function SystemConfigPage() {
     void load();
   }, [load]);
 
-  if (!canLoad) return null;
-
   const sortedCategories = useMemo(() => {
+    if (!canLoad) return [];
     const canManageAll = user?.role === "superuser";
     const keys = [...new Set(rows.map((r) => r.category))].filter((k) =>
       canManageAll ? true : k === "medicine_category" || k === "feed_type"
@@ -122,7 +194,62 @@ export function SystemConfigPage() {
       return a.localeCompare(b);
     });
     return keys;
-  }, [rows, user?.role]);
+  }, [rows, user?.role, canLoad]);
+
+  useEffect(() => {
+    if (listFilter !== "all" && sortedCategories.length && !sortedCategories.includes(listFilter)) {
+      setListFilter(sortedCategories[0] ?? "all");
+      return;
+    }
+    if (!listFilterInitialized && sortedCategories[0]) {
+      setListFilter(sortedCategories[0]);
+      setListFilterInitialized(true);
+    }
+  }, [listFilter, sortedCategories, listFilterInitialized]);
+
+  const tabOptions = useMemo(() => {
+    const opts: { value: ConfigTab; label: string }[] = [{ value: "lists", label: "Lists" }];
+    if (isSuperuser) {
+      opts.push({ value: "settings", label: "Settings" });
+      opts.push({ value: "breeds", label: "Breed standards" });
+    }
+    return opts;
+  }, [isSuperuser]);
+
+  useEffect(() => {
+    if (!tabOptions.some((o) => o.value === tab)) setTab("lists");
+  }, [tab, tabOptions]);
+
+  const indexedRows: IndexedRow[] = useMemo(
+    () => rows.map((r, _i) => ({ ...r, _i })),
+    [rows]
+  );
+
+  const visibleRows = useMemo(() => {
+    const q = searchQ.trim().toLowerCase();
+    return indexedRows
+      .filter((r) => (listFilter === "all" ? true : r.category === listFilter))
+      .filter((r) => {
+        if (!q) return true;
+        return (
+          r.label.toLowerCase().includes(q) ||
+          r.value.toLowerCase().includes(q) ||
+          humanCategory(r.category).toLowerCase().includes(q)
+        );
+      })
+      .sort((a, b) => {
+        const ca = CATEGORY_ORDER.indexOf(a.category);
+        const cb = CATEGORY_ORDER.indexOf(b.category);
+        const catCmp =
+          (ca >= 0 ? ca : 999) - (cb >= 0 ? cb : 999) || a.category.localeCompare(b.category);
+        if (catCmp !== 0) return catCmp;
+        return a.sortOrder - b.sortOrder || a.label.localeCompare(b.label);
+      });
+  }, [indexedRows, listFilter, searchQ]);
+
+  const isFiltered = listFilter !== "all" || searchQ.trim().length > 0;
+
+  if (!canLoad) return null;
 
   function updateRowAt(index: number, patch: Partial<RefRow>) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
@@ -132,19 +259,68 @@ export function SystemConfigPage() {
     setRows((prev) => prev.filter((_, i) => i !== index));
   }
 
-  function addRow(category: string) {
-    const base = `new_${Date.now().toString(36)}`;
-    setRows((prev) => [
-      ...prev,
-      {
-        category,
-        value: base,
-        label: base,
-        sortOrder: (prev.filter((r) => r.category === category).length + 1) * 10,
-        active: true,
-        metadata: {},
-      },
-    ]);
+  function openAdd() {
+    const category = listFilter !== "all" ? listFilter : sortedCategories[0] ?? "breed";
+    const nextSort = (rows.filter((r) => r.category === category).length + 1) * 10;
+    setEditor({
+      mode: "add",
+      index: null,
+      category,
+      label: "",
+      value: "",
+      sortOrder: nextSort,
+      active: true,
+      valueLocked: false,
+    });
+  }
+
+  function openEdit(row: IndexedRow) {
+    setEditor({
+      mode: "edit",
+      index: row._i,
+      category: row.category,
+      label: row.label,
+      value: row.value,
+      sortOrder: row.sortOrder,
+      active: row.active,
+      valueLocked: true,
+    });
+  }
+
+  function commitEditor() {
+    if (!editor) return;
+    const label = editor.label.trim();
+    const value = (editor.value.trim() || slugify(label)).trim();
+    if (!label || !value) {
+      showToast("error", "Label and value are required.");
+      return;
+    }
+    if (!editor.category) {
+      showToast("error", "Choose a list.");
+      return;
+    }
+    if (editor.mode === "add") {
+      setRows((prev) => [
+        ...prev,
+        {
+          category: editor.category,
+          value,
+          label,
+          sortOrder: editor.sortOrder,
+          active: editor.active,
+          metadata: {},
+        },
+      ]);
+    } else if (editor.index != null) {
+      updateRowAt(editor.index, {
+        category: editor.category,
+        label,
+        value,
+        sortOrder: editor.sortOrder,
+        active: editor.active,
+      });
+    }
+    setEditor(null);
   }
 
   async function save() {
@@ -192,7 +368,7 @@ export function SystemConfigPage() {
           sortOrder: x.sortOrder ?? 0,
           active: x.active !== false,
           metadata: x.metadata ?? {},
-        })),
+        }))
       );
       const nextSettings = { ...(d.appSettings ?? {}) };
       delete nextSettings.config_version;
@@ -207,160 +383,293 @@ export function SystemConfigPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-8 pb-10">
+    <ManagerPage variant="settings">
       <PageHeader
-        title="System configuration"
-        subtitle="Superuser only — reference lists, operational limits, and breed growth JSON (merged over the file default)."
-        action={
-          <Link
-            to="/admin/users"
-            className="inline-flex items-center rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
-          >
-            Back to users
-          </Link>
+        title="Lists & types"
+        secondaryAction={{ label: "Users", onClick: () => navigate("/admin/users") }}
+        primaryAction={{
+          label: saving ? "Saving…" : "Save changes",
+          onClick: () => void save(),
+          disabled: saving || loading || Boolean(loadError),
+        }}
+        tabs={
+          tabOptions.length > 1 ? (
+            <PageTabs
+              aria-label="Configuration sections"
+              value={tab}
+              onChange={(v) => setTab(v as ConfigTab)}
+              options={tabOptions}
+            />
+          ) : undefined
         }
       />
 
-      {loading ? <p className="text-sm text-neutral-600">Loading…</p> : null}
+      {loading ? <SkeletonList rows={4} /> : null}
       {loadError ? <ErrorState message={loadError} onRetry={() => void load()} /> : null}
 
-      {!loading && !loadError ? (
-        <>
-          {user?.role === "superuser" ? (
-          <section className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-neutral-900">Operational settings</h2>
-              <p className="text-xs text-neutral-500">Config version {version}</p>
-            </div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {SETTING_FIELDS.map((f) => (
-                <label key={f.key} className="block text-sm">
-                  <span className="text-xs font-medium text-neutral-600">{f.label}</span>
-                  <input
-                    className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 font-mono text-sm"
-                    value={settingsDraft[f.key] ?? ""}
-                    onChange={(e) => setSettingsDraft((s) => ({ ...s, [f.key]: e.target.value }))}
-                  />
-                </label>
-              ))}
-            </div>
-          </section>
-          ) : null}
-
-          {user?.role === "superuser" ? (
-          <section className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
-            <h2 className="text-lg font-semibold text-neutral-900">Breed standards (JSON)</h2>
-            <p className="mt-1 text-xs text-neutral-500">
-              Merged over <code className="rounded bg-neutral-100 px-1">data/breed_standards.json</code>. Each breed
-              needs <code className="rounded bg-neutral-100 px-1">curve_kg_avg_weight_by_day</code> with numeric day
-              keys.
-            </p>
-            <textarea
-              className="mt-3 h-64 w-full rounded-lg border border-neutral-300 px-3 py-2 font-mono text-xs"
-              value={breedJson}
-              onChange={(e) => setBreedJson(e.target.value)}
-              spellCheck={false}
+      {!loading && !loadError && tab === "lists" ? (
+        <div className="table-block">
+          <div className="table-toolbar">
+            <TableToolbar
+              filters={
+                <FacetFilter
+                  label="List"
+                  value={listFilter}
+                  allValue="all"
+                  allLabel="All lists"
+                  onChange={setListFilter}
+                  options={sortedCategories.map((c) => ({
+                    value: c,
+                    label: humanCategory(c),
+                  }))}
+                />
+              }
+              search={
+                <ToolbarSearch
+                  placeholder="Search labels or keys…"
+                  value={searchQ}
+                  onChange={(e) => setSearchQ(e.target.value)}
+                  label="Search list items"
+                />
+              }
+              meta={`v${version} · ${visibleRows.length} items`}
+              actions={
+                <Button variant="secondary" size="sm" onClick={openAdd}>
+                  Add item
+                </Button>
+              }
             />
-          </section>
-          ) : null}
+          </div>
 
-          {sortedCategories.map((cat) => (
-            <section key={cat} className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-lg font-semibold text-neutral-900 font-mono">{cat}</h2>
+          {visibleRows.length === 0 ? (
+            <div className="px-4 py-10 text-center">
+              <p className="text-sm font-semibold text-[var(--text-primary)]">
+                {isFiltered ? "No matching items" : "No list items yet"}
+              </p>
+              {!isFiltered ? (
+                <Button className="mt-3" variant="secondary" size="sm" onClick={openAdd}>
+                  Add item
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <div>
+              <div
+                className={`grid items-center gap-3 border-b border-[var(--border-color)] px-3 py-2 ${
+                  listFilter === "all"
+                    ? "grid-cols-[9.5rem_minmax(0,1fr)_auto]"
+                    : "grid-cols-[minmax(0,1fr)_auto]"
+                }`}
+              >
+                {listFilter === "all" ? (
+                  <p className="type-label text-[var(--text-secondary)]">Group</p>
+                ) : null}
+                <p className="type-label text-[var(--text-secondary)]">Item</p>
+                <p className="type-label text-right text-[var(--text-secondary)]">Actions</p>
+              </div>
+              <ul>
+                {visibleRows.map((r) => (
+                  <li
+                    key={`${r.category}:${r._i}:${r.value}`}
+                    className={`grid items-center gap-3 border-b border-[var(--border-color)] px-3 py-2 last:border-b-0 hover:bg-[var(--surface-subtle)] ${
+                      listFilter === "all"
+                        ? "grid-cols-[9.5rem_minmax(0,1fr)_auto]"
+                        : "grid-cols-[minmax(0,1fr)_auto]"
+                    }`}
+                  >
+                    {listFilter === "all" ? (
+                      <p className="truncate text-sm text-[var(--text-secondary)]">
+                        {humanCategory(r.category)}
+                      </p>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="min-w-0 text-left"
+                      onClick={() => openEdit(r)}
+                    >
+                      <p className="truncate text-sm font-medium text-[var(--text-primary)]">{r.label}</p>
+                      {r.value.trim() !== r.label.trim() ? (
+                        <p className="truncate font-mono text-[11px] text-[var(--text-secondary)]">
+                          {r.value}
+                        </p>
+                      ) : null}
+                    </button>
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => updateRowAt(r._i, { active: !r.active })}
+                        aria-label={r.active ? "Mark inactive" : "Mark active"}
+                      >
+                        <StatusPill tone={r.active ? "success" : "neutral"}>
+                          {r.active ? "Active" : "Off"}
+                        </StatusPill>
+                      </button>
+                      <Button variant="ghost" size="xs" onClick={() => openEdit(r)}>
+                        Edit
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        className="text-[var(--status-danger)] hover:bg-[var(--status-danger-soft)] hover:text-[var(--status-danger)]"
+                        onClick={() =>
+                          setConfirmTarget({
+                            index: r._i,
+                            label: r.label,
+                            category: r.category,
+                          })
+                        }
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {!loading && !loadError && tab === "settings" && isSuperuser ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold text-[var(--text-primary)]">Operational settings</h2>
+            <span className="type-caption tabular-nums text-[var(--text-primary)]">v{version}</span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {SETTING_FIELDS.map((f) => (
+              <Field key={f.key} label={f.label}>
+                <Input
+                  className={`${mgrInput} font-mono`}
+                  value={settingsDraft[f.key] ?? ""}
+                  onChange={(e) => setSettingsDraft((s) => ({ ...s, [f.key]: e.target.value }))}
+                />
+              </Field>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {!loading && !loadError && tab === "breeds" && isSuperuser ? (
+        <div className="space-y-3">
+          <h2 className="text-base font-semibold text-[var(--text-primary)]">Breed standards</h2>
+          <textarea
+            className="h-80 w-full rounded-control border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 font-mono text-xs text-[var(--text-primary)]"
+            value={breedJson}
+            onChange={(e) => setBreedJson(e.target.value)}
+            spellCheck={false}
+            aria-label="Breed standards JSON"
+          />
+        </div>
+      ) : null}
+
+      <Modal
+        open={editor != null}
+        title={editor?.mode === "add" ? "Add item" : "Edit item"}
+        onClose={() => setEditor(null)}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setEditor(null)}>
+              Cancel
+            </Button>
+            <Button variant="primary" size="sm" onClick={commitEditor}>
+              {editor?.mode === "add" ? "Add" : "Update"}
+            </Button>
+          </div>
+        }
+      >
+        {editor ? (
+          <div className="space-y-3">
+            <Field label="List">
+              <select
+                className={`${mgrInput} w-full rounded-control border border-[var(--border-input)] bg-[var(--surface-input)] px-2`}
+                value={editor.category}
+                onChange={(e) =>
+                  setEditor((prev) => (prev ? { ...prev, category: e.target.value } : prev))
+                }
+              >
+                {sortedCategories.map((c) => (
+                  <option key={c} value={c}>
+                    {humanCategory(c)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Label">
+              <Input
+                className={mgrInput}
+                value={editor.label}
+                autoFocus
+                onChange={(e) => {
+                  const label = e.target.value;
+                  setEditor((prev) => {
+                    if (!prev) return prev;
+                    if (!prev.valueLocked) {
+                      return { ...prev, label, value: slugify(label) };
+                    }
+                    return { ...prev, label };
+                  });
+                }}
+              />
+            </Field>
+            <Field label="Key">
+              <Input
+                className={`${mgrInput} font-mono`}
+                value={editor.value}
+                onChange={(e) =>
+                  setEditor((prev) =>
+                    prev ? { ...prev, value: e.target.value, valueLocked: true } : prev
+                  )
+                }
+              />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Sort">
+                <Input
+                  type="number"
+                  className={mgrInput}
+                  value={editor.sortOrder}
+                  onChange={(e) =>
+                    setEditor((prev) =>
+                      prev ? { ...prev, sortOrder: Number(e.target.value) || 0 } : prev
+                    )
+                  }
+                />
+              </Field>
+              <Field label="Status">
                 <button
                   type="button"
-                  className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-semibold text-neutral-800 hover:bg-neutral-50"
-                  onClick={() => addRow(cat)}
+                  className="mt-1"
+                  onClick={() =>
+                    setEditor((prev) => (prev ? { ...prev, active: !prev.active } : prev))
+                  }
                 >
-                  Add row
+                  <StatusPill tone={editor.active ? "success" : "neutral"}>
+                    {editor.active ? "Active" : "Off"}
+                  </StatusPill>
                 </button>
-              </div>
-              <div className="institutional-table-wrapper mt-3 overflow-x-auto">
-                <table className="institutional-table min-w-full text-sm">
-                  <thead>
-                    <tr>
-                      <th>Value</th>
-                      <th>Label</th>
-                      <th>Sort</th>
-                      <th>Active</th>
-                      <th> </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows
-                      .map((r, i) => ({ r, i }))
-                      .filter(({ r }) => r.category === cat)
-                      .map(({ r, i }) => (
-                        <tr key={`${i}`}>
-                          <td className="py-2 pr-3">
-                            <input
-                              className="w-full min-w-[8rem] rounded border border-neutral-200 px-2 py-1 font-mono text-xs"
-                              value={r.value}
-                              onChange={(e) => updateRowAt(i, { value: e.target.value })}
-                            />
-                          </td>
-                          <td className="py-2 pr-3">
-                            <input
-                              className="w-full min-w-[10rem] rounded border border-neutral-200 px-2 py-1 text-xs"
-                              value={r.label}
-                              onChange={(e) => updateRowAt(i, { label: e.target.value })}
-                            />
-                          </td>
-                          <td className="py-2 pr-3">
-                            <input
-                              type="number"
-                              className="w-20 rounded border border-neutral-200 px-2 py-1 text-xs"
-                              value={r.sortOrder}
-                              onChange={(e) =>
-                                updateRowAt(i, { sortOrder: Number(e.target.value) || 0 })
-                              }
-                            />
-                          </td>
-                          <td className="py-2 pr-3">
-                            <input
-                              type="checkbox"
-                              checked={r.active}
-                              onChange={(e) => updateRowAt(i, { active: e.target.checked })}
-                            />
-                          </td>
-                          <td className="py-2">
-                            <button
-                              type="button"
-                              className="text-xs text-red-700 hover:underline"
-                              onClick={() => removeRowAt(i)}
-                            >
-                              Remove
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          ))}
-
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              disabled={saving}
-              className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              onClick={() => void save()}
-            >
-              {saving ? "Saving…" : "Save all changes"}
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              className="rounded-lg border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50 disabled:opacity-50"
-              onClick={() => void load()}
-            >
-              Reload
-            </button>
+              </Field>
+            </div>
           </div>
-        </>
-      ) : null}
-    </div>
+        ) : null}
+      </Modal>
+
+      <ConfirmDialog
+        open={confirmTarget !== null}
+        title="Remove item"
+        message={
+          confirmTarget
+            ? `Remove “${confirmTarget.label}” from ${humanCategory(confirmTarget.category)}?`
+            : ""
+        }
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={() => {
+          if (confirmTarget) removeRowAt(confirmTarget.index);
+          setConfirmTarget(null);
+        }}
+        onCancel={() => setConfirmTarget(null)}
+      />
+    </ManagerPage>
   );
 }

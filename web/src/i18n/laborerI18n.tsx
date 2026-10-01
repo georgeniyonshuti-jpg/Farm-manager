@@ -7,10 +7,12 @@ import React, {
   useState,
 } from "react";
 import { useAuth } from "../auth/AuthContext";
-import type { SessionUser, UserRole } from "../auth/types";
 import { API_BASE_URL } from "../api/config";
 import { jsonAuthHeaders } from "../lib/authHeaders";
 import { lookupRw } from "./rwDictionary";
+import { isLaborerLocaleUser, laborerLocaleFromUser } from "./laborerLocaleUser";
+
+export { isLaborerLocaleUser } from "./laborerLocaleUser";
 
 export type LaborerLocale = "rw" | "en";
 
@@ -19,7 +21,43 @@ type Ctx = { locale: LaborerLocale; setLocale: (l: LaborerLocale) => void };
 const LaborerI18nContext = createContext<Ctx | null>(null);
 
 export const LABORER_UI_LOCALE_KEY = "laborer_ui_locale";
+export const LOCALE_TOAST_RW_KEY = "cleva_locale_toast_rw";
 
+function readLocaleStorage(): string | null {
+  try {
+    return localStorage.getItem(LABORER_UI_LOCALE_KEY) ?? sessionStorage.getItem(LABORER_UI_LOCALE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeLocaleStorage(value: LaborerLocale): void {
+  try {
+    localStorage.setItem(LABORER_UI_LOCALE_KEY, value);
+    sessionStorage.setItem(LABORER_UI_LOCALE_KEY, value);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Pre-login and post-login locale persistence (login page uses this before auth). */
+export function writePreLoginLocale(value: LaborerLocale): void {
+  writeLocaleStorage(value);
+  document.documentElement.setAttribute("data-locale", value);
+}
+
+function hasStoredLocaleChoice(): boolean {
+  return readLocaleStorage() !== null;
+}
+
+function readStoredLocale(): LaborerLocale {
+  try {
+    const v = readLocaleStorage();
+    return v === "rw" ? "rw" : "en";
+  } catch {
+    return "en";
+  }
+}
 function simpleHash(s: string): string {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) {
@@ -33,29 +71,6 @@ export function txCacheKey(lang: LaborerLocale, text: string): string {
   return `laborer_tx_${lang}_${simpleHash(text)}`;
 }
 
-function readStoredLocale(): LaborerLocale {
-  try {
-    const v = sessionStorage.getItem(LABORER_UI_LOCALE_KEY);
-    return v === "rw" ? "rw" : "en";
-  } catch {
-    return "en";
-  }
-}
-
-/** True for coop laborers and junior vets (same field UI as laborers). */
-export function isLaborerLocaleUser(user: SessionUser | null | undefined): boolean {
-  if (!user) return false;
-  if (user.role === "laborer") return true;
-  if (user.role === "vet" && user.departmentKeys.includes("junior_vet")) return true;
-  return false;
-}
-
-function laborerLocaleFromRole(role: UserRole | undefined, departmentKeys: string[]): boolean {
-  if (role === "laborer") return true;
-  if (role === "vet" && departmentKeys.includes("junior_vet")) return true;
-  return false;
-}
-
 export function LaborerI18nProvider({ children }: { children: React.ReactNode }) {
   const { user, bootstrapped } = useAuth();
   const [locale, setLocaleState] = useState<LaborerLocale>(readStoredLocale);
@@ -64,9 +79,18 @@ export function LaborerI18nProvider({ children }: { children: React.ReactNode })
     if (!bootstrapped) return;
     if (!isLaborerLocaleUser(user)) {
       setLocaleState("en");
+      document.documentElement.removeAttribute("data-locale");
       return;
     }
-    setLocaleState(readStoredLocale());
+    if (!hasStoredLocaleChoice() && user?.preferredLanguage === "rw") {
+      setLocaleState("rw");
+      writeLocaleStorage("rw");
+      document.documentElement.setAttribute("data-locale", "rw");
+      return;
+    }
+    const stored = readStoredLocale();
+    setLocaleState(stored);
+    document.documentElement.setAttribute("data-locale", stored);
   }, [bootstrapped, user]);
 
   const setLocale = useCallback(
@@ -76,10 +100,29 @@ export function LaborerI18nProvider({ children }: { children: React.ReactNode })
         return;
       }
       setLocaleState(l);
-      try {
-        sessionStorage.setItem(LABORER_UI_LOCALE_KEY, l);
-      } catch {
-        /* ignore */
+      writeLocaleStorage(l);
+      document.documentElement.setAttribute("data-locale-switching", "1");
+      document.documentElement.setAttribute("data-locale", l);
+      window.setTimeout(() => {
+        document.documentElement.removeAttribute("data-locale-switching");
+      }, 130);
+      if (l === "rw") {
+        try {
+          if (localStorage.getItem(LOCALE_TOAST_RW_KEY) !== "1") {
+            localStorage.setItem(LOCALE_TOAST_RW_KEY, "1");
+            window.dispatchEvent(
+              new CustomEvent("cleva-locale-rw", {
+                detail: {
+                  message:
+                    lookupRw("Murakoze — ururimi rwahinduwe mu Kinyarwanda.") ??
+                    "Murakoze — ururimi rwahinduwe mu Kinyarwanda.",
+                },
+              })
+            );
+          }
+        } catch {
+          /* ignore */
+        }
       }
     },
     [user]
@@ -114,7 +157,7 @@ export function useLaborerTranslation(english: string): LaborerTranslationState 
   const [usedFallback, setUsedFallback] = useState(false);
 
   useEffect(() => {
-    if (!laborerLocaleFromRole(user?.role, user?.departmentKeys ?? []) || locale === "en") {
+    if (!laborerLocaleFromUser(user?.role, user?.departmentKeys ?? [], user?.erpAppRole) || locale === "en") {
       setText(english);
       setIsLoading(false);
       setUsedFallback(false);
@@ -196,7 +239,7 @@ export function useLaborerTranslation(english: string): LaborerTranslationState 
     return () => {
       cancelled = true;
     };
-  }, [english, locale, user?.role, user?.departmentKeys, token]);
+  }, [english, locale, user?.role, user?.departmentKeys, user?.erpAppRole, token]);
 
   return { text, isLoading, usedFallback };
 }

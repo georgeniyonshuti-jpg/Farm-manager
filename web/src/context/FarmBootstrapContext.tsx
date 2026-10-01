@@ -10,6 +10,8 @@ import {
   type FarmBootstrapFarm,
   type FarmCapabilities,
   type FarmTodayPayload,
+  type FieldReportingMode,
+  normalizeFieldReportingMode,
 } from "../auth/farmBootstrap";
 
 export type FarmBootstrapContextValue = {
@@ -20,6 +22,7 @@ export type FarmBootstrapContextValue = {
   today: FarmTodayPayload | null;
   erpAppRole: string | null;
   hasBootstrap: boolean;
+  fieldReportingMode: FieldReportingMode;
 };
 
 const FarmBootstrapContext = createContext<FarmBootstrapContextValue | null>(null);
@@ -40,6 +43,9 @@ export function FarmBootstrapProvider({ children }: { children: ReactNode }) {
       today: todayForFarm(bootstrap, slugKey),
       erpAppRole: bootstrap?.role ?? user?.erpAppRole ?? null,
       hasBootstrap: Boolean(bootstrap),
+      fieldReportingMode: normalizeFieldReportingMode(
+        farm?.field_reporting_mode ?? bootstrap?.field_reporting_mode
+      ),
     };
   }, [farmBootstrap, slugKey, user?.erpAppRole]);
 
@@ -59,6 +65,7 @@ export function useFarmBootstrapContext(): FarmBootstrapContextValue {
       today: null,
       erpAppRole: null,
       hasBootstrap: false,
+      fieldReportingMode: "vet_only",
     };
   }
   return ctx;

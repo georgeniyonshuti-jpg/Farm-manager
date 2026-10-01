@@ -15,20 +15,12 @@ type SupplierOption = {
   name: string;
 };
 
-type OdooApprover = {
-  id: string;
-  displayName: string;
-  role: string;
-};
-
 type Props = {
   open: boolean;
   busy: boolean;
-  canSendToOdoo: boolean;
   feedTypeOptions: FeedTypeOption[];
   procurementReasons: RefOption[];
   suppliers: SupplierOption[];
-  approvers: OdooApprover[];
   procQty: string;
   procFeedType: string;
   procReasonCode: string;
@@ -37,7 +29,6 @@ type Props = {
   procSupplierMode: "existing" | "new";
   procSupplierExistingId: string;
   procSupplierNew: string;
-  requestedApproverUserId: string;
   onClose: () => void;
   onSubmit: () => void;
   onCreateSupplier: () => Promise<void>;
@@ -49,17 +40,14 @@ type Props = {
   setProcSupplierMode: (value: "existing" | "new") => void;
   setProcSupplierExistingId: (value: string) => void;
   setProcSupplierNew: (value: string) => void;
-  setRequestedApproverUserId: (value: string) => void;
 };
 
 export function ReceiveStockModal({
   open,
   busy,
-  canSendToOdoo,
   feedTypeOptions,
   procurementReasons,
   suppliers,
-  approvers,
   procQty,
   procFeedType,
   procReasonCode,
@@ -68,7 +56,6 @@ export function ReceiveStockModal({
   procSupplierMode,
   procSupplierExistingId,
   procSupplierNew,
-  requestedApproverUserId,
   onClose,
   onSubmit,
   onCreateSupplier,
@@ -80,7 +67,6 @@ export function ReceiveStockModal({
   setProcSupplierMode,
   setProcSupplierExistingId,
   setProcSupplierNew,
-  setRequestedApproverUserId,
 }: Props) {
   if (!open) return null;
 
@@ -211,27 +197,6 @@ export function ReceiveStockModal({
             </div>
           </div>
 
-          {!canSendToOdoo ? (
-            <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-3">
-              <label className="mb-1 block text-xs font-medium text-amber-300">Send approval request to</label>
-              <select
-                className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm text-[var(--text-primary)]"
-                value={requestedApproverUserId}
-                onChange={(e) => setRequestedApproverUserId(e.target.value)}
-              >
-                <option value="">Select approver</option>
-                {approvers.map((approver) => (
-                  <option key={approver.id} value={approver.id}>
-                    {approver.displayName} ({approver.role})
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-[11px] text-amber-300/90">
-                You can submit now, but it will only reach Odoo after this approver reviews it in Accounting Approvals.
-              </p>
-            </div>
-          ) : null}
-
           <div className="flex items-center justify-end gap-2 border-t border-[var(--border-color)] pt-3">
             <button
               type="button"
@@ -242,7 +207,7 @@ export function ReceiveStockModal({
             </button>
             <button
               type="button"
-              disabled={busy || !procQty || (!canSendToOdoo && !requestedApproverUserId)}
+              disabled={busy || !procQty}
               onClick={onSubmit}
               className="rounded-lg bg-[var(--primary-color)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-color-dark)] disabled:opacity-60"
             >

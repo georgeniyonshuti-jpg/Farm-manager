@@ -48,6 +48,43 @@ export async function getERPNextHealth(token: string) {
   return res.json();
 }
 
+export type ChartReadinessItem = {
+  field: string;
+  label: string;
+  number?: string;
+  value: string | null;
+  ok: boolean;
+};
+
+export type ChartReadiness = {
+  farm_company?: string | null;
+  company?: string | null;
+  ready?: boolean;
+  missing?: string[];
+  accounts?: ChartReadinessItem[];
+  items?: ChartReadinessItem[];
+  warehouses?: ChartReadinessItem[];
+  updated?: Record<string, string>;
+  error?: string;
+};
+
+export async function getChartReadiness(token: string, company?: string): Promise<ChartReadiness> {
+  const q = company ? `?company=${encodeURIComponent(company)}` : "";
+  const res = await fetch(`${API_BASE_URL}/api/erpnext/chart-readiness${q}`, {
+    headers: readAuthHeaders(token),
+  });
+  return res.json();
+}
+
+export async function bootstrapChart(token: string, company?: string): Promise<ChartReadiness> {
+  const res = await fetch(`${API_BASE_URL}/api/erpnext/bootstrap-chart`, {
+    method: "POST",
+    headers: jsonAuthHeaders(token),
+    body: JSON.stringify(company ? { company } : {}),
+  });
+  return res.json();
+}
+
 export async function getErpnextConfig(token: string) {
   const res = await fetch(`${API_BASE_URL}/api/erpnext/config`, {
     headers: readAuthHeaders(token),

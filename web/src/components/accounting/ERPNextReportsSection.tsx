@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
-import { useERPNextConnection } from "../../context/OdooConnectionContext";
+import { useERPNextConnection } from "../../context/ERPNextConnectionContext";
 import {
   getBalanceSheet,
   getProfitAndLoss,
@@ -8,13 +8,20 @@ import {
 } from "../../api/erpnext.api";
 import { getStoredErpnextCompany } from "../../lib/erpnextPrefs";
 import { useToast } from "../Toast";
+import { Button, Input, Select } from "../ui";
+import { NoticeStrip } from "../ui/NoticeStrip";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
+import { TextLink } from "../ui/TextLink";
 
 type ErpReportKind = "trial_balance" | "pnl" | "balance_sheet";
+
+const mgrInput = "!min-h-10 h-10 box-border py-0 text-sm leading-10";
 
 export function ERPNextReportsSection() {
   const { token } = useAuth();
   const { status } = useERPNextConnection();
   const { showToast } = useToast();
+  const { companyHref } = useCompanyNav();
   const [reportKind, setReportKind] = useState<ErpReportKind>("trial_balance");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -25,7 +32,7 @@ export function ERPNextReportsSection() {
   async function runReport() {
     const company = getStoredErpnextCompany() || status?.company;
     if (!token || !company) {
-      showToast("error", "Select an ERPNext company in ERPNext integration settings.");
+      showToast("error", "Select an ERPNext company in ERPNext setup.");
       return;
     }
     const fromDate = from || new Date(new Date().getFullYear(), 0, 1).toISOString().slice(0, 10);
@@ -45,57 +52,87 @@ export function ERPNextReportsSection() {
     }
   }
 
+  if (!status?.connected) {
+    return (
+      <NoticeStrip
+        tone="warning"
+        action={<TextLink href={companyHref("farm/erpnext-setup")}>Open ERPNext</TextLink>}
+      >
+        Connect ERPNext to load trial balance, P&amp;L, and balance sheet.
+      </NoticeStrip>
+    );
+  }
+
   return (
-    <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4 space-y-4">
-      <div>
-        <h2 className="text-base font-semibold text-[var(--text-primary)]">ERPNext financial reports</h2>
-        <p className="text-xs text-[var(--text-muted)]">
-          Trial balance, P&amp;L, and balance sheet pulled live from ERPNext.
-        </p>
+    <div className="space-y-stack">
+      <div className="table-block">
+        <div className="space-y-3 p-3">
+          <label className="block max-w-md">
+            <span className="mb-1.5 block text-sm text-[var(--text-secondary)]">Report</span>
+            <Select
+              className={mgrInput}
+              value={reportKind}
+              onChange={(e) => setReportKind(e.target.value as ErpReportKind)}
+            >
+              <option value="trial_balance">Trial balance</option>
+              <option value="pnl">Profit &amp; loss</option>
+              <option value="balance_sheet">Balance sheet</option>
+            </Select>
+          </label>
+          <div className="grid max-w-md gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1.5 block text-sm text-[var(--text-secondary)]">From</span>
+              <Input
+                type="date"
+                className={mgrInput}
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-sm text-[var(--text-secondary)]">To</span>
+              <Input
+                type="date"
+                className={mgrInput}
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              loading={loading}
+              disabled={loading}
+              onClick={() => void runReport()}
+            >
+              Run report
+            </Button>
+            {refreshedAt ? (
+              <span className="type-caption text-[var(--text-secondary)]">
+                Last run {refreshedAt}
+              </span>
+            ) : null}
+          </div>
+        </div>
       </div>
 
-      {!status?.connected && (
-        <p className="text-sm text-amber-700">Connect ERPNext to load reports.</p>
-      )}
-
-      <div className="grid gap-3 md:grid-cols-4">
-        <div className="md:col-span-2">
-          <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">Report</label>
-          <select
-            className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm"
-            value={reportKind}
-            onChange={(e) => setReportKind(e.target.value as ErpReportKind)}
-          >
-            <option value="trial_balance">Trial balance</option>
-            <option value="pnl">Profit &amp; loss</option>
-            <option value="balance_sheet">Balance sheet</option>
-          </select>
+      <div className="table-block">
+        <div className="border-b border-[var(--border-color)] px-3 py-2">
+          <p className="text-sm font-semibold text-[var(--text-primary)]">Result</p>
         </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">From</label>
-          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">To</label>
-          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="w-full rounded-lg border border-[var(--border-input)] bg-[var(--surface-input)] px-3 py-2 text-sm" />
-        </div>
+        {report ? (
+          <pre className="max-h-[28rem] overflow-auto px-3 py-3 font-mono text-xs text-[var(--text-secondary)]">
+            {JSON.stringify(report, null, 2)}
+          </pre>
+        ) : (
+          <p className="px-3 py-6 type-caption text-[var(--text-secondary)]">
+            Run a report to see ERPNext data here.
+          </p>
+        )}
       </div>
-
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          disabled={loading || !status?.connected}
-          onClick={() => void runReport()}
-          className="rounded-lg bg-[var(--primary-color)] px-3 py-2 text-sm font-semibold text-white disabled:opacity-50"
-        >
-          {loading ? "Loading…" : "Refresh report"}
-        </button>
-        {refreshedAt && <span className="text-xs text-[var(--text-muted)]">Last refreshed: {refreshedAt}</span>}
-      </div>
-
-      <pre className="max-h-[420px] overflow-auto rounded border border-[var(--border-color)] bg-[var(--surface-input)] p-3 text-xs text-[var(--text-secondary)]">
-        {report ? JSON.stringify(report, null, 2) : "Run a report to see ERPNext data."}
-      </pre>
-    </section>
+    </div>
   );
 }

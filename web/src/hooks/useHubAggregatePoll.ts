@@ -7,8 +7,10 @@ const AGGREGATE_POLL_MS = 45_000;
  * Initial fetch + interval while `document.visibilityState === "visible"`.
  * On return to visible: immediate refetch and interval restarted.
  */
-export function useHubAggregatePoll(load: () => void | Promise<void>) {
+export function useHubAggregatePoll(load: () => void | Promise<void>, enabled = true) {
   useEffect(() => {
+    if (!enabled) return;
+
     let intervalId: ReturnType<typeof setInterval> | null = null;
 
     const clearTimer = () => {
@@ -41,5 +43,5 @@ export function useHubAggregatePoll(load: () => void | Promise<void>) {
       document.removeEventListener("visibilitychange", onVisibility);
       clearTimer();
     };
-  }, [load]);
+  }, [load, enabled]);
 }

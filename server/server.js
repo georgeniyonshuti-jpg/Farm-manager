@@ -7,6 +7,32 @@ import express from "express";
 import session from "express-session";
 import pgSession from "connect-pg-simple";
 import pg from "pg";
+
+/** Load server/.env into process.env when present (no dotenv dependency). */
+(function loadLocalEnv() {
+  try {
+    const envPath = path.join(path.dirname(fileURLToPath(import.meta.url)), ".env");
+    if (!fs.existsSync(envPath)) return;
+    for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq <= 0) continue;
+      const key = trimmed.slice(0, eq).trim();
+      let val = trimmed.slice(eq + 1).trim();
+      if (
+        (val.startsWith('"') && val.endsWith('"')) ||
+        (val.startsWith("'") && val.endsWith("'"))
+      ) {
+        val = val.slice(1, -1);
+      }
+      if (process.env[key] === undefined) process.env[key] = val;
+    }
+  } catch {
+    /* ignore */
+  }
+})();
+
 import { pgClientConfigFromDatabaseUrlAsync } from "./pgConnFromUrl.js";
 import { runMigrations } from "./migrate.js";
 import { checkinSchema, dailyLogSchema, feedEntrySchema, loginSchema, vetLogSchema } from "./utils/validation.js";
@@ -47,17 +73,24 @@ import { buildFarmInsights } from "./src/services/insights.js";
 import { buildFarmOperationsPdfBuffer } from "./src/services/reports/pdfFarmOperations.js";
 import { extractLiveDbActuals } from "./business-model/liveDbActuals.js";
 import { projectionToCsv, varianceToCsv, compareToCsv, heatmapsToCsv } from "./business-model/exportCsv.js";
-import accountingRouter from "./src/routes/accounting.js";
-import accountingApprovalsRouter, { initAccountingApprovalsRouter } from "./src/routes/accountingApprovals.js";
 import ias41Router, { initIas41Service } from "./src/routes/ias41Routes.js";
-import reconciliationRouter, { initReconciliationRouter } from "./src/routes/accountingReconciliation.js";
-import odooSetupRouter from "./src/routes/odooSetupRoute.js";
+import farmSalesRouter, { initFarmSalesRouter } from "./src/routes/farmSales.routes.js";
+import pipelineRouter, { initPipelineRouter } from "./src/routes/pipeline.routes.js";
+import farmPayrollClosuresRouter, { initFarmPayrollClosuresRouter } from "./src/routes/farmPayrollClosures.routes.js";
 import erpnextRouter from "./src/routes/erpnext.routes.js";
+import { createInsightsRouter } from "./src/routes/insights.routes.js";
 import erpnextWebhookRouter, { initErpnextWebhookRouter } from "./src/routes/erpnext-webhooks.routes.js";
 import clevafarmEntitiesRouter, { initClevaFarmEntitiesRouter } from "./src/routes/clevafarmEntities.routes.js";
 import { initErpnextDb } from "./src/services/erpnext/erpnext.syncLog.js";
 import { initClevaFarmSyncWorker, processClevaFarmOutbox } from "./src/services/clevafarm/syncOutbox.js";
 import { emitEntitySync, initClevaFarmEmit } from "./src/services/clevafarm/emitEntitySync.js";
+import { vetVisitStatusPayload as buildVetVisitStatusPayload } from "./src/services/vetVisitStatus.js";
+import {
+  normalizeFieldReportingMode,
+  isJuniorVetUser,
+  canUseLaborerTranslate,
+  shouldShowLaborerRoundCheckin,
+} from "./src/services/fieldReportingMode.js";
 import { enqueueFlockTombstoneSync, initFlockLifecycleSync } from "./src/services/clevafarm/flockLifecycleSync.js";
 import { buildFlockCode, formatPlacementYymmdd } from "./src/services/flockCode.js";
 import { registerInboundEntityRefresh } from "./src/services/clevafarm/inboundEntityRefresh.js";
@@ -70,6 +103,7 @@ import {
   VET_LOG_LIST_EXTRA_SELECT,
   VET_LOG_LIST_EXTRA_SELECT_MINIMAL,
   VET_LOG_LIST_EXTRA_JOINS,
+  VET_LOG_VISIT_SELECT,
   shouldSyncVetLogOnCreate,
   shouldSyncVetLogOnReview,
   syncApprovedVetLogEntities,
@@ -102,17 +136,11 @@ import {
 } from "./src/services/tenant/companyAdmin.js";
 import { createSaasRouter } from "./src/routes/saasRoutes.js";
 import { createClevaAuthRouter } from "./src/routes/clevaAuth.routes.js";
+import { createPublicMarketRouter } from "./src/routes/publicMarket.routes.js";
+import { autoDraftReadyLots, syncManagedLotFromFlock } from "./src/services/pipeline/autoDraftLots.js";
 import { fetchClevaUserExists } from "./src/services/clevaSso.js";
 import { createPasswordResetService } from "./src/services/passwordReset.js";
 import { smtpConfigFromEnv } from "./src/services/smtpSend.js";
-import { initOdooSyncWorker, processOdooSyncOutbox, enqueueOdooSync } from "./src/services/odoo/odooSyncWorker.js";
-import {
-  mapFeedProcurementToBill,
-  mapMedicineLotToBill,
-  mapSlaughterToJournalEntry,
-  mapFlockOpeningToBill,
-  mapMortalityToImpairmentEntry,
-} from "./src/services/odoo/odooFarmMappers.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -343,13 +371,15 @@ const PAGE_ACCESS_KEYS = [
   "farm_vet_logs",
   "farm_treatments",
   "farm_slaughter",
+  "farm_pipeline",
+  "farm_market",
+  "farm_reports",
   "cleva_portfolio",
   "cleva_business_model",
   "cleva_investor_memos",
   "cleva_credit_scoring",
   "admin_system_config",
   "admin_users",
-  "odoo_send",
 ];
 const PAGE_ACCESS_KEY_SET = new Set(PAGE_ACCESS_KEYS);
 
@@ -367,15 +397,20 @@ function normalizePageAccess(input, fallback) {
 function hasUserPageAccess(user, key) {
   if (!user) return false;
   if (user.role === "superuser") return true;
-  if (user.role === "company_admin" && String(key) === "admin_users") return true;
+  // Company admin is the tenant sovereign for company-scoped pages (incl. Reports).
+  if (user.role === "company_admin") return true;
   if (!PAGE_ACCESS_KEY_SET.has(String(key))) return true;
   const access = Array.isArray(user.pageAccess) ? user.pageAccess.map(String) : [];
   if (access.length === 0) {
-    // New sensitive capability: require explicit tick in the matrix.
-    if (String(key) === "odoo_send") return false;
     return true;
   }
-  return access.includes(String(key));
+  if (access.includes(String(key))) return true;
+  // Legacy snapshots omit farm_market; sales / pipeline desk still need /market/*.
+  if (String(key) === "farm_market") {
+    if (user.role === "sales_coordinator") return true;
+    if (access.includes("farm_pipeline")) return true;
+  }
+  return false;
 }
 
 function requirePageAccess(pageKey) {
@@ -490,6 +525,14 @@ function upsertUser(u) {
   } else {
     u.pageAccess = normalizePageAccess(u.pageAccess, PAGE_ACCESS_KEYS);
   }
+  // Backfill market key for sales ops whose pageAccess was saved before farm_market existed.
+  if (
+    (u.role === "sales_coordinator" || u.pageAccess.includes("farm_pipeline")) &&
+    !u.pageAccess.includes("farm_market") &&
+    PAGE_ACCESS_KEY_SET.has("farm_market")
+  ) {
+    u.pageAccess = [...u.pageAccess, "farm_market"];
+  }
   usersById.set(u.id, u);
   usersByEmail.set(u.email.toLowerCase(), u.id);
 }
@@ -584,9 +627,10 @@ async function requireFlockForReport(req, res, flockId) {
 
 async function hydrateUserCompanyFromDb(userRow) {
   if (!hasDb() || !userRow) return userRow;
-  if (userRow.companyId && userRow.companySlug) return userRow;
+  if (userRow.companyId && userRow.companySlug && userRow.fieldReportingMode) return userRow;
   const r = await dbQuery(
-    `SELECT u.company_id::text AS "companyId", c.slug AS "companySlug", c.name AS "companyName"
+    `SELECT u.company_id::text AS "companyId", c.slug AS "companySlug", c.name AS "companyName",
+            COALESCE(c.field_reporting_mode, 'vet_only') AS "fieldReportingMode"
      FROM users u
      LEFT JOIN companies c ON c.id = u.company_id
      WHERE u.id = $1::uuid`,
@@ -598,7 +642,22 @@ async function hydrateUserCompanyFromDb(userRow) {
     companyId: db.companyId ?? DEFAULT_COMPANY_ID,
     companySlug: db.companySlug ?? "default-farm",
     companyName: db.companyName ?? "Default farm",
+    fieldReportingMode: normalizeFieldReportingMode(db.fieldReportingMode),
   });
+}
+
+async function companyFieldReportingMode(companyId) {
+  const cid = String(companyId ?? DEFAULT_COMPANY_ID);
+  if (!hasDb()) return "vet_only";
+  try {
+    const r = await dbQuery(
+      `SELECT COALESCE(field_reporting_mode, 'vet_only') AS mode FROM companies WHERE id = $1::uuid`,
+      [cid]
+    );
+    return normalizeFieldReportingMode(r.rows[0]?.mode);
+  } catch {
+    return "vet_only";
+  }
 }
 
 async function persistUserToDb(row) {
@@ -698,6 +757,11 @@ function updateUserRecord(existing, patch) {
 }
 
 function seedUsers() {
+  const demoCompany = {
+    companyId: DEFAULT_COMPANY_ID,
+    companySlug: "default-farm",
+    companyName: "Default farm",
+  };
   const seed = [
     {
       id: "usr_super",
@@ -708,6 +772,7 @@ function seedUsers() {
       businessUnitAccess: "both",
       canViewSensitiveFinancial: true,
       departmentKeys: [],
+      ...demoCompany,
     },
     {
       id: "usr_mgr",
@@ -718,6 +783,7 @@ function seedUsers() {
       businessUnitAccess: "both",
       canViewSensitiveFinancial: false,
       departmentKeys: [],
+      ...demoCompany,
     },
     {
       id: "usr_lab",
@@ -728,6 +794,7 @@ function seedUsers() {
       businessUnitAccess: "farm",
       canViewSensitiveFinancial: false,
       departmentKeys: ["dispatch"],
+      ...demoCompany,
     },
     {
       id: "usr_vet",
@@ -738,6 +805,19 @@ function seedUsers() {
       businessUnitAccess: "farm",
       canViewSensitiveFinancial: false,
       departmentKeys: [],
+      ...demoCompany,
+    },
+    {
+      id: "usr_sales",
+      email: "sales@demo.com",
+      displayName: "Sales Coordinator",
+      passwordHash: hashPassword("demo"),
+      role: "sales_coordinator",
+      businessUnitAccess: "farm",
+      canViewSensitiveFinancial: false,
+      departmentKeys: [],
+      pageAccess: [...PAGE_ACCESS_KEYS],
+      ...demoCompany,
     },
     {
       id: "usr_inv",
@@ -748,6 +828,7 @@ function seedUsers() {
       businessUnitAccess: "clevacredit",
       canViewSensitiveFinancial: true,
       departmentKeys: ["investor_memo"],
+      ...demoCompany,
     },
   ];
   seed.forEach(upsertUser);
@@ -760,7 +841,7 @@ function ensureDemoUsersForNonProd() {
 
 const REQUIRED_PRODUCTION_SUPERUSERS = [
   {
-    email: "george@clevacredit.com",
+    email: "george@clevagroup.africa",
     displayName: "George",
     password: "User1@123",
   },
@@ -771,9 +852,27 @@ const REQUIRED_PRODUCTION_SUPERUSERS = [
   },
 ];
 
+/** Former seed emails that must not remain platform superuser. */
+const LEGACY_PRODUCTION_SUPERUSER_EMAILS = ["george@clevacredit.com"];
+
 async function ensureRequiredProductionSuperusers() {
   if (!IS_PRODUCTION || !hasDb()) return 0;
   let upserted = 0;
+  let marketHostCompanyId = DEFAULT_COMPANY_ID;
+  let marketHostSlug = "default-farm";
+  let marketHostName = "Default farm";
+  try {
+    const { loadMarketHostCompany } = await import("./src/services/pipeline/marketHostCompany.js");
+    const host = await loadMarketHostCompany(dbQuery);
+    if (host.ok && host.company) {
+      marketHostCompanyId = host.company.id;
+      marketHostSlug = host.company.slug || "cleva-technologies";
+      marketHostName = host.company.name || "Cleva Technologies";
+    }
+  } catch (e) {
+    console.error("[ERROR]", "[startup] market host lookup:", e instanceof Error ? e.message : e);
+  }
+
   for (const requiredUser of REQUIRED_PRODUCTION_SUPERUSERS) {
     const email = String(requiredUser.email).trim().toLowerCase();
     const existingId = usersByEmail.get(email);
@@ -788,9 +887,17 @@ async function ensureRequiredProductionSuperusers() {
       canViewSensitiveFinancial: true,
       departmentKeys: [],
       pageAccess: [...PAGE_ACCESS_KEYS],
-      companyId: existing?.companyId ?? DEFAULT_COMPANY_ID,
-      companySlug: existing?.companySlug ?? "default-farm",
-      companyName: existing?.companyName ?? "Default farm",
+      companyId: existing?.companyId && existing.companyId !== DEFAULT_COMPANY_ID
+        ? existing.companyId
+        : marketHostCompanyId,
+      companySlug:
+        existing?.companyId && existing.companyId !== DEFAULT_COMPANY_ID
+          ? existing.companySlug
+          : marketHostSlug,
+      companyName:
+        existing?.companyId && existing.companyId !== DEFAULT_COMPANY_ID
+          ? existing.companyName
+          : marketHostName,
     };
     try {
       await persistUserToDb(row);
@@ -798,6 +905,25 @@ async function ensureRequiredProductionSuperusers() {
       upserted += 1;
     } catch (e) {
       console.error("[ERROR]", "[startup] required superuser ensure:", e instanceof Error ? e.message : e);
+    }
+  }
+
+  for (const legacyEmail of LEGACY_PRODUCTION_SUPERUSER_EMAILS) {
+    const email = legacyEmail.trim().toLowerCase();
+    const existingId = usersByEmail.get(email);
+    const existing = existingId ? usersById.get(existingId) : null;
+    if (!existing || existing.role !== "superuser") continue;
+    const demoted = {
+      ...existing,
+      role: "company_admin",
+      authSource: existing.authSource || "local",
+    };
+    try {
+      await persistUserToDb(demoted);
+      upsertUser(demoted);
+      console.warn("[startup] demoted legacy platform superuser:", email);
+    } catch (e) {
+      console.error("[ERROR]", "[startup] demote legacy superuser:", e instanceof Error ? e.message : e);
     }
   }
   return upserted;
@@ -928,8 +1054,7 @@ function requireVetUp(req, res, next) {
 }
 
 function requireLaborer(req, res, next) {
-  const r = req.authUser?.role;
-  if (r !== "laborer" && r !== "dispatcher") {
+  if (!canUseLaborerTranslate(req.authUser)) {
     res.status(403).json({ error: "Only field operations accounts may use this translation endpoint" });
     return;
   }
@@ -957,9 +1082,14 @@ async function geminiTranslateToKinyarwanda(text) {
   }
 
   const prompt =
-    "Translate the following user interface line for a poultry farm laborer app in Rwanda.\n" +
+    "Translate the following user interface line for a junior poultry veterinarian field app in Rwanda.\n" +
     "Target language: Kinyarwanda (Ikinyarwanda).\n" +
-    "Keep numbers, units (kg, L, h, °C, %) and ISO dates exactly as in the source. Do not explain; output only the translation.\n\n" +
+    "Audience: junior vet working in poultry barns — short, field-friendly phrasing.\n" +
+    "Style glossary (match tone; do not copy unless the source matches):\n" +
+    "- itsinda = flock, ibiryo = feed, raporo = report, umuveterineri = vet, imiti = medicine\n" +
+    "- izapfuye = mortality/dead birds, gusura = visit, ikiraro = house/barn\n" +
+    "Preserve placeholders like {min}, {max}, numbers, units (kg, L, h, °C, %, ml) and ISO dates exactly.\n" +
+    "Do not explain; output only the Kinyarwanda translation.\n\n" +
     `Text:\n${trimmed}`;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(key)}`;
@@ -1087,13 +1217,6 @@ function needsApproval(user) {
   return r < ROLE_RANK["vet_manager"];
 }
 
-function canDirectPostAccountingToOdoo(user) {
-  if (!user) return false;
-  if (user.role === "superuser") return true;
-  if (user.role !== "manager" && user.role !== "company_admin") return false;
-  return hasUserPageAccess(user, "odoo_send");
-}
-
 function isVetOrAbove(user) {
   if (!user) return false;
   return (ROLE_RANK[user.role] ?? -1) >= ROLE_RANK["vet"];
@@ -1144,8 +1267,8 @@ function requirePayrollApprover(req, res, next) {
 }
 
 function requirePayrollPaymentDecisionAccess(req, res, next) {
-  if (!canDirectPostAccountingToOdoo(req.authUser)) {
-    res.status(403).json({ error: "Only users with Odoo send access can make payroll payment decisions." });
+  if (!canManageLogScheduleAndPayroll(req.authUser)) {
+    res.status(403).json({ error: "Only manager, vet manager, or superuser can make payroll payment decisions." });
     return;
   }
   next();
@@ -1214,6 +1337,7 @@ function seedLogScheduleDemo() {
     id: "ls_demo_001",
     flockId: "flock_demo_001",
     role: "laborer",
+    logType: "check_in",
     intervalHours: 8,
     windowOpen: "06:00",
     windowClose: "20:00",
@@ -1307,6 +1431,23 @@ function hasFeedInWindowForUserOnDay(userId, flockId, ymd, sched) {
     if (!sameFlockId(e.flockId, flockId) || e.enteredByUserId !== userId) continue;
     if (kigaliYmd(new Date(e.recordedAt)) !== ymd) continue;
     if (isSubmissionWithinPayrollWindow(e.recordedAt, sched.windowOpen, sched.windowClose)) return true;
+  }
+  return false;
+}
+
+function vetLogTimestamp(v) {
+  return v.visitedAt ?? v.createdAt ?? (v.logDate ? `${v.logDate}T12:00:00Z` : null);
+}
+
+function hasVetLogInWindowForUserOnDay(userId, flockId, ymd, sched, { includePending = false } = {}) {
+  for (const v of vetLogs) {
+    if (!sameFlockId(v.flockId, flockId) || v.authorUserId !== userId) continue;
+    const status = String(v.submissionStatus ?? "approved");
+    if (status === "rejected") continue;
+    if (!includePending && status === "pending_review") continue;
+    const at = vetLogTimestamp(v);
+    if (!at || kigaliYmd(new Date(at)) !== ymd) continue;
+    if (isSubmissionWithinPayrollWindow(at, sched.windowOpen, sched.windowClose)) return true;
   }
   return false;
 }
@@ -1416,13 +1557,59 @@ async function createPayrollEntry({
  * @returns {{ payrollImpact: object | null, payrollSaved: boolean }}
  */
 async function maybeAutoPayrollForSubmit(reqUser, flockId, logType, logId, submittedAtIso) {
-  if (logType !== "check_in" && logType !== "feed_entry") {
+  if (logType !== "check_in" && logType !== "feed_entry" && logType !== "vet_log") {
     return { payrollImpact: null, payrollSaved: true };
   }
-  const scheds = logSchedules.filter((s) => sameFlockId(s.flockId, flockId) && s.role === reqUser.role);
+  const schedLogType = logType === "vet_log" ? "vet_visit" : logType === "check_in" ? "check_in" : "check_in";
+  const scheds = logSchedules.filter(
+    (s) =>
+      sameFlockId(s.flockId, flockId)
+      && s.role === reqUser.role
+      && (s.logType || "check_in") === schedLogType
+  );
   const rates = systemConfig.getFieldPayrollRates();
   const ymd = kigaliYmd(new Date(submittedAtIso));
   const bucket = logType;
+
+  if (logType === "vet_log") {
+    const baseOnTime = rates.vetVisitRwf ?? rates.checkInRwf;
+    const lateDed = rates.lateVetVisitDeductionRwf ?? rates.lateDeductionRwf;
+    let onTime = true;
+    let creditRwf = baseOnTime;
+    let reason = "Vet visit credit (no payroll window configured for your role on this flock)";
+    if (scheds.length > 0) {
+      const s = scheds[0];
+      onTime = isSubmissionWithinPayrollWindow(submittedAtIso, s.windowOpen, s.windowClose);
+      creditRwf = onTime ? baseOnTime : Math.max(0, baseOnTime - lateDed);
+      reason = onTime
+        ? "On-time: vet visit within payroll window"
+        : "Late vet visit: credit reduced per policy";
+    }
+    if (creditRwf <= 0) return { payrollImpact: null, payrollSaved: true };
+
+    const byLog = findPayrollByLog(reqUser.id, logId, logType);
+    if (byLog) {
+      return { payrollImpact: byLog, payrollSaved: true };
+    }
+
+    try {
+      const row = await createPayrollEntry({
+        userId: reqUser.id,
+        logId,
+        logType,
+        submittedAtIso,
+        flockId,
+        onTime,
+        rwfDelta: creditRwf,
+        reason,
+      });
+      return { payrollImpact: row, payrollSaved: true };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`PAYROLL PERSISTENCE FAILED for user ${reqUser.id}: ${msg}`);
+      return { payrollImpact: null, payrollSaved: false };
+    }
+  }
 
   if (logType === "check_in") {
     // Use checkInRwf as the single source of truth (set by manager on the Payroll page).
@@ -1711,12 +1898,56 @@ async function runMissedPayrollScan() {
   const rates = systemConfig.getFieldPayrollRates();
   const missCheck = -rates.missedCheckInRwf;
   const missFeed = -rates.missedFeedRwf;
+  const missVetVisit = -rates.missedVetVisitRwf;
+  const companyModeCache = new Map();
   for (const sched of logSchedules) {
     if (!flocksById.has(String(sched.flockId ?? ""))) continue;
     if (!windowHasEndedForKigaliDay(sched, now)) continue;
+    const schedLogType = sched.logType || "check_in";
+    const flock = flocksById.get(String(sched.flockId ?? ""));
+    const flockCompanyId = flock?.companyId ?? DEFAULT_COMPANY_ID;
+    let reportingMode = companyModeCache.get(flockCompanyId);
+    if (reportingMode == null) {
+      reportingMode = await companyFieldReportingMode(flockCompanyId);
+      companyModeCache.set(flockCompanyId, reportingMode);
+    }
+    if (schedLogType === "check_in" && reportingMode === "vet_only") continue;
     for (const u of usersById.values()) {
       if (u.role !== sched.role) continue;
       if (!hasFarmAccess(u)) continue;
+
+      if (schedLogType === "vet_visit") {
+        const missVetKey = `missed_vet_visit|${sched.id}|${u.id}|${ymd}`;
+        if (!payrollMissedKeys.has(missVetKey)) {
+          const hasLog =
+            hasVetLogInWindowForUserOnDay(u.id, sched.flockId, ymd, sched, { includePending: true });
+          if (!hasLog) {
+            if (!hasPayrollFieldCreditForBucket(u.id, sched.flockId, ymd, "vet_log")) {
+              if (!hasMissedFieldPayroll(u.id, sched.flockId, ymd, "vet_log")) {
+                if (missVetVisit !== 0) {
+                  try {
+                    await createPayrollEntry({
+                      userId: u.id,
+                      logId: `missed_vet_visit_${sched.id}_${ymd}`,
+                      logType: "vet_log",
+                      submittedAtIso: now.toISOString(),
+                      flockId: sched.flockId,
+                      onTime: false,
+                      rwfDelta: missVetVisit,
+                      reason: "Missed: no vet visit in payroll window",
+                    });
+                    payrollMissedKeys.add(missVetKey);
+                  } catch (e) {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    console.warn(`PAYROLL PERSISTENCE FAILED for user ${u.id}: ${msg}`);
+                  }
+                }
+              }
+            }
+          }
+        }
+        continue;
+      }
 
       const missCheckinKey = `missed_checkin|${sched.id}|${u.id}|${ymd}`;
       if (!payrollMissedKeys.has(missCheckinKey)) {
@@ -2077,6 +2308,7 @@ async function syncLogSchedulesFromDb() {
     `SELECT id::text AS id,
             flock_id::text AS "flockId",
             role,
+            COALESCE(log_type, 'check_in') AS "logType",
             interval_hours AS "intervalHours",
             window_open::text AS "windowOpen",
             window_close::text AS "windowClose",
@@ -2090,10 +2322,42 @@ async function syncLogSchedulesFromDb() {
       id: String(row.id),
       flockId: String(row.flockId),
       role: String(row.role),
+      logType: String(row.logType || "check_in"),
       intervalHours: Number(row.intervalHours) || 24,
       windowOpen: normalizePgTimeToHhMm(row.windowOpen),
       windowClose: normalizePgTimeToHhMm(row.windowClose),
       createdAt: row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt ?? new Date().toISOString()),
+    });
+  }
+}
+
+async function syncVetLogsFromDb() {
+  if (!hasDb()) return;
+  const r = await dbQuery(
+    `SELECT id::text AS id,
+            flock_id::text AS "flockId",
+            author_user_id::text AS "authorUserId",
+            log_date::text AS "logDate",
+            COALESCE(submission_status, 'approved') AS "submissionStatus",
+            visit_slot AS "visitSlot",
+            visited_at AS "visitedAt",
+            created_at AS "createdAt"
+       FROM farm_vet_logs
+      ORDER BY created_at ASC`
+  );
+  vetLogs.length = 0;
+  for (const row of r.rows) {
+    const visitedAt = row.visitedAt instanceof Date ? row.visitedAt.toISOString() : row.visitedAt;
+    const createdAt = row.createdAt instanceof Date ? row.createdAt.toISOString() : String(row.createdAt ?? "");
+    vetLogs.push({
+      id: String(row.id),
+      flockId: String(row.flockId),
+      authorUserId: String(row.authorUserId),
+      logDate: String(row.logDate ?? "").slice(0, 10),
+      submissionStatus: String(row.submissionStatus ?? "approved"),
+      visitSlot: row.visitSlot != null ? String(row.visitSlot) : null,
+      visitedAt: visitedAt != null ? String(visitedAt) : null,
+      createdAt,
     });
   }
 }
@@ -2682,12 +2946,26 @@ function lastCheckinMs(flockId) {
   return best;
 }
 
-function scheduleIntervalHoursForFlockRole(flockId, role) {
+function scheduleIntervalHoursForFlockRole(flockId, role, logType = "check_in") {
   if (!role) return null;
-  const entries = logSchedules.filter((s) => sameFlockId(s.flockId, flockId) && s.role === role);
+  const entries = logSchedules.filter(
+    (s) => sameFlockId(s.flockId, flockId) && s.role === role && (s.logType || "check_in") === logType
+  );
   if (!entries.length) return null;
   const h = Number(entries[0].intervalHours);
   return Number.isFinite(h) && h > 0 ? h : null;
+}
+
+function vetVisitStatusPayload(flock, role = "vet") {
+  return buildVetVisitStatusPayload(flock, role, {
+    logSchedules,
+    vetLogs,
+    sameFlockId,
+    flockAgeDays,
+    intervalHoursForAge,
+    DEFAULT_CHECKIN_BANDS,
+    safeMsToIso,
+  });
 }
 
 function computeNextDueMs(flock, now = Date.now(), role = null) {
@@ -2980,27 +3258,6 @@ app.get("/api/users", requireAuth, requireUserManagementAccess, requirePageAcces
     users = users.filter((u) => String(u.companyId ?? "") === filterCompanyId);
   }
   res.json({ users: users.map(sanitizeUser) });
-});
-
-app.get("/api/users/odoo-approvers", requireAuth, requireFarmAccess, async (_req, res) => {
-  if (hasDb()) {
-    try {
-      await syncUsersFromDbToMemory();
-      if (DEMO_USERS_ENABLED) ensureDemoUsersForNonProd();
-    } catch (e) {
-      console.error("[ERROR]", "[db] GET /api/users/odoo-approvers sync:", e instanceof Error ? e.message : e);
-    }
-  }
-  const approvers = [...usersById.values()]
-    .filter((u) => canDirectPostAccountingToOdoo(u))
-    .map((u) => ({
-      id: u.id,
-      displayName: u.displayName,
-      role: u.role,
-      email: u.email,
-    }))
-    .sort((a, b) => a.displayName.localeCompare(b.displayName));
-  res.json({ approvers });
 });
 
 app.post("/api/users", requireAuth, requireUserManagementAccess, requirePageAccess("admin_users"), async (req, res) => {
@@ -3457,12 +3714,15 @@ app.get("/api/admin/field-payroll-rates", requireAuth, requireFarmAccess, requir
     missedCheckInRwf: r.missedCheckInRwf,
     missedFeedRwf: r.missedFeedRwf,
     lateDeductionRwf: r.lateDeductionRwf,
+    vetVisitRwf: r.vetVisitRwf,
+    missedVetVisitRwf: r.missedVetVisitRwf,
+    lateVetVisitDeductionRwf: r.lateVetVisitDeductionRwf,
   });
 });
 
 app.put("/api/admin/field-payroll-rates", requireAuth, requireFarmAccess, requireManagerOrSuperuser, async (req, res) => {
   const b = req.body ?? {};
-  for (const key of ["checkInRwf", "feedRwf", "missedCheckInRwf", "missedFeedRwf"]) {
+  for (const key of ["checkInRwf", "feedRwf", "missedCheckInRwf", "missedFeedRwf", "vetVisitRwf", "missedVetVisitRwf"]) {
     const x = Number(b[key]);
     if (!Number.isFinite(x) || x < 0) {
       res.status(400).json({ error: "Each rate must be a non-negative number" });
@@ -3476,12 +3736,23 @@ app.put("/api/admin/field-payroll-rates", requireAuth, requireFarmAccess, requir
       return;
     }
   }
+  if (b.lateVetVisitDeductionRwf != null) {
+    const x = Number(b.lateVetVisitDeductionRwf);
+    if (!Number.isFinite(x) || x < 0) {
+      res.status(400).json({ error: "lateVetVisitDeductionRwf must be a non-negative number" });
+      return;
+    }
+  }
   try {
     await systemConfig.persistFieldPayrollRates(dbQuery, hasDb, {
       checkInRwf: b.checkInRwf,
       feedRwf: b.feedRwf,
       missedCheckInRwf: b.missedCheckInRwf,
       missedFeedRwf: b.missedFeedRwf,
+      lateDeductionRwf: b.lateDeductionRwf,
+      vetVisitRwf: b.vetVisitRwf,
+      missedVetVisitRwf: b.missedVetVisitRwf,
+      lateVetVisitDeductionRwf: b.lateVetVisitDeductionRwf,
     });
   } catch (e) {
     console.error("[ERROR]", "[admin] PUT field-payroll-rates:", e instanceof Error ? e.message : e);
@@ -3696,6 +3967,11 @@ async function syncFlocksFromDbToMemory() {
       await syncLogSchedulesFromDb();
     } catch (e) {
       console.error("[ERROR]", "[db] syncLogSchedulesFromDb:", e instanceof Error ? e.message : e);
+    }
+    try {
+      await syncVetLogsFromDb();
+    } catch (e) {
+      console.error("[ERROR]", "[db] syncVetLogsFromDb:", e instanceof Error ? e.message : e);
     }
     try {
       await syncFlockFeedEntriesFromDb();
@@ -3981,37 +4257,15 @@ app.post("/api/flocks", requireAuth, requireFarmAccess, requirePageAccess("farm_
       createdCode = inserted.rows[0]?.code != null ? String(inserted.rows[0].code) : createdCode;
       createdLabel = String(inserted.rows[0]?.label ?? createdCode);
       if (purchaseCostRwf != null || costPerChickRwf != null) {
-        const canDirectPost = canDirectPostAccountingToOdoo(req.authUser);
-        const openingAcctStatus = canDirectPost ? "approved" : "pending_approval";
         dbQuery(
           `UPDATE poultry_flocks
-              SET bio_asset_accounting_status = $4,
+              SET bio_asset_accounting_status = 'not_applicable',
                   purchase_cost_rwf = COALESCE(purchase_cost_rwf, $2::numeric),
                   cost_per_chick_rwf = COALESCE(cost_per_chick_rwf, $3::numeric),
                   updated_at = now()
             WHERE id::text = $1`,
-          [createdId, purchaseCostRwf, costPerChickRwf, openingAcctStatus]
+          [createdId, purchaseCostRwf, costPerChickRwf]
         ).catch((e) => console.error("[ERROR]", "[accounting] flock bio_asset_accounting_status:", e instanceof Error ? e.message : e));
-
-        if (canDirectPost) {
-          const payload = mapFlockOpeningToBill({
-            id: createdId,
-            code: createdCode,
-            initialCount: Math.floor(initialCount),
-            purchaseCostRwf: Number(purchaseCostRwf ?? 0),
-            purchaseSupplier,
-            purchaseDate,
-            createdAt: new Date().toISOString(),
-          });
-          enqueueOdooSync({
-            sourceTable: "poultry_flocks",
-            sourceId: createdId,
-            eventType: "bio_asset_opening",
-            payload,
-            triggeredByUserId: req.authUser.id,
-            triggeredByRole: req.authUser.role,
-          }).then(() => processOdooSyncOutbox(3)).catch(() => {});
-        }
       }
     }
     const flockRow = {
@@ -4397,6 +4651,12 @@ app.delete("/api/flocks/:id/purge", requireAuth, requireFarmAccess, requireCompa
       event: "on_delete",
     });
     if (hasDb()) {
+      await dbQuery(
+        `DELETE FROM pipeline_matches
+          WHERE lot_id IN (SELECT id FROM pipeline_lots WHERE flock_id::text = $1)`,
+        [id]
+      );
+      await dbQuery(`DELETE FROM pipeline_lots WHERE flock_id::text = $1`, [id]);
       await dbQuery(`DELETE FROM poultry_flocks WHERE id::text = $1`, [id]);
     }
     flocksById.delete(id);
@@ -4670,6 +4930,121 @@ app.get("/api/me/aggregate-checkin-status", requireAuth, requireFarmAccess, requ
   }
 });
 
+app.get("/api/me/aggregate-vet-visit-status", requireAuth, requireFarmAccess, requireAnyPageAccess(["dashboard_vet", "dashboard_management"]), requireAction("flock.view"), async (req, res) => {
+  try {
+    if (hasDb()) {
+      try {
+        await syncFlocksFromDbToMemory();
+        await syncVetLogsFromDb();
+        await syncLogSchedulesFromDb();
+      } catch {
+        /* ignore */
+      }
+    }
+    const now = Date.now();
+    const scopedCompanyId = await userCompanyId(req);
+    const role = req.authUser?.role === "vet" ? "vet" : req.authUser?.role ?? "vet";
+    const flocks = filterFlocksForUser(flocksById.values(), req.authUser, scopedCompanyId).filter(
+      (f) => !(String(f.status) === "archived" && !canViewArchivedFlocks(req.authUser))
+    );
+    const perFlock = flocks.map((f) => {
+      const status = vetVisitStatusPayload(f, role);
+      return { flockId: f.id, label: f.label ?? f.code ?? f.id, status };
+    });
+
+    let anyOverdue = false;
+    let overdueCount = 0;
+    let maxOverdueMinutes = 0;
+    const overdueLabels = [];
+    let soonestNextMs = Infinity;
+    let soonestFlockId = null;
+    let soonestFlockLabel = null;
+    let worstOverdueFlockId = null;
+
+    for (const { flockId, label, status } of perFlock) {
+      if (status.isOverdue) {
+        anyOverdue = true;
+        overdueCount += 1;
+        const mins = Math.floor(status.overdueMs / 60000);
+        if (mins >= maxOverdueMinutes) {
+          maxOverdueMinutes = mins;
+          worstOverdueFlockId = flockId;
+        }
+        if (overdueLabels.length < 3) overdueLabels.push(String(label));
+      } else {
+        const nextMs = new Date(status.nextDueAt).getTime();
+        if (Number.isFinite(nextMs) && nextMs < soonestNextMs) {
+          soonestNextMs = nextMs;
+          soonestFlockId = flockId;
+          soonestFlockLabel = String(label);
+        }
+      }
+    }
+
+    const primaryFlockId = anyOverdue ? worstOverdueFlockId : soonestFlockId;
+    let primaryStatus = null;
+    if (primaryFlockId) {
+      const primaryFlock = flocksById.get(primaryFlockId);
+      primaryStatus = primaryFlock ? vetVisitStatusPayload(primaryFlock, role) : null;
+    }
+
+    const summary = {
+      anyOverdue,
+      overdueCount,
+      maxOverdueMinutes,
+      overdueLabels,
+      minutesUntilSoonestNext:
+        anyOverdue || soonestNextMs === Infinity ? null : Math.max(0, Math.floor((soonestNextMs - now) / 60000)),
+      soonestFlockLabel: anyOverdue ? null : soonestFlockLabel,
+      soonestFlockId: anyOverdue ? null : soonestFlockId,
+      primaryFlockId,
+      flockList: perFlock.map(({ flockId, label, status }) => ({
+        flockId: String(flockId),
+        label: String(label),
+        isOverdue: Boolean(status.isOverdue),
+        overdueMinutes: Math.max(0, Math.floor(Number(status.overdueMs ?? 0) / 60000)),
+        nextDueAt: String(status.nextDueAt),
+        visitDoneToday: Boolean(status.lastVisitAt && kigaliYmd(new Date(status.lastVisitAt)) === kigaliYmd(new Date(now))),
+        lastVisitAt: status.lastVisitAt,
+      })),
+    };
+
+    res.json({ summary, primaryFlockId, primaryStatus });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[ERROR]", "[api] GET /api/me/aggregate-vet-visit-status:", msg);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Could not load vet visit schedule. Try again." });
+    }
+  }
+});
+
+app.get("/api/company/field-reporting-mode", requireAuth, requireFarmAccess, requirePageAccess("farm_schedule_settings"), async (req, res) => {
+  const companyId = await userCompanyId(req);
+  const mode = await companyFieldReportingMode(companyId);
+  res.json({ fieldReportingMode: mode });
+});
+
+app.patch("/api/company/field-reporting-mode", requireAuth, requireFarmAccess, requireManagerOrSuperuser, async (req, res) => {
+  const mode = normalizeFieldReportingMode(req.body?.fieldReportingMode ?? req.body?.mode);
+  const companyId = await userCompanyId(req);
+  if (hasDb()) {
+    try {
+      await dbQuery(
+        `UPDATE companies SET field_reporting_mode = $1 WHERE id = $2::uuid`,
+        [mode, companyId]
+      );
+    } catch (e) {
+      console.error("[ERROR]", "[db] PATCH field-reporting-mode:", e instanceof Error ? e.message : e);
+      res.status(503).json({ error: "Could not save field reporting mode." });
+      return;
+    }
+  }
+  appendAudit(req.authUser.id, req.authUser.role, "company.field_reporting_mode.update", "company", companyId, { mode });
+  clevaSync("farm_company", companyId);
+  res.json({ fieldReportingMode: mode });
+});
+
 app.patch("/api/flocks/:id/checkin-schedule", requireAuth, requireFarmAccess, requireCheckinScheduleEditor, async (req, res) => {
   const f = await getFlockForApi(req, res);
   if (!f) return;
@@ -4924,42 +5299,19 @@ app.post("/api/flocks/:id/round-checkins", requireAuth, requireFarmAccess, requi
     }
     if (linkedMortalitySavedToDb) {
       if (hasDb() && mid && mortalityAtCheckin > 0) {
-        const canDirectPost = canDirectPostAccountingToOdoo(req.authUser);
         const checkinPerBirdValue = await estimateBirdValueRwfForFlock(f.id);
         const checkinImpairmentRwf =
           checkinPerBirdValue != null && checkinPerBirdValue > 0
             ? Number(checkinPerBirdValue) * Number(mortalityAtCheckin)
             : 0;
-        const checkinMortAcctStatus = canDirectPost && checkinImpairmentRwf > 0 ? "approved" : "pending_approval";
         dbQuery(
           `UPDATE flock_mortality_events
-              SET accounting_status = $2,
-                  impairment_value_rwf = CASE WHEN $3::numeric > 0 THEN $3::numeric ELSE impairment_value_rwf END,
+              SET accounting_status = 'not_applicable',
+                  impairment_value_rwf = CASE WHEN $2::numeric > 0 THEN $2::numeric ELSE impairment_value_rwf END,
                   updated_at = now()
             WHERE id::text = $1`,
-          [mid, checkinMortAcctStatus, checkinImpairmentRwf > 0 ? checkinImpairmentRwf : null]
+          [mid, checkinImpairmentRwf > 0 ? checkinImpairmentRwf : null]
         ).catch((e) => console.error("[ERROR]", "[accounting] check-in mortality accounting_status:", e instanceof Error ? e.message : e));
-
-        if (canDirectPost && checkinImpairmentRwf > 0) {
-          const payload = mapMortalityToImpairmentEntry({
-            id: mid,
-            flockId: f.id,
-            flockCode: f.code ?? f.label ?? f.id,
-            impairmentValueRwf: checkinImpairmentRwf,
-            count: mortalityAtCheckin,
-            at,
-          });
-          if (payload) {
-            enqueueOdooSync({
-              sourceTable: "flock_mortality_events",
-              sourceId: mid,
-              eventType: "mortality_impairment",
-              payload,
-              triggeredByUserId: req.authUser.id,
-              triggeredByRole: req.authUser.role,
-            }).then(() => processOdooSyncOutbox(3)).catch(() => {});
-          }
-        }
       }
       try {
         await syncMortalityEventsFromDb();
@@ -5245,44 +5597,19 @@ app.post("/api/flocks/:id/mortality-events", requireAuth, requireFarmAccess, req
     submissionStatus,
   });
 
-  // Accounting: post mortality impairment directly when we can derive a value.
+  // Store derived impairment value when available (ERPNext sync via clevaSync elsewhere).
   if (hasDb() && mortalitySavedToDb && id && count > 0) {
-    const canDirectPost = canDirectPostAccountingToOdoo(req.authUser);
     const perBirdValue = await estimateBirdValueRwfForFlock(f.id);
     const impairmentValueRwf =
       perBirdValue != null && perBirdValue > 0 ? Number(perBirdValue) * Number(count) : 0;
-    const mortAcctStatus = canDirectPost && impairmentValueRwf > 0 ? "approved" : "pending_approval";
     dbQuery(
       `UPDATE flock_mortality_events
-          SET accounting_status = $2,
-              impairment_value_rwf = CASE WHEN $3::numeric > 0 THEN $3::numeric ELSE impairment_value_rwf END,
+          SET accounting_status = 'not_applicable',
+              impairment_value_rwf = CASE WHEN $2::numeric > 0 THEN $2::numeric ELSE impairment_value_rwf END,
               updated_at = now()
         WHERE id::text = $1`,
-      [id, mortAcctStatus, impairmentValueRwf > 0 ? impairmentValueRwf : null]
+      [id, impairmentValueRwf > 0 ? impairmentValueRwf : null]
     ).catch((e) => console.error("[ERROR]", "[accounting] mortality accounting_status:", e instanceof Error ? e.message : e));
-
-    if (canDirectPost && impairmentValueRwf > 0) {
-      const payload = mapMortalityToImpairmentEntry({
-        id,
-        flockId: f.id,
-        flockCode: f.code ?? f.label ?? f.id,
-        impairmentValueRwf,
-        count,
-        at: row.at,
-      });
-      if (payload) {
-        enqueueOdooSync({
-          sourceTable: "flock_mortality_events",
-          sourceId: id,
-          eventType: "mortality_impairment",
-          payload,
-          triggeredByUserId: req.authUser.id,
-          triggeredByRole: req.authUser.role,
-        }).then(() => processOdooSyncOutbox(3)).catch(() => {});
-      }
-    }
-    // When impairmentValueRwf === 0, record stays in pending_approval
-    // so manager can set cost per bird and retry from Accounting Approvals.
   }
 
   const processed = await handleMortalityLog({
@@ -6011,12 +6338,80 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
     res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Invalid vet log payload" });
     return;
   }
-  const { flockId, logDate, observations, actionsTaken, recommendations, weightSample, medicine, mortalityReview } = parsed.data;
+  const {
+    flockId,
+    logDate,
+    observations,
+    actionsTaken,
+    recommendations,
+    weightSample,
+    medicine,
+    mortalityReview,
+    visitSlot: visitSlotRaw,
+    photosFlockSign: photosFlockSignRaw,
+    photosThermometer: photosThermometerRaw,
+    photosFeed: photosFeedRaw,
+    photosWater: photosWaterRaw,
+    coopTemperatureC: coopTemperatureCRaw,
+    feedAvailable: feedAvailableRaw,
+    waterAvailable: waterAvailableRaw,
+  } = parsed.data;
   const f = await getFlockByIdForUser(flockId, req.authUser, res);
   if (!f) return;
   if (!assertFlockNotArchivedForMutation(f, res)) return;
   const submissionStatus = needsVetLogApproval(req.authUser) ? "pending_review" : "approved";
   const now = new Date().toISOString();
+  const inferVisitSlot = () => {
+    const sub = minutesSinceMidnightKigali(new Date(now));
+    if (sub >= 7 * 60 && sub <= 10 * 60) return "am";
+    if (sub >= 17 * 60 && sub <= 20 * 60) return "pm";
+    return sub < 14 * 60 ? "am" : "pm";
+  };
+  const visitSlot = visitSlotRaw ?? (isJuniorVetUser(req.authUser) ? inferVisitSlot() : "spot");
+  const requiresHouseRound = visitSlot === "am" || visitSlot === "pm" || isJuniorVetUser(req.authUser);
+  const sanitizePhotos = (arr) => (Array.isArray(arr) ? arr.filter((p) => typeof p === "string" && p.length > 40) : []);
+  const photosFlockSign = sanitizePhotos(photosFlockSignRaw);
+  const photosThermometer = sanitizePhotos(photosThermometerRaw);
+  const photosFeed = sanitizePhotos(photosFeedRaw);
+  const photosWater = sanitizePhotos(photosWaterRaw);
+  const feedAvailable = Boolean(feedAvailableRaw);
+  const waterAvailable = Boolean(waterAvailableRaw);
+  const coopTemperatureC = coopTemperatureCRaw == null ? null : Number(coopTemperatureCRaw);
+  if (requiresHouseRound) {
+    const uploadError =
+      validateImageDataUrls(photosFlockSign)
+      || validateImageDataUrls(photosThermometer)
+      || validateImageDataUrls(photosFeed)
+      || validateImageDataUrls(photosWater);
+    if (uploadError) {
+      res.status(400).json({ error: uploadError });
+      return;
+    }
+    const minPhotos = f.photosRequiredPerRound ?? 1;
+    if (!Number.isFinite(coopTemperatureC)) {
+      res.status(400).json({ error: "coopTemperatureC is required." });
+      return;
+    }
+    if (photosFlockSign.length < minPhotos) {
+      res.status(400).json({ error: `At least ${minPhotos} flock sign photo(s) required for this visit` });
+      return;
+    }
+    if (photosThermometer.length < 1) {
+      res.status(400).json({ error: "At least one thermometer photo is required." });
+      return;
+    }
+    if (feedAvailable && photosFeed.length < 1) {
+      res.status(400).json({ error: "At least one feed photo is required when feed is available." });
+      return;
+    }
+    if (waterAvailable && photosWater.length < 1) {
+      res.status(400).json({ error: "At least one water photo is required when water is available." });
+      return;
+    }
+  }
+  const photoUrls = requiresHouseRound
+    ? { flockSign: photosFlockSign, thermometer: photosThermometer, feed: photosFeed, water: photosWater }
+    : null;
   let fcrAtLogTime = null;
   let fcrStatus = null;
   let fcrTargetMin = null;
@@ -6067,6 +6462,12 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
     treatmentId: null,
     hasWeightSample: Boolean(weightSample),
     medicineName: medicine?.medicineName ?? null,
+    visitSlot,
+    visitedAt: now,
+    coopTemperatureC: coopTemperatureC != null ? Number(coopTemperatureC.toFixed(2)) : null,
+    feedAvailable,
+    waterAvailable,
+    photoUrls,
   };
 
   let vetLogSavedToDb = false;
@@ -6078,9 +6479,10 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
       const ins = await client.query(
         `INSERT INTO farm_vet_logs (
            flock_id, author_user_id, log_date, observations, actions_taken, recommendations, submission_status,
-           fcr_at_log_time, fcr_status, fcr_target_min, fcr_target_max
+           fcr_at_log_time, fcr_status, fcr_target_min, fcr_target_max,
+           visit_slot, visited_at, coop_temperature_c, feed_available, water_available, photo_urls
          )
-         VALUES ($1::uuid, $2::uuid, $3::date, $4, $5, $6, $7, $8, $9, $10, $11)
+         VALUES ($1::uuid, $2::uuid, $3::date, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::timestamptz, $14::numeric, $15, $16, $17::jsonb)
          RETURNING id::text AS id, created_at AS "createdAt"`,
         [
           flockId,
@@ -6094,6 +6496,12 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
           fcrStatus,
           fcrTargetMin,
           fcrTargetMax,
+          visitSlot,
+          now,
+          row.coopTemperatureC,
+          feedAvailable,
+          waterAvailable,
+          photoUrls ? JSON.stringify(photoUrls) : null,
         ]
       );
       const r0 = ins.rows[0];
@@ -6153,7 +6561,7 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
       console.error("[ERROR]", "[db] POST /api/vet-logs:", msg);
       let clientMsg = msg || "Could not save vet log.";
       if (/duplicate key|unique constraint/i.test(msg)) {
-        clientMsg = "A vet log already exists for this flock on this date.";
+        clientMsg = "A vet log already exists for this flock, date, and visit slot.";
       } else if (/column .+ does not exist/i.test(msg)) {
         clientMsg = "Vet log storage is not fully migrated yet. Retry after the next deploy.";
       }
@@ -6162,8 +6570,17 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
     } finally {
       client.release();
     }
+    vetLogs.push(row);
   } else if (!vetLogSavedToDb) {
     vetLogs.push(row);
+  }
+
+  let payrollImpact = null;
+  let payrollSaved = true;
+  if (submissionStatus === "approved") {
+    const pay = await maybeAutoPayrollForSubmit(req.authUser, flockId, "vet_log", id, now);
+    payrollImpact = pay.payrollImpact;
+    payrollSaved = pay.payrollSaved;
   }
 
   appendAudit(req.authUser.id, req.authUser.role, "farm.vet_log.create", "flock", flockId, {
@@ -6190,7 +6607,7 @@ app.post("/api/vet-logs", requireAuth, requireFarmAccess, requirePageAccess("far
     await syncApprovedVetLogEntities(clevaSync, client, id);
   }
 
-  res.json({ ok: true, log: row });
+  res.json({ ok: true, log: row, payrollImpact, payrollSaved });
 });
 
 app.get("/api/vet-logs", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_vet_logs", "farm_reports"]), requireVetUp, async (req, res) => {
@@ -6271,24 +6688,37 @@ app.get("/api/vet-logs", requireAuth, requireFarmAccess, requireAnyPageAccess(["
 app.get("/api/vet-logs/:id", requireAuth, requireFarmAccess, requireAnyPageAccess(["farm_vet_logs", "farm_reports"]), requireVetUp, async (req, res) => {
   const logId = String(req.params.id);
   if (hasDb() && isPersistableUuid(logId)) {
+    const buildDetailSql = (extraSelect, visitSelect) => `
+      SELECT v.id::text AS id, v.flock_id::text AS "flockId", v.author_user_id::text AS "authorUserId",
+             v.log_date AS "logDate", v.observations, v.actions_taken AS "actionsTaken",
+             v.recommendations, v.submission_status AS "submissionStatus",
+             v.reviewed_by_user_id::text AS "reviewedByUserId", v.reviewed_at AS "reviewedAt",
+             v.review_notes AS "reviewNotes", v.created_at AS "createdAt",
+             v.fcr_at_log_time AS "fcrAtLogTime", v.fcr_status AS "fcrStatus",
+             v.fcr_target_min AS "fcrTargetMin", v.fcr_target_max AS "fcrTargetMax",
+             ${visitSelect ? `${visitSelect},` : ""}
+             ${extraSelect},
+             u.full_name AS "authorName", f.code AS "flockCode"
+        FROM farm_vet_logs v
+        ${VET_LOG_LIST_EXTRA_JOINS}
+        LEFT JOIN users u ON u.id = v.author_user_id
+        LEFT JOIN poultry_flocks f ON f.id = v.flock_id
+       WHERE v.id = $1::uuid`;
     try {
-      const r = await dbQuery(
-        `SELECT v.id::text AS id, v.flock_id::text AS "flockId", v.author_user_id::text AS "authorUserId",
-                v.log_date AS "logDate", v.observations, v.actions_taken AS "actionsTaken",
-                v.recommendations, v.submission_status AS "submissionStatus",
-                v.reviewed_by_user_id::text AS "reviewedByUserId", v.reviewed_at AS "reviewedAt",
-                v.review_notes AS "reviewNotes", v.created_at AS "createdAt",
-                v.fcr_at_log_time AS "fcrAtLogTime", v.fcr_status AS "fcrStatus",
-                v.fcr_target_min AS "fcrTargetMin", v.fcr_target_max AS "fcrTargetMax",
-                ${VET_LOG_LIST_EXTRA_SELECT},
-                u.full_name AS "authorName", f.code AS "flockCode"
-           FROM farm_vet_logs v
-           ${VET_LOG_LIST_EXTRA_JOINS}
-           LEFT JOIN users u ON u.id = v.author_user_id
-           LEFT JOIN poultry_flocks f ON f.id = v.flock_id
-          WHERE v.id = $1::uuid`,
-        [logId]
-      );
+      let r;
+      try {
+        r = await dbQuery(buildDetailSql(VET_LOG_LIST_EXTRA_SELECT, VET_LOG_VISIT_SELECT), [logId]);
+      } catch (e) {
+        if (!isPgMissingColumnError(e)) throw e;
+        console.warn("[WARN]", "[db] GET /api/vet-logs/:id: falling back without visit columns:", e instanceof Error ? e.message : e);
+        try {
+          r = await dbQuery(buildDetailSql(VET_LOG_LIST_EXTRA_SELECT, null), [logId]);
+        } catch (e2) {
+          if (!isPgMissingColumnError(e2)) throw e2;
+          console.warn("[WARN]", "[db] GET /api/vet-logs/:id: falling back to minimal select:", e2 instanceof Error ? e2.message : e2);
+          r = await dbQuery(buildDetailSql(VET_LOG_LIST_EXTRA_SELECT_MINIMAL, null), [logId]);
+        }
+      }
       if (!r.rows[0]) {
         res.status(404).json({ error: "Vet log not found" });
         return;
@@ -6328,12 +6758,30 @@ app.patch("/api/vet-logs/:id/review", requireAuth, requireFarmAccess, requireLea
         `UPDATE farm_vet_logs
             SET submission_status = $1, reviewed_by_user_id = $2::uuid, reviewed_at = now(), review_notes = $3, updated_at = now()
           WHERE id = $4::uuid AND submission_status = 'pending_review'
-          RETURNING id::text AS id`,
+          RETURNING id::text AS id, flock_id::text AS "flockId", author_user_id::text AS "authorUserId", COALESCE(visited_at, created_at) AS "visitedAt"`,
         [newStatus, req.authUser.id, reviewNotes, logId]
       );
       if (r.rowCount === 0) {
         res.status(404).json({ error: "Vet log not found or already reviewed" });
         return;
+      }
+      if (action === "approve") {
+        const approved = r.rows[0];
+        const submittedAt =
+          approved?.visitedAt instanceof Date
+            ? approved.visitedAt.toISOString()
+            : approved?.visitedAt
+              ? String(approved.visitedAt)
+              : new Date().toISOString();
+        const author = usersById.get(String(approved.authorUserId ?? ""));
+        if (author) {
+          await maybeAutoPayrollForSubmit(author, approved.flockId, "vet_log", logId, submittedAt);
+        }
+        try {
+          await syncVetLogsFromDb();
+        } catch {
+          /* ignore */
+        }
       }
     } catch (e) {
       console.error("[ERROR]", "[db] PATCH vet-logs review:", e instanceof Error ? e.message : e);
@@ -7178,63 +7626,34 @@ app.post("/api/flocks/:id/slaughter-events", requireAuth, requireFarmAccess, req
   }
   appendAudit(req.authUser.id, req.authUser.role, "flock.slaughter.create", "flock", f.id, { slaughterId: row.id });
   clevaSync("slaughter_record", row.id);
+  if (hasDb()) {
+    void syncManagedLotFromFlock(dbQuery, f.id).catch((e) =>
+      console.error("[ERROR]", "[market] sync lot after slaughter:", e instanceof Error ? e.message : e)
+    );
+  }
   await maybeAutoArchiveFlock(f.id, { userId: req.authUser.id, role: req.authUser.role });
 
-  // Accounting: auto-post slaughter conversion to Odoo.
+  // Persist fair value fields when provided (ERPNext sync via clevaSync).
   if (hasDb()) {
     const carcassKg = Number((row.avgCarcassWeightKg ?? row.avgLiveWeightKg) || 0) * Number(row.birdsSlaughtered || 0);
     const fairValueRwf =
       fairValueRwfInput != null
         ? fairValueRwfInput
         : (pricePerKgRwfInput != null ? pricePerKgRwfInput * carcassKg : 0);
-    let carryingValueRwf = fairValueRwf;
-    const perBirdValue = await estimateBirdValueRwfForFlock(f.id);
-    if (perBirdValue != null && perBirdValue > 0) {
-      carryingValueRwf = Number(perBirdValue) * Number(row.birdsSlaughtered || 0);
-    }
 
-    const canDirectPost = canDirectPostAccountingToOdoo(req.authUser);
-    const slaughterAcctStatus = canDirectPost && fairValueRwf > 0 ? "approved" : "pending_approval";
     dbQuery(
       `UPDATE flock_slaughter_events
-          SET accounting_status = $2,
-              fair_value_rwf = CASE WHEN COALESCE($3::numeric, 0) > 0 THEN $3::numeric ELSE fair_value_rwf END,
+          SET accounting_status = 'not_applicable',
+              fair_value_rwf = CASE WHEN COALESCE($2::numeric, 0) > 0 THEN $2::numeric ELSE fair_value_rwf END,
               fair_value_basis = CASE
-                                  WHEN COALESCE($4::numeric, 0) > 0 THEN 'price_per_kg'
-                                  WHEN COALESCE($3::numeric, 0) > 0 THEN 'entered_directly'
+                                  WHEN COALESCE($3::numeric, 0) > 0 THEN 'price_per_kg'
+                                  WHEN COALESCE($2::numeric, 0) > 0 THEN 'entered_directly'
                                   ELSE fair_value_basis
                                 END,
               updated_at = now()
         WHERE id = $1`,
-      [row.id, slaughterAcctStatus, fairValueRwf > 0 ? fairValueRwf : null, pricePerKgRwfInput]
+      [row.id, fairValueRwf > 0 ? fairValueRwf : null, pricePerKgRwfInput]
     ).catch((e) => console.error("[ERROR]", "[accounting] slaughter accounting_status:", e instanceof Error ? e.message : e));
-
-    if (canDirectPost && fairValueRwf > 0) {
-      const flockLabel = f.code ?? f.label ?? f.id;
-      const payload = mapSlaughterToJournalEntry(
-        {
-          id: row.id,
-          flockId: row.flockId,
-          flockCode: flockLabel,
-          birdsSlaughtered: row.birdsSlaughtered,
-          avgLiveWeightKg: row.avgLiveWeightKg,
-          avgCarcassWeightKg: row.avgCarcassWeightKg,
-          fairValueRwf,
-          at: row.at,
-        },
-        { carryingValueRwf }
-      );
-      enqueueOdooSync({
-        sourceTable: "flock_slaughter_events",
-        sourceId: row.id,
-        eventType: "slaughter_conversion",
-        payload,
-        triggeredByUserId: req.authUser.id,
-        triggeredByRole: req.authUser.role,
-      }).then(() => processOdooSyncOutbox(3)).catch(() => {});
-    }
-    // When fairValueRwf === 0, the record appears in Accounting Approvals → Needs Action
-    // so the manager can enter pricing and retry.
   }
 
   res.status(201).json({
@@ -8011,19 +8430,6 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
   const reference = String(body.reference ?? "").slice(0, 200);
   const supplierId = String(body.supplierId ?? "").trim() || null;
   const supplierNameInput = String(body.supplierName ?? "").trim() || null;
-  const requestedApproverUserId = String(body.requestedApproverUserId ?? "").trim() || null;
-  const canDirectPost = canDirectPostAccountingToOdoo(req.authUser);
-  if (!canDirectPost && !requestedApproverUserId) {
-    res.status(400).json({ error: "Select an approver who can send to Odoo." });
-    return;
-  }
-  if (!canDirectPost && requestedApproverUserId) {
-    const targetApprover = usersById.get(requestedApproverUserId);
-    if (!targetApprover || !canDirectPostAccountingToOdoo(targetApprover)) {
-      res.status(400).json({ error: "Selected approver does not have Odoo send access." });
-      return;
-    }
-  }
   const scopedCompanyId = await userCompanyId(req);
   if (flockId) {
     if (!(await getFlockByIdForUser(flockId, req.authUser, res))) return;
@@ -8126,37 +8532,19 @@ app.post("/api/inventory/procurement", requireAuth, requireFarmAccess, requirePa
     flockId,
     feedType,
     quantityKg,
-    requestedApproverUserId,
   });
 
-  // Accounting: post procurement directly to Odoo when cost is available.
   if (hasDb() && procurementSavedToDb && row.id) {
-    const acctStatus = canDirectPost && unitCostRwfPerKg != null ? "approved" : "pending_approval";
-    row.accountingStatus = acctStatus;
+    row.accountingStatus = "not_applicable";
     try {
       await dbQuery(
         `UPDATE farm_inventory_transactions
-            SET accounting_status = $1
-          WHERE id::text = $2`,
-        [acctStatus, row.id]
+            SET accounting_status = 'not_applicable'
+          WHERE id::text = $1`,
+        [row.id]
       );
     } catch (e) {
       console.error("[ERROR]", "[accounting] set feed proc accounting_status:", e instanceof Error ? e.message : e);
-    }
-    if (canDirectPost && unitCostRwfPerKg != null) {
-      const payload = mapFeedProcurementToBill({
-        ...row,
-        at: row.at,
-        supplierName,
-      });
-      enqueueOdooSync({
-        sourceTable: "farm_inventory_transactions",
-        sourceId: row.id,
-        eventType: "feed_purchase",
-        payload,
-        triggeredByUserId: req.authUser.id,
-        triggeredByRole: req.authUser.role,
-      }).then(() => processOdooSyncOutbox(3)).catch(() => {});
     }
   }
 
@@ -9400,6 +9788,7 @@ app.post("/api/log-schedule", requireAuth, requireFarmAccess, requirePageAccess(
   const body = req.body ?? {};
   const flockId = String(body.flockId ?? "");
   const role = String(body.role ?? "laborer");
+  const logType = String(body.logType ?? "check_in");
   const intervalHours = Number(body.intervalHours);
   const windowOpen = String(body.windowOpen ?? "06:00");
   const windowClose = String(body.windowClose ?? "18:00");
@@ -9418,12 +9807,17 @@ app.post("/api/log-schedule", requireAuth, requireFarmAccess, requirePageAccess(
     res.status(400).json({ error: "Invalid role for log schedule" });
     return;
   }
+  if (logType !== "check_in" && logType !== "vet_visit") {
+    res.status(400).json({ error: "logType must be check_in or vet_visit" });
+    return;
+  }
   let id = `ls_${crypto.randomBytes(6).toString("hex")}`;
   const createdAtIso = new Date().toISOString();
   const row = {
     id,
     flockId,
     role,
+    logType,
     intervalHours,
     windowOpen,
     windowClose,
@@ -9432,10 +9826,10 @@ app.post("/api/log-schedule", requireAuth, requireFarmAccess, requirePageAccess(
   if (hasDb() && isPersistableUuid(flockId)) {
     try {
       const ins = await dbQuery(
-        `INSERT INTO log_schedule (flock_id, role, interval_hours, window_open, window_close)
-         VALUES ($1::uuid, $2, $3::numeric, $4::time, $5::time)
+        `INSERT INTO log_schedule (flock_id, role, log_type, interval_hours, window_open, window_close)
+         VALUES ($1::uuid, $2, $3, $4::numeric, $5::time, $6::time)
          RETURNING id::text AS id, created_at AS "createdAt"`,
-        [flockId, role, intervalHours, windowOpen, windowClose]
+        [flockId, role, logType, intervalHours, windowOpen, windowClose]
       );
       const r0 = ins.rows[0];
       if (r0?.id) {
@@ -9487,6 +9881,14 @@ app.patch("/api/log-schedule/:id", requireAuth, requireFarmAccess, requirePageAc
     }
     s.role = nextRole;
   }
+  if (body.logType != null) {
+    const nextType = String(body.logType);
+    if (nextType !== "check_in" && nextType !== "vet_visit") {
+      res.status(400).json({ error: "logType must be check_in or vet_visit" });
+      return;
+    }
+    s.logType = nextType;
+  }
   if (hasDb() && isPersistableUuid(s.id)) {
     try {
       await dbQuery(
@@ -9494,9 +9896,10 @@ app.patch("/api/log-schedule/:id", requireAuth, requireFarmAccess, requirePageAc
             SET interval_hours = $2::numeric,
                 window_open = $3::time,
                 window_close = $4::time,
-                role = $5
+                role = $5,
+                log_type = $6
           WHERE id = $1::uuid`,
-        [s.id, s.intervalHours, s.windowOpen, s.windowClose, s.role]
+        [s.id, s.intervalHours, s.windowOpen, s.windowClose, s.role, s.logType || "check_in"]
       );
     } catch (e) {
       console.error("[ERROR]", "[db] PATCH log-schedule:", e instanceof Error ? e.message : e);
@@ -10013,48 +10416,21 @@ app.post("/api/medicine/lots", requireAuth, requireFarmAccess, requirePageAccess
       quantityReceived,
     });
 
-    // Accounting: post medicine purchases directly to Odoo when cost is available.
+    // Persist unit cost when provided; ERPNext sync via clevaSync.
     const medLotId = ins.rows[0]?.id?.toString?.() ?? null;
     if (medLotId) {
       const unitCostRwf = body.unitCostRwf == null ? null : Number(body.unitCostRwf);
-      const canDirectPost = canDirectPostAccountingToOdoo(req.authUser);
-      const medAcctStatus = canDirectPost && unitCostRwf != null ? "approved" : "pending_approval";
       try {
         await dbQuery(
           `UPDATE medicine_lots
-              SET accounting_status = $1,
-                  unit_cost_rwf = $2,
+              SET accounting_status = 'not_applicable',
+                  unit_cost_rwf = $1,
                   updated_at = now()
-            WHERE id::text = $3`,
-          [medAcctStatus, unitCostRwf ?? null, medLotId]
+            WHERE id::text = $2`,
+          [unitCostRwf ?? null, medLotId]
         );
       } catch (e) {
         console.error("[ERROR]", "[accounting] set medicine lot accounting_status:", e instanceof Error ? e.message : e);
-      }
-      if (canDirectPost && unitCostRwf != null) {
-        // Resolve the medicine name from the inventory table (INSERT RETURNING doesn't join).
-        let medName = "Medicine";
-        try {
-          const nameRes = await dbQuery(`SELECT name FROM medicine_inventory WHERE id = $1`, [medicineId]);
-          medName = nameRes.rows[0]?.name ? String(nameRes.rows[0].name) : "Medicine";
-        } catch {}
-        const medPayload = mapMedicineLotToBill({
-          id: medLotId,
-          medicineName: medName,
-          lotNumber,
-          quantityReceived,
-          unitCostRwf,
-          supplier,
-          receivedAt,
-        });
-        enqueueOdooSync({
-          sourceTable: "medicine_lots",
-          sourceId: medLotId,
-          eventType: "medicine_purchase",
-          payload: medPayload,
-          triggeredByUserId: req.authUser.id,
-          triggeredByRole: req.authUser.role,
-        }).then(() => processOdooSyncOutbox(3)).catch(() => {});
       }
     }
 
@@ -11140,14 +11516,31 @@ app.get("/api/farm/weigh-in-trends", requireAuth, requireFarmAccess, requireAnyP
   }
 });
 
-app.use("/api/accounting", accountingRouter);
-app.use("/api/accounting-approvals", requireAuth, accountingApprovalsRouter);
 app.use("/api/ias41", requireAuth, ias41Router);
-app.use("/api/accounting-reconciliation", requireAuth, reconciliationRouter);
-app.use("/api/odoo-setup", requireAuth, odooSetupRouter);
+app.use("/api/farm-sales", requireAuth, farmSalesRouter);
+app.use("/api/pipeline", requireAuth, pipelineRouter);
+app.use(
+  "/api/market",
+  createPublicMarketRouter({
+    dbQuery,
+    hasDb,
+    ipWindowRateLimitMiddleware: systemConfig.ipWindowRateLimitMiddleware,
+    getAppSettingNumber: systemConfig.getAppSettingNumber,
+    getAppSetting: systemConfig.getAppSetting,
+  })
+);
+app.use("/api/farm-payroll", requireAuth, farmPayrollClosuresRouter);
 app.use("/api/entities", clevafarmEntitiesRouter);
 app.use("/api/webhooks/erpnext", erpnextWebhookRouter);
 app.use("/api/erpnext", requireAuth, erpnextRouter);
+app.use(
+  "/api/insights",
+  requireAuth,
+  createInsightsRouter({
+    dbQuery,
+    hasDb,
+  })
+);
 
 function scrubCompanyFromMemory(companyId) {
   const cid = String(companyId);
@@ -11269,19 +11662,22 @@ app.use((err, _req, res, _next) => {
     }
   }
 
-  // Init Odoo sync worker and accounting approvals router with DB access
-  initOdooSyncWorker(dbQuery, hasDb);
-  initAccountingApprovalsRouter(dbQuery, hasDb, clevaSync);
   initIas41Service(dbQuery, hasDb);
-  initReconciliationRouter(dbQuery, hasDb);
-  // Background worker: process any unprocessed outbox rows every 5 minutes
-  setInterval(() => {
-    if (hasDb()) {
-      processOdooSyncOutbox(10).catch((e) => {
-        console.error("[ERROR]", "[odoo-worker] background run:", e instanceof Error ? e.message : e);
+  initFarmSalesRouter(dbQuery, hasDb);
+  initPipelineRouter(dbQuery, hasDb, appendAudit);
+  initFarmPayrollClosuresRouter(dbQuery, hasDb);
+  const runAutoDraftLots = () => {
+    if (!hasDb()) return;
+    autoDraftReadyLots(dbQuery)
+      .then((r) => {
+        if (r.drafted.length) {
+          console.log("[INFO]", `[market] auto-drafted ${r.drafted.length} ready lots`);
+        }
+      })
+      .catch((e) => {
+        console.error("[ERROR]", "[market] auto-draft lots:", e instanceof Error ? e.message : e);
       });
-    }
-  }, 5 * 60 * 1000);
+  };
   setInterval(() => {
     if (hasDb()) {
       processClevaFarmOutbox(25).catch((e) => {
@@ -11289,6 +11685,8 @@ app.use((err, _req, res, _next) => {
       });
     }
   }, 45 * 1000);
+  setInterval(runAutoDraftLots, 15 * 60 * 1000);
+  setTimeout(runAutoDraftLots, 20 * 1000);
 
   if (hasDb()) {
     try {

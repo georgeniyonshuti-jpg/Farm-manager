@@ -42,12 +42,17 @@ export async function pgClientConfigFromDatabaseUrlAsync(databaseUrl) {
     host = r.address;
   }
 
+  const useSsl =
+    /sslmode=require/i.test(databaseUrl) ||
+    /supabase\.com/i.test(databaseUrl) ||
+    /render\.com/i.test(databaseUrl);
+
   return {
     host,
     port: p.port,
     user: p.user,
     password: p.password,
     database: p.database,
-    ssl: { rejectUnauthorized: false },
+    ...(useSsl ? { ssl: { rejectUnauthorized: false } } : {}),
   };
 }

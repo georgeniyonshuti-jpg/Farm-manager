@@ -69,3 +69,37 @@ export function memoryFlockIdVisible(flockId, flocksById, user, userCompanyId) {
   const flock = flocksById.get(String(flockId ?? ""));
   return flockVisibleToUser(flock, user, userCompanyId);
 }
+
+/**
+ * Filter in-memory inventory rows for a user.
+ * @param {Iterable<{ companyId?: string | null, company_id?: string | null, actorUserId?: string | null }>} rows
+ * @param {{ role?: string, companyId?: string | null } | null | undefined} user
+ * @param {string | null | undefined} userCompanyId
+ * @param {Map<string, { companyId?: string | null }>} [usersById]
+ */
+export function filterInventoryForUser(rows, user, userCompanyId, usersById = null) {
+  if (isPlatformSuperuser(user)) return [...rows];
+  const scoped = userCompanyId ?? user?.companyId ?? null;
+  if (!scoped) return [];
+  return [...rows].filter((row) => {
+    const rowCo = row?.companyId ?? row?.company_id ?? null;
+    if (rowCo) return String(rowCo) === String(scoped);
+    if (usersById && row?.actorUserId) {
+      const actor = usersById.get(String(row.actorUserId));
+      return actor?.companyId && String(actor.companyId) === String(scoped);
+    }
+    return false;
+  });
+}
+
+/**
+ * Append strict inventory company filter to SQL.
+ * @param {string} sql
+ * @param {unknown[]} params
+ * @param {string} userCompanyId
+ * @param {string} [alias]
+ */
+export function appendSqlInventoryCompanyFilter(sql, params, userCompanyId, alias = "t") {
+  params.push(userCompanyId);
+  return `${sql} AND ${alias}.company_id = $${params.length}::uuid`;
+}

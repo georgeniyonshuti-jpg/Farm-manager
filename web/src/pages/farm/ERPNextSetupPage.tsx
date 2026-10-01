@@ -1,18 +1,31 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
+import { ManagerPage } from "../../components/layout/ManagerPage";
+import { Button } from "../../components/ui/Button";
+import { TextLink } from "../../components/ui/TextLink";
+import { StatusPill } from "../../components/ui/StatusPill";
+import { NoticeStrip } from "../../components/ui/NoticeStrip";
+import { PageTabs, Select } from "../../components/ui";
 import { useAuth } from "../../auth/AuthContext";
 import { isSuperuser } from "../../auth/permissions";
-import { useERPNextConnection } from "../../context/OdooConnectionContext";
+import { useERPNextConnection } from "../../context/ERPNextConnectionContext";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
 import { useToast } from "../../components/Toast";
 import {
+  bootstrapChart,
   getAccounts,
+  getChartReadiness,
   getCompanies,
   getCostCenters,
   getErpnextConfig,
+  getERPNextHealth,
   getWarehouses,
   getWebhookStatus,
   saveErpnextConfig,
   saveWarehouseMapping,
+  type ChartReadiness,
+  type ChartReadinessItem,
 } from "../../api/erpnext.api";
 import {
   apiConfigToLocal,
@@ -20,6 +33,8 @@ import {
   type ErpnextAccountMappings,
 } from "../../lib/erpnextPrefs";
 import { redirectToERPNextLogin } from "../../auth/ERPNextOAuth";
+import { ERPNextSyncPanel } from "../../components/accounting/ERPNextSyncPanel";
+import { formatManagerDateTime } from "../../lib/formatManagerDateTime";
 
 type Company = { name: string; company_name?: string };
 type Account = { name: string; account_name?: string };
@@ -27,14 +42,77 @@ type CostCenter = { name: string; cost_center_name?: string };
 type Warehouse = { name: string; warehouse_name?: string };
 type WebhookRow = { doctype: string; event: string; url: string; active: boolean; name?: string | null };
 type BarnMapping = { barnName: string; erpnextWarehouse: string };
+type HealthInfo = {
+  ok?: boolean;
+  responseMs?: number;
+  failedLast24h?: number;
+  pendingCount?: number;
+  lastSuccessAt?: string | null;
+  authMode?: string;
+};
+
+type ErpTab = "overview" | "activity" | "setup";
 
 const BARN_NAMES = ["Barn A", "Barn B", "Barn C", "Main House"];
+const mgrInput = "!min-h-10 h-10 box-border py-0 text-sm leading-10";
+
+const ACCOUNT_PICKS = [
+  ["feedExpense", "Feed purchase"],
+  ["medicineExpense", "Medicine / vet"],
+  ["mortalityLoss", "Mortality loss"],
+  ["livestockAsset", "Livestock asset"],
+  ["revenue", "Flock sales"],
+  ["payrollExpense", "Payroll"],
+] as const;
+
+function ReadinessRows({ items }: { items: ChartReadinessItem[] }) {
+  if (!items.length) return null;
+  return (
+    <ul>
+      {items.map((item) => (
+        <li
+          key={item.field}
+          className="flex items-center gap-3 border-b border-[var(--border-color)] px-3 py-2.5 last:border-b-0"
+        >
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+              {item.number ? `${item.number} · ` : ""}
+              {item.label}
+            </p>
+            {item.value ? (
+              <p className="truncate font-mono text-[11px] text-[var(--text-secondary)]">{item.value}</p>
+            ) : null}
+          </div>
+          <StatusPill tone={item.ok ? "success" : "warning"}>{item.ok ? "Ready" : "Missing"}</StatusPill>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 export function ERPNextSetupPage() {
   const { token, user } = useAuth();
   const canEditErpnextCompany = isSuperuser(user);
+  const { companyHref } = useCompanyNav();
   const { status, loading, error, refetch } = useERPNextConnection();
   const { showToast } = useToast();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const tab: ErpTab = (() => {
+    const t = searchParams.get("tab");
+    if (t === "activity" || t === "setup" || t === "overview") return t;
+    if (searchParams.get("advanced") === "1") return "setup";
+    return "overview";
+  })();
+
+  function setTab(next: ErpTab) {
+    const params = new URLSearchParams(searchParams);
+    params.delete("advanced");
+    if (next === "overview") params.delete("tab");
+    else params.set("tab", next);
+    setSearchParams(params, { replace: true });
+  }
+
   const [companies, setCompanies] = useState<Company[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
@@ -45,6 +123,10 @@ export function ERPNextSetupPage() {
   const [accountMappings, setAccountMappings] = useState<ErpnextAccountMappings>({});
   const [barnMappings, setBarnMappings] = useState<BarnMapping[]>([]);
   const [saving, setSaving] = useState(false);
+  const [health, setHealth] = useState<HealthInfo | null>(null);
+  const [readiness, setReadiness] = useState<ChartReadiness | null>(null);
+  const [readinessLoading, setReadinessLoading] = useState(false);
+  const [bootstrapping, setBootstrapping] = useState(false);
 
   const loadConfig = useCallback(async () => {
     if (!token) return;
@@ -63,7 +145,7 @@ export function ERPNextSetupPage() {
         );
       }
     } catch {
-      /* fall back to localStorage cache */
+      /* fall back */
     }
   }, [token, status?.company]);
 
@@ -87,25 +169,60 @@ export function ERPNextSetupPage() {
     }
   }, [token, selectedCompany]);
 
-  useEffect(() => {
+  const loadHealth = useCallback(async () => {
     if (!token) return;
-    void getCompanies(token).then((data) => {
-      setCompanies(Array.isArray(data) ? data : []);
-    });
-    void loadConfig();
-  }, [token, loadConfig]);
+    try {
+      setHealth(await getERPNextHealth(token));
+    } catch {
+      setHealth(null);
+    }
+  }, [token]);
+
+  const loadReadiness = useCallback(async () => {
+    if (!token || !selectedCompany || !status?.connected) {
+      setReadiness(null);
+      return;
+    }
+    setReadinessLoading(true);
+    try {
+      const data = await getChartReadiness(token, selectedCompany);
+      setReadiness(data?.error && !data.farm_company ? data : data);
+    } catch (e) {
+      setReadiness({
+        ready: false,
+        company: selectedCompany,
+        missing: ["error"],
+        error: e instanceof Error ? e.message : "Could not load chart readiness",
+      });
+    } finally {
+      setReadinessLoading(false);
+    }
+  }, [token, selectedCompany, status?.connected]);
 
   useEffect(() => {
-    if (status?.company && !selectedCompany) {
-      setSelectedCompany(status.company);
-    }
+    if (!token) return;
+    void getCompanies(token).then((data) => setCompanies(Array.isArray(data) ? data : []));
+    void loadConfig();
+    void loadHealth();
+  }, [token, loadConfig, loadHealth]);
+
+  useEffect(() => {
+    if (status?.company && !selectedCompany) setSelectedCompany(status.company);
   }, [status?.company, selectedCompany]);
 
   useEffect(() => {
     void loadMeta();
   }, [loadMeta]);
 
-  async function persistConfig(nextCompany = selectedCompany, nextCc = selectedCostCenter, nextMaps = accountMappings) {
+  useEffect(() => {
+    void loadReadiness();
+  }, [loadReadiness]);
+
+  async function persistConfig(
+    nextCompany = selectedCompany,
+    nextCc = selectedCostCenter,
+    nextMaps = accountMappings
+  ) {
     if (!token) return;
     setSaving(true);
     try {
@@ -148,248 +265,359 @@ export function ERPNextSetupPage() {
     }
   }
 
+  async function runBootstrap() {
+    if (!token || !selectedCompany) return;
+    setBootstrapping(true);
+    try {
+      const result = await bootstrapChart(token, selectedCompany);
+      if (result?.error && !result.farm_company) {
+        showToast("error", result.error);
+      } else {
+        const created = Object.keys(result?.updated || {}).length;
+        showToast(
+          "success",
+          created > 0 ? `Created or linked ${created} farm chart item(s).` : "Farm chart already ready."
+        );
+      }
+      setReadiness(result);
+      void refetch();
+      void loadHealth();
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Bootstrap failed");
+    } finally {
+      setBootstrapping(false);
+    }
+  }
+
+  const missingCount = readiness?.missing?.length ?? 0;
+  const readyCount = useMemo(() => {
+    const all = [
+      ...(readiness?.accounts || []),
+      ...(readiness?.items || []),
+      ...(readiness?.warehouses || []),
+    ];
+    return all.filter((i) => i.ok).length;
+  }, [readiness]);
+
+  const connected = Boolean(status?.connected);
+  const disconnectReason = error || status?.error || "Not connected";
+
+  const headerActions = (
+    <>
+      <Button type="button" variant="secondary" size="sm" onClick={() => void refetch()}>
+        Test connection
+      </Button>
+      {!connected ? (
+        <Button type="button" variant="primary" size="sm" onClick={() => redirectToERPNextLogin()}>
+          Sign in
+        </Button>
+      ) : tab === "overview" && selectedCompany ? (
+        <Button
+          type="button"
+          variant="primary"
+          size="sm"
+          disabled={bootstrapping}
+          loading={bootstrapping}
+          onClick={() => void runBootstrap()}
+        >
+          {readiness?.ready ? "Refresh accounts" : "Create farm accounts"}
+        </Button>
+      ) : (
+        <TextLink href={companyHref("farm/erpnext")}>Open desk</TextLink>
+      )}
+    </>
+  );
+
+  const healthMeta = connected
+    ? [
+        health?.pendingCount != null ? `${health.pendingCount} pending` : null,
+        health?.failedLast24h != null ? `${health.failedLast24h} failed/24h` : null,
+        health?.responseMs != null ? `${health.responseMs} ms` : null,
+        health?.lastSuccessAt ? `OK ${formatManagerDateTime(health.lastSuccessAt)}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ")
+    : null;
+
   return (
-    <div className="space-y-6">
+    <ManagerPage variant="settings">
       <PageHeader
-        title="ERPNext integration"
-        subtitle="Connect ClevaFarm to ERPNext for accounting, inventory, and lending."
+        title="ERPNext"
+        action={headerActions}
+        tabs={
+          <PageTabs
+            aria-label="ERPNext sections"
+            value={tab}
+            onChange={(v) => setTab(v as ErpTab)}
+            options={[
+              { value: "overview", label: "Overview" },
+              { value: "activity", label: "Activity" },
+              { value: "setup", label: "Setup" },
+            ]}
+          />
+        }
       />
 
-      <section className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-neutral-900">Connection status</h2>
-            {loading && <p className="text-sm text-neutral-500">Checking ERPNext…</p>}
-            {!loading && status?.connected && (
-              <p className="text-sm text-emerald-700">
-                Connected as <strong>{status.user}</strong>
-                {status.company ? ` · ${status.company}` : ""}
-                {status.authMode ? ` · ${status.authMode}` : ""}
-              </p>
-            )}
-            {!loading && !status?.connected && (
-              <p className="text-sm text-red-600">{error || status?.error || "Not connected"}</p>
+      {tab === "overview" ? (
+        <div className="space-y-stack">
+          {!loading && !connected ? (
+            <NoticeStrip tone="danger">{disconnectReason}</NoticeStrip>
+          ) : null}
+
+          {connected || loading ? (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <StatusPill tone={loading ? "neutral" : "success"}>
+                    {loading ? "Checking…" : "Connected"}
+                  </StatusPill>
+                  {connected && status?.user ? (
+                    <p className="truncate text-sm text-[var(--text-primary)]">
+                      <span className="font-medium">{status.user}</span>
+                      {status.company ? (
+                        <span className="text-[var(--text-secondary)]"> · {status.company}</span>
+                      ) : null}
+                    </p>
+                  ) : null}
+                </div>
+                {healthMeta ? (
+                  <p className="mt-1 type-caption text-[var(--text-secondary)]">{healthMeta}</p>
+                ) : null}
+              </div>
+              {connected ? (
+                <TextLink href={companyHref("farm/erpnext")}>Open desk</TextLink>
+              ) : null}
+            </div>
+          ) : (
+            <p className="type-caption text-[var(--text-secondary)]">
+              Sign in to link this farm, then create farm accounts.
+            </p>
+          )}
+
+          {connected ? (
+          <div className="table-block">
+            <div className="flex items-center justify-between gap-2 border-b border-[var(--border-color)] px-3 py-2">
+              <p className="text-sm font-semibold text-[var(--text-primary)]">Farm accounts</p>
+              {selectedCompany && readiness ? (
+                <p className="type-caption text-[var(--text-secondary)]">
+                  {readiness.ready ? "Chart ready" : `${missingCount} missing`}
+                  {readyCount ? ` · ${readyCount} linked` : ""}
+                </p>
+              ) : null}
+            </div>
+
+            {!selectedCompany ? (
+              <div className="px-4 py-8 text-center">
+                <p className="text-sm font-semibold text-[var(--text-primary)]">Link a company</p>
+                <p className="mt-1 type-caption text-[var(--text-secondary)]">
+                  Choose the ERPNext company on the Setup tab.
+                </p>
+                <Button className="mt-3" variant="secondary" size="sm" onClick={() => setTab("setup")}>
+                  Open setup
+                </Button>
+              </div>
+            ) : readinessLoading && !readiness ? (
+              <p className="px-3 py-6 text-sm text-[var(--text-secondary)]">Checking farm chart…</p>
+            ) : readiness?.error && !readiness.farm_company ? (
+              <div className="px-4 py-8 text-center">
+                <p className="text-sm font-semibold text-[var(--text-primary)]">Farm company not linked</p>
+                <p className="mt-1 type-caption text-[var(--text-secondary)]">{readiness.error}</p>
+              </div>
+            ) : (
+              <div>
+                {(readiness?.accounts?.length || 0) > 0 ? (
+                  <div>
+                    <p className="type-label border-b border-[var(--border-color)] px-3 py-1.5 text-[var(--text-secondary)]">
+                      Accounts
+                    </p>
+                    <ReadinessRows items={readiness?.accounts || []} />
+                  </div>
+                ) : null}
+                {(readiness?.items?.length || 0) > 0 ? (
+                  <div>
+                    <p className="type-label border-b border-[var(--border-color)] px-3 py-1.5 text-[var(--text-secondary)]">
+                      Items
+                    </p>
+                    <ReadinessRows items={readiness?.items || []} />
+                  </div>
+                ) : null}
+                {(readiness?.warehouses?.length || 0) > 0 ? (
+                  <div>
+                    <p className="type-label border-b border-[var(--border-color)] px-3 py-1.5 text-[var(--text-secondary)]">
+                      Warehouses
+                    </p>
+                    <ReadinessRows items={readiness?.warehouses || []} />
+                  </div>
+                ) : null}
+                {!readiness?.accounts?.length &&
+                !readiness?.items?.length &&
+                !readiness?.warehouses?.length ? (
+                  <div className="px-4 py-8 text-center">
+                    <p className="text-sm font-semibold text-[var(--text-primary)]">No chart items yet</p>
+                    <p className="mt-1 type-caption text-[var(--text-secondary)]">
+                      Create farm accounts to link the chart of accounts.
+                    </p>
+                  </div>
+                ) : null}
+              </div>
             )}
           </div>
-          <span
-            className={`rounded-full px-3 py-1 text-xs font-semibold uppercase ${
-              status?.connected ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-700"
-            }`}
-          >
-            {status?.connected ? "Connected" : "Disconnected"}
-          </span>
+          ) : null}
         </div>
+      ) : null}
 
-        {status?.connected && (
-          <dl className="mt-4 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-            <div>
-              <dt className="text-neutral-500">Companies</dt>
-              <dd className="font-semibold">{status.companies ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-neutral-500">Customers</dt>
-              <dd className="font-semibold">{status.customers ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-neutral-500">Loans</dt>
-              <dd className="font-semibold">{status.loans ?? "—"}</dd>
-            </div>
-            <div>
-              <dt className="text-neutral-500">Accounts</dt>
-              <dd className="font-semibold">{status.accounts ?? "—"}</dd>
-            </div>
-          </dl>
-        )}
+      {tab === "activity" ? <ERPNextSyncPanel embedded /> : null}
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white"
-          >
-            Test connection
-          </button>
-          <button
-            type="button"
-            onClick={() => redirectToERPNextLogin()}
-            className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium"
-          >
-            Sign in with ERPNext
-          </button>
-        </div>
-      </section>
-
-      {!status?.connected && (
-        <section className="rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-950">
-          <h3 className="font-semibold">Setup instructions</h3>
-          <ol className="mt-2 list-decimal space-y-1 pl-5">
-            <li>
-              Log in with your ERPNext credentials (same email/password), or configure a service account API key on
-              the server for background sync.
-            </li>
-            <li>
-              ERPNext → My Settings → API Access → Generate Keys (for{" "}
-              <code className="rounded bg-white px-1">farmapi@clevacredit.com</code> service account only)
-            </li>
-            <li>
-              Server env: <code>ERPNEXT_WEBHOOK_SECRET</code>, <code>CLEVAFARM_API_SECRET</code>
-            </li>
-          </ol>
-        </section>
-      )}
-
-      <section className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm space-y-4">
-        <h2 className="text-lg font-semibold">Company &amp; cost center</h2>
-        {saving && <p className="text-xs text-neutral-500">Saving…</p>}
-        <label className="block text-sm">
-          <span className="text-neutral-600">ERPNext company</span>
-          {canEditErpnextCompany ? (
-            <select
-              className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-              value={selectedCompany}
-              onChange={(e) => saveCompany(e.target.value)}
+      {tab === "setup" ? (
+        !connected ? (
+          <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-color)] px-4 py-8 text-center">
+            <p className="text-sm font-semibold text-[var(--text-primary)]">Sign in to configure</p>
+            <p className="mt-1 type-caption text-[var(--text-secondary)]">
+              Company, cost center, and account mappings load after ERPNext is connected.
+            </p>
+            <Button
+              className="mt-4"
+              variant="primary"
+              size="sm"
+              onClick={() => redirectToERPNextLogin()}
             >
-              <option value="">Select company…</option>
-              {companies.map((c) => (
-                <option key={c.name} value={c.name}>
-                  {c.company_name || c.name}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <>
-              <p className="mt-1 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-neutral-700">
-                {selectedCompany || "Not linked yet"}
-              </p>
-              <p className="mt-1 text-xs text-neutral-500">
-                Linked by the platform administrator. Contact support to change this mapping.
-              </p>
-            </>
-          )}
-        </label>
-        <label className="block text-sm">
-          <span className="text-neutral-600">Default cost center</span>
-          <select
-            className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-            value={selectedCostCenter}
-            onChange={(e) => saveCostCenter(e.target.value)}
-            disabled={!selectedCompany}
-          >
-            <option value="">Select cost center…</option>
-            {costCenters.map((c) => (
-              <option key={c.name} value={c.name}>
-                {c.cost_center_name || c.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </section>
+              Sign in
+            </Button>
+          </div>
+        ) : (
+          <div className="w-full max-w-md space-y-section">
+            {saving ? <p className="type-caption text-[var(--text-secondary)]">Saving…</p> : null}
 
-      {selectedCompany && accounts.length > 0 && (
-        <section className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm space-y-3">
-          <h2 className="text-lg font-semibold">Account mapping</h2>
-          {(
-            [
-              ["feedExpense", "Feed purchase account"],
-              ["medicineExpense", "Medicine / vet expense account"],
-              ["mortalityLoss", "Mortality loss account"],
-              ["livestockAsset", "Livestock asset account"],
-              ["revenue", "Flock sales revenue account"],
-              ["payrollExpense", "Payroll expense account"],
-            ] as const
-          ).map(([key, label]) => (
-            <label key={key} className="block text-sm">
-              <span className="text-neutral-600">{label}</span>
-              <select
-                className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-                value={accountMappings[key] || ""}
-                onChange={(e) => updateMapping(key, e.target.value)}
-              >
-                <option value="">Default ERPNext account</option>
-                {accounts.map((a) => (
-                  <option key={a.name} value={a.name}>
-                    {a.account_name || a.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ))}
-        </section>
-      )}
+            <div className="space-y-3">
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-medium text-[var(--text-primary)]">
+                  Company
+                </span>
+                {canEditErpnextCompany ? (
+                  <Select
+                    className={mgrInput}
+                    value={selectedCompany}
+                    onChange={(e) => saveCompany(e.target.value)}
+                  >
+                    <option value="">Select company…</option>
+                    {companies.map((c) => (
+                      <option key={c.name} value={c.name}>
+                        {c.company_name || c.name}
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <>
+                    <p className="text-sm text-[var(--text-primary)]">
+                      {selectedCompany || "Not linked yet"}
+                    </p>
+                    <p className="mt-1 type-caption text-[var(--text-secondary)]">
+                      Linked by the platform administrator.
+                    </p>
+                  </>
+                )}
+              </label>
 
-      {selectedCompany && warehouses.length > 0 && (
-        <section className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm space-y-3">
-          <h2 className="text-lg font-semibold">Barn → warehouse mapping</h2>
-          <p className="text-sm text-neutral-600">Map each barn to an ERPNext warehouse for stock entries.</p>
-          {BARN_NAMES.map((barn) => {
-            const current = barnMappings.find((m) => m.barnName === barn)?.erpnextWarehouse || "";
-            return (
-              <label key={barn} className="block text-sm">
-                <span className="text-neutral-600">{barn}</span>
-                <select
-                  className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
-                  value={current}
-                  onChange={(e) => void updateBarnMapping(barn, e.target.value)}
+              <label className="block">
+                <span className="mb-1.5 block text-sm font-medium text-[var(--text-primary)]">
+                  Cost center
+                </span>
+                <Select
+                  className={mgrInput}
+                  value={selectedCostCenter}
+                  onChange={(e) => saveCostCenter(e.target.value)}
+                  disabled={!selectedCompany}
                 >
-                  <option value="">Select warehouse…</option>
-                  {warehouses.map((w) => (
-                    <option key={w.name} value={w.name}>
-                      {w.warehouse_name || w.name}
+                  <option value="">Select cost center…</option>
+                  {costCenters.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.cost_center_name || c.name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
-            );
-          })}
-        </section>
-      )}
+            </div>
 
-      <section className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm space-y-3">
-        <h2 className="text-lg font-semibold">Webhook setup</h2>
-        <p className="text-sm text-neutral-600">
-          Register these webhooks in ERPNext under Setup → Integrations → Webhook. Use the same secret as{" "}
-          <code>ERPNEXT_WEBHOOK_SECRET</code> on the farm API.
-        </p>
-        <div className="overflow-x-auto rounded-lg border border-neutral-200">
-          <table className="min-w-full text-sm">
-            <thead className="bg-neutral-50 text-left text-xs text-neutral-500">
-              <tr>
-                <th className="px-3 py-2">DocType</th>
-                <th className="px-3 py-2">Event</th>
-                <th className="px-3 py-2">URL</th>
-                <th className="px-3 py-2">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {webhooks.map((w) => (
-                <tr key={`${w.doctype}-${w.event}`} className="border-t border-neutral-100">
-                  <td className="px-3 py-2">{w.doctype}</td>
-                  <td className="px-3 py-2">{w.event}</td>
-                  <td className="px-3 py-2 font-mono text-xs max-w-xs truncate">{w.url}</td>
-                  <td className="px-3 py-2">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                        w.active ? "bg-emerald-100 text-emerald-800" : "bg-neutral-100 text-neutral-600"
-                      }`}
+            {selectedCompany && accounts.length > 0 ? (
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">Account mappings</h3>
+                {ACCOUNT_PICKS.map(([key, label]) => (
+                  <label key={key} className="block">
+                    <span className="mb-1.5 block text-sm text-[var(--text-secondary)]">{label}</span>
+                    <Select
+                      className={mgrInput}
+                      value={accountMappings[key] || ""}
+                      onChange={(e) => updateMapping(key, e.target.value)}
                     >
-                      {w.active ? "Active" : "Not registered"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {webhooks.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="px-3 py-4 text-neutral-500">
-                    Connect to ERPNext to check webhook registration status.
-                  </td>
-                </tr>
+                      <option value="">Default account</option>
+                      {accounts.map((a) => (
+                        <option key={a.name} value={a.name}>
+                          {a.account_name || a.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                ))}
+              </div>
+            ) : null}
+
+            {selectedCompany && warehouses.length > 0 ? (
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">Barn warehouses</h3>
+                {BARN_NAMES.map((barn) => {
+                  const current = barnMappings.find((m) => m.barnName === barn)?.erpnextWarehouse || "";
+                  return (
+                    <label key={barn} className="block">
+                      <span className="mb-1.5 block text-sm text-[var(--text-secondary)]">{barn}</span>
+                      <Select
+                        className={mgrInput}
+                        value={current}
+                        onChange={(e) => void updateBarnMapping(barn, e.target.value)}
+                      >
+                        <option value="">Select warehouse…</option>
+                        {warehouses.map((w) => (
+                          <option key={w.name} value={w.name}>
+                            {w.warehouse_name || w.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </label>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold text-[var(--text-primary)]">Webhooks</h3>
+              {webhooks.length === 0 ? (
+                <p className="type-caption text-[var(--text-secondary)]">None registered yet</p>
+              ) : (
+                <ul className="divide-y divide-[var(--border-color)] rounded-lg border border-[var(--border-color)]">
+                  {webhooks.map((w) => (
+                    <li
+                      key={`${w.doctype}-${w.event}-${w.url}`}
+                      className="flex items-center gap-3 px-3 py-2.5"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm text-[var(--text-primary)]">
+                          {w.doctype}
+                          <span className="text-[var(--text-secondary)]"> · {w.event}</span>
+                        </p>
+                        <p className="truncate font-mono text-[11px] text-[var(--text-secondary)]">
+                          {w.url}
+                        </p>
+                      </div>
+                      <StatusPill tone={w.active ? "success" : "neutral"}>
+                        {w.active ? "Active" : "Off"}
+                      </StatusPill>
+                    </li>
+                  ))}
+                </ul>
               )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
+            </div>
+          </div>
+        )
+      ) : null}
+    </ManagerPage>
   );
 }
-
-export { ERPNextSetupPage as OdooSetupPage };

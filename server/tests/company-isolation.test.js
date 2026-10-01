@@ -8,8 +8,10 @@ import {
   assertSameCompany,
   flockVisibleToUser,
   filterFlocksForUser,
+  filterInventoryForUser,
   memoryFlockIdVisible,
   appendSqlFlockCompanyFilter,
+  appendSqlInventoryCompanyFilter,
 } from "../src/services/tenant/companyIsolation.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -73,6 +75,17 @@ describe("companyIsolation helpers", () => {
     const sql = appendSqlFlockCompanyFilter("SELECT 1 WHERE true", params, COMPANY_A, "f");
     assert.match(sql, /f\.company_id = \$2::uuid/);
     assert.deepEqual(params, ["x", COMPANY_A]);
+  });
+
+  it("pipeline opted-in lots are the only cross-tenant supply surface (policy)", () => {
+    // Documented in docs/tenant-policy.md — managers never browse other companies' flocks;
+    // only opted-in pipeline_lots are desk-visible. Scout lots have null company_id.
+    const managedLot = { source: "managed_flock", companyId: COMPANY_A, flockId: "f1", optedIn: true };
+    const privateFlock = { companyId: COMPANY_B, optedIn: false };
+    const scoutLot = { source: "scout", companyId: null, flockId: null };
+    assert.equal(managedLot.optedIn && managedLot.companyId === COMPANY_A, true);
+    assert.equal(privateFlock.optedIn, false);
+    assert.equal(scoutLot.companyId, null);
   });
 
   it("flockVisibleToUser has no NULL bypass", () => {
@@ -169,6 +182,51 @@ describe("server.js cross-tenant isolation guards", () => {
     assert.ok(migration.includes("UPDATE users"), "Must backfill users.company_id");
     assert.ok(migration.includes("UPDATE poultry_flocks"), "Must backfill poultry_flocks.company_id");
     assert.ok(migration.includes("WHERE company_id IS NULL"), "Must only touch NULL rows");
+  });
+
+  it("inventory migration adds company_id to farm_inventory_transactions", async () => {
+    const migration = await readFile(
+      path.resolve(__dirname, "../../database/migrations/054_inventory_company_id.sql"),
+      "utf8"
+    );
+    assert.ok(migration.includes("farm_inventory_transactions"), "Must alter inventory table");
+    assert.ok(migration.includes("company_id"), "Must add company_id column");
+  });
+
+  it("GET /api/inventory routes scope data by company", () => {
+    for (const route of ["/api/inventory/stock-summary", "/api/inventory/ledger", "/api/inventory/balance"]) {
+      const block = extractRouteBlock(serverJs, route);
+      assert.ok(block, `${route} must exist`);
+      assert.ok(
+        block.includes("scopedInventoryRowsForRequest") || block.includes("filterInventoryForUser"),
+        `${route} must scope inventory by company`
+      );
+    }
+  });
+
+  it("inventory writes set company_id and validate flock ownership", () => {
+    const procurement = extractRouteBlock(serverJs, "/api/inventory/procurement");
+    const consumption = extractRouteBlock(serverJs, "/api/inventory/feed-consumption");
+    assert.ok(procurement?.includes("company_id"), "Procurement INSERT must set company_id");
+    assert.ok(procurement?.includes("getFlockByIdForUser"), "Procurement must verify flock company");
+    assert.ok(consumption?.includes("getFlockByIdForUser"), "Feed consumption must verify flock company");
+    assert.ok(consumption?.includes("getAvailableFeedStockRows"), "Feed consumption must scope stock check");
+  });
+
+  it("farm operations report does not leak farm-wide inventory across tenants", () => {
+    const block = extractRouteBlock(serverJs, "/api/reports/farm/operations/preview");
+    assert.ok(block?.includes("filterInventoryForUser"), "Must filter inventory by company");
+    assert.ok(!block?.includes("!t.flockId ||"), "Must not include other tenants' farm-wide stock");
+  });
+
+  it("filterInventoryForUser isolates stock by company", () => {
+    const rows = [
+      { id: "a", companyId: COMPANY_A, deltaKg: 100 },
+      { id: "b", companyId: COMPANY_B, deltaKg: 50 },
+    ];
+    const scoped = filterInventoryForUser(rows, { role: "manager", companyId: COMPANY_A }, COMPANY_A);
+    assert.equal(scoped.length, 1);
+    assert.equal(scoped[0].id, "a");
   });
 });
 

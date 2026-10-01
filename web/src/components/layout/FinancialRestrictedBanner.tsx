@@ -24,31 +24,28 @@ export function FinancialRestrictedBanner() {
   return (
     <>
       {/* Mobile: one compact row until expanded */}
-      <div
-        className="border-b border-amber-500/30 bg-amber-500/10 md:hidden"
-        role="status"
-      >
+      <div className="bg-amber-500/10 md:hidden" role="status">
         {!mobileExpanded ? (
           <button
             type="button"
             onClick={() => setMobileExpanded(true)}
-            className="flex w-full items-center justify-center gap-2 px-2 py-1 text-[11px] font-medium text-amber-400"
+            className="flex w-full items-center justify-center gap-2 px-shell-x py-1 text-[11px] font-medium text-amber-900 dark:text-amber-200"
             aria-expanded={false}
             aria-label={expandLabel}
           >
             <span className="truncate">{shortLabel}</span>
-            <span className="shrink-0 text-amber-300" aria-hidden>
+            <span className="shrink-0 opacity-70" aria-hidden>
               ▾
             </span>
           </button>
         ) : (
-          <div className="flex items-start justify-between gap-3 px-3 py-2 text-xs leading-snug text-amber-400">
+          <div className="flex items-start justify-between gap-3 px-shell-x py-2 text-xs leading-snug text-amber-900 dark:text-amber-100">
             <p className="min-w-0 flex-1">{message}</p>
             <div className="flex shrink-0 flex-col items-end gap-1">
               <button
                 type="button"
                 onClick={() => setMobileExpanded(false)}
-                className="rounded-md px-2 py-0.5 text-[11px] font-semibold text-amber-300 hover:bg-amber-500/15"
+                className="rounded-md px-2 py-0.5 text-[11px] font-semibold hover:bg-amber-500/15"
                 aria-label={collapseLabel}
               >
                 ▴
@@ -63,7 +60,7 @@ export function FinancialRestrictedBanner() {
                   }
                   setDismissed(true);
                 }}
-                className="bounce-tap rounded-lg px-2 py-1 text-[11px] font-semibold text-amber-300 underline decoration-amber-500/60 underline-offset-2 hover:bg-amber-500/10"
+                className="bounce-tap rounded-lg px-2 py-1 text-[11px] font-semibold underline underline-offset-2 hover:bg-amber-500/10"
                 aria-label={dismissLabel}
               >
                 ×
@@ -73,9 +70,9 @@ export function FinancialRestrictedBanner() {
         )}
       </div>
 
-      {/* Desktop: full banner */}
+      {/* Desktop: soft notice under AppTopBar */}
       <div
-        className="hidden items-start justify-between gap-3 border-b border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs leading-snug text-amber-400 sm:px-4 md:flex"
+        className="hidden items-start justify-between gap-3 bg-amber-500/10 px-shell-x py-2 text-xs leading-snug text-amber-900 dark:text-amber-100 md:flex"
         role="status"
       >
         <p className="min-w-0 flex-1">{message}</p>
@@ -89,7 +86,7 @@ export function FinancialRestrictedBanner() {
             }
             setDismissed(true);
           }}
-          className="bounce-tap shrink-0 rounded-lg px-2 py-1 text-xs font-semibold text-amber-300 underline decoration-amber-500/60 underline-offset-2 hover:bg-amber-500/10"
+          className="bounce-tap shrink-0 rounded-lg px-2 py-1 text-xs font-semibold underline underline-offset-2 hover:bg-amber-500/10"
           aria-label={dismissLabel}
         >
           ×

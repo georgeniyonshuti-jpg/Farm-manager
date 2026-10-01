@@ -29,14 +29,16 @@ function buildAuthHeaders(sessionCookie) {
 }
 
 async function erpnextFetch(path, options = {}, sessionCookie = null) {
-  const url = `${ERPNEXT_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+  const base = String(options.baseUrl || ERPNEXT_BASE_URL).replace(/\/+$/, "");
+  const { baseUrl: _ignored, ...fetchOptions } = options;
+  const url = `${base}${path.startsWith("/") ? path : `/${path}`}`;
   const res = await fetch(url, {
-    ...options,
+    ...fetchOptions,
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
       ...buildAuthHeaders(sessionCookie),
-      ...options.headers,
+      ...fetchOptions.headers,
     },
     credentials: sessionCookie ? "include" : "omit",
   });
@@ -53,6 +55,55 @@ async function erpnextFetch(path, options = {}, sessionCookie = null) {
 
   if (payload.data !== undefined) return payload.data;
   return payload.message ?? payload;
+}
+
+/**
+ * Call a whitelisted Frappe method on a specific tenant IdP base URL (API key).
+ * @param {string} baseUrl
+ * @param {string} method fully-qualified or clevafarm_integration.api.* path
+ * @param {{ params?: Record<string, string>, body?: Record<string, unknown>, method?: string }} opts
+ */
+export async function callMethodOnBase(baseUrl, method, opts = {}) {
+  const normalized = method.startsWith("clevafarm_integration.")
+    ? method
+    : method.includes(".")
+      ? method
+      : `clevafarm_integration.api.${method}`;
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(opts.params || {})) {
+    if (v !== undefined && v !== null && v !== "") q.set(k, String(v));
+  }
+  const qs = q.toString();
+  const httpMethod = (opts.method || (opts.body ? "POST" : "GET")).toUpperCase();
+  return erpnextFetch(
+    `/api/method/${normalized}${qs ? `?${qs}` : ""}`,
+    {
+      method: httpMethod,
+      baseUrl,
+      ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
+    },
+    null
+  );
+}
+
+export async function getInsightsMetaOnBase(baseUrl, farmCompany) {
+  return callMethodOnBase(baseUrl, "clevafarm_integration.api.superset_guest_token.get_insights_meta", {
+    params: farmCompany ? { farm_company: farmCompany } : {},
+  });
+}
+
+export async function getInsightsEmbedTokenOnBase(baseUrl, farmCompany, dashboardUuid) {
+  return callMethodOnBase(
+    baseUrl,
+    "clevafarm_integration.api.superset_guest_token.get_token_for_embed",
+    {
+      method: "POST",
+      body: {
+        farm_company: farmCompany,
+        ...(dashboardUuid ? { dashboard_uuid: dashboardUuid } : {}),
+      },
+    }
+  );
 }
 
 function resourceFilters(filters) {
@@ -86,7 +137,7 @@ export async function logoutSession(sessionCookie) {
   }).catch(() => {});
 }
 
-export async function exchangeOAuthToken({ code, redirectUri, clientId, clientSecret }) {
+export async function exchangeOAuthToken({ code, redirectUri, clientId, clientSecret, baseUrl }) {
   const params = new URLSearchParams({
     grant_type: "authorization_code",
     code,
@@ -94,7 +145,8 @@ export async function exchangeOAuthToken({ code, redirectUri, clientId, clientSe
     client_id: clientId || process.env.ERPNEXT_OAUTH_CLIENT_ID || "clevafarm",
     client_secret: clientSecret || process.env.ERPNEXT_OAUTH_CLIENT_SECRET || "",
   });
-  const res = await fetch(`${ERPNEXT_BASE_URL}/api/method/frappe.integrations.oauth2.get_token`, {
+  const origin = String(baseUrl || ERPNEXT_BASE_URL).replace(/\/+$/, "");
+  const res = await fetch(`${origin}/api/method/frappe.integrations.oauth2.get_token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params.toString(),
@@ -322,9 +374,36 @@ export async function getBalanceSheet(company, fromDate, toDate, sessionCookie =
 }
 
 export async function getCompanyList(sessionCookie = null) {
+  if (!sessionCookie) {
+    return erpnextFetch(
+      "/api/method/clevafarm_integration.api.company.list_erpnext_companies",
+      { method: "GET" },
+      null
+    );
+  }
   return erpnextFetch(
     `/api/resource/Company?fields=${encodeURIComponent(JSON.stringify(["name", "company_name", "default_currency", "country"]))}&limit_page_length=50`,
     {},
+    sessionCookie
+  );
+}
+
+export async function getChartReadiness(company, sessionCookie = null) {
+  const q = new URLSearchParams({ company: String(company || "") });
+  return erpnextFetch(
+    `/api/method/clevafarm_integration.api.company.get_chart_readiness?${q}`,
+    { method: "GET" },
+    sessionCookie
+  );
+}
+
+export async function bootstrapChartForCompany(company, sessionCookie = null) {
+  return erpnextFetch(
+    "/api/method/clevafarm_integration.api.company.bootstrap_chart_for_company",
+    {
+      method: "POST",
+      body: JSON.stringify({ company: String(company || "") }),
+    },
     sessionCookie
   );
 }

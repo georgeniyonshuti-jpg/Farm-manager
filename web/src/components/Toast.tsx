@@ -10,6 +10,15 @@ type ToastContextValue = {
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
+const TOAST_STYLES: Record<ToastType, string> = {
+  success:
+    "pointer-events-auto rounded-xl border border-[var(--status-success)]/30 bg-[var(--status-success-soft)] px-4 py-3 text-sm font-medium text-[var(--status-success)] shadow-lg",
+  error:
+    "pointer-events-auto rounded-xl border border-[var(--status-danger)]/30 bg-[var(--status-danger-soft)] px-4 py-3 text-sm font-medium text-[var(--status-danger)] shadow-lg",
+  info:
+    "pointer-events-auto rounded-xl border border-[var(--status-info)]/30 bg-[var(--status-info-soft)] px-4 py-3 text-sm font-medium text-[var(--status-info)] shadow-lg",
+};
+
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
 
@@ -32,17 +41,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         aria-live="polite"
       >
         {toasts.map((t) => (
-          <div
-            key={t.id}
-            role="status"
-            className={
-              t.type === "success"
-                ? "pointer-events-auto rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-950 shadow-lg"
-                : t.type === "info"
-                  ? "pointer-events-auto rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-800 shadow-lg dark:border-slate-600 dark:bg-slate-800/90 dark:text-slate-100"
-                  : "pointer-events-auto rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-950 shadow-lg"
-            }
-          >
+          <div key={t.id} role="status" className={TOAST_STYLES[t.type]}>
             {t.message}
           </div>
         ))}

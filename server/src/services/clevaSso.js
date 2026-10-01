@@ -1,9 +1,8 @@
 /**
  * Cleva Farm shared login (ERPNext OAuth Authorization Code).
  *
- * Tenant ERPNext users (including System Managers) become company_admin only —
- * never platform superuser. Companies are auto-provisioned and linked strictly
- * to the IdP origin used for the OAuth exchange.
+ * Tenant ERPNext users become company_admin only — never platform superuser —
+ * except the market-operator allowlist (default george@clevagroup.africa).
  */
 
 import crypto from "crypto";
@@ -12,11 +11,36 @@ import {
   ensureFarmCompanyForErp,
   getErpnextCompanyLinks,
 } from "./erpnext/erpnext.config.js";
+import { loadMarketHostCompany } from "./pipeline/marketHostCompany.js";
 
 const ERPNEXT_BASE_URL = (process.env.ERPNEXT_BASE_URL || "https://erp.clevacredit.com").replace(
   /\/+$/,
   ""
 );
+
+/** Sole market-operator platform superuser emails (override via env). */
+export const DEFAULT_PLATFORM_SUPERUSER_EMAILS = ["george@clevagroup.africa"];
+/** Legacy seed that must be demoted away from platform superuser. */
+export const LEGACY_PLATFORM_SUPERUSER_EMAILS = ["george@clevacredit.com"];
+
+export function platformSuperuserEmails(env = process.env) {
+  const raw = String(env.CLEVA_PLATFORM_SUPERUSER_EMAILS || "").trim();
+  if (!raw) return [...DEFAULT_PLATFORM_SUPERUSER_EMAILS];
+  return [
+    ...new Set(
+      raw
+        .split(",")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean)
+    ),
+  ];
+}
+
+export function isPlatformSuperuserIdentity(identity, env = process.env) {
+  if (identity?.is_platform_superuser) return true;
+  const email = String(identity?.email || "").trim().toLowerCase();
+  return Boolean(email && platformSuperuserEmails(env).includes(email));
+}
 
 const BLOCKED_IDP_LABELS = new Set([
   "www",
@@ -137,6 +161,14 @@ function unwrapMessage(value) {
   return value;
 }
 
+/** Merge ERP farm_bootstrap role into department keys (additive; preserves admin edits). */
+export function departmentKeysFromIdentity(identity, existingKeys = []) {
+  const keys = new Set(Array.isArray(existingKeys) ? existingKeys : []);
+  const erpRole = String(identity?.farm_bootstrap?.role || "").trim().toLowerCase();
+  if (erpRole === "junior_vet") keys.add("junior_vet");
+  return [...keys];
+}
+
 /** Map ERP farm_bootstrap app role → Farm PWA UserRole. */
 export function mapErpAppRoleToPwaRole(erpRole) {
   const role = String(erpRole || "").trim().toLowerCase();
@@ -154,7 +186,8 @@ export function mapErpAppRoleToPwaRole(erpRole) {
   }
 }
 
-function resolvePwaRoleFromIdentity(identity) {
+export function resolvePwaRoleFromIdentity(identity, env = process.env) {
+  if (isPlatformSuperuserIdentity(identity, env)) return "superuser";
   const bootstrap = identity?.farm_bootstrap;
   const fromBootstrap = mapErpAppRoleToPwaRole(bootstrap?.role);
   if (fromBootstrap) return fromBootstrap;
@@ -314,6 +347,7 @@ export async function exchangeClevaIdentity({ code, redirectUri, idpUrl }) {
     email,
     name,
     is_admin: Boolean(identity.is_admin),
+    is_platform_superuser: Boolean(identity.is_platform_superuser) || isPlatformSuperuserIdentity({ email }),
     erp_companies: erpCompanies,
     tenant_subdomain: identity.tenant_subdomain ? String(identity.tenant_subdomain) : null,
     idp_url: identity.idp_url ? String(identity.idp_url) : origin,
@@ -323,7 +357,9 @@ export async function exchangeClevaIdentity({ code, redirectUri, idpUrl }) {
 }
 
 /**
- * Upsert Farm user as company_admin for the IdP-linked company (never superuser).
+ * Upsert Farm user from Cleva IdP.
+ * Platform superuser only for the market-operator allowlist; all other SSO
+ * users are company-scoped (company_admin or field roles).
  */
 export async function syncClevaUserFromIdentity(identity, deps) {
   const {
@@ -333,47 +369,62 @@ export async function syncClevaUserFromIdentity(identity, deps) {
     usersByEmail,
     usersById,
     getCompanyById,
+    dbQuery,
   } = deps;
 
-  const email = identity.email;
+  const email = String(identity.email || "").trim().toLowerCase();
   const existingId = usersByEmail.get(email);
   const existing = existingId ? usersById.get(existingId) : null;
   const idpUrl = identity.idpOrigin || identity.idp_url || defaultIdpOrigin();
+  const platformSuper = isPlatformSuperuserIdentity(identity);
 
   await ensureCompaniesFromErp(identity.erp_companies, {
     idpUrl,
     tenantSubdomain: identity.tenant_subdomain,
   });
 
-  const links = await mapErpCompaniesToFarmLinks(identity.erp_companies, idpUrl);
-  if (!links.length) {
-    return { user: null, code: "no_companies" };
+  let links = await mapErpCompaniesToFarmLinks(identity.erp_companies, idpUrl);
+  let company = null;
+
+  if (links.length) {
+    const preferred =
+      existing?.companyId && links.some((l) => String(l.companyId) === String(existing.companyId))
+        ? links.find((l) => String(l.companyId) === String(existing.companyId))
+        : links[0];
+    company = preferred ? await getCompanyById(preferred.companyId) : null;
   }
 
-  const preferred =
-    existing?.companyId && links.some((l) => String(l.companyId) === String(existing.companyId))
-      ? links.find((l) => String(l.companyId) === String(existing.companyId))
-      : links[0];
+  if (!company && platformSuper && typeof dbQuery === "function") {
+    const host = await loadMarketHostCompany(dbQuery);
+    if (host.ok && host.company) {
+      company = await getCompanyById(host.company.id);
+    }
+  }
 
-  const company = await getCompanyById(preferred.companyId);
   if (!company) {
     return { user: null, code: "no_companies" };
   }
 
   const pwaRole = resolvePwaRoleFromIdentity(identity);
+  // Allowlist wins; never keep a stale superuser for other Cleva SSO accounts.
+  const resolvedRole = platformSuper ? "superuser" : pwaRole === "superuser" ? "company_admin" : pwaRole;
   const fieldRoles = new Set(["laborer", "vet", "vet_manager", "dispatcher"]);
-  const isFieldRole = fieldRoles.has(pwaRole);
+  const isFieldRole = fieldRoles.has(resolvedRole);
+  const pageAccess =
+    resolvedRole === "company_admin" || resolvedRole === "superuser"
+      ? null
+      : existing?.pageAccess ?? null;
 
   const row = {
     id: existing?.id || crypto.randomUUID(),
     email,
     displayName: identity.name,
     passwordHash: existing?.passwordHash || hashPassword(crypto.randomBytes(32).toString("hex")),
-    role: pwaRole,
-    businessUnitAccess: isFieldRole ? "farm" : "both",
+    role: resolvedRole,
+    businessUnitAccess: isFieldRole ? "farm" : existing?.businessUnitAccess || "both",
     canViewSensitiveFinancial: !isFieldRole,
-    departmentKeys: existing?.departmentKeys ?? [],
-    pageAccess: existing?.pageAccess ?? null,
+    departmentKeys: departmentKeysFromIdentity(identity, existing?.departmentKeys),
+    pageAccess,
     companyId: company.id,
     companySlug: company.slug,
     companyName: company.name,

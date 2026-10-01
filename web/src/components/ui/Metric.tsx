@@ -20,12 +20,12 @@ const TREND_ARROW: Record<Trend, string> = {
 export function Metric({ label, value, context, trend, trendLabel, className = "" }: Props) {
   return (
     <div className={`min-w-0 ${className}`}>
-      <p className="type-label">{label}</p>
-      <div className="mt-1 flex items-baseline gap-2">
-        <p className="type-metric text-[var(--text-primary)] animate-count">{value}</p>
+      <p className="type-label truncate">{label}</p>
+      <div className="mt-1 flex min-w-0 items-baseline gap-2">
+        <p className="type-metric whitespace-nowrap text-[var(--text-primary)] animate-count">{value}</p>
         {trend ? (
           <span
-            className={`text-xs font-semibold ${
+            className={`shrink-0 text-xs font-semibold ${
               trend === "up"
                 ? "text-[var(--status-success)]"
                 : trend === "down"
@@ -38,7 +38,7 @@ export function Metric({ label, value, context, trend, trendLabel, className = "
           </span>
         ) : null}
       </div>
-      {context ? <p className="mt-1 type-caption">{context}</p> : null}
+      {context ? <p className="mt-1 type-caption truncate">{context}</p> : null}
     </div>
   );
 }

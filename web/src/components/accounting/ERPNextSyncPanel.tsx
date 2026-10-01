@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
-import { useERPNextConnection } from "../../context/OdooConnectionContext";
+import { useERPNextConnection } from "../../context/ERPNextConnectionContext";
 import {
   getErpnextJournalEntries,
   getErpnextSyncLog,
@@ -9,8 +9,15 @@ import {
   syncFeedPurchaseToERPNext,
 } from "../../api/erpnext.api";
 import { getStoredErpnextCompany, getStoredErpnextCostCenter } from "../../lib/erpnextPrefs";
-import { ERPNextSyncBadge, type ERPNextSyncState } from "../accounting/ERPNextSyncBadge";
+import { ERPNextSyncBadge, type ERPNextSyncState } from "./ERPNextSyncBadge";
 import { useToast } from "../Toast";
+import { DataTable, type DataColumn } from "../ui/DataTable";
+import { TableToolbar } from "../ui/TableToolbar";
+import { SegmentedControl } from "../ui/Field";
+import { ToolbarSearch } from "../ui/ToolbarSearch";
+import { Button } from "../ui/Button";
+import { formatManagerDateTime } from "../../lib/formatManagerDateTime";
+import { useTableQueryParams } from "../../hooks/useTableQueryParams";
 
 type SyncLogEntry = {
   id: string;
@@ -38,9 +45,17 @@ type HealthInfo = {
   authMode?: string;
 };
 
+type StatusFilter = "all" | "success" | "failed" | "pending";
+
 const POLL_MS = 15000;
 
-export function ERPNextSyncPanel() {
+function normalizeStatus(status: string): "success" | "failed" | "pending" {
+  if (status === "success" || status === "sent") return "success";
+  if (status === "failed") return "failed";
+  return "pending";
+}
+
+export function ERPNextSyncPanel({ embedded = false }: { embedded?: boolean }) {
   const { token } = useAuth();
   const { status, refetch } = useERPNextConnection();
   const { showToast } = useToast();
@@ -49,6 +64,15 @@ export function ERPNextSyncPanel() {
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [retrying, setRetrying] = useState(false);
+  const { values: query, setValue: setQuery } = useTableQueryParams({
+    status: "all",
+    q: "",
+  });
+  const statusFilter = (query.status as StatusFilter) || "all";
+  const search = query.q;
+  const setStatusFilter = (v: StatusFilter) => setQuery("status", v);
+  const setSearch = (v: string) => setQuery("q", v);
+  const [errorOpenId, setErrorOpenId] = useState<string | null>(null);
   const prevFailedRef = useRef(0);
 
   const company = getStoredErpnextCompany() || status?.company || "";
@@ -125,127 +149,294 @@ export function ERPNextSyncPanel() {
   }
 
   function badgeFor(entry: SyncLogEntry): ERPNextSyncState {
-    if (entry.status === "success") return "synced";
-    if (entry.status === "failed") return "failed";
+    const n = normalizeStatus(entry.status);
+    if (n === "success") return "synced";
+    if (n === "failed") return "failed";
     return "pending";
   }
 
-  const failed = syncLog.filter((e) => e.status === "failed");
-  const synced = syncLog.filter((e) => e.status === "success");
+  const counts = useMemo(() => {
+    let success = 0;
+    let failed = 0;
+    let pending = 0;
+    for (const e of syncLog) {
+      const n = normalizeStatus(e.status);
+      if (n === "success") success += 1;
+      else if (n === "failed") failed += 1;
+      else pending += 1;
+    }
+    return { success, failed, pending, all: syncLog.length };
+  }, [syncLog]);
+
+  const filteredLog = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return syncLog.filter((e) => {
+      if (statusFilter !== "all" && normalizeStatus(e.status) !== statusFilter) return false;
+      if (!q) return true;
+      const hay = [e.eventType, e.erpnextRef, e.error, e.sourceId, e.status]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [syncLog, statusFilter, search]);
+
+  const isFiltered = statusFilter !== "all" || search.trim().length > 0;
+
+  const syncColumns: DataColumn<SyncLogEntry>[] = [
+    {
+      key: "type",
+      header: "Type",
+      render: (row) => (
+        <span className="inline-flex rounded-full border border-[var(--border-color)] bg-[var(--surface-subtle)] px-2 py-0.5 text-[11px] font-semibold text-[var(--text-secondary)]">
+          {row.eventType}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      badge: true,
+      render: (row) => (
+        <div className="relative inline-flex flex-col items-start gap-1">
+          <button
+            type="button"
+            className="text-left"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (row.error) setErrorOpenId((id) => (id === row.id ? null : row.id));
+            }}
+            title={row.error ? "Show error" : undefined}
+          >
+            <ERPNextSyncBadge state={badgeFor(row)} reference={row.erpnextRef} />
+          </button>
+          {errorOpenId === row.id && row.error ? (
+            <p className="max-w-xs rounded-md border border-[var(--status-danger)]/30 bg-[var(--status-danger-soft)] px-2 py-1 text-[11px] text-[var(--status-danger)]">
+              {row.error}
+            </p>
+          ) : null}
+        </div>
+      ),
+    },
+    {
+      key: "ref",
+      header: "ERPNext document",
+      className: "tbl-mono",
+      render: (row) => (
+        <span className="text-[var(--text-secondary)]">{row.erpnextRef || "—"}</span>
+      ),
+    },
+    {
+      key: "at",
+      header: "When",
+      render: (row) => (
+        <span className="text-xs text-[var(--text-muted)]" title={row.at}>
+          {formatManagerDateTime(row.at)}
+        </span>
+      ),
+    },
+  ];
+
+  const journalColumns: DataColumn<JournalEntry>[] = [
+    {
+      key: "name",
+      header: "Name",
+      className: "tbl-mono",
+      render: (row) => row.name,
+    },
+    {
+      key: "date",
+      header: "Date",
+      render: (row) => row.posting_date || "—",
+    },
+    {
+      key: "remark",
+      header: "Remark",
+      render: (row) => (
+        <span className="max-w-xs truncate text-[var(--text-secondary)]">{row.user_remark || "—"}</span>
+      ),
+    },
+    {
+      key: "debit",
+      header: "Debit",
+      numeric: true,
+      render: (row) => row.total_debit?.toLocaleString() ?? "—",
+    },
+  ];
 
   return (
-    <section className="space-y-5">
-      {!status?.connected && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          ERPNext is not connected. Configure under <strong>Farm → ERPNext integration</strong> or sign in with
-          ERPNext.
+    <section className={embedded ? "space-y-stack" : "space-y-5"}>
+      {!embedded && !status?.connected && (
+        <div className="rounded-lg border border-[var(--status-warning)]/30 bg-[var(--status-warning-soft)] p-4 text-sm text-[var(--status-warning)]">
+          ERPNext is not connected. Configure under <strong>Farm → ERPNext</strong> or sign in with ERPNext.
         </div>
       )}
 
+      {!embedded && (
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-          <p className="text-xs font-medium text-emerald-800">Synced (recent)</p>
-          <p className="text-2xl font-bold text-emerald-950">{synced.length}</p>
+        <div className="rounded-lg border border-[var(--status-success)]/30 bg-[var(--status-success-soft)] p-4">
+          <p className="text-xs font-medium text-[var(--status-success)]">Synced (recent)</p>
+          <p className="text-2xl font-bold text-[var(--text-primary)]">{counts.success}</p>
         </div>
-        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
-          <p className="text-xs font-medium text-red-800">Failed (recent)</p>
-          <p className="text-2xl font-bold text-red-950">{failed.length}</p>
+        <div className="rounded-lg border border-[var(--status-danger)]/30 bg-[var(--status-danger-soft)] p-4">
+          <p className="text-xs font-medium text-[var(--status-danger)]">Failed (recent)</p>
+          <p className="text-2xl font-bold text-[var(--text-primary)]">{counts.failed}</p>
         </div>
-        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
-          <p className="text-xs font-medium text-amber-800">Pending entities</p>
-          <p className="text-2xl font-bold text-amber-950">{health?.pendingCount ?? "—"}</p>
+        <div className="rounded-lg border border-[var(--status-warning)]/30 bg-[var(--status-warning-soft)] p-4">
+          <p className="text-xs font-medium text-[var(--status-warning)]">Pending entities</p>
+          <p className="text-2xl font-bold text-[var(--text-primary)]">{health?.pendingCount ?? "—"}</p>
         </div>
-        <div className="rounded-lg border border-neutral-200 bg-white p-4">
-          <p className="text-xs font-medium text-neutral-600">API latency</p>
-          <p className="text-sm font-semibold text-neutral-900">
+        <div className="rounded-lg border border-[var(--border-color)] bg-[var(--surface-card)] p-4">
+          <p className="text-xs font-medium text-[var(--text-muted)]">API latency</p>
+          <p className="text-sm font-semibold text-[var(--text-primary)]">
             {health?.responseMs != null ? `${health.responseMs} ms` : "—"}
             {health?.authMode ? ` · ${health.authMode}` : ""}
           </p>
-          {health?.lastSuccessAt && (
-            <p className="text-xs text-neutral-500 mt-1">
-              Last OK: {new Date(health.lastSuccessAt).toLocaleString()}
+          {health?.lastSuccessAt ? (
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
+              Last OK: {formatManagerDateTime(health.lastSuccessAt)}
             </p>
-          )}
+          ) : null}
         </div>
       </div>
+      )}
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => void load()}
-          className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium"
-        >
-          {loading ? "Refreshing…" : "Refresh"}
-        </button>
-        <button
-          type="button"
-          disabled={!status?.connected || !company}
-          onClick={() => void retryFeed()}
-          className="rounded-lg bg-emerald-800 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-        >
-          Test feed sync
-        </button>
-        <button
-          type="button"
-          disabled={retrying || failed.length === 0}
-          onClick={() => void retryAllFailed()}
-          className="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-800 disabled:opacity-50"
-        >
-          {retrying ? "Retrying…" : "Retry all failed"}
-        </button>
+      {!embedded ? (
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="secondary" size="sm" onClick={() => void load()}>
+            {loading ? "Refreshing…" : "Refresh"}
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            disabled={!status?.connected || !company}
+            onClick={() => void retryFeed()}
+          >
+            Test feed sync
+          </Button>
+          <Button
+            type="button"
+            variant="dangerGhost"
+            size="sm"
+            disabled={retrying || counts.failed === 0}
+            onClick={() => void retryAllFailed()}
+          >
+            {retrying ? "Retrying…" : "Retry all failed"}
+          </Button>
+        </div>
+      ) : null}
+
+      <div className={embedded ? "table-block" : "space-y-2"}>
+        {!embedded ? <h3 className="text-sm font-semibold text-[var(--text-primary)]">Sync log</h3> : null}
+        <DataTable<SyncLogEntry>
+          columns={syncColumns}
+          rows={filteredLog}
+          rowKey={(row) => row.id}
+          flush={embedded}
+          isFiltered={isFiltered}
+          emptyTitle="No sync events yet"
+          emptyDescription=""
+          filteredEmptyTitle="No matching sync events"
+          filteredEmptyDescription=""
+          toolbar={
+            <TableToolbar
+              filters={
+                <SegmentedControl
+                  size="sm"
+                  value={statusFilter}
+                  onChange={(v) => setStatusFilter(v as StatusFilter)}
+                  options={[
+                    { value: "all", label: "All", badge: counts.all || undefined },
+                    { value: "success", label: "Sent", badge: counts.success || undefined },
+                    { value: "failed", label: "Failed", badge: counts.failed || undefined },
+                    { value: "pending", label: "Pending", badge: counts.pending || undefined },
+                  ]}
+                />
+              }
+              search={
+                <ToolbarSearch
+                  placeholder="Search type, doc, error…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  label="Search sync log"
+                />
+              }
+              meta={`${filteredLog.length} of ${syncLog.length}`}
+              actions={
+                <>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => void load()}>
+                    {loading ? "Refreshing…" : "Refresh"}
+                  </Button>
+                  {embedded ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={!status?.connected || !company}
+                        onClick={() => void retryFeed()}
+                      >
+                        Test sync
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="dangerGhost"
+                        size="sm"
+                        disabled={retrying || counts.failed === 0}
+                        onClick={() => void retryAllFailed()}
+                      >
+                        {retrying ? "Retrying…" : "Retry failed"}
+                      </Button>
+                    </>
+                  ) : null}
+                </>
+              }
+            />
+          }
+          renderMobileCard={(row) => (
+            <div className="space-y-1.5 rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-sm)]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold text-[var(--text-secondary)]">{row.eventType}</span>
+                <ERPNextSyncBadge state={badgeFor(row)} compact />
+              </div>
+              <p className="text-xs text-[var(--text-muted)]">
+                {row.erpnextRef ? `${row.erpnextRef} · ` : ""}
+                {formatManagerDateTime(row.at)}
+              </p>
+              {row.error ? <p className="text-xs text-[var(--status-danger)]">{row.error}</p> : null}
+            </div>
+          )}
+        />
       </div>
 
-      <div>
-        <h3 className="mb-2 text-sm font-semibold text-neutral-900">Recent sync log</h3>
-        {syncLog.length === 0 ? (
-          <p className="text-sm text-neutral-500">No ERPNext sync events yet.</p>
-        ) : (
-          <ul className="space-y-2">
-            {syncLog.map((entry) => (
-              <li
-                key={entry.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm"
-              >
-                <div>
-                  <span className="font-medium">{entry.eventType}</span>
-                  <span className="ml-2 text-xs text-neutral-500">{new Date(entry.at).toLocaleString()}</span>
-                  {entry.error && <p className="text-xs text-red-600 mt-0.5">{entry.error}</p>}
-                </div>
-                <ERPNextSyncBadge state={badgeFor(entry)} reference={entry.erpnextRef} />
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div>
-        <h3 className="mb-2 text-sm font-semibold text-neutral-900">ERPNext journal entries</h3>
-        {journalEntries.length === 0 ? (
-          <p className="text-sm text-neutral-500">No journal entries loaded.</p>
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-neutral-200">
-            <table className="min-w-full text-sm">
-              <thead className="bg-neutral-50 text-left text-xs text-neutral-500">
-                <tr>
-                  <th className="px-3 py-2">Name</th>
-                  <th className="px-3 py-2">Date</th>
-                  <th className="px-3 py-2">Remark</th>
-                  <th className="px-3 py-2">Debit</th>
-                </tr>
-              </thead>
-              <tbody>
-                {journalEntries.map((je) => (
-                  <tr key={je.name} className="border-t border-neutral-100">
-                    <td className="px-3 py-2 font-mono text-xs">{je.name}</td>
-                    <td className="px-3 py-2">{je.posting_date || "—"}</td>
-                    <td className="px-3 py-2 max-w-xs truncate">{je.user_remark || "—"}</td>
-                    <td className="px-3 py-2">{je.total_debit?.toLocaleString() ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      <div className={embedded ? "table-block" : "space-y-2"}>
+        <div
+          className={
+            embedded
+              ? "border-b border-[var(--border-color)] px-3 py-2"
+              : undefined
+          }
+        >
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Journal entries</h3>
+        </div>
+        <DataTable<JournalEntry>
+          columns={journalColumns}
+          rows={journalEntries}
+          rowKey={(row) => row.name}
+          flush={embedded}
+          emptyTitle="No journal entries"
+          emptyDescription=""
+          renderMobileCard={(row) => (
+            <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3">
+              <p className="font-mono text-xs font-semibold">{row.name}</p>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">
+                {row.posting_date || "—"} · {row.total_debit?.toLocaleString() ?? "—"}
+              </p>
+              <p className="mt-1 truncate text-sm text-[var(--text-secondary)]">{row.user_remark || "—"}</p>
+            </div>
+          )}
+        />
       </div>
     </section>
   );

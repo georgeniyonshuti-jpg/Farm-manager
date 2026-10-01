@@ -68,6 +68,17 @@ describe("ops-board growth & valuation fields", () => {
     assert.ok(block.includes("farmTotals"), "Must return farmTotals");
     assert.ok(block.includes("getReferenceMarketPricing"), "Must read reference market pricing");
   });
+
+  it("ops-board exposes growth tracker fields and structured growthInsights", () => {
+    const block = extractRouteBlock(serverJs, "/api/farm/ops-board");
+    assert.ok(block.includes("feedToDateKg"), "Must expose feedToDateKg per flock");
+    assert.ok(block.includes("adgGramsPerDay"), "Must expose adgGramsPerDay per flock");
+    assert.ok(block.includes("fcrStatus"), "Must expose fcrStatus per flock");
+    assert.ok(block.includes("daysSinceWeighIn"), "Must expose daysSinceWeighIn per flock");
+    assert.ok(block.includes("growthInsights"), "Must return growthInsights array");
+    assert.ok(block.includes("totalFeedToDateKg"), "Must aggregate totalFeedToDateKg in farmTotals");
+    assert.ok(block.includes("flocksAboveTargetFcr"), "Must aggregate flocksAboveTargetFcr in farmTotals");
+  });
 });
 
 describe("weigh-in trends API", () => {
@@ -96,6 +107,10 @@ describe("dashboardAdapters growth helpers", async () => {
   const {
     weightVsTargetSeries,
     biomassSummary,
+    growthTrackerSummary,
+    growthScorecardRows,
+    fcrStatusLabel,
+    trendArrowLabel,
     farmAverageWeightTrend,
     flockWeightTrendChartData,
     FLOCK_TREND_COLORS,
@@ -162,6 +177,66 @@ describe("dashboardAdapters growth helpers", async () => {
     assert.equal(summary.belowTargetCount, 1);
     assert.equal(summary.staleWeighInCount, 1);
     assert.equal(summary.avgFcr, 1.65);
+  });
+
+  const sampleFlock = (overrides) => ({
+    flockId: "f1",
+    label: "Barn-A",
+    ageDays: 28,
+    latestWeightKg: 2,
+    expectedWeightKg: 2.2,
+    weightDeviationPct: -9,
+    latestFcr: 1.75,
+    expectedFcrRange: { min: 1.4, max: 1.6 },
+    fcrStatus: "warning",
+    feedToDateKg: 1200,
+    feedPerBirdKg: 3.2,
+    adgGramsPerDay: 55,
+    daysSinceWeighIn: 3,
+    latestWeighDate: new Date().toISOString(),
+    ...overrides,
+  });
+
+  it("growthTrackerSummary merges biomass with feed and ADG farm totals", () => {
+    const summary = growthTrackerSummary(
+      [
+        sampleFlock({ flockId: "a", latestFcr: 1.75, fcrStatus: "warning" }),
+        sampleFlock({
+          flockId: "b",
+          label: "Barn-B",
+          weightDeviationPct: -2,
+          latestFcr: 1.5,
+          fcrStatus: "on_track",
+          adgGramsPerDay: 45,
+        }),
+      ],
+      { totalFeedToDateKg: 5000, avgFeedPerBirdKg: 3.1, flocksAboveTargetFcr: 1 },
+    );
+    assert.equal(summary.totalFeedToDateKg, 5000);
+    assert.equal(summary.avgFeedPerBirdKg, 3.1);
+    assert.equal(summary.flocksAboveTargetFcr, 1);
+    assert.equal(summary.avgAdgGramsPerDay, 50);
+    assert.equal(summary.fcrWatchCount, 1);
+  });
+
+  it("growthScorecardRows prioritizes underweight and high-FCR flocks", () => {
+    const rows = growthScorecardRows(
+      [
+        sampleFlock({ flockId: "ok", weightDeviationPct: 0, latestFcr: 1.5, fcrStatus: "on_track" }),
+        sampleFlock({ flockId: "bad", weightDeviationPct: -12, latestFcr: 1.9, fcrStatus: "warning" }),
+        sampleFlock({ flockId: "mid", weightDeviationPct: -6, latestFcr: 1.65, fcrStatus: "watch" }),
+      ],
+      2,
+    );
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].flockId, "bad");
+  });
+
+  it("fcrStatusLabel and trendArrowLabel map known values", () => {
+    assert.equal(fcrStatusLabel("on_track"), "On track");
+    assert.equal(fcrStatusLabel("warning"), "High");
+    assert.equal(trendArrowLabel("up"), "↑");
+    assert.equal(trendArrowLabel("flat"), "→");
   });
 
   it("farmAverageWeightTrend groups by date", () => {

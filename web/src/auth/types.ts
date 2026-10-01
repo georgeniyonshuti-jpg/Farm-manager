@@ -8,6 +8,7 @@ export type UserRole =
   | "laborer"
   | "procurement_officer"
   | "sales_coordinator"
+  | "buyer"
   | "investor"
   | "dispatcher";
 
@@ -39,6 +40,8 @@ export type SessionUser = {
   erpnextAccess?: boolean;
   /** ERP app role from farm_bootstrap (laborer, junior_vet, vet_manager, admin). */
   erpAppRole?: string;
+  /** Preferred UI language from ERP farm_bootstrap ("rw" | "en"). */
+  preferredLanguage?: "rw" | "en" | string;
 };
 
 export type AuthState = {

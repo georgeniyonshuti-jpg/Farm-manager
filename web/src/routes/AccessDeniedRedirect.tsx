@@ -18,6 +18,6 @@ export function AccessDeniedRedirect() {
     showToast("info", ACCESS_DENIED_MESSAGE);
   }, [showToast]);
 
-  const home = user ? defaultHomeForUser(user.role) : "/login";
+  const home = user ? defaultHomeForUser(user.role, undefined, user.pageAccess) : "/login";
   return <Navigate to={home} replace />;
 }

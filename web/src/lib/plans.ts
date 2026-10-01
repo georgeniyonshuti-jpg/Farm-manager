@@ -6,9 +6,13 @@ export interface Plan {
   maxUsers: number;
   maxFlocks: number;
   features: string[];
+  stripePriceId?: string | null;
+  sortOrder?: number;
+  isActive?: boolean;
 }
 
-export const PLANS: Plan[] = [
+/** Fallback when API is unavailable (matches migration 056 seed). */
+export const DEFAULT_PLANS: Plan[] = [
   {
     id: "starter",
     name: "Starter",
@@ -35,10 +39,13 @@ export const PLANS: Plan[] = [
       "Up to 25 team members",
       "Up to 20 flocks",
       "Everything in Starter",
-      "Odoo integration",
+      "ERPNext integration",
       "Business model analytics",
       "PDF reports",
       "Priority support",
     ],
   },
 ];
+
+/** @deprecated Use useBillingPlans() — kept for type imports */
+export const PLANS = DEFAULT_PLANS;

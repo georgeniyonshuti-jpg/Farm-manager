@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
-import { useERPNextConnection } from "../../context/OdooConnectionContext";
+import { useERPNextConnection } from "../../context/ERPNextConnectionContext";
 import { getLoans } from "../../api/erpnext.api";
 import { getStoredErpnextCompany } from "../../lib/erpnextPrefs";
 
@@ -36,18 +36,10 @@ export function PortfolioPage() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
-        <PageHeader
-          title="Portfolio analytics"
-          subtitle="Clevafarm finance exposure, cohort performance, and risk bands."
-        />
-      </div>
+      <PageHeader title="Portfolio analytics" />
 
-      <section className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
-        <PageHeader
-          title="ERPNext loans"
-          subtitle="Live loan portfolio from Frappe Lending (via ERPNext)."
-        />
+      <section className="rounded-xl border border-neutral-200 bg-white p-card shadow-sm">
+        <h2 className="text-sm font-semibold text-[var(--text-primary)]">ERPNext loans</h2>
         {!status?.connected && (
           <p className="mt-3 text-sm text-neutral-600">
             Connect ERPNext under Farm → ERPNext integration to load loans here.

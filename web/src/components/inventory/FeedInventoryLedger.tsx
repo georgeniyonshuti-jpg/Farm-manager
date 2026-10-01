@@ -1,8 +1,20 @@
-import { EmptyState } from "../EmptyState";
-import { SkeletonList } from "../LoadingSkeleton";
-import { OdooSyncBadge } from "../accounting/OdooSyncBadge";
 import { DataTable, type DataColumn } from "../ui/DataTable";
-import { SegmentedControl } from "../ui";
+import {
+  SegmentedControl,
+  StatusPill,
+  TablePagination,
+  TableToolbar,
+  FacetFilter,
+  ToolbarOverflow,
+  type StatusTone,
+} from "../ui";
+import { Button } from "../ui/Button";
+import { useAuth } from "../../auth/AuthContext";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
+import { useErpnextSyncBySource } from "../../hooks/useErpnextSyncBySource";
+import { ERPNextSyncBadge } from "../accounting/ERPNextSyncBadge";
+import { formatManagerDateTime } from "../../lib/formatManagerDateTime";
+import { SkeletonList } from "../LoadingSkeleton";
 
 type LedgerRow = {
   id: string;
@@ -20,6 +32,14 @@ type LedgerRow = {
   accountingStatus: string | null;
 };
 
+type StockRow = {
+  feedType: string | null;
+  purchasedKg: number;
+  usedKg: number;
+  adjustmentsKg: number;
+  balanceKg: number;
+};
+
 type FeedTypeOption = {
   value: string;
   label: string;
@@ -29,18 +49,21 @@ type TxTypeFilter = "all" | "procurement_receipt" | "feed_consumption" | "adjust
 
 type Props = {
   rows: LedgerRow[];
+  summary: StockRow[];
   loading: boolean;
   totalRows: number;
   page: number;
-  totalPages: number;
   feedTypeFilter: string;
   txTypeFilter: TxTypeFilter;
   feedTypeOptions: FeedTypeOption[];
   exportHref: string;
   onFeedTypeFilterChange: (value: string) => void;
   onTxTypeFilterChange: (value: TxTypeFilter) => void;
-  onPrevPage: () => void;
-  onNextPage: () => void;
+  onPageChange: (page: number) => void;
+  pageSize?: number;
+  onRefresh?: () => void;
+  onAdjust?: () => void;
+  operationsReportHref?: string;
 };
 
 function txLabel(type: LedgerRow["type"]): string {
@@ -49,48 +72,76 @@ function txLabel(type: LedgerRow["type"]): string {
   return "Adjustment";
 }
 
-function txBadgeClass(type: LedgerRow["type"]): string {
-  if (type === "procurement_receipt") return "bg-[var(--surface-subtle)] text-[var(--text-primary)]";
-  if (type === "feed_consumption") return "bg-[var(--surface-subtle)] text-[var(--text-secondary)]";
-  return "bg-[var(--primary-color-soft)] text-[var(--primary-color-dark)]";
+function txTone(type: LedgerRow["type"]): StatusTone {
+  if (type === "procurement_receipt") return "success";
+  if (type === "feed_consumption") return "neutral";
+  return "info";
 }
 
 function feedTypeLabel(value: string | null, feedTypeOptions: FeedTypeOption[]): string {
   return feedTypeOptions.find((option) => option.value === value)?.label ?? value ?? "—";
 }
 
+function formatKg(n: number): string {
+  return `${Number(n).toFixed(1)} kg`;
+}
+
 export function FeedInventoryLedger({
   rows,
+  summary,
   loading,
   totalRows,
   page,
-  totalPages,
   feedTypeFilter,
   txTypeFilter,
   feedTypeOptions,
   exportHref,
   onFeedTypeFilterChange,
   onTxTypeFilterChange,
-  onPrevPage,
-  onNextPage,
+  onPageChange,
+  pageSize = 50,
+  onRefresh,
+  onAdjust,
+  operationsReportHref,
 }: Props) {
+  const { token, user } = useAuth();
+  const { companyHref } = useCompanyNav();
+  const { bySource } = useErpnextSyncBySource(user?.erpnextAccess ? token : null);
   const visibleRows = txTypeFilter === "all" ? rows : rows.filter((row) => row.type === txTypeFilter);
+  const isFiltered = Boolean(feedTypeFilter) || txTypeFilter !== "all";
+
+  const summaryByType = new Map(summary.map((row) => [String(row.feedType ?? ""), row]));
+  const scoped =
+    feedTypeFilter && summaryByType.has(feedTypeFilter)
+      ? summaryByType.get(feedTypeFilter)!
+      : summary.reduce(
+          (acc, row) => {
+            acc.balanceKg += Number(row.balanceKg) || 0;
+            acc.purchasedKg += Number(row.purchasedKg) || 0;
+            acc.usedKg += Number(row.usedKg) || 0;
+            return acc;
+          },
+          { balanceKg: 0, purchasedKg: 0, usedKg: 0 }
+        );
+
+  const facetOptions = feedTypeOptions.map((option) => {
+    const row = summaryByType.get(option.value);
+    const bal = row ? formatKg(row.balanceKg) : "0.0 kg";
+    return { value: option.value, label: `${option.label} · ${bal}` };
+  });
 
   const columns: DataColumn<LedgerRow>[] = [
     {
       key: "at",
       header: "Date / time",
       className: "tbl-mono whitespace-nowrap",
-      render: (row) => new Date(row.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" }),
+      render: (row) => formatManagerDateTime(row.at),
     },
     {
       key: "status",
-      header: "Status",
-      render: (row) => (
-        <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${txBadgeClass(row.type)}`}>
-          {txLabel(row.type)}
-        </span>
-      ),
+      header: "Type",
+      badge: true,
+      render: (row) => <StatusPill tone={txTone(row.type)}>{txLabel(row.type)}</StatusPill>,
     },
     {
       key: "feedType",
@@ -108,7 +159,11 @@ export function FeedInventoryLedger({
       header: "Delta (kg)",
       numeric: true,
       render: (row) => (
-        <span className={`font-semibold ${row.deltaKg >= 0 ? "text-emerald-500" : "text-amber-500"}`}>
+        <span
+          className={`font-semibold ${
+            row.deltaKg >= 0 ? "text-[var(--status-success)]" : "text-[var(--status-warning)]"
+          }`}
+        >
           {row.deltaKg >= 0 ? "+" : ""}
           {row.deltaKg.toFixed(1)}
         </span>
@@ -123,117 +178,140 @@ export function FeedInventoryLedger({
       key: "ref",
       header: "Flock / reference",
       className: "tbl-mono",
-      render: (row) => <span className="text-[var(--text-muted)]">{row.flockLabel ?? row.reference ?? "—"}</span>,
+      render: (row) => (
+        <span className="text-[var(--text-muted)]">{row.flockLabel ?? row.reference ?? "—"}</span>
+      ),
     },
-    {
-      key: "accounting",
-      header: "Accounting",
-      render: (row) =>
-        row.type === "procurement_receipt" ? (
-          <OdooSyncBadge status={row.accountingStatus} compact approvalsHref="/farm/accounting-approvals" />
-        ) : (
-          <span className="text-xs text-[var(--text-muted)]">N/A</span>
-        ),
-    },
+    ...(user?.erpnextAccess
+      ? ([
+          {
+            key: "erpnext",
+            header: "ERPNext",
+            badge: true,
+            render: (row: LedgerRow) => {
+              const hint = bySource.get(row.id);
+              if (!hint) return null;
+              return (
+                <ERPNextSyncBadge
+                  state={hint.state}
+                  reference={hint.reference}
+                  compact
+                  href={companyHref(`farm/erpnext-setup?q=${encodeURIComponent(row.id)}`)}
+                />
+              );
+            },
+          },
+        ] as DataColumn<LedgerRow>[])
+      : []),
   ];
 
   return (
-    <section className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)]">
-      <div className="table-block border-0 bg-transparent">
-        <div className="table-toolbar">
-          <SegmentedControl
-            size="sm"
-            value={feedTypeFilter || "__all__"}
-            onChange={(v) => onFeedTypeFilterChange(v === "__all__" ? "" : v)}
-            options={[
-              { value: "__all__", label: "All feeds" },
-              ...feedTypeOptions.map((option) => ({ value: option.value, label: option.label })),
-            ]}
-          />
-          <SegmentedControl
-            size="sm"
-            value={txTypeFilter}
-            onChange={(v) => onTxTypeFilterChange(v as TxTypeFilter)}
-            options={[
-              { value: "all", label: "All types" },
-              { value: "procurement_receipt", label: "Received" },
-              { value: "feed_consumption", label: "Used" },
-              { value: "adjustment", label: "Adjustment" },
-            ]}
-          />
-          <a
-            href={exportHref}
-            className="rounded border border-[var(--border-color)] bg-[var(--surface-input)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-primary)] hover:bg-[var(--surface-subtle)]"
-            download
-          >
-            Export CSV
-          </a>
-          <span className="ml-auto text-xs text-[var(--text-muted)]">{totalRows} rows</span>
+    <div className="table-block">
+      {loading ? (
+        <div className="p-card">
+          <SkeletonList rows={4} />
         </div>
-
-        {loading ? (
-          <div className="p-4">
-            <SkeletonList rows={3} />
-          </div>
-        ) : visibleRows.length === 0 ? (
-          <div className="p-6">
-            <EmptyState title="No transactions found." description="Try changing feed type or transaction filters." />
-          </div>
-        ) : (
-          <DataTable<LedgerRow>
-            columns={columns}
-            rows={visibleRows}
-            rowKey={(row) => row.id}
-            renderMobileCard={(row) => (
-              <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-sm)]">
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${txBadgeClass(row.type)}`}>
-                    {txLabel(row.type)}
-                  </span>
-                  <span className={`text-sm font-semibold ${row.deltaKg >= 0 ? "text-emerald-500" : "text-amber-500"}`}>
-                    {row.deltaKg >= 0 ? "+" : ""}
-                    {row.deltaKg.toFixed(1)} kg
-                  </span>
-                </div>
-                <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                  {feedTypeLabel(row.feedType, feedTypeOptions)}
-                  {row.reason ? ` · ${row.reason}` : ""}
-                </p>
-                <p className="mt-1 text-xs text-[var(--text-muted)]">
-                  {new Date(row.at).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
-                  {row.flockLabel ? ` · ${row.flockLabel}` : ""}
-                </p>
+      ) : (
+        <DataTable<LedgerRow>
+          flush
+          columns={columns}
+          rows={visibleRows}
+          rowKey={(row) => row.id}
+          isFiltered={isFiltered}
+          emptyTitle="No transactions yet"
+          emptyDescription=""
+          filteredEmptyTitle="No matching transactions"
+          filteredEmptyDescription=""
+          toolbar={
+            <TableToolbar
+              filters={
+                <>
+                  <SegmentedControl
+                    size="sm"
+                    value={txTypeFilter}
+                    onChange={(v) => onTxTypeFilterChange(v as TxTypeFilter)}
+                    options={[
+                      { value: "all", label: "All" },
+                      { value: "procurement_receipt", label: "Received" },
+                      { value: "feed_consumption", label: "Used" },
+                      { value: "adjustment", label: "Adjustment" },
+                    ]}
+                  />
+                  <FacetFilter
+                    label="Feed type"
+                    value={feedTypeFilter || "all"}
+                    allValue="all"
+                    allLabel="All types"
+                    onChange={(v) => onFeedTypeFilterChange(v === "all" ? "" : v)}
+                    options={facetOptions}
+                  />
+                </>
+              }
+              meta={`Balance ${formatKg(scoped.balanceKg)} · Received +${formatKg(scoped.purchasedKg)} · Used ${formatKg(scoped.usedKg)} · ${visibleRows.length} rows`}
+              actions={
+                <>
+                  {onRefresh ? (
+                    <Button variant="ghost" size="sm" onClick={onRefresh}>
+                      Refresh
+                    </Button>
+                  ) : null}
+                  <a
+                    href={exportHref}
+                    download
+                    className="inline-flex h-control-sm items-center rounded-control px-2.5 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--status-neutral-soft)] hover:text-[var(--text-primary)]"
+                  >
+                    Export CSV
+                  </a>
+                  {onAdjust || operationsReportHref ? (
+                    <ToolbarOverflow
+                      items={[
+                        ...(onAdjust
+                          ? [{ key: "adjust", label: "Adjust stock", onClick: onAdjust }]
+                          : []),
+                        ...(operationsReportHref
+                          ? [{ key: "ops", label: "Operations report", href: operationsReportHref }]
+                          : []),
+                      ]}
+                    />
+                  ) : null}
+                </>
+              }
+            />
+          }
+          renderMobileCard={(row) => (
+            <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <StatusPill tone={txTone(row.type)}>{txLabel(row.type)}</StatusPill>
+                <span
+                  className={`text-sm font-semibold ${
+                    row.deltaKg >= 0 ? "text-[var(--status-success)]" : "text-[var(--status-warning)]"
+                  }`}
+                >
+                  {row.deltaKg >= 0 ? "+" : ""}
+                  {row.deltaKg.toFixed(1)} kg
+                </span>
               </div>
-            )}
-          />
-        )}
-      </div>
+              <p className="mt-1 text-sm text-[var(--text-primary)]">
+                {feedTypeLabel(row.feedType, feedTypeOptions)}
+                {row.reason ? ` · ${row.reason}` : ""}
+              </p>
+              <p className="mt-1 type-caption tabular-nums text-[var(--text-primary)]">
+                {formatManagerDateTime(row.at)}
+                {row.flockLabel ? ` · ${row.flockLabel}` : ""}
+              </p>
+            </div>
+          )}
+        />
+      )}
 
-      {!loading && totalPages > 1 ? (
-        <div className="flex items-center justify-between border-t border-[var(--border-color)] px-4 py-3">
-          <span className="text-xs text-[var(--text-muted)]">
-            Page {page} of {totalPages} ({totalRows} total)
-          </span>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              disabled={page <= 1}
-              onClick={onPrevPage}
-              className="rounded border border-[var(--border-color)] bg-[var(--surface-input)] px-2 py-1 text-xs text-[var(--text-primary)] disabled:opacity-40"
-            >
-              ← Prev
-            </button>
-            <button
-              type="button"
-              disabled={page >= totalPages}
-              onClick={onNextPage}
-              className="rounded border border-[var(--border-color)] bg-[var(--surface-input)] px-2 py-1 text-xs text-[var(--text-primary)] disabled:opacity-40"
-            >
-              Next →
-            </button>
-          </div>
-        </div>
+      {!loading && totalRows > 0 ? (
+        <TablePagination
+          page={page}
+          pageSize={pageSize}
+          total={totalRows}
+          onPageChange={onPageChange}
+        />
       ) : null}
-    </section>
+    </div>
   );
 }

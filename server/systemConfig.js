@@ -86,14 +86,22 @@ export const DEFAULT_APP_SETTINGS = {
   rate_limit_login_window_ms: "900000",
   rate_limit_translate_max: "30",
   rate_limit_translate_window_ms: "60000",
-  rate_limit_api_max: "200",
+  rate_limit_api_max: "1200",
   rate_limit_api_window_ms: "60000",
+  rate_limit_public_market_max: "120",
+  rate_limit_public_market_window_ms: "60000",
+  rate_limit_public_request_max: "5",
+  rate_limit_public_request_window_ms: "900000",
+  marketplace_storefronts: "1",
   max_image_upload_bytes: "5242880",
   demo_initial_count: "1000",
   field_payroll_check_in_rwf: "100",
   field_payroll_feed_rwf: "300",
   field_payroll_missed_check_in_rwf: "200",
   field_payroll_missed_feed_rwf: "200",
+  field_payroll_vet_visit_rwf: "500",
+  field_payroll_missed_vet_visit_rwf: "500",
+  field_payroll_late_vet_visit_deduction_rwf: "200",
   checkin_commission_on_time_rwf: "500",
   checkin_deduction_late_rwf: "300",
   checkin_deduction_missed_rwf: "500",
@@ -218,6 +226,12 @@ export function getAppSettingNumber(key, defaultValue) {
   return Number.isFinite(n) ? n : defaultValue;
 }
 
+export function getAppSetting(key, defaultValue = "") {
+  const raw = memAppSettings[key];
+  if (raw == null || raw === "") return defaultValue;
+  return String(raw);
+}
+
 /**
  * All field payroll rates, unified into a single place.
  * These are the rates that the manager sets on the Payroll page.
@@ -243,6 +257,18 @@ export function getFieldPayrollRates() {
       getAppSettingNumber("field_payroll_missed_check_in_rwf",
         getAppSettingNumber("checkin_deduction_missed_rwf", 500))
     )),
+    vetVisitRwf: Math.max(0, Math.floor(
+      getAppSettingNumber("field_payroll_vet_visit_rwf",
+        getAppSettingNumber("field_payroll_check_in_rwf", Number(DEFAULT_APP_SETTINGS.field_payroll_check_in_rwf)))
+    )),
+    missedVetVisitRwf: Math.max(0, Math.floor(
+      getAppSettingNumber("field_payroll_missed_vet_visit_rwf",
+        getAppSettingNumber("field_payroll_missed_check_in_rwf", Number(DEFAULT_APP_SETTINGS.field_payroll_missed_check_in_rwf)))
+    )),
+    lateVetVisitDeductionRwf: Math.max(0, Math.floor(
+      getAppSettingNumber("field_payroll_late_vet_visit_deduction_rwf",
+        getAppSettingNumber("field_payroll_late_deduction_rwf", 200))
+    )),
   };
 }
 
@@ -267,6 +293,9 @@ const FIELD_PAYROLL_DB_KEYS = [
   "field_payroll_missed_check_in_rwf",
   "field_payroll_missed_feed_rwf",
   "field_payroll_late_deduction_rwf",
+  "field_payroll_vet_visit_rwf",
+  "field_payroll_missed_vet_visit_rwf",
+  "field_payroll_late_vet_visit_deduction_rwf",
 ];
 
 /**
@@ -287,6 +316,9 @@ export async function persistFieldPayrollRates(dbQuery, hasDbFn, body) {
     field_payroll_missed_check_in_rwf: clamp(body.missedCheckInRwf),
     field_payroll_missed_feed_rwf: clamp(body.missedFeedRwf),
     field_payroll_late_deduction_rwf: clamp(body.lateDeductionRwf ?? body.missedCheckInRwf),
+    field_payroll_vet_visit_rwf: clamp(body.vetVisitRwf ?? body.checkInRwf),
+    field_payroll_missed_vet_visit_rwf: clamp(body.missedVetVisitRwf ?? body.missedCheckInRwf),
+    field_payroll_late_vet_visit_deduction_rwf: clamp(body.lateVetVisitDeductionRwf ?? body.lateDeductionRwf ?? body.missedCheckInRwf),
     // Mirror into the legacy keys so existing reads don't break
     checkin_commission_on_time_rwf: clamp(body.checkInRwf),
     checkin_deduction_late_rwf: clamp(body.lateDeductionRwf ?? body.missedCheckInRwf),
@@ -511,6 +543,10 @@ export async function applyAdminSystemConfigPut(payload, dbPool, dbQuery, hasDbF
       "rate_limit_translate_window_ms",
       "rate_limit_api_max",
       "rate_limit_api_window_ms",
+      "rate_limit_public_market_max",
+      "rate_limit_public_market_window_ms",
+      "rate_limit_public_request_max",
+      "rate_limit_public_request_window_ms",
       "max_image_upload_bytes",
       "demo_initial_count",
       "reference_market_price_rwf_per_kg",
@@ -625,14 +661,17 @@ export function ipWindowRateLimitMiddleware(getMax, getWindowMs, jsonBody) {
   const hits = new Map();
   return (req, res, next) => {
     const windowMs = getWindowMs();
-    const max = getMax();
+    const authed = String(req.headers.authorization || "").toLowerCase().startsWith("bearer ");
+    const max = authed ? Math.max(getMax() * 6, 1200) : getMax();
     const ip = req.ip || req.socket?.remoteAddress || "unknown";
     const now = Date.now();
-    let b = hits.get(ip);
+    const key = `${authed ? "a" : "p"}:${ip}`;
+    let b = hits.get(key);
     if (!b || now - b.start > windowMs) b = { start: now, n: 0 };
     b.n += 1;
-    hits.set(ip, b);
+    hits.set(key, b);
     if (b.n > max) {
+      res.setHeader("Retry-After", String(Math.ceil(windowMs / 1000)));
       res.status(429).json(jsonBody);
       return;
     }

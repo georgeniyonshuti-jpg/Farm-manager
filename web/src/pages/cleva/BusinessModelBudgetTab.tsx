@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { API_BASE_URL } from "../../api/config";
+import { Button } from "../../components/ui/Button";
 
 type PaygoCtl = Record<string, unknown>;
 type Row = { month: number; kpi_key: string; value: number; source?: string };
@@ -231,7 +232,7 @@ export function BusinessModelBudgetTab(props: { token: string | null; paygoCtl: 
   }, [variance, selectedKpi]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-stack">
       {error ? <p className="text-sm text-red-700">{error}</p> : null}
 
       {/* Header explanation */}
@@ -245,37 +246,45 @@ export function BusinessModelBudgetTab(props: { token: string | null; paygoCtl: 
 
       {/* Action toolbar */}
       <div className="flex flex-wrap gap-2">
-        <button
-          type="button" disabled={busy || !paygoCtl} onClick={() => void syncTargets()}
-          className="rounded-lg bg-slate-800 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+        <Button
+          size="sm"
+          disabled={busy || !paygoCtl}
+          onClick={() => void syncTargets()}
         >
           Sync targets from PAYGO ctl
-        </button>
-        <button
-          type="button" disabled={busy} onClick={() => void load()}
-          className="rounded-lg border border-neutral-300 px-3 py-2 text-xs font-medium"
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={busy}
+          onClick={() => void load()}
         >
           Refresh
-        </button>
-        <button
-          type="button" disabled={busy} onClick={() => void appendSuggested()}
-          className="rounded-lg border border-cyan-600 px-3 py-2 text-xs font-semibold text-cyan-900 disabled:opacity-50"
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={busy}
+          onClick={() => void appendSuggested()}
         >
           Append env actuals
-        </button>
-        <button
-          type="button" disabled={busy || !paygoCtl} onClick={() => void runVariance()}
-          className="rounded-lg bg-emerald-800 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+        </Button>
+        <Button
+          size="sm"
+          disabled={busy || !paygoCtl}
+          onClick={() => void runVariance()}
         >
           Run variance analysis
-        </button>
+        </Button>
         {variance?.length ? (
-          <button
-            type="button" disabled={busy} onClick={() => void downloadVarianceCsv()}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={busy}
+            onClick={() => void downloadVarianceCsv()}
           >
             ↓ Variance CSV
-          </button>
+          </Button>
         ) : null}
       </div>
 
@@ -339,12 +348,13 @@ export function BusinessModelBudgetTab(props: { token: string | null; paygoCtl: 
           value={csvText}
           onChange={(e) => setCsvText(e.target.value)}
         />
-        <button
-          type="button" disabled={busy || !csvText.trim()} onClick={() => void importCsv()}
-          className="rounded-lg bg-emerald-800 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+        <Button
+          size="sm"
+          disabled={busy || !csvText.trim()}
+          onClick={() => void importCsv()}
         >
           Import CSV
-        </button>
+        </Button>
       </div>
 
       {/* Variance analysis */}

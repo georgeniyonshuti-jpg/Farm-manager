@@ -1,42 +1,47 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../../auth/AuthContext";
-import { CheckinStatusBlock } from "../farm/FarmCheckinPage";
-import { EmptyState } from "../../components/EmptyState";
-import { PageHeader } from "../../components/PageHeader";
+import { FieldBlockedScreen } from "../../components/field/FieldBlockedScreen";
+import { FieldMissionCard } from "../../components/field/FieldMissionCard";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
-import { HubCheckinBanner } from "../../components/farm/HubCheckinBanner";
+import { FieldEarningsSnapshot } from "../../components/field/FieldEarningsSnapshot";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
-import { useFieldOpsHubStatus } from "../../hooks/useFieldOpsHubStatus";
-import { FieldOpsActionLink } from "../../components/field/FieldOpsActionLink";
+import { useFieldOpsVetVisitStatus } from "../../hooks/useFieldOpsVetVisitStatus";
 import { TodayChecklistPanel } from "../../components/farm/TodayChecklistPanel";
-import { useFarmCapabilities } from "../../hooks/useFarmCapabilities";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
+import { Button } from "../../components/ui";
+import { FieldFlockTriageList } from "../../components/field/FieldFlockTriageList";
+import { useActiveFlock } from "../../context/ActiveFlockContext";
+import { fieldRoute } from "../../lib/fieldRoutes";
+import { prefetchFieldFlockContext } from "../../hooks/useFlockFieldContext";
+import { fetchWeighQueue } from "../../api/pipeline.api";
+import { canScoutPipeline } from "../../auth/permissions";
 
 export function VetFieldHub() {
-  const { token } = useAuth();
-  const [showDetailedCard, setShowDetailedCard] = useState(false);
+  const { token, user } = useAuth();
+  const { slug } = useParams<{ slug?: string }>();
+  const queryClient = useQueryClient();
+  const { companyHref } = useCompanyNav();
+  const navigate = useNavigate();
+  const { setPrimaryFlockId, setTriageFlockList, setActiveFlockId, activeFlockId } = useActiveFlock();
 
-  const hTitle = useLaborerT("Vet hub");
-  const hSub = useLaborerT("Track rounds, flock health, and urgent work.");
-  const linkCheckin = useLaborerT("Round check-in");
-  const linkMort = useLaborerT("Log mortality");
-  const linkFeed = useLaborerT("Feed log");
-  const linkVetLogs = useLaborerT("Vet logs");
-  const linkMedicine = useLaborerT("Medicine tracking");
-  const linkSlaughter = useLaborerT("Slaughter & FCR");
-  const linkEarnings = useLaborerT("My earnings");
   const noFlockTitle = useLaborerT("No flock available");
-  const noFlockBody = useLaborerT("Round status appears when a flock is assigned to your site.");
+  const noFlockBody = useLaborerT("Waiting for flock assignment");
   const tRetry = useLaborerT("Try again");
-
-  const tLoadingBanner = useLaborerT("Preparing round check-in status…");
-  const tErrBanner = useLaborerT("Could not load round check-in. Try again.");
-  const tNoScheduleBanner = useLaborerT("No round schedule available right now.");
-  const tOverduePrefix = useLaborerT("Round check-in is overdue by");
+  const tStartVisit = useLaborerT("Start vet visit");
+  const tOverdueLbl = useLaborerT("OVERDUE");
+  const tOnTrackLbl = useLaborerT("On track");
+  const tLoadingBanner = useLaborerT("Preparing vet visit status…");
+  const tErrBanner = useLaborerT("Could not load vet visit schedule. Try again.");
+  const tNoScheduleBanner = useLaborerT("No vet visit schedule available right now.");
+  const tScheduleNotConfigured = useLaborerT("Visit schedule not configured — ask your manager.");
+  const tOverduePrefix = useLaborerT("Vet visit is overdue by");
   const tOverdueSuffix = useLaborerT("minutes. Inspect the flock now.");
   const tOnTrack = useLaborerT("You are on track.");
   const tAbout = useLaborerT("About");
-  const tUntilNext = useLaborerT("minutes until the next round.");
-  const tMultiFlockBanner = useLaborerT("flocks need check-in — details below for the most overdue.");
+  const tUntilNext = useLaborerT("minutes until the next visit.");
+  const tMultiFlockBanner = useLaborerT("flocks need a vet visit — details below for the most overdue.");
 
   const hubLabels = useMemo(
     () => ({
@@ -63,84 +68,145 @@ export function VetFieldHub() {
     ]
   );
 
-  const { status, loading, loadError, load, opsGlance, roundBanner, otherOverdueCount } =
-    useFieldOpsHubStatus(token, hubLabels);
-  const { can, hasBootstrap } = useFarmCapabilities();
-  const showCap = (cap: Parameters<typeof can>[0], legacy = true) => (hasBootstrap ? can(cap) : legacy);
-  return (
-    <div className="mx-auto w-full max-w-[960px] space-y-6">
-      {roundBanner ? (
-        <button type="button" className="w-full text-left" onClick={() => setShowDetailedCard((v) => !v)}>
-          <HubCheckinBanner variant={roundBanner.variant} message={roundBanner.text} />
-        </button>
-      ) : null}
-      <PageHeader className="mb-3 gap-3" title={hTitle} subtitle={hSub} />
+  const {
+    status,
+    loading,
+    loadError,
+    load,
+    visitBanner,
+    isOverdue,
+    primaryFlockId,
+    flockList,
+  } = useFieldOpsVetVisitStatus(token, hubLabels);
 
-      {loading && <SkeletonList rows={2} />}
-      {!loading && loadError && (
+  useEffect(() => {
+    setPrimaryFlockId(primaryFlockId);
+    setTriageFlockList(flockList);
+  }, [primaryFlockId, flockList, setPrimaryFlockId, setTriageFlockList]);
+
+  useEffect(() => {
+    if (!token) return;
+    prefetchFieldFlockContext(
+      queryClient,
+      token,
+      slug ?? "default-farm",
+      activeFlockId || primaryFlockId
+    );
+  }, [token, slug, queryClient, activeFlockId, primaryFlockId]);
+
+  const multiFlock = flockList.length > 1;
+  const heroFlockId = activeFlockId || primaryFlockId || status?.flockId || flockList[0]?.flockId;
+  const [weighDue, setWeighDue] = useState(0);
+  useEffect(() => {
+    if (!token || !canScoutPipeline(user)) return;
+    let cancelled = false;
+    void fetchWeighQueue(token)
+      .then((r) => {
+        if (!cancelled) setWeighDue(r.dueThisWeek || r.lots.length);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [token, user]);
+
+  const vetVisitRoute = companyHref(
+    fieldRoute("/farm/vet-logs?log=1&step=1", heroFlockId)
+  );
+
+  const missionTone =
+    visitBanner?.variant === "warn" || isOverdue
+      ? "danger"
+      : visitBanner?.variant === "ok"
+        ? "success"
+        : visitBanner?.variant === "error"
+          ? "warning"
+          : "neutral";
+
+  // Multi-flock: triage list is the work queue — do not duplicate the same CTA in a hero.
+  const showVisitHero = Boolean(status || visitBanner) && !multiFlock;
+  const bannerText =
+    visitBanner?.text ??
+    (flockList.length > 0 && !status ? tScheduleNotConfigured : tNoScheduleBanner);
+
+  return (
+    <div className="w-full space-y-5">
+      {loading ? <SkeletonList rows={2} /> : null}
+
+      {!loading && loadError ? (
         <ErrorState
           message={<TranslatedText text={loadError} />}
           retryLabel={tRetry}
           onRetry={() => void load()}
         />
-      )}
+      ) : null}
 
-      {!loading && !loadError && status && showDetailedCard ? (
-        <CheckinStatusBlock
-          status={status}
-          showWarning={false}
-          otherOverdueCount={otherOverdueCount}
-          opsGlance={opsGlance}
+      {!loading && !loadError && !status && !visitBanner && flockList.length === 0 ? (
+        <FieldBlockedScreen title={noFlockTitle} description={noFlockBody} />
+      ) : null}
+
+      {!loading && !loadError && multiFlock ? (
+        <FieldFlockTriageList rows={flockList} mode="vet_visit" />
+      ) : null}
+
+      {!loading && !loadError && showVisitHero ? (
+        <FieldMissionCard
+          statusTitle={bannerText}
+          flockLabel={status?.label}
+          urgencyTone={missionTone}
+          urgencyLabel={
+            visitBanner?.variant === "warn" || isOverdue
+              ? tOverdueLbl
+              : visitBanner?.variant === "ok"
+                ? tOnTrackLbl
+                : undefined
+          }
+          primaryAction={
+            heroFlockId ? (
+              <Button
+                type="button"
+                size="field"
+                className="w-full"
+                onClick={() => {
+                  setActiveFlockId(heroFlockId);
+                  navigate(vetVisitRoute);
+                }}
+              >
+                {tStartVisit}
+              </Button>
+            ) : (
+              <Button type="button" size="field" variant="secondary" className="w-full" onClick={() => void load()}>
+                {tRetry}
+              </Button>
+            )
+          }
         />
       ) : null}
-      {!loading && !loadError && !status ? (
-        <EmptyState title={noFlockTitle} description={noFlockBody} />
+
+      {weighDue > 0 ? (
+        <FieldMissionCard
+          statusTitle={`${weighDue} weigh visits this week`}
+          urgencyTone="warning"
+          urgencyLabel="Visit"
+          primaryAction={
+            <Button
+              type="button"
+              size="field"
+              className="w-full"
+              onClick={() => navigate(companyHref("/farm/pipeline/weigh"))}
+            >
+              Open weigh queue
+            </Button>
+          }
+        />
       ) : null}
 
-      <TodayChecklistPanel />
+      <FieldEarningsSnapshot />
 
-      <div className="grid gap-3 md:grid-cols-2 md:gap-4 md:items-start">
-        <div className="grid gap-3">
-          {showCap("checkin") ? (
-            <FieldOpsActionLink to="/farm/checkin" variant="primary">
-              {linkCheckin}
-            </FieldOpsActionLink>
-          ) : null}
-          {showCap("mortality") ? (
-            <FieldOpsActionLink to="/farm/mortality-log" variant="danger">
-              {linkMort}
-            </FieldOpsActionLink>
-          ) : null}
-          {showCap("feed_log") ? (
-            <FieldOpsActionLink to="/farm/feed" variant="neutral">
-              {linkFeed}
-            </FieldOpsActionLink>
-          ) : null}
-          {showCap("vet_log_create") ? (
-            <FieldOpsActionLink to="/farm/vet-logs" variant="emerald">
-              {linkVetLogs}
-            </FieldOpsActionLink>
-          ) : null}
-          {showCap("treatment_rounds") ? (
-            <FieldOpsActionLink to="/farm/treatments" variant="purple">
-              {linkMedicine}
-            </FieldOpsActionLink>
-          ) : null}
-          {showCap("slaughter") ? (
-            <FieldOpsActionLink to="/farm/slaughter" variant="neutral">
-              {linkSlaughter}
-            </FieldOpsActionLink>
-          ) : null}
-        </div>
-        <div className="grid gap-3">
-          {showCap("payroll_visible") ? (
-            <FieldOpsActionLink to="/laborer/earnings" variant="soft">
-              {linkEarnings}
-            </FieldOpsActionLink>
-          ) : null}
-        </div>
-      </div>
-
+      <TodayChecklistPanel
+        title="Today"
+        excludeCategories={showVisitHero || multiFlock ? ["checkin", "rounds", "vet_visit"] : []}
+      />
     </div>
   );
 }

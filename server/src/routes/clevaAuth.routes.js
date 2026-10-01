@@ -194,6 +194,7 @@ export function createClevaAuthRouter(deps) {
         usersByEmail,
         usersById,
         getCompanyById,
+        dbQuery,
       });
 
       if (syncCode === "no_companies" || !user) {

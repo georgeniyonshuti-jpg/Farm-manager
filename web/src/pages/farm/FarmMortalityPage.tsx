@@ -1,16 +1,27 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { readAuthHeaders } from "../../lib/authHeaders";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { PageHeader } from "../../components/PageHeader";
-import { EmptyState } from "../../components/EmptyState";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
 import { useFlockFieldContext } from "../../hooks/useFlockFieldContext";
-import { FlockContextStrip } from "../../components/farm/FlockContextStrip";
-import { OdooSyncBadge } from "../../components/accounting/OdooSyncBadge";
-import { SegmentedControl } from "../../components/ui";
+import {
+  Button,
+  DataTable,
+  FacetFilter,
+  SegmentedControl,
+  StatusPill,
+  TableToolbar,
+  ToolbarSearch,
+  type DataColumn,
+} from "../../components/ui";
+import { formatManagerDateTime } from "../../lib/formatManagerDateTime";
+import { ManagerPage } from "../../components/layout/ManagerPage";
+import { useErpnextSyncBySource } from "../../hooks/useErpnextSyncBySource";
+import { ERPNextSyncBadge } from "../../components/accounting/ERPNextSyncBadge";
 
 type MortalityRow = {
   id: string;
@@ -26,18 +37,18 @@ type MortalityRow = {
 };
 
 function MortStatusBadge({ status }: { status?: string }) {
-  if (!status || status === "approved") return <span className="inline-block rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-800">Approved</span>;
-  if (status === "pending_review") return <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-800">Pending</span>;
-  return <span className="inline-block rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-800">Rejected</span>;
+  if (!status || status === "approved") return <StatusPill tone="success">Approved</StatusPill>;
+  if (status === "pending_review") return <StatusPill tone="warning">Pending</StatusPill>;
+  return <StatusPill tone="danger">Rejected</StatusPill>;
 }
 
 export function FarmMortalityPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const navigate = useNavigate();
+  const { companyHref } = useCompanyNav();
+  const { bySource } = useErpnextSyncBySource(user?.erpnextAccess ? token : null);
   const tFlock = useLaborerT("Flock");
   const tTitle = useLaborerT("Mortality tracking");
-  const tLead = useLaborerT(
-    "Full report of all mortality events, with filters and export.",
-  );
   const tLog = useLaborerT("Log mortality");
   const tTime = useLaborerT("Time");
   const tCount = useLaborerT("Count");
@@ -46,7 +57,6 @@ export function FarmMortalityPage() {
   const tStatus = useLaborerT("Status");
   const tLive = useLaborerT("Affects live count");
   const tEmptyTitle = useLaborerT("No mortality logged yet");
-  const tEmptyBody = useLaborerT("Submit losses from the mortality log — photos are required.");
   const tNoFlocks = useLaborerT("No flock available");
 
   const {
@@ -56,7 +66,6 @@ export function FarmMortalityPage() {
     status,
     performance,
     listLoading,
-    detailLoading,
     error: ctxError,
     loadFlocks,
     loadDetails,
@@ -127,64 +136,93 @@ export function FarmMortalityPage() {
 
   const loading = listLoading || (eventsLoading && rows.length === 0);
   const pageError = ctxError ?? eventsError;
+  const isFiltered = statusFilter !== "all" || searchQ.trim().length > 0;
+
+  const columns: DataColumn<MortalityRow>[] = useMemo(
+    () => [
+      {
+        key: "time",
+        header: tTime,
+        render: (r) => (
+          <span className="tabular-nums" title={r.at}>
+            {formatManagerDateTime(r.at)}
+          </span>
+        ),
+      },
+      {
+        key: "count",
+        header: tCount,
+        numeric: true,
+        render: (r) => <span className="font-semibold">{r.count}</span>,
+      },
+      {
+        key: "type",
+        header: tType,
+        badge: true,
+        render: (r) =>
+          r.isEmergency ? (
+            <StatusPill tone="danger">
+              <TranslatedText text="Emergency" />
+            </StatusPill>
+          ) : (
+            <TranslatedText text={r.source?.replace(/_/g, " ").trim() || "—"} />
+          ),
+      },
+      {
+        key: "status",
+        header: tStatus,
+        badge: true,
+        render: (r) => <MortStatusBadge status={r.submissionStatus} />,
+      },
+      ...(user?.erpnextAccess
+        ? [
+            {
+              key: "erpnext",
+              header: "ERPNext",
+              badge: true,
+              render: (r: MortalityRow) => {
+                const hint = bySource.get(r.id);
+                if (!hint) return null;
+                return (
+                  <ERPNextSyncBadge
+                    state={hint.state}
+                    reference={hint.reference}
+                    compact
+                    href={companyHref(`farm/erpnext-setup?q=${encodeURIComponent(r.id)}`)}
+                  />
+                );
+              },
+            } as DataColumn<MortalityRow>,
+          ]
+        : []),
+      {
+        key: "live",
+        header: tLive,
+        badge: true,
+        render: (r) => (
+          <StatusPill tone={r.affectsLiveCount !== false ? "info" : "neutral"}>
+            {r.affectsLiveCount !== false ? "Yes" : "No"}
+          </StatusPill>
+        ),
+      },
+      {
+        key: "notes",
+        header: tNotes,
+        render: (r) => <span className="max-w-[14rem] block truncate">{r.notes || "—"}</span>,
+      },
+    ],
+    [tTime, tCount, tType, tStatus, tLive, tNotes, user?.erpnextAccess, bySource, companyHref]
+  );
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5">
+    <ManagerPage>
       <PageHeader
         title={tTitle}
-        subtitle={tLead}
-        action={
-          <Link
-            to="/farm/mortality-log"
-            className="inline-flex rounded-lg bg-neutral-900 px-4 py-2 text-sm font-semibold text-white hover:bg-black"
-          >
-            {tLog}
-          </Link>
-        }
+        primaryAction={{ label: tLog, onClick: () => navigate(companyHref("/farm/mortality-log")) }}
       />
 
       {!listLoading && !ctxError && flocks.length === 0 ? (
-        <p className="mt-4 text-sm text-neutral-600">{tNoFlocks}</p>
-      ) : null}
-
-      {!listLoading && !ctxError && flocks.length > 0 ? (
-        <label className="mt-4 block text-sm font-medium text-neutral-700">
-          {tFlock}
-          <select
-            className="mt-1 w-full max-w-md min-h-[44px] rounded-lg border border-neutral-300 px-3 text-base"
-            value={flockId}
-            onChange={(e) => setFlockId(e.target.value)}
-          >
-            <option value="">All flocks</option>
-            {flocks.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.label}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : null}
-
-      {!listLoading && !ctxError && flockId && !status && detailLoading ? (
-        <div className="mt-4">
-          <SkeletonList rows={2} />
-        </div>
-      ) : null}
-
-      {!listLoading && !ctxError && status ? (
-        <div className="mt-4">
-          <FlockContextStrip
-            label={status.label}
-            code={flocks.find((f) => f.id === flockId)?.code}
-            placementDate={status.placementDate}
-            ageDays={status.ageDays}
-            feedToDateKg={status.feedToDateKg}
-            initialCount={flocks.find((f) => f.id === flockId)?.initialCount}
-            birdsLiveEstimate={performance?.birdsLiveEstimate}
-            verifiedLiveCount={performance?.verifiedLiveCount}
-            mortalityToDate={performance?.mortalityToDate}
-          />
-        </div>
+        <p className="text-sm text-[var(--text-secondary)]">{tNoFlocks}</p>
       ) : null}
 
       {loading && <SkeletonList rows={4} />}
@@ -199,92 +237,87 @@ export function FarmMortalityPage() {
         />
       )}
 
-      {!loading && !pageError && rows.length > 0 ? (
+      {!loading && !pageError && !listLoading && !ctxError && flocks.length > 0 ? (
         <div className="table-block">
-          <div className="table-toolbar">
-            <input
-              className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs"
-              placeholder="Search notes, source…"
-              value={searchQ}
-              onChange={(e) => setSearchQ(e.target.value)}
-            />
-            <SegmentedControl
-              size="sm"
-              value={statusFilter}
-              onChange={setStatusFilter}
-              options={[
-                { value: "all", label: "All" },
-                { value: "pending_review", label: "Pending" },
-                { value: "approved", label: "Approved" },
-                { value: "rejected", label: "Rejected" },
-              ]}
-            />
-            <span className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-neutral-500">{filteredRows.length} rows</span>
-              <a
-                href={`${API_BASE_URL}/api/reports/mortality.csv${flockId ? `?flockId=${encodeURIComponent(flockId)}` : ""}`}
-                className="rounded border border-neutral-300 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50"
-                download
-              >
-                Export CSV
-              </a>
-            </span>
-          </div>
-
-          {!loading && !pageError && filteredRows.length === 0 && flockId ? (
-            <div className="p-6">
-              <EmptyState title={tEmptyTitle} description={tEmptyBody} />
-            </div>
-          ) : null}
-
-          {!loading && !pageError && filteredRows.length > 0 ? (
-            <div className="institutional-table-wrapper">
-              <table className="institutional-table min-w-[44rem]">
-                <thead>
-                  <tr>
-                    <th>{tTime}</th>
-                    <th className="tbl-num">{tCount}</th>
-                    <th>{tType}</th>
-                    <th>{tStatus}</th>
-                    <th>{tLive}</th>
-                    <th>{tNotes}</th>
-                    <th>Odoo</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredRows.map((r) => (
-                    <tr key={r.id}>
-                      <td className="tbl-mono">{r.at}</td>
-                      <td className="tbl-num font-semibold">{r.count}</td>
-                      <td className="tbl-badge">
-                        {r.isEmergency ? (
-                          <span className="inline-block rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-red-800">
-                            <TranslatedText text="Emergency" />
-                          </span>
-                        ) : (
-                          <TranslatedText text={r.source?.replace(/_/g, " ").trim() || "—"} />
-                        )}
-                      </td>
-                      <td className="tbl-badge"><MortStatusBadge status={r.submissionStatus} /></td>
-                      <td className="tbl-badge">{r.affectsLiveCount !== false ? "Yes" : "No"}</td>
-                      <td style={{ maxWidth: "14rem" }}>{r.notes || "—"}</td>
-                      <td>
-                        {r.count >= 5 && (
-                          <OdooSyncBadge status={r.accountingStatus} compact approvalsHref="/farm/accounting-approvals" />
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
+          <DataTable<MortalityRow>
+            flush
+            columns={columns}
+            rows={filteredRows}
+            rowKey={(r) => r.id}
+            isFiltered={isFiltered || Boolean(flockId)}
+            emptyTitle={tEmptyTitle}
+            emptyDescription=""
+            filteredEmptyTitle={tEmptyTitle}
+            filteredEmptyDescription=""
+            emptyAction={
+              <Link to="../mortality-log">
+                <Button variant="primary" size="sm">
+                  Go to mortality log
+                </Button>
+              </Link>
+            }
+            toolbar={
+              <TableToolbar
+                filters={
+                  <>
+                    <SegmentedControl
+                      size="sm"
+                      value={statusFilter}
+                      onChange={setStatusFilter}
+                      options={[
+                        { value: "all", label: "All" },
+                        { value: "pending_review", label: "Pending" },
+                        { value: "approved", label: "Approved" },
+                        { value: "rejected", label: "Rejected" },
+                      ]}
+                    />
+                    <FacetFilter
+                      label={tFlock}
+                      value={flockId || "all"}
+                      allValue="all"
+                      allLabel="All flocks"
+                      onChange={(v) => setFlockId(v === "all" ? "" : v)}
+                      options={flocks.map((f) => ({ value: f.id, label: f.label }))}
+                    />
+                  </>
+                }
+                search={
+                  <ToolbarSearch
+                    placeholder="Search notes, source…"
+                    value={searchQ}
+                    onChange={(e) => setSearchQ(e.target.value)}
+                    label="Search mortality"
+                  />
+                }
+                meta={
+                  flockId && status
+                    ? `Day ${status.ageDays} · Live ${performance?.birdsLiveEstimate ?? "—"} · Mort ${performance?.mortalityToDate ?? "—"} · ${filteredRows.length} rows`
+                    : `${filteredRows.length} rows`
+                }
+                actions={
+                  <a
+                    href={`${API_BASE_URL}/api/reports/mortality.csv${flockId ? `?flockId=${encodeURIComponent(flockId)}` : ""}`}
+                    className="inline-flex h-control-sm items-center rounded-control px-2.5 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--status-neutral-soft)] hover:text-[var(--text-primary)]"
+                    download
+                  >
+                    Export CSV
+                  </a>
+                }
+              />
+            }
+            renderMobileCard={(r) => (
+              <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 shadow-[var(--shadow-sm)]">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold tabular-nums">{r.count} birds</span>
+                  <MortStatusBadge status={r.submissionStatus} />
+                </div>
+                <p className="mt-1 text-xs text-[var(--text-muted)]">{formatManagerDateTime(r.at)}</p>
+                <p className="mt-1 text-sm text-[var(--text-secondary)]">{r.notes || "—"}</p>
+              </div>
+            )}
+          />
         </div>
       ) : null}
-
-      {!loading && !pageError && filteredRows.length === 0 && !rows.length ? (
-        <EmptyState title={tEmptyTitle} description={tEmptyBody} />
-      ) : null}
-    </div>
+    </ManagerPage>
   );
 }

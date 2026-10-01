@@ -15,7 +15,7 @@ const LEVEL: Record<Level, string> = {
 
 export function Card({ level = "default", className = "", children, ...rest }: Props) {
   return (
-    <div className={`rounded-2xl p-4 md:p-5 ${LEVEL[level]} ${className}`} {...rest}>
+    <div className={`rounded-lg p-card ${LEVEL[level]} ${className}`} {...rest}>
       {children}
     </div>
   );

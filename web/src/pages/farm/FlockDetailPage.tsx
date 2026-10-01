@@ -1,13 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
-import { flockActionPresentation } from "../../auth/permissions";
+import { flockActionPresentation, isCompanyLevelAdmin, isFarmOpsLead } from "../../auth/permissions";
 import { readAuthHeaders, jsonAuthHeaders } from "../../lib/authHeaders";
 import { CheckinUrgencyBadge } from "../../components/farm/CheckinUrgencyBadge";
 import { PageHeader } from "../../components/PageHeader";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
 import { useToast } from "../../components/Toast";
+import { ManagerPage } from "../../components/layout/ManagerPage";
+import {
+  Button,
+  FacetFilter,
+  Metric,
+  Modal,
+  SectionCard,
+  StatusPill,
+  TableToolbar,
+} from "../../components/ui";
+import { formatManagerDate, formatManagerDateTime } from "../../lib/formatManagerDateTime";
 import type { CheckinStatus } from "./checkinStatusTypes";
 
 type Eligibility = {
@@ -44,6 +55,9 @@ type Performance = {
 
 type FlockPickerRow = { id: string; label: string };
 
+const controlClass =
+  "h-[var(--control-h-md)] w-full rounded-control border border-[var(--border-input)] bg-[var(--surface-input)] px-3 text-sm text-[var(--text-primary)]";
+
 export function FlockDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -77,19 +91,15 @@ export function FlockDetailPage() {
   const treatmentAction = flockActionPresentation(user, "treatment.execute");
   const weighinAction = flockActionPresentation(user, "weighin.record");
   const slaughterAction = flockActionPresentation(user, "slaughter.schedule");
-  const alertAction = flockActionPresentation(user, "alert.acknowledge", { allowDisabledContext: true });
 
-  const canVerifyHeadcount = user?.role === "manager" || user?.role === "superuser";
+  const canVerifyHeadcount = isCompanyLevelAdmin(user);
 
   const load = useCallback(async () => {
     if (!id) return;
     setError(null);
     setLoading(true);
     try {
-      const listQ =
-        user?.role === "superuser" || user?.role === "manager" || user?.role === "vet_manager"
-          ? "?includeArchived=true"
-          : "";
+      const listQ = isFarmOpsLead(user) ? "?includeArchived=true" : "";
       const fr = await fetch(`${API_BASE_URL}/api/flocks${listQ}`, { headers: readAuthHeaders(token) });
       const fd = await fr.json();
       if (!fr.ok) throw new Error((fd as { error?: string }).error);
@@ -103,7 +113,9 @@ export function FlockDetailPage() {
       const sd = await sr.json();
       if (!sr.ok) throw new Error((sd as { error?: string }).error);
       setStatus(sd as CheckinStatus);
-      const pr = await fetch(`${API_BASE_URL}/api/flocks/${id}/performance-summary`, { headers: readAuthHeaders(token) });
+      const pr = await fetch(`${API_BASE_URL}/api/flocks/${id}/performance-summary`, {
+        headers: readAuthHeaders(token),
+      });
       const pd = await pr.json();
       if (!pr.ok) throw new Error((pd as { error?: string }).error);
       setPerformance(pd as Performance);
@@ -172,10 +184,7 @@ export function FlockDetailPage() {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error((d as { error?: string }).error ?? "Save failed");
-      showToast(
-        "success",
-        "Weigh-in saved. Cycle FCR on the dashboard uses this weight with check-in feed totals.",
-      );
+      showToast("success", "Weigh-in saved.");
       setWeighForm((v) => ({
         ...v,
         avgWeightKg: "",
@@ -247,381 +256,346 @@ export function FlockDetailPage() {
     }
   }
 
+  const fcrContext =
+    performance?.fcrBroiler?.fcrCumulative != null
+      ? `Target ${performance.fcrBroiler.fcrTargetMin.toFixed(2)}–${performance.fcrBroiler.fcrTargetMax.toFixed(2)}`
+      : performance?.fcrSlaughter != null
+        ? "From harvest"
+        : "Needs weigh-in";
+
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
+    <ManagerPage>
       <PageHeader
         title={flockMeta?.label ?? "Flock"}
-        subtitle={flockMeta ? <>Placement {flockMeta.placementDate}</> : undefined}
+        meta={
+          flockMeta ? (
+            <span className="tabular-nums">Placed {formatManagerDate(flockMeta.placementDate)}</span>
+          ) : undefined
+        }
         action={
-          <div className="flex items-center gap-3">
-            <Link to={`/farm/reports?type=flock_deep_dive&flockId=${encodeURIComponent(id ?? "")}`} className="text-sm font-medium text-[var(--primary-color)] hover:underline">
-              Generate report
-            </Link>
-            <Link to="/farm/flocks" className="text-sm font-medium text-emerald-800 hover:underline">
-              ← All flocks
-            </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            {treatmentAction.mode === "enabled" ? (
+              <Link to="/farm/treatments">
+                <Button size="sm" variant="secondary">
+                  Treatment
+                </Button>
+              </Link>
+            ) : null}
+            {slaughterAction.mode === "enabled" ? (
+              <Link to="/farm/slaughter">
+                <Button size="sm" variant="secondary">
+                  Slaughter
+                </Button>
+              </Link>
+            ) : null}
+            {weighinAction.mode === "enabled" ? (
+              <Button size="sm" variant="primary" onClick={() => setShowWeighInForm(true)}>
+                Record weigh-in
+              </Button>
+            ) : null}
           </div>
         }
       />
 
       {!loading && flockPickerOptions.length > 0 && id ? (
-        <label className="block text-sm font-medium text-neutral-700">
-          Flock
-          <select
-            className="mt-1 w-full min-h-[48px] max-w-xl rounded-xl border border-neutral-300 px-3 text-base"
-            value={id}
-            onChange={(e) => {
-              const next = e.target.value;
-              if (!next) return;
-              const hash = location.hash ?? "";
-              void navigate(`/farm/flocks/${encodeURIComponent(next)}${hash}`);
-            }}
-          >
-            {flockPickerOptions.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <TableToolbar
+          filters={
+            <FacetFilter
+              label="Flock"
+              value={id}
+              allValue="all"
+              allLabel="All flocks"
+              onChange={(v) => {
+                if (v === "all") {
+                  void navigate("/farm/flocks");
+                  return;
+                }
+                const hash = location.hash ?? "";
+                void navigate(`/farm/flocks/${encodeURIComponent(v)}${hash}`);
+              }}
+              options={flockPickerOptions.map((f) => ({ value: f.id, label: f.label }))}
+            />
+          }
+          actions={
+            <Link to={`/farm/reports?type=flock_deep_dive&flockId=${encodeURIComponent(id)}`}>
+              <Button size="sm" variant="ghost">
+                Report
+              </Button>
+            </Link>
+          }
+        />
       ) : null}
 
       {loading && <SkeletonList rows={3} />}
-
       {!loading && error && <ErrorState message={error} onRetry={() => void load()} />}
 
       {flockMeta && status && !loading && !error ? (
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="space-y-4 lg:col-span-2">
-            {performance ? (
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
-                  <p className="text-neutral-500">Feed to date</p>
-                  <p className="font-semibold">{performance.feedToDateKg} kg</p>
-                </div>
-                <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
-                  <p className="text-neutral-500">Live estimate</p>
-                  <p className="font-semibold">{performance.birdsLiveEstimate}</p>
-                  {performance.verifiedLiveCount != null ? (
-                    <p className="mt-1 text-xs text-emerald-700">Manager-verified count</p>
-                  ) : performance.computedBirdsLiveEstimate != null &&
-                    performance.computedBirdsLiveEstimate !== performance.birdsLiveEstimate ? null : (
-                    <p className="mt-1 text-xs text-neutral-500">From placement − mortality − harvest</p>
-                  )}
-                </div>
-                <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
-                  <p className="text-neutral-500">Cycle FCR</p>
-                  <p className="font-semibold">{performance.fcr != null ? performance.fcr.toFixed(2) : "-"}</p>
-                  {performance.fcrBroiler?.fcrCumulative != null ? (
-                    <p className="mt-1 text-xs text-neutral-500">
-                      Feed ÷ flock weight gained (broiler). Target band day {performance.ageDays ?? "?"}:{" "}
-                      {performance.fcrBroiler.fcrTargetMin.toFixed(2)}–{performance.fcrBroiler.fcrTargetMax.toFixed(2)}
-                    </p>
-                  ) : performance.fcrSlaughter != null ? (
-                    <p className="mt-1 text-xs text-neutral-500">From last harvest weights (no cycle estimate yet)</p>
-                  ) : (
-                    <p className="mt-1 text-xs text-neutral-500">Add a weigh-in to compute cycle FCR</p>
-                  )}
-                  {id ? (
-                    <Link
-                      to={`/farm/vet-logs?flockId=${encodeURIComponent(id ?? "")}`}
-                      className="mt-2 inline-block text-xs font-medium text-emerald-800 hover:underline"
-                    >
-                      Open vet logs & FCR
-                    </Link>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-
-            {weighinAction.mode === "enabled" ? (
-              <section id="weigh-in" className="rounded-xl border border-neutral-200 bg-white p-4 text-sm shadow-sm scroll-mt-4">
-                <p className="mb-2 font-semibold text-neutral-800">Weigh-in history</p>
-                <p className="mb-3 text-xs text-neutral-600">
-                  Feed per kg of sampled biomass is shown for each entry. Use{" "}
-                  <span className="font-medium text-neutral-800">Record new weigh-in</span> to add a row.
-                </p>
-                {weighIns.length ? (
-                  <div className="mb-4 space-y-1">
-                    {weighIns.map((w) => {
-                      const ratio = w.feedPerKgSampleBiomass ?? w.fcr;
-                      return (
-                        <div key={w.id} className="grid grid-cols-4 gap-2 text-xs">
-                          <span className="font-medium text-neutral-800">{w.weighDate}</span>
-                          <span className="text-neutral-700">{w.avgWeightKg.toFixed(2)} kg</span>
-                          <span className="text-neutral-700" title="Feed per kg of sampled bird biomass (not cumulative FCR)">
-                            {ratio != null ? `${ratio.toFixed(2)} feed/kg sample` : "—"}
-                          </span>
-                          <span className="text-neutral-600">{w.variancePct != null ? `${w.variancePct > 0 ? "+" : ""}${w.variancePct}%` : "—"}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="mb-4 text-neutral-500">No weigh-ins yet.</p>
-                )}
-                {!showWeighInForm ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowWeighInForm(true)}
-                    className="rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-900"
-                  >
-                    Record new weigh-in
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setShowWeighInForm(false)}
-                      className="mb-3 text-sm font-medium text-neutral-600 underline"
-                    >
-                      Cancel
-                    </button>
-                    <p className="mb-3 font-semibold text-neutral-800">Record weigh-in</p>
-                    <p className="mb-3 text-xs text-neutral-600">
-                      Sample average weight and cumulative feed (kg) to this date. Cycle FCR on the dashboard uses check-in
-                      feed totals and this weight × live headcount vs placement weight.
-                    </p>
-                    <form onSubmit={(ev) => void submitWeighIn(ev)} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                      <label className="flex flex-col gap-1">
-                        <span className="text-xs text-neutral-500">Weigh date</span>
-                        <input
-                          type="date"
-                          className="rounded-lg border border-neutral-300 px-3 py-2"
-                          value={weighForm.weighDate}
-                          onChange={(e) => setWeighForm((v) => ({ ...v, weighDate: e.target.value }))}
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1">
-                        <span className="text-xs text-neutral-500">Age (days)</span>
-                        <input
-                          className="rounded-lg border border-neutral-300 px-3 py-2"
-                          inputMode="numeric"
-                          value={weighForm.ageDays}
-                          onChange={(e) => setWeighForm((v) => ({ ...v, ageDays: e.target.value }))}
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1">
-                        <span className="text-xs text-neutral-500">Sample size (birds)</span>
-                        <input
-                          className="rounded-lg border border-neutral-300 px-3 py-2"
-                          inputMode="numeric"
-                          value={weighForm.sampleSize}
-                          onChange={(e) => setWeighForm((v) => ({ ...v, sampleSize: e.target.value }))}
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1">
-                        <span className="text-xs text-neutral-500">Avg weight (kg)</span>
-                        <input
-                          className="rounded-lg border border-neutral-300 px-3 py-2"
-                          inputMode="decimal"
-                          value={weighForm.avgWeightKg}
-                          onChange={(e) => setWeighForm((v) => ({ ...v, avgWeightKg: e.target.value }))}
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 sm:col-span-2 lg:col-span-2">
-                        <span className="text-xs text-neutral-500">Total feed used (kg) to this date</span>
-                        <input
-                          className="rounded-lg border border-neutral-300 px-3 py-2"
-                          inputMode="decimal"
-                          value={weighForm.totalFeedUsedKg}
-                          onChange={(e) => setWeighForm((v) => ({ ...v, totalFeedUsedKg: e.target.value }))}
-                          placeholder="Typically matches feed-to-date from check-ins"
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1">
-                        <span className="text-xs text-neutral-500">Target weight (kg, optional)</span>
-                        <input
-                          className="rounded-lg border border-neutral-300 px-3 py-2"
-                          inputMode="decimal"
-                          value={weighForm.targetWeightKg}
-                          onChange={(e) => setWeighForm((v) => ({ ...v, targetWeightKg: e.target.value }))}
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 sm:col-span-2">
-                        <span className="text-xs text-neutral-500">Notes</span>
-                        <input
-                          className="rounded-lg border border-neutral-300 px-3 py-2"
-                          value={weighForm.notes}
-                          onChange={(e) => setWeighForm((v) => ({ ...v, notes: e.target.value }))}
-                        />
-                      </label>
-                      <div className="flex items-end sm:col-span-2 lg:col-span-3">
-                        <button
-                          type="submit"
-                          disabled={weighBusy}
-                          className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                        >
-                          {weighBusy ? "Saving…" : "Save weigh-in"}
-                        </button>
-                      </div>
-                    </form>
-                  </>
-                )}
-              </section>
-            ) : null}
-
-            {canVerifyHeadcount ? (
-              <section className="rounded-xl border border-neutral-200 bg-white p-4 text-sm shadow-sm">
-                <p className="mb-2 font-semibold text-neutral-800">Verified head count (manager)</p>
-                <p className="mb-3 text-xs text-neutral-600">
-                  Use when on-farm inventory does not match recorded mortality (e.g. unlogged losses). This overrides the
-                  calculated live estimate until cleared.
-                  {performance?.computedBirdsLiveEstimate != null ? (
-                    <>
-                      {" "}
-                      Calculated now: <span className="font-medium">{performance.computedBirdsLiveEstimate}</span> birds.
-                    </>
-                  ) : null}
-                </p>
-                <form onSubmit={(ev) => void submitVerification(ev)} className="flex flex-wrap items-end gap-3">
-                  <label className="flex flex-col gap-1">
-                    <span className="text-xs text-neutral-500">Current birds (physical count)</span>
-                    <input
-                      className="rounded-lg border border-neutral-300 px-3 py-2"
-                      inputMode="numeric"
-                      value={verifyForm.liveCount}
-                      onChange={(e) => setVerifyForm((v) => ({ ...v, liveCount: e.target.value }))}
-                    />
-                  </label>
-                  <label className="flex min-w-[12rem] flex-1 flex-col gap-1">
-                    <span className="text-xs text-neutral-500">Note (optional)</span>
-                    <input
-                      className="rounded-lg border border-neutral-300 px-3 py-2"
-                      value={verifyForm.note}
-                      onChange={(e) => setVerifyForm((v) => ({ ...v, note: e.target.value }))}
-                    />
-                  </label>
-                  <button
-                    type="submit"
-                    disabled={verifyBusy}
-                    className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                  >
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    disabled={verifyBusy || performance?.verifiedLiveCount == null}
-                    onClick={() => void clearVerification()}
-                    className="rounded-lg border border-neutral-300 px-3 py-2 text-sm disabled:opacity-50"
-                  >
-                    Clear override
-                  </button>
-                </form>
-              </section>
-            ) : null}
-
+        <div className="space-y-stack">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusPill tone="neutral">Day {status.ageDays}</StatusPill>
+            <CheckinUrgencyBadge badge={status.checkinBadge} />
             {eligibility ? (
-              <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
-                <p className="mb-2 font-semibold text-neutral-800">Slaughter Eligibility</p>
-                {eligibility.eligibleForSlaughter ? (
-                  <p className="text-emerald-700">Eligible for slaughter.</p>
-                ) : (
-                  <div className="space-y-1">
-                    {eligibility.blockers.map((b, i) => (
-                      <p key={`${b.type}-${i}`} className="text-amber-700">
-                        {b.type === "withdrawal"
-                          ? `${b.medicineName ?? "Treatment"} withdrawal active until ${b.safeAfter ?? "clearance"}`
-                          : `Missed treatment round at ${b.plannedFor ?? "unknown time"}`}
-                      </p>
-                    ))}
-                  </div>
-                )}
-              </div>
+              eligibility.eligibleForSlaughter ? (
+                <StatusPill tone="success">Slaughter OK</StatusPill>
+              ) : (
+                <StatusPill tone="warning">Withdrawal / blocked</StatusPill>
+              )
             ) : null}
-            <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
-              <p className="mb-2 font-semibold text-neutral-800">Today&apos;s Critical Tasks</p>
-              <ul className="space-y-1">
-                {eligibility && !eligibility.eligibleForSlaughter ? (
-                  <li className="text-amber-700">Resolve withdrawal/missed treatment blockers before slaughter actions.</li>
-                ) : null}
-                <li className="text-neutral-700">Check-in due: {new Date(status.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}</li>
-                <li className="text-neutral-700">Review mortality and feed trends for this flock.</li>
-              </ul>
-            </div>
-            <div className="rounded-xl border border-neutral-200 bg-white p-3 text-sm">
-              <p className="mb-2 font-semibold text-neutral-800">Mortality & Health</p>
-              <p className="text-neutral-700">
-                Current live estimate: <span className="font-semibold">{performance?.birdsLiveEstimate ?? "—"}</span>
-              </p>
-              <p className="text-neutral-700">
-                Cycle FCR: <span className="font-semibold">{performance?.fcr != null ? performance.fcr.toFixed(2) : "—"}</span>
-              </p>
-            </div>
-            <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-100 pb-4">
-                <p className="text-sm font-medium text-neutral-800">Round check-in</p>
-                <CheckinUrgencyBadge badge={status.checkinBadge} />
-              </div>
-              <dl className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
-                <div>
-                  <dt className="text-neutral-500">Bird age</dt>
-                  <dd className="font-medium text-neutral-900">Day {status.ageDays}</dd>
-                </div>
-                <div>
-                  <dt className="text-neutral-500">Check-in every</dt>
-                  <dd className="font-medium text-neutral-900">{status.intervalHours} h</dd>
-                </div>
-                <div>
-                  <dt className="text-neutral-500">Last check-in</dt>
-                  <dd className="font-mono text-xs text-neutral-900">
-                    {status.lastCheckinAt
-                      ? new Date(status.lastCheckinAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })
-                      : "—"}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-neutral-500">Next due (Kigali)</dt>
-                  <dd className="font-mono text-xs text-neutral-900">
-                    {new Date(status.nextDueAt).toLocaleString(undefined, { timeZone: "Africa/Kigali" })}
-                  </dd>
-                </div>
-              </dl>
-            </div>
+            {performance?.verifiedLiveCount != null ? (
+              <StatusPill tone="info">Verified count</StatusPill>
+            ) : null}
+            <span className="type-caption text-[var(--text-muted)]">
+              Next check-in {formatManagerDateTime(status.nextDueAt)}
+            </span>
           </div>
-          <div className="space-y-3">
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 text-sm">
-              <p className="mb-2 font-semibold text-neutral-800">Allowed Actions</p>
-              <div className="space-y-2">
-                {treatmentAction.mode === "enabled" ? (
-                  <Link
-                    to="/farm/treatments"
-                    className="block w-full rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs hover:bg-neutral-50"
-                  >
-                    Execute treatment round
-                  </Link>
-                ) : null}
-                {weighinAction.mode === "enabled" ? (
-                  <a
-                    href="#weigh-in"
-                    className="block w-full rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs hover:bg-neutral-50"
-                  >
-                    Record weigh-in
-                  </a>
-                ) : null}
-                {slaughterAction.mode === "enabled" ? (
-                  <Link
-                    to="/farm/slaughter"
-                    className="block w-full rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs hover:bg-neutral-50"
-                  >
-                    Schedule slaughter
-                  </Link>
-                ) : null}
-                {alertAction.mode !== "hidden" ? (
-                  <button
-                    type="button"
-                    disabled={alertAction.mode !== "enabled"}
-                    className="w-full cursor-not-allowed rounded-lg border border-neutral-300 px-3 py-2 text-left text-xs disabled:opacity-60"
-                    title={alertAction.reason ?? ""}
-                  >
-                    Acknowledge critical alert
-                  </button>
-                ) : null}
-              </div>
+
+          {performance ? (
+            <div className="grid gap-3 rounded-[var(--radius-xl)] border border-[var(--border-color)] bg-[var(--surface-card)] p-card shadow-[var(--shadow-card)] sm:grid-cols-2 lg:grid-cols-4">
+              <Metric
+                label="Day"
+                value={status.ageDays}
+                context={`Every ${status.intervalHours}h`}
+              />
+              <Metric
+                label="Live birds"
+                value={performance.birdsLiveEstimate.toLocaleString()}
+                context={
+                  performance.verifiedLiveCount != null
+                    ? "Manager override"
+                    : "Placement − mort − harvest"
+                }
+              />
+              <Metric
+                label="Feed to date"
+                value={`${performance.feedToDateKg.toLocaleString()} kg`}
+              />
+              <Metric
+                label="Cycle FCR"
+                value={performance.fcr != null ? performance.fcr.toFixed(2) : "—"}
+                context={fcrContext}
+              />
             </div>
+          ) : null}
+
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
+            <div className="space-y-stack min-w-0">
+              <SectionCard
+                title="Weigh-ins"
+                controls={
+                  weighinAction.mode === "enabled" ? (
+                    <Button size="sm" variant="secondary" onClick={() => setShowWeighInForm(true)}>
+                      Record
+                    </Button>
+                  ) : null
+                }
+                flushBody
+              >
+                {weighIns.length ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[28rem] text-left text-sm">
+                      <thead>
+                        <tr className="border-b border-[var(--border-color)] type-caption text-[var(--text-muted)]">
+                          <th className="px-card py-2 font-medium">Date</th>
+                          <th className="px-card py-2 font-medium">Avg kg</th>
+                          <th className="px-card py-2 font-medium">Feed/kg sample</th>
+                          <th className="px-card py-2 font-medium">vs target</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {weighIns.map((w) => {
+                          const ratio = w.feedPerKgSampleBiomass ?? w.fcr;
+                          return (
+                            <tr key={w.id} className="border-b border-[var(--border-color)]/60 last:border-0">
+                              <td className="px-card py-2.5 tabular-nums text-[var(--text-primary)]">
+                                {formatManagerDate(w.weighDate)}
+                              </td>
+                              <td className="px-card py-2.5 tabular-nums font-medium">
+                                {w.avgWeightKg.toFixed(2)}
+                              </td>
+                              <td className="px-card py-2.5 tabular-nums text-[var(--text-secondary)]">
+                                {ratio != null ? ratio.toFixed(2) : "—"}
+                              </td>
+                              <td className="px-card py-2.5 tabular-nums text-[var(--text-secondary)]">
+                                {w.variancePct != null
+                                  ? `${w.variancePct > 0 ? "+" : ""}${w.variancePct}%`
+                                  : "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="px-card py-6 type-caption text-[var(--text-muted)]">No weigh-ins yet.</p>
+                )}
+              </SectionCard>
+
+              {eligibility && !eligibility.eligibleForSlaughter ? (
+                <SectionCard title="Slaughter blockers">
+                  <ul className="space-y-1.5 text-sm">
+                    {eligibility.blockers.map((b, i) => (
+                      <li key={`${b.type}-${i}`} className="text-[var(--status-warning)]">
+                        {b.type === "withdrawal"
+                          ? `${b.medicineName ?? "Treatment"} withdrawal until ${b.safeAfter ?? "clearance"}`
+                          : `Missed treatment round at ${b.plannedFor ?? "unknown time"}`}
+                      </li>
+                    ))}
+                  </ul>
+                </SectionCard>
+              ) : null}
+
+              {canVerifyHeadcount ? (
+                <SectionCard title="Verify head count">
+                  <form onSubmit={(ev) => void submitVerification(ev)} className="flex flex-wrap items-end gap-2">
+                    <label className="min-w-[8rem] flex-1 space-y-1">
+                      <span className="type-label">Physical count</span>
+                      <input
+                        className={controlClass}
+                        inputMode="numeric"
+                        value={verifyForm.liveCount}
+                        onChange={(e) => setVerifyForm((v) => ({ ...v, liveCount: e.target.value }))}
+                        placeholder={
+                          performance?.computedBirdsLiveEstimate != null
+                            ? `Calc ${performance.computedBirdsLiveEstimate}`
+                            : undefined
+                        }
+                      />
+                    </label>
+                    <label className="min-w-[12rem] flex-[2] space-y-1">
+                      <span className="type-label">Note</span>
+                      <input
+                        className={controlClass}
+                        value={verifyForm.note}
+                        onChange={(e) => setVerifyForm((v) => ({ ...v, note: e.target.value }))}
+                      />
+                    </label>
+                    <Button variant="secondary" size="sm" type="submit" disabled={verifyBusy} loading={verifyBusy}>
+                      Save
+                    </Button>
+                    {performance?.verifiedLiveCount != null ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={verifyBusy}
+                        onClick={() => void clearVerification()}
+                      >
+                        Clear
+                      </Button>
+                    ) : null}
+                  </form>
+                </SectionCard>
+              ) : null}
+            </div>
+
+            <aside className="space-y-stack">
+              <SectionCard title="Check-in">
+                <dl className="space-y-2.5 text-sm">
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-[var(--text-muted)]">Last</dt>
+                    <dd className="text-right tabular-nums text-[var(--text-primary)]">
+                      {formatManagerDateTime(status.lastCheckinAt)}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-[var(--text-muted)]">Next</dt>
+                    <dd className="text-right tabular-nums text-[var(--text-primary)]">
+                      {formatManagerDateTime(status.nextDueAt)}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-[var(--text-muted)]">Interval</dt>
+                    <dd className="tabular-nums text-[var(--text-primary)]">{status.intervalHours}h</dd>
+                  </div>
+                </dl>
+                {id ? (
+                  <Link
+                    to={`/farm/vet-logs?flockId=${encodeURIComponent(id)}`}
+                    className="mt-3 inline text-sm font-semibold text-[var(--primary-color)] underline-offset-2 hover:underline"
+                  >
+                    Vet logs
+                  </Link>
+                ) : null}
+              </SectionCard>
+            </aside>
           </div>
         </div>
       ) : null}
-    </div>
+
+      <Modal open={showWeighInForm} title="Record weigh-in" onClose={() => setShowWeighInForm(false)} wide>
+        <form onSubmit={(ev) => void submitWeighIn(ev)} className="grid gap-3 sm:grid-cols-2">
+          <label className="space-y-1">
+            <span className="type-label">Weigh date</span>
+            <input
+              type="date"
+              className={controlClass}
+              value={weighForm.weighDate}
+              onChange={(e) => setWeighForm((v) => ({ ...v, weighDate: e.target.value }))}
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="type-label">Age (days)</span>
+            <input
+              className={controlClass}
+              inputMode="numeric"
+              value={weighForm.ageDays}
+              onChange={(e) => setWeighForm((v) => ({ ...v, ageDays: e.target.value }))}
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="type-label">Sample size</span>
+            <input
+              className={controlClass}
+              inputMode="numeric"
+              value={weighForm.sampleSize}
+              onChange={(e) => setWeighForm((v) => ({ ...v, sampleSize: e.target.value }))}
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="type-label">Avg weight (kg)</span>
+            <input
+              className={controlClass}
+              inputMode="decimal"
+              value={weighForm.avgWeightKg}
+              onChange={(e) => setWeighForm((v) => ({ ...v, avgWeightKg: e.target.value }))}
+            />
+          </label>
+          <label className="space-y-1 sm:col-span-2">
+            <span className="type-label">Total feed used (kg) to this date</span>
+            <input
+              className={controlClass}
+              inputMode="decimal"
+              value={weighForm.totalFeedUsedKg}
+              onChange={(e) => setWeighForm((v) => ({ ...v, totalFeedUsedKg: e.target.value }))}
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="type-label">Target weight (kg)</span>
+            <input
+              className={controlClass}
+              inputMode="decimal"
+              value={weighForm.targetWeightKg}
+              onChange={(e) => setWeighForm((v) => ({ ...v, targetWeightKg: e.target.value }))}
+            />
+          </label>
+          <label className="space-y-1">
+            <span className="type-label">Notes</span>
+            <input
+              className={controlClass}
+              value={weighForm.notes}
+              onChange={(e) => setWeighForm((v) => ({ ...v, notes: e.target.value }))}
+            />
+          </label>
+          <div className="flex justify-end gap-2 sm:col-span-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setShowWeighInForm(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" size="sm" disabled={weighBusy} loading={weighBusy}>
+              Save weigh-in
+            </Button>
+          </div>
+        </form>
+      </Modal>
+    </ManagerPage>
   );
 }

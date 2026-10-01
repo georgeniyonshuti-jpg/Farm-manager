@@ -28,10 +28,24 @@ import {
   Settings2,
   LogOut,
   LayoutDashboard,
+  Truck,
 } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
 import type { ActiveWorkspace, SessionUser } from "../../auth/types";
-import { canAccessPageByKey, canAccessWorkspace, canFlockAction, canManageUsers, farmCoreNavItems, hasPermission } from "../../auth/permissions";
+import {
+  canAccessPageByKey,
+  canAccessPipelineDesk,
+  canAccessWorkspace,
+  canFlockAction,
+  canManageUsers,
+  canScoutPipeline,
+  farmCoreNavItems,
+  hasPermission,
+  isCompanyLevelAdmin,
+  isFarmOpsLead,
+  isOfficeFarmDesktopRole,
+  isPipelineSalesRole,
+} from "../../auth/permissions";
 import { canEditFlockScheduleRole } from "../../farm/scheduleAccess";
 import { useLaborerT } from "../../i18n/laborerI18n";
 import { useCompanyNav } from "../../hooks/useCompanyNav";
@@ -64,14 +78,19 @@ const PATH_ICONS: Record<string, ReactNode> = {
   "/farm/treatments": <Pill className={ICON_CLS} aria-hidden />,
   "/farm/inventory": <Package className={ICON_CLS} aria-hidden />,
   "/farm/slaughter": <Drumstick className={ICON_CLS} aria-hidden />,
+  "/farm/pipeline": <Truck className={ICON_CLS} aria-hidden />,
+  "/farm/pipeline/buyers": <Users className={ICON_CLS} aria-hidden />,
+  "/farm/pipeline/scout": <Truck className={ICON_CLS} aria-hidden />,
+  "/farm/pipeline/weigh": <ClipboardCheck className={ICON_CLS} aria-hidden />,
+  "/market/listings": <Package className={ICON_CLS} aria-hidden />,
+  "/market/jobs": <ClipboardCheck className={ICON_CLS} aria-hidden />,
+  "/market/commissions": <Wallet className={ICON_CLS} aria-hidden />,
   "/farm/flocks": <Bird className={ICON_CLS} aria-hidden />,
   "/farm/schedule-settings": <CalendarCog className={ICON_CLS} aria-hidden />,
   "/farm/payroll": <Wallet className={ICON_CLS} aria-hidden />,
   "/laborer/earnings": <CircleDollarSign className={ICON_CLS} aria-hidden />,
-  "/farm/accounting-approvals": <FileCheck2 className={ICON_CLS} aria-hidden />,
   "/farm/erpnext-setup": <Plug className={ICON_CLS} aria-hidden />,
   "/farm/erpnext": <ExternalLink className={ICON_CLS} aria-hidden />,
-  "/farm/odoo-setup": <Plug className={ICON_CLS} aria-hidden />,
   "/farm/reports": <BarChart3 className={ICON_CLS} aria-hidden />,
   "/cleva/portfolio": <PieChart className={ICON_CLS} aria-hidden />,
   "/cleva/business-model": <Landmark className={ICON_CLS} aria-hidden />,
@@ -135,7 +154,7 @@ function SidebarNavBody({
 }: SidebarNavBodyProps) {
   const { logout, setActiveWorkspace } = useAuth();
   const { tenantCompany } = useTenant();
-  const { can, erpnextAccess, hasBootstrap } = useFarmCapabilities();
+  const { can, erpnextAccess, hasBootstrap, fieldReportingMode } = useFarmCapabilities();
   const href = (path: string) => companyHref(path);
   const signOut = useLaborerT("Sign out");
   const appName = useLaborerT("Clevafarm");
@@ -169,14 +188,14 @@ function SidebarNavBody({
 
   const logPayrollItem: NavItem | null =
     activeWorkspace === "farm" &&
-    (user.role === "manager" || user.role === "vet_manager" || user.role === "superuser") &&
+    isFarmOpsLead(user) &&
     canSee("farm_schedule_settings")
       ? { to: "/farm/schedule-settings", label: "Schedule settings" }
       : null;
 
   const checkinReviewNavItem: NavItem | null =
     activeWorkspace === "farm" &&
-    (user.role === "manager" || user.role === "vet_manager" || user.role === "superuser") &&
+    isFarmOpsLead(user) &&
     canSee("farm_checkin_review") &&
     (!hasBootstrap || can("review_queue"))
       ? { to: "/farm/checkin-review", label: "Review check-ins" }
@@ -184,7 +203,7 @@ function SidebarNavBody({
 
   const payrollNavItem: NavItem | null =
     activeWorkspace === "farm" &&
-    (user.role === "manager" || user.role === "vet_manager" || user.role === "superuser") &&
+    isFarmOpsLead(user) &&
     canSee("farm_payroll")
       ? { to: "/farm/payroll", label: "Payroll" }
       : null;
@@ -193,14 +212,34 @@ function SidebarNavBody({
     canFlockAction(user, "treatment.execute") &&
     canSee("farm_treatments") &&
     (!hasBootstrap || can("treatment_rounds"))
-      ? { to: "/farm/treatments", label: "Medicine tracking" }
+      ? { to: "/farm/treatments", label: isOfficeFarmDesktopRole(user) ? "Medicine" : "Medicine tracking" }
       : null;
   const slaughterNavItem: NavItem | null =
     activeWorkspace === "farm" &&
     canFlockAction(user, "slaughter.schedule") &&
     canSee("farm_slaughter") &&
     (!hasBootstrap || can("slaughter"))
-      ? { to: "/farm/slaughter", label: "Slaughter & FCR" }
+      ? { to: "/farm/slaughter", label: isOfficeFarmDesktopRole(user) ? "Slaughter" : "Slaughter & FCR" }
+      : null;
+  const pipelineDeskNavItem: NavItem | null =
+    activeWorkspace === "farm" && canAccessPipelineDesk(user) && canSee("farm_pipeline")
+      ? { to: "/farm/pipeline", label: "Market" }
+      : null;
+  const pipelineScoutNavItem: NavItem | null =
+    activeWorkspace === "farm" && canScoutPipeline(user) && !canAccessPipelineDesk(user)
+      ? { to: "/farm/pipeline/scout", label: "Inventory scout" }
+      : null;
+  const pipelineWeighNavItem: NavItem | null =
+    activeWorkspace === "farm" && canScoutPipeline(user) && !canAccessPipelineDesk(user)
+      ? { to: "/farm/pipeline/weigh", label: "Weigh visits" }
+      : null;
+  const marketListingsNavItem: NavItem | null =
+    activeWorkspace === "farm" && (user.role === "company_admin" || user.role === "manager")
+      ? { to: "/market/listings", label: "My market listings" }
+      : null;
+  const marketCommissionsNavItem: NavItem | null =
+    activeWorkspace === "farm" && canScoutPipeline(user) && !canAccessPipelineDesk(user)
+      ? { to: "/market/commissions", label: "Scout commissions" }
       : null;
   const laborerEarningsItem: NavItem | null =
     activeWorkspace === "farm" &&
@@ -212,28 +251,21 @@ function SidebarNavBody({
       ? { to: "/laborer/earnings", label: "My earnings" }
       : null;
 
-  const accountingApprovalsNavItem: NavItem | null =
-    activeWorkspace === "farm" &&
-    erpnextAccess &&
-    (user.role === "manager" || user.role === "superuser")
-      ? { to: "/farm/accounting-approvals", label: "Accounting approvals" }
-      : null;
-
   const erpnextSetupNavItem: NavItem | null =
     activeWorkspace === "farm" &&
     erpnextAccess &&
-    (user.role === "manager" || user.role === "superuser")
-      ? { to: "/farm/erpnext-setup", label: "ERPNext integration" }
+    isCompanyLevelAdmin(user)
+      ? { to: "/farm/erpnext-setup", label: "ERPNext" }
       : null;
   const erpnextDeskNavItem: NavItem | null =
     activeWorkspace === "farm" &&
     erpnextAccess &&
-    (user.role === "manager" || user.role === "superuser")
+    isCompanyLevelAdmin(user)
       ? { to: "/farm/erpnext", label: "ERPNext desk" }
       : null;
   const reportsCenterNavItem: NavItem | null =
     activeWorkspace === "farm" &&
-    (user.role === "vet" || user.role === "vet_manager" || user.role === "manager" || user.role === "superuser") &&
+    (user.role === "vet" || isFarmOpsLead(user)) &&
     canSee("farm_reports")
       ? { to: "/farm/reports", label: "Reports center" }
       : null;
@@ -247,12 +279,16 @@ function SidebarNavBody({
     payrollNavItem,
     treatmentNavItem,
     slaughterNavItem,
-    accountingApprovalsNavItem,
+    pipelineDeskNavItem,
+    pipelineScoutNavItem,
+    pipelineWeighNavItem,
+    marketListingsNavItem,
+    marketCommissionsNavItem,
     erpnextSetupNavItem,
     erpnextDeskNavItem,
     reportsCenterNavItem,
   ].filter(Boolean) as NavItem[];
-  const farmCore = farmCoreNavItems(user).filter((item) => {
+  const farmCore = farmCoreNavItems(user, fieldReportingMode).filter((item) => {
     const byPath: Record<string, string> = {
       "/farm/checkin": "farm_checkin",
       "/farm/feed": "farm_feed",
@@ -275,7 +311,10 @@ function SidebarNavBody({
     if (hasBootstrap && cap && !can(cap)) return false;
     return k ? canSee(k) : true;
   });
-  const farmNav = [...farmCore, ...farmExtras];
+  const salesOnlyNav = isPipelineSalesRole(user)
+      ? ([pipelineDeskNavItem, pipelineScoutNavItem, pipelineWeighNavItem].filter(Boolean) as NavItem[])
+    : null;
+  const farmNav = salesOnlyNav ?? [...farmCore, ...farmExtras];
   const nav = activeWorkspace === "farm" ? farmNav : clevaNav.filter((item) => {
     if (item.to === "/cleva/portfolio") return canSee("cleva_portfolio");
     if (item.to === "/cleva/business-model") return canSee("cleva_business_model");
@@ -285,12 +324,15 @@ function SidebarNavBody({
     return true;
   });
 
-  const dashLink =
-    user.role === "laborer" || user.role === "dispatcher"
-      ? { to: "/dashboard/laborer", label: "Action center" }
-      : user.role === "vet" || user.role === "vet_manager"
-        ? { to: "/dashboard/vet", label: "Vet home" }
-        : { to: "/dashboard/management", label: "Command center" };
+  const dashLink = isPipelineSalesRole(user)
+    ? { to: "/farm/pipeline", label: "Market" }
+    : isOfficeFarmDesktopRole(user)
+      ? { to: "/dashboard/management", label: "Today" }
+      : user.role === "laborer" || user.role === "dispatcher"
+        ? { to: "/dashboard/laborer", label: "Action center" }
+        : user.role === "vet"
+          ? { to: "/dashboard/vet", label: "Vet home" }
+          : { to: "/dashboard/management", label: "Today" };
   const effectiveDashLink =
     dashLink.to === "/dashboard/laborer" && !canSee("dashboard_laborer")
       ? null
@@ -301,19 +343,51 @@ function SidebarNavBody({
           : dashLink;
 
   const adminLink =
-    canManageUsers(user) && canSee("admin_users") ? { to: "/admin/users", label: "User management" } : null;
+    canManageUsers(user) && canSee("admin_users") ? { to: "/admin/users", label: isOfficeFarmDesktopRole(user) ? "Users" : "User management" } : null;
   const superAdminLink =
     user.role === "superuser" ? { to: "/admin/super", label: "Super admin" } : null;
   const typeLink =
-    user.role === "vet_manager" || user.role === "manager" || user.role === "company_admin" || user.role === "superuser"
-      ? (canSee("admin_system_config") ? { to: "/admin/system-config", label: "Type settings" } : null)
+    isFarmOpsLead(user)
+      ? (canSee("admin_system_config") ? { to: "/admin/system-config", label: isOfficeFarmDesktopRole(user) ? "Lists & types" : "Type settings" } : null)
       : null;
 
-  const adminItems = [adminLink, superAdminLink, typeLink].filter(Boolean) as NavItem[];
+  const adminItems = (isOfficeFarmDesktopRole(user) ? [superAdminLink] : [adminLink, superAdminLink, typeLink]).filter(Boolean) as NavItem[];
 
   const groupedFarmNav = useMemo(() => {
     const byPath = new Map(farmNav.map((item) => [item.to, item]));
     const pick = (paths: string[]) => paths.map((p) => byPath.get(p)).filter(Boolean) as NavItem[];
+    if (isPipelineSalesRole(user)) {
+      return {
+        overview: [] as NavItem[],
+        operations: [] as NavItem[],
+        health: [] as NavItem[],
+        inventory: farmNav,
+        planning_workforce: [] as NavItem[],
+        people: [] as NavItem[],
+        settings: [] as NavItem[],
+        finance: [] as NavItem[],
+      };
+    }
+    const office = isOfficeFarmDesktopRole(user);
+
+    if (office) {
+      return {
+        overview: effectiveDashLink ? [{ ...effectiveDashLink, label: "Today" }] : [],
+        operations: [] as NavItem[],
+        health: pick(["/farm/vet-logs", "/farm/treatments", "/farm/mortality", "/farm/checkin-review"]),
+        inventory: pick([
+          "/farm/inventory",
+          "/farm/slaughter",
+          "/farm/pipeline",
+          "/market/listings",
+          "/market/commissions",
+        ]),
+        planning_workforce: pick(["/farm/flocks"]),
+        people: [adminLink, payrollNavItem].filter(Boolean) as NavItem[],
+        settings: [typeLink, logPayrollItem, erpnextSetupNavItem, erpnextDeskNavItem, reportsCenterNavItem].filter(Boolean) as NavItem[],
+        finance: [] as NavItem[],
+      };
+    }
 
     return {
       overview: effectiveDashLink ? [effectiveDashLink] : [],
@@ -326,22 +400,30 @@ function SidebarNavBody({
         "/farm/checkin-review",
       ]),
       health: pick(["/farm/mortality", "/farm/vet-logs", "/farm/treatments"]),
-      inventory: pick(["/farm/inventory", "/farm/slaughter"]),
+      inventory: pick([
+        "/farm/inventory",
+        "/farm/slaughter",
+        "/farm/pipeline",
+        "/farm/pipeline/scout",
+        "/farm/pipeline/weigh",
+        "/market/listings",
+        "/market/commissions",
+      ]),
       planning_workforce: pick([
         "/farm/flocks",
         "/farm/schedule-settings",
         "/farm/payroll",
         "/laborer/earnings",
       ]),
+      people: [] as NavItem[],
+      settings: [] as NavItem[],
       finance: pick([
-        "/farm/accounting-approvals",
         "/farm/erpnext-setup",
         "/farm/erpnext",
-        "/farm/odoo-setup",
         "/farm/reports",
       ]),
     };
-  }, [farmNav, effectiveDashLink]);
+  }, [farmNav, effectiveDashLink, user, adminLink, payrollNavItem, typeLink, logPayrollItem, erpnextSetupNavItem, erpnextDeskNavItem, reportsCenterNavItem]);
 
   const compactPrimary = (() => {
     const base =
@@ -349,9 +431,11 @@ function SidebarNavBody({
         ? [
             ...groupedFarmNav.overview,
             ...groupedFarmNav.operations,
+            ...groupedFarmNav.planning_workforce,
             ...groupedFarmNav.health,
             ...groupedFarmNav.inventory,
-            ...groupedFarmNav.planning_workforce,
+            ...groupedFarmNav.people,
+            ...groupedFarmNav.settings,
             ...groupedFarmNav.finance,
           ]
         : nav;
@@ -501,6 +585,17 @@ function SidebarNavBody({
               <MgrLink key={item.to} item={item} compact />
             ))}
           </div>
+        ) : activeWorkspace === "farm" && isPipelineSalesRole(user) ? (
+          <GroupSection title="Supply" items={groupedFarmNav.inventory} />
+        ) : activeWorkspace === "farm" && isOfficeFarmDesktopRole(user) ? (
+          <>
+            <GroupSection title="Today" items={groupedFarmNav.overview} />
+            <GroupSection title="Flocks" items={groupedFarmNav.planning_workforce} />
+            <GroupSection title="Health" items={groupedFarmNav.health} />
+            <GroupSection title="Stock" items={groupedFarmNav.inventory} />
+            <GroupSection title="People" items={groupedFarmNav.people} />
+            <GroupSection title="Settings" items={groupedFarmNav.settings} />
+          </>
         ) : activeWorkspace === "farm" ? (
           <>
             <GroupSection title="Overview" items={groupedFarmNav.overview} />

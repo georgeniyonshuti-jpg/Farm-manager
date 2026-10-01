@@ -106,16 +106,29 @@ export function defaultHomePathForRole(role: UserRole): string {
       return "/dashboard/vet";
     case "investor":
       return "/cleva/portfolio";
+    case "sales_coordinator":
+      return "/farm/pipeline";
+    case "buyer":
+      return "/market";
     default:
       return "/dashboard/management";
   }
 }
 
-export function defaultHomeForUser(role: UserRole, companySlug?: string): string {
+export function defaultHomeForUser(
+  role: UserRole,
+  companySlug?: string,
+  pageAccess?: string[] | null
+): string {
   const bootstrap = readStoredFarmBootstrap();
   const mapped = bootstrap?.role ? mapErpRoleToPwaRole(bootstrap.role) : null;
   const effectiveRole = mapped ?? role;
-  const path = defaultHomePathForRole(effectiveRole);
+  const marketOnlySeller =
+    (effectiveRole === "manager" || effectiveRole === "company_admin") &&
+    Array.isArray(pageAccess) &&
+    pageAccess.length > 0 &&
+    pageAccess.every((key) => key === "farm_market");
+  const path = marketOnlySeller ? "/market/listings" : defaultHomePathForRole(effectiveRole);
   if (!companySlug) return path;
   return tenantPath(companySlug, path);
 }

@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../auth/AuthContext";
-import { useERPNextConnection } from "../../context/OdooConnectionContext";
+import { useERPNextConnection } from "../../context/ERPNextConnectionContext";
 import { getLoans } from "../../api/erpnext.api";
 import { getStoredErpnextCompany } from "../../lib/erpnextPrefs";
 import { useToast } from "../../components/Toast";
+import { Button } from "../../components/ui/Button";
 
 type LoanRow = {
   name: string;
@@ -56,12 +57,7 @@ export function CreditScoringPage() {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-xl border border-neutral-200 bg-white p-6 shadow-sm">
-        <PageHeader
-          title="Credit scoring"
-          subtitle="Use ERPNext loan repayment history as an input to credit decisions."
-        />
-      </div>
+      <PageHeader title="Credit scoring" />
 
       <section className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm space-y-4">
         <h2 className="text-base font-semibold">Applicant ERPNext loan history</h2>
@@ -75,13 +71,9 @@ export function CreditScoringPage() {
             value={applicant}
             onChange={(e) => setApplicant(e.target.value)}
           />
-          <button
-            type="submit"
-            disabled={loading || !status?.connected}
-            className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-          >
+          <Button type="submit" size="sm" disabled={loading || !status?.connected} loading={loading}>
             {loading ? "Loading…" : "Fetch history"}
-          </button>
+          </Button>
         </form>
 
         {history.length > 0 && (
