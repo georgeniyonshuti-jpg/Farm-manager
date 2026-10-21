@@ -1,5 +1,5 @@
-import { NavLink, Link, useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { NavLink, Link } from "react-router-dom";
+import { useMemo, type ReactNode } from "react";
 import {
   Home,
   ClipboardCheck,
@@ -54,7 +54,6 @@ import { useCompanyNav } from "../../hooks/useCompanyNav";
 import { useFarmCapabilities } from "../../hooks/useFarmCapabilities";
 import { BrandLogo } from "../BrandLogo";
 import { useTenant } from "../../context/TenantContext";
-import { stripTenantPrefix } from "../../lib/tenancy";
 
 function NavText({ text }: { text: string }) {
   const t = useLaborerT(text);
@@ -85,6 +84,8 @@ const PATH_ICONS: Record<string, ReactNode> = {
   "/farm/inventory": <Package className={ICON_CLS} aria-hidden />,
   "/farm/slaughter": <Drumstick className={ICON_CLS} aria-hidden />,
   "/farm/pipeline": <Truck className={ICON_CLS} aria-hidden />,
+  "/farm/pipeline/people": <Users className={ICON_CLS} aria-hidden />,
+  "/farm/pipeline/flocks": <Bird className={ICON_CLS} aria-hidden />,
   "/farm/pipeline/buyers": <Users className={ICON_CLS} aria-hidden />,
   "/farm/pipeline/scout": <Truck className={ICON_CLS} aria-hidden />,
   "/farm/pipeline/sellers": <Users className={ICON_CLS} aria-hidden />,
@@ -162,23 +163,6 @@ function SidebarNavBody({
   collapsed = false,
 }: SidebarNavBodyProps) {
   const { logout, setActiveWorkspace } = useAuth();
-  const location = useLocation();
-  const navigate = useNavigate();
-  const appPath = stripTenantPrefix(location.pathname);
-  const [navLane, setNavLane] = useState<"farm" | "market">("farm");
-  useEffect(() => {
-    if (
-      appPath.startsWith("/dashboard/market") ||
-      appPath.startsWith("/admin/signups") ||
-      appPath.startsWith("/farm/pipeline")
-    ) {
-      setNavLane("market");
-      return;
-    }
-    if (appPath.startsWith("/dashboard") || appPath.startsWith("/farm") || appPath.startsWith("/admin")) {
-      setNavLane("farm");
-    }
-  }, [appPath]);
   const { tenantCompany } = useTenant();
   const { can, erpnextAccess, hasBootstrap, fieldReportingMode } = useFarmCapabilities();
   const href = (path: string) => companyHref(path);
@@ -247,9 +231,14 @@ function SidebarNavBody({
     (!hasBootstrap || can("slaughter"))
       ? { to: "/farm/slaughter", label: isOfficeFarmDesktopRole(user) ? "Slaughter" : "Slaughter & FCR" }
       : null;
-  const pipelineDeskNavItem: NavItem | null =
+  const pipelineDeskNavItem: NavItem | null = null;
+  const peopleNavItem: NavItem | null =
     activeWorkspace === "farm" && canAccessPipelineDesk(user) && canSee("farm_pipeline")
-      ? { to: "/farm/pipeline", label: "Market" }
+      ? { to: "/farm/pipeline/people", label: "People" }
+      : null;
+  const flocksNavItem: NavItem | null =
+    activeWorkspace === "farm" && canAccessPipelineDesk(user) && canSee("farm_pipeline")
+      ? { to: "/farm/pipeline/flocks", label: "Flocks" }
       : null;
   const marketOverviewNavItem: NavItem | null =
     activeWorkspace === "farm" && canAccessPipelineDesk(user) && canSee("dashboard_market")
@@ -263,21 +252,17 @@ function SidebarNavBody({
     activeWorkspace === "farm" && canAccessPipelineDesk(user) && canSee("dashboard_market")
       ? { to: "/dashboard/market/recruitment", label: "Recruitment" }
       : null;
-  const pipelineScoutNavItem: NavItem | null =
-    activeWorkspace === "farm" && canScoutPipeline(user) && !canAccessPipelineDesk(user)
-      ? { to: "/farm/pipeline/scout", label: "Inventory scout" }
-      : null;
+  const pipelineScoutNavItem: NavItem | null = null;
   const pipelineSellersNavItem: NavItem | null =
-    activeWorkspace === "farm" && canScoutPipeline(user) && !canAccessPipelineDesk(user)
-      ? { to: "/farm/pipeline/sellers", label: "My sellers" }
+    activeWorkspace === "farm" &&
+    (user.role === "vet" || user.role === "vet_manager") &&
+    !canAccessPipelineDesk(user)
+      ? { to: "/farm/pipeline/sellers", label: "My flocks" }
       : null;
-  const pipelineWeighNavItem: NavItem | null =
-    activeWorkspace === "farm" && canScoutPipeline(user) && !canAccessPipelineDesk(user)
-      ? { to: "/farm/pipeline/weigh", label: "Weigh visits" }
-      : null;
+  const pipelineWeighNavItem: NavItem | null = null;
   const marketListingsNavItem: NavItem | null =
     activeWorkspace === "farm" && (user.role === "company_admin" || user.role === "manager")
-      ? { to: "/market/listings", label: "My market listings" }
+      ? { to: "/market/listings", label: "My flocks" }
       : null;
   const marketCommissionsNavItem: NavItem | null =
     activeWorkspace === "farm" && canScoutPipeline(user) && !canAccessPipelineDesk(user)
@@ -355,7 +340,7 @@ function SidebarNavBody({
     return k ? canSee(k) : true;
   });
   const salesOnlyNav = isPipelineSalesRole(user)
-      ? ([pipelineDeskNavItem, pipelineScoutNavItem, pipelineWeighNavItem].filter(Boolean) as NavItem[])
+      ? ([peopleNavItem, flocksNavItem].filter(Boolean) as NavItem[])
     : null;
   const farmNav = salesOnlyNav ?? [...farmCore, ...farmExtras];
   const nav = activeWorkspace === "farm" ? farmNav : clevaNav.filter((item) => {
@@ -368,7 +353,7 @@ function SidebarNavBody({
   });
 
   const dashLink = isPipelineSalesRole(user)
-    ? { to: "/farm/pipeline", label: "Market" }
+    ? { to: "/farm/pipeline/people", label: "People" }
     : isOfficeFarmDesktopRole(user)
       ? { to: "/dashboard/management", label: "Today" }
       : user.role === "laborer" || user.role === "dispatcher"
@@ -411,14 +396,18 @@ function SidebarNavBody({
   const office = isOfficeFarmDesktopRole(user);
   const desk = canAccessPipelineDesk(user);
   const showMarketLane = office && desk && activeWorkspace === "farm";
-  const marketLane: NavItem[] = showMarketLane
-    ? ([
-        pipelineDeskNavItem ? { ...pipelineDeskNavItem, label: "Desk" } : null,
-        messagesLink,
-        signupsLink,
-        marketOverviewNavItem ? { ...marketOverviewNavItem, label: "Insights" } : null,
-      ].filter(Boolean) as NavItem[])
-    : [];
+  const deskMarketItems: NavItem[] =
+    activeWorkspace === "farm" && desk
+      ? ([
+          peopleNavItem,
+          flocksNavItem,
+          messagesLink,
+          signupsLink,
+          marketOverviewNavItem ? { ...marketOverviewNavItem, label: "Insights" } : null,
+          marketRecruitmentNavItem,
+          marketTrendsNavItem,
+        ].filter(Boolean) as NavItem[])
+      : [];
   const footerAdmin = office
     ? adminItems.filter(
         (item) =>
@@ -438,7 +427,7 @@ function SidebarNavBody({
     ].filter(Boolean) as NavItem[];
     if (isPipelineSalesRole(user)) {
       return {
-        overview: marketGlance,
+        overview: [] as NavItem[],
         operations: [] as NavItem[],
         health: [] as NavItem[],
         inventory: farmNav,
@@ -452,7 +441,7 @@ function SidebarNavBody({
 
     if (office) {
       const healthPages = pick(["/farm/vet-logs", "/farm/treatments", "/farm/mortality", "/farm/checkin-review"]);
-      const stockPages = pick(["/farm/inventory", "/farm/slaughter", "/market/listings"]);
+      const stockPages = pick(["/farm/inventory", "/farm/slaughter"]);
       return {
         overview: [...(effectiveDashLink ? [{ ...effectiveDashLink, label: "Today" }] : [])],
         operations: [] as NavItem[],
@@ -518,9 +507,7 @@ function SidebarNavBody({
 
   const compactPrimary = (() => {
     const base =
-      showMarketLane && navLane === "market"
-        ? marketLane
-        : activeWorkspace === "farm"
+      activeWorkspace === "farm"
         ? [
             ...groupedFarmNav.overview,
             ...groupedFarmNav.operations,
@@ -530,6 +517,9 @@ function SidebarNavBody({
             ...groupedFarmNav.people,
             ...groupedFarmNav.settings,
             ...groupedFarmNav.finance,
+            ...(deskMarketItems.length ? deskMarketItems : []),
+            ...(marketListingsNavItem && office && !desk ? [marketListingsNavItem] : []),
+            ...(pipelineSellersNavItem && office ? [pipelineSellersNavItem] : []),
           ]
         : nav;
     const seen = new Set<string>();
@@ -563,12 +553,21 @@ function SidebarNavBody({
     );
   }
 
-  function GroupSection({ title, items }: { title: string; items: NavItem[] }) {
+  function GroupSection({
+    title,
+    items,
+    alwaysLabel,
+  }: {
+    title?: string;
+    items: NavItem[];
+    alwaysLabel?: boolean;
+  }) {
     if (!items.length) return null;
+    const labeled = Boolean(title) && (alwaysLabel || items.length > 2);
     return (
       <div className="mgr-nav-group">
-        <p className="mgr-nav-label">{title}</p>
-        <div className="mgr-nav-group__items">
+        {labeled ? <p className="mgr-nav-label">{title}</p> : null}
+        <div className={`mgr-nav-group__items${labeled ? "" : " mgr-nav-group__items--flat"}`}>
           {items.map((item) => (
             <MgrLink key={item.to} item={item} />
           ))}
@@ -586,13 +585,16 @@ function SidebarNavBody({
     <div className={`mgr-sidebar-footer ${collapsed ? "mgr-sidebar-footer--collapsed" : ""}`}>
       {footerAdmin.length > 0 ? (
         <div className="mgr-nav-group">
-          {!collapsed ? <p className="mgr-nav-label">Admin</p> : null}
-          <div className="mgr-nav-group__items">
+          {!collapsed && footerAdmin.length > 2 ? <p className="mgr-nav-label">Admin</p> : null}
+          <div className={`mgr-nav-group__items${footerAdmin.length > 2 ? "" : " mgr-nav-group__items--flat"}`}>
             {footerAdmin.map((item) => (
               <MgrLink key={item.to} item={item} compact={collapsed} />
             ))}
           </div>
         </div>
+      ) : null}
+      {superAdminLink && !footerAdmin.some((item) => item.to === "/admin/super") ? (
+        <MgrLink item={superAdminLink} compact={collapsed} />
       ) : null}
       <button
         type="button"
@@ -630,47 +632,30 @@ function SidebarNavBody({
               <span className="mgr-brand-name block truncate text-[15px] leading-tight">
                 {companyLabel}
               </span>
-              {!(showWorkspaceSwitch || (office && desk)) ? (
+              {!showWorkspaceSwitch ? (
                 <span className="mt-0.5 block truncate text-[10px] font-medium tracking-wide text-white/55">
                   {workspaceLabel}
                 </span>
               ) : null}
             </span>
           </Link>
-          {showWorkspaceSwitch || (office && desk) ? (
+          {showWorkspaceSwitch ? (
             <label className="mt-3 block">
               <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.06em] text-white/40">
                 Workspace
               </span>
               <select
                 className="mgr-sidebar-select"
-                value={activeWorkspace === "clevacredit" ? "clevacredit" : showMarketLane ? navLane : "farm"}
+                value={activeWorkspace ?? "farm"}
                 aria-label={switchWorkspaceAria}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  if (next === "clevacredit") {
-                    setActiveWorkspace("clevacredit");
-                    return;
-                  }
-                  if (activeWorkspace !== "farm") setActiveWorkspace("farm");
-                  if (next === "market") {
-                    setNavLane("market");
-                    navigate(href("/dashboard/market"));
-                    return;
-                  }
-                  setNavLane("farm");
-                  navigate(href("/dashboard/management"));
-                }}
+                onChange={(e) => setActiveWorkspace(e.target.value as ActiveWorkspace)}
               >
                 <option value="farm" disabled={!canAccessWorkspace(user, "farm")}>
                   {farmWorkspace}
                 </option>
-                {office && desk ? <option value="market">Market</option> : null}
-                {showWorkspaceSwitch ? (
-                  <option value="clevacredit" disabled={!canAccessWorkspace(user, "clevacredit")}>
-                    {clevaWorkspace}
-                  </option>
-                ) : null}
+                <option value="clevacredit" disabled={!canAccessWorkspace(user, "clevacredit")}>
+                  {clevaWorkspace}
+                </option>
               </select>
             </label>
           ) : null}
@@ -696,17 +681,22 @@ function SidebarNavBody({
             ))}
           </div>
         ) : activeWorkspace === "farm" && isPipelineSalesRole(user) ? (
-          <GroupSection title="Supply" items={groupedFarmNav.inventory} />
-        ) : activeWorkspace === "farm" && isOfficeFarmDesktopRole(user) && navLane === "market" && showMarketLane ? (
-          <GroupSection title="Market" items={marketLane} />
+          <GroupSection title="Market" items={deskMarketItems} alwaysLabel />
         ) : activeWorkspace === "farm" && isOfficeFarmDesktopRole(user) ? (
           <>
-            <GroupSection title="Today" items={groupedFarmNav.overview} />
-            <GroupSection title="Flocks" items={groupedFarmNav.planning_workforce} />
-            <GroupSection title="Health" items={groupedFarmNav.health} />
-            <GroupSection title="Stock" items={groupedFarmNav.inventory} />
-            <GroupSection title="People" items={groupedFarmNav.people} />
-            <GroupSection title="Settings" items={groupedFarmNav.settings} />
+            <GroupSection
+              items={[
+                ...groupedFarmNav.overview,
+                ...groupedFarmNav.planning_workforce,
+                ...groupedFarmNav.health,
+                ...groupedFarmNav.inventory,
+                ...groupedFarmNav.people,
+                ...groupedFarmNav.settings,
+              ]}
+            />
+            {marketListingsNavItem && !desk ? <GroupSection items={[marketListingsNavItem]} /> : null}
+            {pipelineSellersNavItem ? <GroupSection items={[pipelineSellersNavItem]} /> : null}
+            {showMarketLane ? <GroupSection title="Market" items={deskMarketItems} alwaysLabel /> : null}
           </>
         ) : activeWorkspace === "farm" ? (
           <>

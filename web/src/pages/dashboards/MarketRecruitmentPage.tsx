@@ -22,11 +22,13 @@ import {
 } from "../../components/ui";
 import { formatRwf } from "../../lib/formatRwf";
 import {
+  fetchRecruitmentQueue,
   fetchRecruitmentSummary,
   saveMarketExpectations,
   type MarketExpectations,
   type RecruitmentSummary,
 } from "../../api/marketInsights.api";
+import { RECRUITMENT_STAGES } from "../market/people/peopleWork";
 
 const DAYS_OPTS = [
   { value: "7", label: "7d" },
@@ -89,15 +91,24 @@ export function MarketRecruitmentPage() {
   const [targetsOpen, setTargetsOpen] = useState(false);
   const [draft, setDraft] = useState<Partial<MarketExpectations>>({});
   const [saving, setSaving] = useState(false);
+  const [stageCounts, setStageCounts] = useState<Record<string, number>>({});
 
   const load = useCallback(async () => {
     if (!token) return;
     setLoading(true);
     setError(null);
     try {
-      const summary = await fetchRecruitmentSummary(token, Number(days));
+      const [summary, queue] = await Promise.all([
+        fetchRecruitmentSummary(token, Number(days)),
+        fetchRecruitmentQueue(token, { lane: "recruitment" }).catch(() => null),
+      ]);
       setData(summary);
       setDraft(summary.expectations);
+      const counts: Record<string, number> = {};
+      for (const contact of queue?.contacts || []) {
+        counts[contact.stage] = (counts[contact.stage] || 0) + 1;
+      }
+      setStageCounts(counts);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load recruitment");
     } finally {
@@ -228,6 +239,25 @@ export function MarketRecruitmentPage() {
             tone={vsTone(sc.scoutsVsTargetPct)}
           />
         </div>
+
+        <section className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-elevated)] p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-[var(--text-primary)]">People in recruitment</h2>
+            <Link
+              to={companyHref("/farm/pipeline/people")}
+              className="text-sm font-semibold text-[var(--primary-color)] hover:underline"
+            >
+              Open People
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {RECRUITMENT_STAGES.map(([value, label]) => (
+              <p key={value} className="text-sm text-[var(--text-secondary)]">
+                <span className="font-semibold text-[var(--text-primary)]">{stageCounts[value] || 0}</span> {label}
+              </p>
+            ))}
+          </div>
+        </section>
 
         <section className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-elevated)] p-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

@@ -18,12 +18,15 @@ import {
   computeScoutCommission,
   DEFAULT_SCOUT_COMMISSION_RATE_PCT,
 } from "../services/pipeline/pipeline.js";
+import { normalizePlace } from "../services/pipeline/rwandaLocations.js";
 import {
   buildCommissionAccruedEmail,
   emailForUserId,
   notifyMany,
 } from "../services/pipeline/marketNotify.js";
 import { isPlatformSuperuser } from "../services/tenant/companyIsolation.js";
+import { scoutReadyGate } from "../services/pipeline/farmProfiles.js";
+import { recruitmentTradingGate } from "../services/pipeline/recruitmentContacts.js";
 import { registerPipelineMarketRoutes } from "./pipelineMarketExtras.js";
 import { registerPipelineStorefrontRoutes } from "./pipelineStorefrontExtras.js";
 import { registerPipelineFulfillmentRoutes } from "./pipelineFulfillmentExtras.js";
@@ -164,7 +167,7 @@ async function refreshDemandStatus(demandId) {
 }
 
 const BUYER_SELECT = `
-  id::text AS id, name, buyer_type AS "buyerType", district, whatsapp, phone,
+  id::text AS id, name, buyer_type AS "buyerType", district, sector, whatsapp, phone,
   weekly_birds_min AS "weeklyBirdsMin", weekly_birds_max AS "weeklyBirdsMax",
   weight_kg_min AS "weightKgMin", weight_kg_max AS "weightKgMax",
   prefers_slaughtered AS "prefersSlaughtered", collect_or_delivery AS "collectOrDelivery",
@@ -197,17 +200,19 @@ router.post("/buyers", async (req, res) => {
   const name = str(body.name, 200);
   if (!name) return res.status(400).json({ error: "name is required." });
   const buyerType = str(body.buyerType ?? body.type, 40) || "other";
+  const place = normalizePlace(body.district, body.sector, { sectorRequiredWithDistrict: true });
+  if (!place.ok) return res.status(400).json({ error: place.error, code: place.code });
   try {
     const r = await dbQuery(
       `INSERT INTO pipeline_buyers
          (name, buyer_type, district, whatsapp, phone, weekly_birds_min, weekly_birds_max,
-          weight_kg_min, weight_kg_max, prefers_slaughtered, collect_or_delivery, notice_days, notes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::uuid)
+          weight_kg_min, weight_kg_max, prefers_slaughtered, collect_or_delivery, notice_days, notes, created_by, sector)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::uuid, $15)
        RETURNING ${BUYER_SELECT}`,
       [
         name,
         buyerType,
-        str(body.district, 120),
+        place.district,
         str(body.whatsapp, 40),
         str(body.phone, 40),
         numOrNull(body.weeklyBirdsMin),
@@ -219,6 +224,7 @@ router.post("/buyers", async (req, res) => {
         numOrNull(body.noticeDays) ?? 2,
         str(body.notes, 2000),
         req.authUser.id,
+        place.sector,
       ]
     );
     audit(req.authUser, "pipeline.buyer.create", "pipeline_buyer", r.rows[0].id, { name });
@@ -233,11 +239,24 @@ router.patch("/buyers/:id", async (req, res) => {
   const id = req.params.id;
   const body = req.body ?? {};
   try {
+    let place = null;
+    if (body.district !== undefined || body.sector !== undefined) {
+      let district = body.district;
+      if (district === undefined) {
+        const cur = await dbQuery(`SELECT district FROM pipeline_buyers WHERE id = $1::uuid`, [id]);
+        district = cur.rows[0]?.district;
+      }
+      place = normalizePlace(district, body.sector !== undefined ? body.sector : "", {
+        sectorRequiredWithDistrict: true,
+      });
+      if (!place.ok) return res.status(400).json({ error: place.error, code: place.code });
+    }
     const r = await dbQuery(
       `UPDATE pipeline_buyers SET
           name = COALESCE($2, name),
           buyer_type = COALESCE($3, buyer_type),
           district = COALESCE($4, district),
+          sector = CASE WHEN $16::boolean THEN $17 ELSE sector END,
           whatsapp = COALESCE($5, whatsapp),
           phone = COALESCE($6, phone),
           weekly_birds_min = COALESCE($7, weekly_birds_min),
@@ -256,7 +275,7 @@ router.patch("/buyers/:id", async (req, res) => {
         id,
         body.name != null ? str(body.name, 200) : null,
         body.buyerType != null || body.type != null ? str(body.buyerType ?? body.type, 40) : null,
-        body.district !== undefined ? str(body.district, 120) : null,
+        place ? place.district : null,
         body.whatsapp !== undefined ? str(body.whatsapp, 40) : null,
         body.phone !== undefined ? str(body.phone, 40) : null,
         body.weeklyBirdsMin !== undefined ? numOrNull(body.weeklyBirdsMin) : null,
@@ -268,6 +287,8 @@ router.patch("/buyers/:id", async (req, res) => {
         body.noticeDays !== undefined ? numOrNull(body.noticeDays) : null,
         body.notes !== undefined ? str(body.notes, 2000) : null,
         body.active !== undefined ? bool(body.active, true) : null,
+        place != null,
+        place ? place.sector : null,
       ]
     );
     if (!r.rows[0]) return res.status(404).json({ error: "Buyer not found." });
@@ -385,6 +406,8 @@ router.post("/lots/opt-in", async (req, res) => {
     const expectedWeight = numOrNull(body.expectedWeightKg) ?? snap.expectedWeightKg;
     const ask = numOrNull(body.askPricePerKg);
     const district = str(body.district, 120);
+    const located = normalizePlace(district, body.sector, { required: Boolean(district) });
+    if (!located.ok) return res.status(400).json({ error: located.error, code: located.code });
     const contactPhone = str(body.contactPhone, 40);
     const notes = str(body.notes, 2000);
 
@@ -459,6 +482,9 @@ router.post("/lots/opt-in", async (req, res) => {
           body.minOrderBirds !== undefined ? numOrNull(body.minOrderBirds) : null,
         ]
       );
+      if (located.sector) {
+        await dbQuery(`UPDATE pipeline_lots SET sector = $2 WHERE id = $1::uuid`, [existing.rows[0].id, located.sector]);
+      }
       const refetch = await dbQuery(
         `SELECT ${LOT_SELECT} FROM pipeline_lots l WHERE l.id = $1::uuid`,
         [existing.rows[0].id]
@@ -504,6 +530,9 @@ router.post("/lots/opt-in", async (req, res) => {
           numOrNull(body.minOrderBirds),
         ]
       );
+      if (located.sector) {
+        await dbQuery(`UPDATE pipeline_lots SET sector = $2 WHERE id = $1::uuid`, [ins.rows[0].id, located.sector]);
+      }
       const refetch = await dbQuery(
         `SELECT ${LOT_SELECT} FROM pipeline_lots l WHERE l.id = $1::uuid`,
         [ins.rows[0].id]
@@ -578,12 +607,26 @@ router.post("/lots/scout", async (req, res) => {
   if (!canScoutPipeline(req.authUser)) {
     return res.status(403).json({ error: "Vet or pipeline role required to scout inventory." });
   }
+  if (req.authUser.role === "vet" || req.authUser.role === "vet_manager") {
+    const app = await dbQuery(
+      `SELECT status FROM scout_applications WHERE user_id = $1::uuid`,
+      [req.authUser.id]
+    ).catch(() => ({ rows: [] }));
+    const trade = await recruitmentTradingGate(dbQuery, req.authUser.id);
+    if (!trade.allow && trade.code === "kyc_required") {
+      return res.status(403).json({ error: trade.error, code: trade.code });
+    }
+    const gate = scoutReadyGate(app.rows[0]?.status);
+    if (!gate.allow) return res.status(403).json({ error: gate.error });
+  }
   const body = req.body ?? {};
   const flockId = str(body.flockId, 64);
   const birdCount = numOrNull(body.birdCount);
   const readyFrom = str(body.readyFrom, 10);
   const readyTo = str(body.readyTo, 10);
   const district = str(body.district, 120);
+  const located = normalizePlace(district, body.sector, { required: true });
+  if (!located.ok) return res.status(400).json({ error: located.error, code: located.code });
   if (!birdCount || birdCount <= 0) return res.status(400).json({ error: "birdCount is required." });
   if (!readyFrom || !readyTo) return res.status(400).json({ error: "readyFrom and readyTo are required." });
   if (!district) return res.status(400).json({ error: "district is required for scout lots." });
@@ -676,6 +719,9 @@ router.post("/lots/scout", async (req, res) => {
         );
         lotId = ins.rows[0].id;
       }
+      if (located.sector) {
+        await dbQuery(`UPDATE pipeline_lots SET sector = $2 WHERE id = $1::uuid`, [lotId, located.sector]);
+      }
       const refetch = await dbQuery(
         `SELECT ${LOT_SELECT} FROM pipeline_lots l WHERE l.id = $1::uuid`,
         [lotId]
@@ -723,6 +769,9 @@ router.post("/lots/scout", async (req, res) => {
         str(body.publicTitle, 160),
       ]
     );
+    if (located.sector) {
+      await dbQuery(`UPDATE pipeline_lots SET sector = $2 WHERE id = $1::uuid`, [ins.rows[0].id, located.sector]);
+    }
     const refetch = await dbQuery(
       `SELECT ${LOT_SELECT} FROM pipeline_lots l WHERE l.id = $1::uuid`,
       [ins.rows[0].id]
@@ -739,9 +788,22 @@ router.patch("/lots/:id", async (req, res) => {
   const id = req.params.id;
   const body = req.body ?? {};
   try {
+    let place = null;
+    if (body.district !== undefined || body.sector !== undefined) {
+      let district = body.district;
+      let sector = body.sector;
+      if (district === undefined || sector === undefined) {
+        const cur = await dbQuery(`SELECT district, sector FROM pipeline_lots WHERE id = $1::uuid`, [id]);
+        if (district === undefined) district = cur.rows[0]?.district;
+        if (sector === undefined) sector = cur.rows[0]?.sector;
+      }
+      place = normalizePlace(district, sector, { sectorRequiredWithDistrict: true });
+      if (!place.ok) return res.status(400).json({ error: place.error, code: place.code });
+    }
     await dbQuery(
       `UPDATE pipeline_lots SET
           district = COALESCE($2, district),
+          sector = CASE WHEN $16::boolean THEN $17 ELSE sector END,
           contact_phone = COALESCE($3, contact_phone),
           farm_label = COALESCE($4, farm_label),
           bird_count = COALESCE($5, bird_count),
@@ -759,7 +821,7 @@ router.patch("/lots/:id", async (req, res) => {
         WHERE id = $1::uuid`,
       [
         id,
-        body.district !== undefined ? str(body.district, 120) : null,
+        place ? place.district : null,
         body.contactPhone !== undefined ? str(body.contactPhone, 40) : null,
         body.farmLabel !== undefined ? str(body.farmLabel, 200) : null,
         body.birdCount !== undefined ? numOrNull(body.birdCount) : null,
@@ -773,6 +835,8 @@ router.patch("/lots/:id", async (req, res) => {
         body.deliveryAvailable !== undefined ? bool(body.deliveryAvailable) : null,
         body.status != null ? str(body.status, 40) : null,
         body.notes !== undefined ? str(body.notes, 2000) : null,
+        place != null,
+        place ? place.sector : null,
       ]
     );
     const refetch = await dbQuery(

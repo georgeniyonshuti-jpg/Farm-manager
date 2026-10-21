@@ -99,6 +99,7 @@ export function FarmSlaughterPage() {
   const [optInOpen, setOptInOpen] = useState(false);
   const [optInForm, setOptInForm] = useState({
     district: "",
+    sector: "",
     askPricePerKg: "",
     contactPhone: "",
     farmerCanSlaughter: false,
@@ -271,6 +272,7 @@ export function FarmSlaughterPage() {
       const r = await optInFlockToPipeline(token, {
         flockId,
         district: optInForm.district.trim(),
+        sector: optInForm.sector.trim(),
         askPricePerKg: optInForm.askPricePerKg ? Number(optInForm.askPricePerKg) : null,
         contactPhone: optInForm.contactPhone || null,
         farmerCanSlaughter: optInForm.farmerCanSlaughter,
@@ -882,7 +884,9 @@ export function FarmSlaughterPage() {
           </p>
           <DistrictSelect
             value={optInForm.district}
+            sector={optInForm.sector}
             onChange={(district) => setOptInForm((f) => ({ ...f, district }))}
+            onSectorChange={(sector) => setOptInForm((f) => ({ ...f, sector }))}
           />
           <Field label="Ask RWF/kg">
             <input

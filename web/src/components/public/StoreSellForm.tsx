@@ -13,6 +13,7 @@ export function StoreSellForm({ locale }: { locale: StoreLocale }) {
   const [birds, setBirds] = useState(50);
   const [avgKg, setAvgKg] = useState(1.8);
   const [district, setDistrict] = useState("");
+  const [sector, setSector] = useState("");
   const [honeypot, setHoneypot] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +51,7 @@ export function StoreSellForm({ locale }: { locale: StoreLocale }) {
         birds,
         avgWeightKg: avgKg,
         district: district || undefined,
+        sector: sector || undefined,
         website: honeypot,
         formStartedAt,
       });
@@ -146,7 +148,14 @@ export function StoreSellForm({ locale }: { locale: StoreLocale }) {
           />
         </label>
       </div>
-        <DistrictSelect variant="store" locale={locale} value={district} onChange={setDistrict} />
+        <DistrictSelect
+          variant="store"
+          locale={locale}
+          value={district}
+          sector={sector}
+          onChange={setDistrict}
+          onSectorChange={setSector}
+        />
       <div className="absolute -left-[9999px] h-0 w-0 overflow-hidden" aria-hidden>
         <label>
           Website

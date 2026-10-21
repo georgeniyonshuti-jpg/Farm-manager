@@ -1,17 +1,14 @@
 import {
-  BadgeCheck,
+  Bird,
   ClipboardCheck,
   Home,
-  Inbox,
   Package,
   Store,
   Pill,
-  Search,
   ShoppingBag,
   Skull,
   Stethoscope,
-  Tag,
-  Truck,
+  Users,
   Wallet,
   Wheat,
 } from "lucide-react";
@@ -82,35 +79,16 @@ export function FieldShellBottomNav() {
   if (canAccessPipelineDesk(user) && (appPath.startsWith("/market") || appPath.startsWith("/farm/pipeline"))) {
     const deskItems: MobileFieldNavItem[] = [
       {
-        to: companyHref("/farm/pipeline"),
-        label: "Today",
-        end: true,
-        icon: <Truck className={iconCls} aria-hidden />,
-        active: appPath.startsWith("/farm/pipeline") && !location.search.includes("tab="),
+        to: companyHref("/farm/pipeline/people"),
+        label: "People",
+        icon: <Users className={iconCls} aria-hidden />,
+        active: appPath.startsWith("/farm/pipeline/people"),
       },
       {
-        to: companyHref("/farm/pipeline?tab=book"),
-        label: "Book",
-        icon: <Package className={iconCls} aria-hidden />,
-        active: location.search.includes("tab=book"),
-      },
-      {
-        to: companyHref("/farm/pipeline?tab=buyers"),
-        label: "Buyers",
-        icon: <Inbox className={iconCls} aria-hidden />,
-        active: location.search.includes("tab=buyers"),
-      },
-      {
-        to: companyHref("/farm/pipeline?tab=pricing"),
-        label: "Pricing",
-        icon: <Tag className={iconCls} aria-hidden />,
-        active: location.search.includes("tab=pricing"),
-      },
-      {
-        to: companyHref("/farm/pipeline?tab=scouts"),
-        label: "Scouts",
-        icon: <Wallet className={iconCls} aria-hidden />,
-        active: location.search.includes("tab=scouts"),
+        to: companyHref("/farm/pipeline/flocks"),
+        label: "Flocks",
+        icon: <Bird className={iconCls} aria-hidden />,
+        active: appPath.startsWith("/farm/pipeline/flocks"),
       },
     ];
     return <MobileFieldBottomNav className="md:hidden" items={deskItems} ariaLabel="Market ops" />;
@@ -119,36 +97,16 @@ export function FieldShellBottomNav() {
   if (isPipelineSalesRole(user)) {
     const salesItems: MobileFieldNavItem[] = [
       {
-        to: companyHref("/farm/pipeline"),
-        label: "Market",
-        end: true,
-        icon: <Truck className={iconCls} aria-hidden />,
+        to: companyHref("/farm/pipeline/people"),
+        label: "People",
+        icon: <Users className={iconCls} aria-hidden />,
+        active: appPath.startsWith("/farm/pipeline/people"),
       },
       {
-        to: companyHref("/market"),
-        label: "Board",
-        icon: <ShoppingBag className={iconCls} aria-hidden />,
-      },
-      {
-        to: companyHref("/farm/pipeline?tab=buyers&panel=leads"),
-        label: "Leads",
-        icon: <Inbox className={iconCls} aria-hidden />,
-      },
-      {
-        to: companyHref("/farm/pipeline/messages"),
-        label: "Messages",
-        icon: <Inbox className={iconCls} aria-hidden />,
-        active: appPath.startsWith("/farm/pipeline/messages"),
-      },
-      {
-        to: companyHref("/farm/pipeline?tab=scouts"),
-        label: "Scouts",
-        icon: <BadgeCheck className={iconCls} aria-hidden />,
-      },
-      {
-        to: companyHref("/farm/pipeline?tab=scouts&panel=pay"),
-        label: "Pay",
-        icon: <Wallet className={iconCls} aria-hidden />,
+        to: companyHref("/farm/pipeline/flocks"),
+        label: "Flocks",
+        icon: <Bird className={iconCls} aria-hidden />,
+        active: appPath.startsWith("/farm/pipeline/flocks"),
       },
     ];
     return <MobileFieldBottomNav items={salesItems} ariaLabel="Market ops" />;
@@ -176,17 +134,10 @@ export function FieldShellBottomNav() {
             active: fieldScout && appPath === "/farm/pipeline/home",
           },
           {
-            to: companyHref("/farm/pipeline/scout?mode=offplatform"),
-            label: "Find",
-            icon: <Search className={iconCls} aria-hidden />,
-            active: appPath.startsWith("/farm/pipeline/scout") && !onSellers,
-            reselect: true,
-          },
-          {
             to: companyHref("/farm/pipeline/sellers"),
-            label: "Sellers",
-            icon: <BadgeCheck className={iconCls} aria-hidden />,
-            active: onSellers,
+            label: "My flocks",
+            icon: <Bird className={iconCls} aria-hidden />,
+            active: onSellers || appPath.startsWith("/farm/pipeline/scout"),
           },
           {
             to: companyHref("/market/commissions"),

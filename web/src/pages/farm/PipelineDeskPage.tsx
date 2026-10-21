@@ -788,6 +788,7 @@ export function PipelineDeskPage() {
             </Field>
           </div>
           <DistrictSelect
+            includeSector={false}
             value={demandForm.districtPreference}
             onChange={(districtPreference) => setDemandForm((f) => ({ ...f, districtPreference }))}
           />

@@ -10,7 +10,7 @@ import {
 describe("publicMarketFilters", () => {
   it("builds query from filters", () => {
     const q = filtersToPublicLotsQuery(
-      { district: "Gasabo", week: "this", minBirds: 100, sort: "birds", productType: "", service: "", farmMode: "" },
+      { district: "Gasabo", sector: "Kacyiru", week: "this", minBirds: 100, sort: "birds", productType: "", service: "", farmMode: "" },
       2,
       12
     );

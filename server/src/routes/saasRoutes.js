@@ -25,11 +25,14 @@ import {
 } from "../services/pipeline/sellerClaim.js";
 import { recordMarketReach } from "../services/pipeline/marketReach.js";
 import { attributionFieldsFromReq } from "../services/pipeline/signupAttribution.js";
+import { normalizeRwandaPhone, rwandaPhoneError } from "../services/pipeline/rwandaPhone.js";
+import { normalizePlace } from "../services/pipeline/rwandaLocations.js";
 import {
   buildSignupDeskEmail,
   logSignupAttemptFromReq,
   upsertPeopleOnboarding,
 } from "../services/pipeline/peopleOnboarding.js";
+import { upsertRecruitmentContact } from "../services/pipeline/recruitmentContacts.js";
 import { emailsForDeskRoles, notifyMany } from "../services/pipeline/marketNotify.js";
 import {
   accountTypeForContact,
@@ -186,7 +189,8 @@ export function createSaasRouter(deps) {
     const fullName = String(req.body?.fullName ?? "").trim();
     const email = String(req.body?.email ?? "").trim().toLowerCase();
     const password = String(req.body?.password ?? "");
-    const district = String(req.body?.district ?? "").trim().slice(0, 120);
+    const districtRaw = String(req.body?.district ?? "").trim().slice(0, 120);
+    const sectorRaw = String(req.body?.sector ?? "").trim().slice(0, 80);
     const phone = String(req.body?.phone ?? req.body?.whatsapp ?? "").trim().slice(0, 40);
     const buyerType = String(req.body?.buyerType ?? "butcher").trim().slice(0, 40) || "butcher";
 
@@ -199,13 +203,6 @@ export function createSaasRouter(deps) {
               ? "fullName, email, and password are required."
               : "companyName, fullName, email, and password are required.",
         code: "validation",
-      });
-      return;
-    }
-    if (accountType === "scout" && (!phone || !district)) {
-      fail(400, {
-        error: "Phone and district are required to apply as a scout.",
-        code: "scout_contact_required",
       });
       return;
     }
@@ -234,13 +231,6 @@ export function createSaasRouter(deps) {
       } catch (e) {
         console.error("[ERROR]", "[crm] signup token failed:", e instanceof Error ? e.message : "error");
         fail(503, { error: "Could not read signup link.", code: "crm_token" });
-        return;
-      }
-      if (accountType === "scout" && (!phone || !district)) {
-        fail(400, {
-          error: "Phone and district are required to apply as a scout.",
-          code: "scout_contact_required",
-        });
         return;
       }
       if (accountType !== "scout" && !companyName && !fullName) {
@@ -274,11 +264,33 @@ export function createSaasRouter(deps) {
       fail(400, { error: "This invite link is for a seller account.", code: "claim_wrong_type" });
       return;
     }
+    const contactRequired = fromMarket || accountType === "buyer" || accountType === "scout";
+    const phoneStored = normalizeRwandaPhone(phone);
+    const located = normalizePlace(districtRaw, sectorRaw, { required: contactRequired });
+    if (!located.ok) {
+      fail(400, { error: located.error, code: located.code || "district_required" });
+      return;
+    }
+    const district = located.district || "";
+    const sector = located.sector;
+    if (contactRequired) {
+      const phoneError = rwandaPhoneError(phoneStored, { required: true });
+      if (phoneError) {
+        fail(400, { error: phoneError, code: "phone_invalid" });
+        return;
+      }
+    } else if (phoneStored) {
+      const phoneError = rwandaPhoneError(phoneStored);
+      if (phoneError) {
+        fail(400, { error: phoneError, code: "phone_invalid" });
+        return;
+      }
+    }
     const slugBase = slugify(companyName) || (accountType === "buyer" ? "buyer" : "farm");
     const userId = crypto.randomUUID();
     const role =
       accountType === "buyer" ? "buyer" : accountType === "scout" ? "vet" : fromMarket ? "manager" : "company_admin";
-    // Scouts get instant access; intro call is tracked in people_onboarding, not scout_pending.
+    // A finished market signup is an Application. Desk approval activates the seller, scout, or buyer.
     const departmentKeys = [];
     const pageAccess =
       accountType === "scout"
@@ -407,9 +419,9 @@ export function createSaasRouter(deps) {
         if (accountType === "buyer") {
           await q(
             `INSERT INTO pipeline_buyers
-               (name, buyer_type, district, phone, whatsapp, user_id, verification_status, active)
-             VALUES ($1, $2, $3, $4, $4, $5::uuid, 'verified', true)`,
-            [companyName || fullName, buyerType, district || null, phone || null, userId]
+               (name, buyer_type, district, sector, phone, whatsapp, user_id, verification_status, active)
+             VALUES ($1, $2, $3, $4, $5, $5, $6::uuid, 'pending', true)`,
+            [companyName || fullName, buyerType, district || null, sector, phoneStored || null, userId]
           );
         } else if (fromMarket && claimRaw) {
           const claimed = await executeSellerClaim(q, {
@@ -427,18 +439,18 @@ export function createSaasRouter(deps) {
           }
         } else if (accountType === "scout") {
           await q(
-            `INSERT INTO scout_applications (user_id, phone, district, status)
-             VALUES ($1::uuid, $2, $3, 'pending')`,
-            [userId, phone || null, district || null]
+            `INSERT INTO scout_applications (user_id, phone, district, sector, status)
+             VALUES ($1::uuid, $2, $3, $4, 'pending')`,
+            [userId, phoneStored || null, district || null, sector]
           );
         } else if (fromMarket) {
           const profileSlug = await createUniqueFarmSlug(q, companyName);
           await q(
             `INSERT INTO farm_profiles
-               (company_id, slug, display_name, district, contact_phone, contact_whatsapp,
+               (company_id, slug, display_name, district, sector, contact_phone, contact_whatsapp,
                 created_by, owner_user_id, verification_status)
-             VALUES ($1::uuid, $2, $3, $4, $5, $5, $6::uuid, $6::uuid, 'pending')`,
-            [companyId, profileSlug, companyName, district || null, phone || null, userId]
+             VALUES ($1::uuid, $2, $3, $4, $5, $6, $6, $7::uuid, $7::uuid, 'pending')`,
+            [companyId, profileSlug, companyName, district || null, sector, phoneStored || null, userId]
           );
         }
         if (crmToken) {
@@ -448,7 +460,7 @@ export function createSaasRouter(deps) {
             userId,
             entityType: entity.type,
             entityId: entity.id,
-            phone,
+            phone: phoneStored,
           });
           if (!consumed.ok) {
             const err = new Error(consumed.message || "This signup link could not be used.");
@@ -485,17 +497,27 @@ export function createSaasRouter(deps) {
         void upsertPeopleOnboarding(dbQuery, {
           userId,
           accountType,
-          phone,
+          phone: phoneStored,
           district,
+          sector,
           attr,
-          stage: accountType === "buyer" ? "active" : "new",
+          stage: "new",
+        }).catch(() => {});
+        void upsertRecruitmentContact(dbQuery, {
+          phone: phoneStored,
+          name: fullName,
+          district,
+          sector,
+          accountType,
+          source: "signup",
+          userId,
         }).catch(() => {});
         void logSignupAttemptFromReq(dbQuery, req, {
           outcome: "succeeded",
           userId,
           accountType,
           email,
-          phone,
+          phone: phoneStored,
           fullName,
           district,
         }).catch(() => {});
@@ -507,7 +529,7 @@ export function createSaasRouter(deps) {
                 accountType,
                 fullName,
                 email,
-                phone,
+                phone: phoneStored,
                 district,
                 source: attr.source,
                 companyName,
@@ -521,7 +543,7 @@ export function createSaasRouter(deps) {
           userId,
           accountType,
           email,
-          phone,
+          phone: phoneStored,
           fullName,
           district,
         }).catch(() => {});
@@ -530,7 +552,7 @@ export function createSaasRouter(deps) {
         token,
         user: sanitizeUser(row),
         accountType,
-        verificationStatus: accountType === "buyer" ? "verified" : "pending",
+        verificationStatus: "pending",
         from: fromMarket ? "market" : "farm_os",
       });
     } catch (e) {

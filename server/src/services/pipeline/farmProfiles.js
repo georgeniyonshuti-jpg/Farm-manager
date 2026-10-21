@@ -152,6 +152,7 @@ export function mapFarmProfileRow(row) {
     displayName: row.displayName ?? row.display_name,
     story: row.story ?? null,
     district: row.district ?? null,
+    sector: row.sector ?? null,
     locationLabel: row.locationLabel ?? row.location_label ?? null,
     exactLocation: row.exactLocation ?? row.exact_location ?? null,
     lat: row.lat != null ? Number(row.lat) : null,
@@ -187,6 +188,7 @@ export const FARM_PROFILE_SELECT = `
   fp.display_name AS "displayName",
   fp.story,
   fp.district,
+  fp.sector,
   fp.location_label AS "locationLabel",
   fp.exact_location AS "exactLocation",
   fp.lat,
@@ -270,10 +272,18 @@ export function isMarketOnlySeller(user) {
 }
 
 /**
- * Market sellers share the host company, so their own profile is the approval.
- * A pending profile may save flocks. Those flocks stay off the public board.
+ * A market seller can register flocks after desk approval and KYC.
+ * Those flocks still wait for desk to review them.
  * A full-farm company still has to be verified before any listing is saved.
  */
+export function scoutReadyGate(status) {
+  if (status === "approved") return { allow: true };
+  if (status === "rejected") {
+    return { allow: false, error: "This scout account was not approved." };
+  }
+  return { allow: false, error: "Cleva has not marked you ready to register flocks." };
+}
+
 export function sellerListingGate({ marketOnly, companyStatus, profileStatus }) {
   if (marketOnly) {
     const status = profileStatus || "pending";
@@ -284,7 +294,14 @@ export function sellerListingGate({ marketOnly, companyStatus, profileStatus }) 
         error: "This seller account was not approved.",
       };
     }
-    return { allow: true, holdForReview: status !== "verified" };
+    if (status !== "verified") {
+      return {
+        allow: false,
+        code: "not_ready",
+        error: "Cleva has not marked you ready to register flocks.",
+      };
+    }
+    return { allow: true, holdForReview: true };
   }
   if (companyStatus !== "verified") {
     return {

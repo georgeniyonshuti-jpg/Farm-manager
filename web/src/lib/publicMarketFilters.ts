@@ -8,6 +8,7 @@ export type PublicFarmMode = "" | "with_profile";
 
 export type PublicMarketFilters = {
   district: string;
+  sector: string;
   week: PublicWeekFilter;
   minBirds: number | "";
   sort: PublicSort;
@@ -17,7 +18,7 @@ export type PublicMarketFilters = {
 };
 
 export function defaultPublicMarketFilters(): PublicMarketFilters {
-  return { district: "", week: "", minBirds: "", sort: "price", productType: "", service: "", farmMode: "" };
+  return { district: "", sector: "", week: "", minBirds: "", sort: "price", productType: "", service: "", farmMode: "" };
 }
 
 /** Build API query from UI filter state. */
@@ -29,6 +30,7 @@ export function filtersToPublicLotsQuery(
 ): PublicLotsQuery {
   return {
     district: filters.district || undefined,
+    sector: filters.sector || undefined,
     week: filters.week || undefined,
     minBirds: filters.minBirds === "" ? undefined : Number(filters.minBirds),
     sort: filters.sort,

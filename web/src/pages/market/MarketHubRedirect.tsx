@@ -12,15 +12,14 @@ type Props = {
   queue?: string;
 };
 
-/** Thin redirect into the Market ops hub (`/farm/pipeline?tab=…`). */
-export function MarketHubRedirect({ tab = "today", panel, queue }: Props) {
+/** Old desk tabs now land on People or Flocks. */
+export function MarketHubRedirect({ tab = "today" }: Props) {
   const { companyHref } = useCompanyNav();
-  const sp = new URLSearchParams();
-  if (tab !== "today") sp.set("tab", tab);
-  if (panel) sp.set("panel", panel);
-  if (queue) sp.set("queue", queue);
-  const q = sp.toString();
-  return <Navigate to={companyHref(`/farm/pipeline${q ? `?${q}` : ""}`)} replace />;
+  const to =
+    tab === "pricing" || tab === "book" || tab === "scouts"
+      ? "/farm/pipeline/flocks"
+      : "/farm/pipeline/people";
+  return <Navigate to={companyHref(to)} replace />;
 }
 
 export function RedirectMarketBuyers() {

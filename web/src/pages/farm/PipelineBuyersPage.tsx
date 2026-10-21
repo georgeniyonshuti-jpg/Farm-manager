@@ -19,6 +19,7 @@ const emptyForm = {
   name: "",
   buyerType: "butcher",
   district: "",
+  sector: "",
   whatsapp: "",
   phone: "",
   weeklyBirdsMin: "",
@@ -75,6 +76,7 @@ export function PipelineBuyersPage() {
       name: b.name,
       buyerType: b.buyerType || "other",
       district: b.district ?? "",
+      sector: b.sector ?? "",
       whatsapp: b.whatsapp ?? "",
       phone: b.phone ?? "",
       weeklyBirdsMin: b.weeklyBirdsMin != null ? String(b.weeklyBirdsMin) : "",
@@ -91,11 +93,16 @@ export function PipelineBuyersPage() {
 
   async function save() {
     if (!token || !form.name.trim()) return;
+    if (form.district.trim() && !form.sector.trim()) {
+      showToast("error", "Sector is required.");
+      return;
+    }
     setBusy(true);
     const body = {
       name: form.name.trim(),
       buyerType: form.buyerType,
       district: form.district || null,
+      sector: form.sector || null,
       whatsapp: form.whatsapp || null,
       phone: form.phone || null,
       weeklyBirdsMin: form.weeklyBirdsMin ? Number(form.weeklyBirdsMin) : null,
@@ -283,7 +290,13 @@ export function PipelineBuyersPage() {
               ))}
             </select>
           </Field>
-          <DistrictSelect value={form.district} onChange={(district) => setForm((f) => ({ ...f, district }))} />
+          <DistrictSelect
+            value={form.district}
+            sector={form.sector}
+            required={Boolean(form.district.trim())}
+            onChange={(district) => setForm((f) => ({ ...f, district }))}
+            onSectorChange={(sector) => setForm((f) => ({ ...f, sector }))}
+          />
           <div className="grid grid-cols-2 gap-2">
             <Field label="WhatsApp">
               <input

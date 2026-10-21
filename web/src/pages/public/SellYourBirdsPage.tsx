@@ -18,6 +18,7 @@ export function SellYourBirdsPage() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [district, setDistrict] = useState("");
+  const [sector, setSector] = useState("");
   const [birds, setBirds] = useState("");
   const [avgKg, setAvgKg] = useState("1.8");
   const [error, setError] = useState<string | null>(null);
@@ -28,8 +29,8 @@ export function SellYourBirdsPage() {
     const place = district.trim();
     const birdCount = Number(birds);
     const kg = Number(avgKg);
-    if (!contactName || !contactPhone || !place) {
-      setError("Name, phone, and district are required.");
+    if (!contactName || !contactPhone || !place || !sector.trim()) {
+      setError("Name, phone, district, and sector are required.");
       return;
     }
     if (birds.trim() && (!Number.isFinite(birdCount) || birdCount <= 0)) {
@@ -40,6 +41,7 @@ export function SellYourBirdsPage() {
       contactName,
       phone: contactPhone,
       district: place,
+      sector: sector.trim(),
       birds: Number.isFinite(birdCount) && birdCount > 0 ? birdCount : 0,
       avgKg: Number.isFinite(kg) && kg > 0 ? kg : 1.8,
     });
@@ -100,7 +102,16 @@ export function SellYourBirdsPage() {
               required
             />
           </label>
-          <DistrictSelect variant="store" locale={locale} layout="stack" value={district} onChange={setDistrict} required />
+          <DistrictSelect
+            variant="store"
+            locale={locale}
+            layout="stack"
+            value={district}
+            sector={sector}
+            onChange={setDistrict}
+            onSectorChange={setSector}
+            required
+          />
           <div className="store-field-row">
             <label className="store-field">
               <span>Birds</span>

@@ -15,6 +15,7 @@ import {
 export type ListBirdsPayload = {
   birdCount: number;
   district: string;
+  sector: string;
   placementDate: string;
   chicksInRelative: ChicksInRelative;
   readyFrom: string;
@@ -54,6 +55,7 @@ export function ListBirdsSheet({
   const [beat, setBeat] = useState<1 | 2 | 3>(1);
   const [birds, setBirds] = useState(100);
   const [district, setDistrict] = useState(initialDistrict || "");
+  const [sector, setSector] = useState("");
   const [phone, setPhone] = useState(initialPhone || "");
   const [relative, setRelative] = useState<ChicksInRelative>("about_2_weeks");
   const [exactDate, setExactDate] = useState("");
@@ -96,7 +98,7 @@ export function ListBirdsSheet({
   const readyTo = overrideTo || suggested?.readyTo || "";
 
   const beat1Ready =
-    birds > 0 && district.trim().length > 1 && Boolean(placementDate) && Boolean(suggested);
+    birds > 0 && district.trim().length > 1 && sector.trim().length > 1 && Boolean(placementDate) && Boolean(suggested);
   const beat3Ready = kg > 0;
   const submitDisabled = beat === 1 ? !beat1Ready : beat === 2 ? !readyFrom || !readyTo : !beat3Ready;
 
@@ -152,6 +154,7 @@ export function ListBirdsSheet({
     onSubmit({
       birdCount: birds,
       district: district.trim(),
+      sector: sector.trim(),
       placementDate,
       chicksInRelative: relative,
       readyFrom,
@@ -203,7 +206,15 @@ export function ListBirdsSheet({
                   </button>
                 </div>
               </div>
-              <DistrictSelect variant="store" locale={locale} value={district} onChange={setDistrict} />
+              <DistrictSelect
+                variant="store"
+                locale={locale}
+                value={district}
+                sector={sector}
+                onChange={setDistrict}
+                onSectorChange={setSector}
+                required
+              />
               <div className="store-field">
                 <span>Chicks in</span>
                 <div className="flex flex-wrap gap-1.5">

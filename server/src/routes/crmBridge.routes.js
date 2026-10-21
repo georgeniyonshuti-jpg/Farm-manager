@@ -9,6 +9,7 @@ import {
   convertLead,
   createSignupLink,
   crmEnabled,
+  crmInboxConfigured,
   launchCrm,
   listScoutSellers,
   loadScoutSeller,
@@ -125,6 +126,12 @@ export function createCrmInternalRouter({ dbQuery, hasDb }) {
 
 export function createCrmStaffRouter({ dbQuery, hasDb }) {
   const router = express.Router();
+
+  router.get("/status", (req, res) => {
+    const role = req.authUser?.role;
+    const desk = role === "superuser" || role === "sales_coordinator";
+    res.json({ configured: desk && crmInboxConfigured() });
+  });
 
   router.post("/launch", async (req, res) => {
     if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });

@@ -4,6 +4,7 @@ export type ScoutDraft = {
   farmProfileId: string;
   displayName: string;
   district: string;
+  sector: string;
   locationLabel: string;
   contactPhone: string;
   story: string;
@@ -65,6 +66,7 @@ export function emptyScoutDraft(partial: Partial<ScoutDraft> = {}): ScoutDraft {
     farmProfileId: "",
     displayName: "",
     district: "",
+    sector: "",
     locationLabel: "",
     contactPhone: "",
     story: "",

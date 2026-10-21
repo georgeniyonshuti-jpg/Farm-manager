@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MarketPageHead } from "../../components/layout/MarketAppHeader";
+import { KycSelfPanel } from "./people/KycSelfPanel";
 import {
   Button,
   Card,
@@ -63,6 +64,7 @@ function formatDay(d: string | null | undefined) {
 type ListingForm = {
   birdCount: string;
   district: string;
+  sector: string;
   readyFrom: string;
   readyTo: string;
   avgWeightKg: string;
@@ -78,6 +80,7 @@ type ListingForm = {
 const emptyForm = (): ListingForm => ({
   birdCount: "",
   district: "",
+  sector: "",
   readyFrom: "",
   readyTo: "",
   avgWeightKg: "",
@@ -94,6 +97,7 @@ function formFromLot(lot: PipelineLot): ListingForm {
   return {
     birdCount: String(lot.birdCount ?? ""),
     district: lot.district || "",
+    sector: lot.sector || "",
     readyFrom: formatDay(lot.readyFrom),
     readyTo: formatDay(lot.readyTo),
     avgWeightKg: lot.avgWeightKg != null ? String(lot.avgWeightKg) : "",
@@ -122,7 +126,12 @@ function ListingFormFields({
       <Field label="Birds">
         <Input type="number" value={form.birdCount} onChange={(e) => setForm((f) => ({ ...f, birdCount: e.target.value }))} />
       </Field>
-      <DistrictSelect value={form.district} onChange={(district) => setForm((f) => ({ ...f, district }))} />
+      <DistrictSelect
+        value={form.district}
+        sector={form.sector}
+        onChange={(district) => setForm((f) => ({ ...f, district }))}
+        onSectorChange={(sector) => setForm((f) => ({ ...f, sector }))}
+      />
       <div className="grid grid-cols-2 gap-2">
         <Field label="Selling week from">
           <Input type="date" value={form.readyFrom} onChange={(e) => setForm((f) => ({ ...f, readyFrom: e.target.value }))} />
@@ -196,6 +205,7 @@ export function MarketListingsPage() {
   const [storefront, setStorefront] = useState({
     displayName: "",
     district: "",
+    sector: "",
     locationLabel: "",
     story: "",
     specialties: "",
@@ -230,6 +240,7 @@ export function MarketListingsPage() {
         setStorefront({
           displayName: prof.profile.displayName || "",
           district: prof.profile.district || "",
+          sector: prof.profile.sector || "",
           locationLabel: prof.profile.locationLabel || "",
           story: prof.profile.story || "",
           specialties: (prof.profile.specialties || []).join(", "),
@@ -319,6 +330,7 @@ export function MarketListingsPage() {
   async function submitCreate(payload: {
     birdCount: number;
     district: string;
+    sector: string;
     placementDate: string;
     chicksInRelative: string;
     readyFrom: string;
@@ -332,6 +344,7 @@ export function MarketListingsPage() {
       await createFarmerListing(token, {
         birdCount: payload.birdCount,
         district: payload.district,
+        sector: payload.sector,
         placementDate: payload.placementDate,
         chicksInRelative: payload.chicksInRelative,
         readyFrom: payload.readyFrom,
@@ -359,6 +372,7 @@ export function MarketListingsPage() {
       const updated = await updateFarmerListing(token, editLot.id, {
         birdCount: Number(form.birdCount),
         district: form.district,
+        sector: form.sector,
         readyFrom: form.readyFrom,
         readyTo: form.readyTo,
         avgWeightKg: form.avgWeightKg ? Number(form.avgWeightKg) : null,
@@ -464,9 +478,9 @@ export function MarketListingsPage() {
   return (
     <div className="store-wrap space-y-4 pb-8">
       <MarketPageHead
-        title="My market"
+        title="My flocks"
         action={
-          tab === "listings" && lots.length > 0 ? (
+          tab === "listings" && lots.length > 0 && !reviewPending ? (
             <button
               type="button"
               className="store-btn store-btn-ember"
@@ -481,10 +495,11 @@ export function MarketListingsPage() {
           ) : undefined
         }
       />
+      <KycSelfPanel />
       {sellerMeta ? <p className="type-caption text-[var(--store-muted)]">{sellerMeta}</p> : null}
       {reviewPending ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-          Your flocks are saved and go live after a quick call with our team. You can keep adding birds now.
+          You are waiting for Cleva. You can register flocks after you are marked ready.
         </div>
       ) : null}
       <div className="hidden md:block">
@@ -554,9 +569,11 @@ export function MarketListingsPage() {
               {t("farmerFarmPageEmptyTitle")}
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-[var(--store-muted)]">{t("farmerFarmPageEmptyBody")}</p>
+            {reviewPending ? null : (
             <button type="button" className="store-btn store-btn-ember mt-5" onClick={() => setCreateOpen(true)}>
               {t("farmerListBirds")}
             </button>
+            )}
           </div>
         ) : (
         <div className="grid gap-4 lg:grid-cols-2">
@@ -566,7 +583,9 @@ export function MarketListingsPage() {
             </Field>
             <DistrictSelect
               value={storefront.district}
+              sector={storefront.sector}
               onChange={(district) => setStorefront((s) => ({ ...s, district }))}
+              onSectorChange={(sector) => setStorefront((s) => ({ ...s, sector }))}
             />
             <Field label="Approximate location">
               <Input value={storefront.locationLabel} onChange={(e) => setStorefront((s) => ({ ...s, locationLabel: e.target.value }))} />
@@ -647,11 +666,13 @@ export function MarketListingsPage() {
             <li>3. {t("farmerEmptyHow3")}</li>
             <li>4. {t("farmerEmptyHow4")}</li>
           </ol>
+          {reviewPending ? null : (
           <div className="mt-5">
             <button type="button" className="store-btn store-btn-ember" onClick={() => setCreateOpen(true)}>
               {t("farmerListBirds")}
             </button>
           </div>
+          )}
         </div>
       ) : (
         <ul className="space-y-3">

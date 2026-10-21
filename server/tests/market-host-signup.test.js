@@ -77,8 +77,9 @@ describe("saas signup host vs farm", () => {
     assert.ok(saas.includes("INSERT INTO companies"));
     assert.ok(saas.includes('fromMarket ? "market" : "farm_os"'));
     assert.ok(saas.includes("status(503)"));
-    assert.ok(saas.includes("VALUES ($1, $2, $3, $4, $4, $5::uuid, 'verified', true)"));
-    assert.ok(saas.includes('accountType === "buyer" ? "verified" : "pending"'));
+    assert.ok(saas.includes("VALUES ($1, $2, $3, $4, $4, $5::uuid, 'pending', true)"));
+    assert.ok(saas.includes('verificationStatus: "pending"'));
+    assert.ok(saas.includes("'pending')"));
     assert.ok(saas.includes("INSERT INTO farm_profiles"));
     assert.ok(saas.includes("owner_user_id"));
     assert.ok(saas.includes("createUniqueFarmSlug"));

@@ -6,6 +6,7 @@ import { EmptyState } from "../../components/EmptyState";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { FulfillmentCard } from "../../components/market/FulfillmentCard";
 import { fetchMyMarketOrders, type FulfillmentJob } from "../../api/pipeline.api";
+import { KycSelfPanel } from "./people/KycSelfPanel";
 
 export function MarketOrdersPage() {
   const { token, user } = useAuth();
@@ -51,6 +52,7 @@ export function MarketOrdersPage() {
           </button>
         }
       />
+      {isBuyerRole(user) ? <KycSelfPanel /> : null}
       {loading ? (
         <SkeletonList rows={3} />
       ) : error ? (

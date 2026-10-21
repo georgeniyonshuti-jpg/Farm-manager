@@ -88,6 +88,10 @@ const EN = {
   pickProvince: "Pick a province first",
   allProvinces: "All provinces",
   allDistricts: "All districts",
+  sector: "Sector",
+  selectSector: "Select sector",
+  pickDistrict: "Pick a district first",
+  allSectors: "All sectors",
   sortReady: "Ready soonest",
   sortBirds: "Most birds",
   sortPrice: "Lowest price",
@@ -270,6 +274,35 @@ const EN = {
   farmerWhatPublicSees: "What buyers see",
   farmerSellingWeek: "Selling week",
   farmerPutOnBook: "Put on the book",
+  privacy: "Privacy",
+  privacyTitle: "Privacy",
+  privacyLead:
+    "Cleva Technologies runs Cleva Market at market.cleva.rw. We help people sell and buy birds. You can write to us on WhatsApp, create an account, or register a flock.",
+  privacyCollectTitle: "What we collect",
+  privacyCollectWa:
+    "If you message us on WhatsApp: your phone number, the name on your WhatsApp profile, and the messages you send, including photos and voice notes.",
+  privacyCollectSignup:
+    "If you sign up: your name, phone number, email, district, and whether you want to sell, buy, or scout.",
+  privacyCollectFlock:
+    "If you register a flock: the place, the number of birds, the dates, and who registered it.",
+  privacyCollectSite: "If you use the website: the pages you open, so we can keep the site working.",
+  privacyUseTitle: "What we use it for",
+  privacyUseBody:
+    "Staff use this information to call you, review your account, mark you ready to register flocks, review a flock, approve it, and name the scout who will visit. A scout sees the flocks assigned to them. A seller sees their own flocks.",
+  privacyPublic:
+    "A WhatsApp chat is not published as a public listing. The public market shows birds for sale without your phone number.",
+  privacyShareTitle: "Who we share it with",
+  privacyShareBody:
+    "We share a message or a flock with Cleva staff who are doing that work, and with the scout assigned to that flock. WhatsApp, which is part of Meta, delivers the messages. We do not sell this information.",
+  privacyKeepTitle: "How long we keep it",
+  privacyKeepBody:
+    "We keep it while we are working with you. When the conversation or the flock is finished, we delete it or remove the details that identify you.",
+  privacyDeleteTitle: "How to delete it",
+  privacyDeleteBody:
+    "Email clevatech@clevagroup.africa with the phone number you used. Ask us to delete your WhatsApp messages, your account, or both. We will delete the personal details we hold for that number, except where we must keep a record of a sale.",
+  privacyContactTitle: "Contact",
+  privacyContactName: "Cleva Technologies",
+  privacyContactEmail: "clevatech@clevagroup.africa",
 };
 
 const RW: typeof EN = {
@@ -360,6 +393,10 @@ const RW: typeof EN = {
   pickProvince: "Hitamo intara mbere",
   allProvinces: "Intara zose",
   allDistricts: "Uturere twose",
+  sector: "Umurenge",
+  selectSector: "Hitamo umurenge",
+  pickDistrict: "Hitamo akarere mbere",
+  allSectors: "Imirenge yose",
   sortReady: "Ziteguye vuba",
   sortBirds: "Inkoko nyinshi",
   sortPrice: "Igiciro gito",
@@ -542,6 +579,35 @@ const RW: typeof EN = {
   farmerWhatPublicSees: "Icyo abaguzi babona",
   farmerSellingWeek: "Icyumweru cyo kugurisha",
   farmerPutOnBook: "Shyira ku gitabo",
+  privacy: "Ibanga",
+  privacyTitle: "Ibanga",
+  privacyLead:
+    "Cleva Technologies icunga Cleva Market kuri market.cleva.rw. Dufasha abantu kugurisha no kugura inkoko. Ushobora kutwandikira kuri WhatsApp, gukora konti, cyangwa kwandika ishyo.",
+  privacyCollectTitle: "Ibyo dukusanya",
+  privacyCollectWa:
+    "Niwandikira kuri WhatsApp: numero ya telefoni, izina riri kuri WhatsApp yawe, n'ubutumwa bwohereza, harimo amafoto n'amajwi.",
+  privacyCollectSignup:
+    "Niwiyandikisha: izina, numero ya telefoni, imeyili, akarere, n'icyo ushaka: kugurisha, kugura, cyangwa kuba scout.",
+  privacyCollectFlock:
+    "Niwandika ishyo: ahantu, umubare w'inkoko, amatariki, n'uwaryanditse.",
+  privacyCollectSite: "Nukoresha urubuga: paji ufungura, kugira ngo urubuga rukomeze gukora.",
+  privacyUseTitle: "Icyo tubikoresha",
+  privacyUseBody:
+    "Abakozi bakoresha aya makuru kuguhamagara, gusuzuma konti yawe, kukumenyesha ko witeguye kwandika amashyo, gusuzuma ishyo, kuryemeza, no guhitamo scout uzaryisura. Scout abona amashyo yahawe. Ugurisha abona amashyo ye.",
+  privacyPublic:
+    "Ikiganiro cya WhatsApp ntikigirwa ishyo risohoka ku mugaragaro. Isoko rusange yerekana inkoko zigurishwa nta numero ya telefoni.",
+  privacyShareTitle: "Abo dusangiza",
+  privacyShareBody:
+    "Dusangiza ubutumwa cyangwa ishyo n'abakozi ba Cleva bakora ako kazi, n'um scout wahawe iryo shyo. WhatsApp, ya Meta, itanga ubutumwa. Ntitugurisha aya makuru.",
+  privacyKeepTitle: "Igihe tubibika",
+  privacyKeepBody:
+    "Tubibika mu gihe dukorana nawe. Igihe ikiganiro cyangwa ishyo rirangiye, tubisiba cyangwa tukuraho ibikumenyesha.",
+  privacyDeleteTitle: "Uko usiba",
+  privacyDeleteBody:
+    "Ohereza imeyili kuri clevatech@clevagroup.africa n'numero ya telefoni wakoresheje. Saba ko dusiba ubutumwa bwawe bwa WhatsApp, konti yawe, cyangwa byombi. Tuzasiba ibikumenyesha dufite kuri iyo numero, keretse aho tugomba kubika inyandiko y'igurisha.",
+  privacyContactTitle: "Tuvugishe",
+  privacyContactName: "Cleva Technologies",
+  privacyContactEmail: "clevatech@clevagroup.africa",
 }
 
 export function storeCopyKeys(): Array<keyof typeof EN> {

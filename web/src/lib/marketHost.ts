@@ -83,6 +83,9 @@ export function isFarmControlPath(pathname: string): boolean {
 /** Full URL when this request belongs on the other host. Null means stay. */
 export function hostRedirectTarget(hostname: string, pathname: string, search = ""): string | null {
   const query = search ? (search.startsWith("?") ? search : `?${search}`) : "";
+  if (isFarmHostname(hostname) && pathname === "/privacy") {
+    return `https://${MARKET_HOST}/privacy${query}`;
+  }
   if (
     isFarmHostname(hostname) &&
     (isPublicMarketPath(pathname) || isMarketSignup(pathname, search, hostname))

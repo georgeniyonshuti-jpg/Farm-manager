@@ -6,6 +6,7 @@ import { canScoutPipeline, isScoutApplicant } from "../../auth/permissions";
 import { useCompanyNav } from "../../hooks/useCompanyNav";
 import { fetchCrmSellers, fetchMyCommissions, fetchScoutFarms, type CrmSellerRow, type ScoutFarmRow } from "../../api/pipeline.api";
 import { formatRwf } from "../../lib/formatRwf";
+import { KycSelfPanel } from "../market/people/KycSelfPanel";
 
 const CHIP_LABEL: Record<string, string> = {
   invite_sent: "Invite sent",
@@ -69,6 +70,7 @@ export function ScoutHomePage() {
 
   return (
     <div className="mx-auto max-w-lg space-y-4 pb-28">
+      <KycSelfPanel />
       {introPending ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
           Intro call pending — you can find sellers now. Commission payouts unlock after your onboarding call.

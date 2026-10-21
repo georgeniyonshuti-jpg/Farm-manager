@@ -56,6 +56,7 @@ const emptyForm = {
   name: "",
   buyerType: "butcher",
   district: "",
+  sector: "",
   whatsapp: "",
   phone: "",
   weeklyBirdsMin: "",
@@ -142,12 +143,17 @@ function AccountsSubpanel({ openCreate }: { openCreate: boolean }) {
       return;
     }
     if (!token) return;
+    if (form.district.trim() && !form.sector.trim()) {
+      showToast("error", "Sector is required.");
+      return;
+    }
     setBusy(true);
     try {
       const body = {
         name: form.name.trim(),
         buyerType: form.buyerType,
         district: form.district || null,
+        sector: form.sector || null,
         whatsapp: form.whatsapp || null,
         phone: form.phone || null,
         weeklyBirdsMin: form.weeklyBirdsMin ? Number(form.weeklyBirdsMin) : null,
@@ -220,6 +226,7 @@ function AccountsSubpanel({ openCreate }: { openCreate: boolean }) {
                 name: b.name,
                 buyerType: b.buyerType || "other",
                 district: b.district ?? "",
+                sector: b.sector ?? "",
                 whatsapp: b.whatsapp ?? "",
                 phone: b.phone ?? "",
                 weeklyBirdsMin: b.weeklyBirdsMin != null ? String(b.weeklyBirdsMin) : "",
@@ -292,12 +299,15 @@ function AccountsSubpanel({ openCreate }: { openCreate: boolean }) {
               ))}
             </select>
           </Field>
-          <Field label="District">
+          <div className="sm:col-span-2">
             <DistrictSelect
               value={form.district}
+              sector={form.sector}
+              required={Boolean(form.district.trim())}
               onChange={(district) => setForm((v) => ({ ...v, district }))}
+              onSectorChange={(sector) => setForm((v) => ({ ...v, sector }))}
             />
-          </Field>
+          </div>
           <Field label="WhatsApp">
             <input
               className="h-[var(--control-h-md)] w-full rounded-control border border-[var(--border-input)] bg-[var(--surface-input)] px-3 text-sm"

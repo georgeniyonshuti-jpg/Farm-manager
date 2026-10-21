@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { ManagerPage } from "../../components/layout/ManagerPage";
@@ -6,8 +6,6 @@ import { PageHeader } from "../../components/PageHeader";
 import { Button } from "../../components/ui/Button";
 import { Modal } from "../../components/ui/Modal";
 import {
-  DataTable,
-  FacetFilter,
   Field,
   Input,
   PageTabs,
@@ -15,33 +13,20 @@ import {
   Select,
   StatusPill,
   Textarea,
-  TableToolbar,
-  ToolbarSearch,
-  type DataColumn,
 } from "../../components/ui";
 import { useToast } from "../../components/Toast";
 import { useCompanyNav } from "../../hooks/useCompanyNav";
 import {
-  addSignupTouch,
   downloadSignupsCsv,
   fetchSignupAttempts,
-  fetchSignupPerson,
   fetchSignupsFunnel,
-  fetchSignupsPeople,
   patchSignupAttempt,
-  patchSignupPerson,
   type SignupAttempt,
   type SignupPerson,
   type SignupsFunnel,
   type SignupTouch,
 } from "../../api/signups.api";
-import {
-  verifyFarmProfile,
-  verifyLot,
-  verifyScoutApplication,
-} from "../../api/pipeline.api";
-
-type Tab = "funnel" | "people" | "failed" | "links";
+type Tab = "funnel" | "failed" | "links";
 
 const STAGES = [
   "new",
@@ -98,35 +83,20 @@ export function SignupsPage() {
   const { companyHref } = useCompanyNav();
   const { showToast } = useToast();
   const [params, setParams] = useSearchParams();
-  const tab = (["funnel", "people", "failed", "links"].includes(params.get("tab") || "")
+  const tab = (["funnel", "failed", "links"].includes(params.get("tab") || "")
     ? params.get("tab")
-    : "people") as Tab;
+    : "funnel") as Tab;
 
   const [funnel, setFunnel] = useState<SignupsFunnel | null>(null);
-  const [people, setPeople] = useState<SignupPerson[]>([]);
-  const [total, setTotal] = useState(0);
   const [attempts, setAttempts] = useState<SignupAttempt[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const accountType = params.get("accountType") || "";
-  const stage = params.get("stage") || "";
   const source = params.get("source") || "";
-  const q = params.get("q") || "";
   const days = Number(params.get("days") || 7);
 
   const setTab = (t: Tab) => {
     const next = new URLSearchParams(params);
     next.set("tab", t);
-    setParams(next, { replace: true });
-  };
-
-  /** People-list filters — switch to People tab. */
-  const setPeopleFilter = (key: string, value: string) => {
-    const next = new URLSearchParams(params);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    next.set("tab", "people");
     setParams(next, { replace: true });
   };
 
@@ -150,109 +120,17 @@ export function SignupsPage() {
           limit: 100,
         });
         setAttempts(r.attempts);
-      } else {
-        const r = await fetchSignupsPeople(token, {
-          accountType: accountType || undefined,
-          stage: stage || undefined,
-          source: source || undefined,
-          q: q || undefined,
-          limit: 100,
-        });
-        setPeople(r.people);
-        setTotal(r.total);
       }
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "Could not load signups");
     } finally {
       setLoading(false);
     }
-  }, [token, tab, days, source, accountType, stage, q, showToast]);
+  }, [token, tab, days, source, showToast]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
-
-  const peopleCols: DataColumn<SignupPerson>[] = useMemo(
-    () => [
-      {
-        key: "name",
-        header: "Person",
-        render: (row) => (
-          <button
-            type="button"
-            className="text-left font-medium text-[var(--primary-color)] hover:underline"
-            onClick={() => setSelectedId(row.userId)}
-          >
-            {row.fullName || "—"}
-            <span className="mt-0.5 block text-xs font-normal text-[var(--text-muted)]">
-              {TYPE_LABEL[row.accountType] || row.accountType}
-              {row.district ? ` · ${row.district}` : ""}
-            </span>
-          </button>
-        ),
-      },
-      {
-        key: "contact",
-        header: "Contact",
-        render: (row) => (
-          <div className="space-y-0.5 text-sm">
-            <div>{row.email}</div>
-            <div className="flex flex-wrap gap-2 text-xs">
-              {row.phone ? (
-                <>
-                  <a href={`tel:${row.phone}`} className="text-[var(--primary-color)]">
-                    {row.phone}
-                  </a>
-                  {waHref(row.phone) ? (
-                    <a
-                      href={waHref(row.phone)!}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-[var(--primary-color)]"
-                    >
-                      WhatsApp
-                    </a>
-                  ) : null}
-                </>
-              ) : (
-                <span className="text-[var(--text-muted)]">No phone</span>
-              )}
-            </div>
-          </div>
-        ),
-      },
-      {
-        key: "source",
-        header: "Source",
-        render: (row) => (
-          <span className="text-sm">
-            {row.source || "—"}
-            {row.utmCampaign ? (
-              <span className="block text-xs text-[var(--text-muted)]">{row.utmCampaign}</span>
-            ) : null}
-          </span>
-        ),
-      },
-      {
-        key: "signed",
-        header: "Signed up",
-        render: (row) => <span className="text-sm tabular-nums">{fmtDate(row.createdAt)}</span>,
-      },
-      {
-        key: "stage",
-        header: "Stage",
-        render: (row) => (
-          <StatusPill tone={stageTone(row.stage)}>{row.stage.replace(/_/g, " ")}</StatusPill>
-        ),
-      },
-      {
-        key: "next",
-        header: "Next call",
-        render: (row) => <span className="text-sm">{fmtDate(row.nextCallAt)}</span>,
-      },
-    ],
-    []
-  );
 
   return (
     <ManagerPage>
@@ -272,10 +150,10 @@ export function SignupsPage() {
               Export CSV
             </Button>
             <Link
-              to={companyHref("/farm/pipeline?tab=buyers&view=verify")}
+              to={companyHref("/farm/pipeline/people")}
               className="inline-flex items-center rounded-lg border border-[var(--border-color)] px-3 py-2 text-sm text-[var(--text-secondary)]"
             >
-              Market verify
+              People
             </Link>
           </div>
         }
@@ -287,7 +165,6 @@ export function SignupsPage() {
           onChange={(v) => setTab(v as Tab)}
           aria-label="Signups sections"
           options={[
-            { value: "people", label: "People" },
             { value: "funnel", label: "Funnel" },
             { value: "failed", label: "Failed attempts" },
             { value: "links", label: "Ad links" },
@@ -313,77 +190,6 @@ export function SignupsPage() {
         />
       ) : null}
 
-      {tab === "people" ? (
-        <>
-          <DataTable
-            columns={peopleCols}
-            rows={people}
-            rowKey={(r) => r.userId}
-            isFiltered={Boolean(q || accountType || stage || source)}
-            emptyTitle="No signups match"
-            emptyDescription="Try clearing filters or wait for new market signups."
-            toolbar={
-              <TableToolbar
-                filters={
-                  <>
-                    <FacetFilter
-                      label="Type"
-                      value={accountType || "all"}
-                      allValue="all"
-                      onChange={(v) => setPeopleFilter("accountType", v === "all" ? "" : v)}
-                      options={[
-                        { value: "farmer", label: "Sellers" },
-                        { value: "buyer", label: "Buyers" },
-                        { value: "scout", label: "Scouts" },
-                      ]}
-                    />
-                    <FacetFilter
-                      label="Stage"
-                      value={stage || "all"}
-                      allValue="all"
-                      onChange={(v) => setPeopleFilter("stage", v === "all" ? "" : v)}
-                      options={STAGES.map((s) => ({ value: s, label: s.replace(/_/g, " ") }))}
-                    />
-                    <FacetFilter
-                      label="Source"
-                      value={source || "all"}
-                      allValue="all"
-                      onChange={(v) => setPeopleFilter("source", v === "all" ? "" : v)}
-                      options={[
-                        { value: "facebook", label: "Facebook" },
-                        { value: "instagram", label: "Instagram" },
-                        { value: "google", label: "Google" },
-                        { value: "whatsapp", label: "WhatsApp" },
-                        { value: "direct", label: "Direct" },
-                        { value: "unknown", label: "Unknown" },
-                      ]}
-                    />
-                  </>
-                }
-                search={
-                  <ToolbarSearch
-                    value={q}
-                    onChange={(e) => setPeopleFilter("q", e.target.value)}
-                    placeholder="Name, email, phone"
-                  />
-                }
-                meta={loading ? "Loading…" : `${total} people`}
-              />
-            }
-          />
-        </>
-      ) : null}
-
-      {selectedId ? (
-        <PersonDrawer
-          userId={selectedId}
-          token={token}
-          onClose={() => setSelectedId(null)}
-          onChanged={() => {
-            void reload();
-          }}
-        />
-      ) : null}
     </ManagerPage>
   );
 }
@@ -837,141 +643,6 @@ function PersonCard({
         )}
       </section>
     </div>
-  );
-}
-
-function PersonDrawer({
-  userId,
-  token,
-  onClose,
-  onChanged,
-}: {
-  userId: string;
-  token: string | null;
-  onClose: () => void;
-  onChanged: () => void;
-}) {
-  const { showToast } = useToast();
-  const [loading, setLoading] = useState(true);
-  const [person, setPerson] = useState<SignupPerson | null>(null);
-  const [touches, setTouches] = useState<SignupTouch[]>([]);
-  const [profiles, setProfiles] = useState<
-    Array<{ id: string; displayName: string; verificationStatus: string }>
-  >([]);
-  const [scoutApp, setScoutApp] = useState<{ status: string } | null>(null);
-  const [lots, setLots] = useState<
-    Array<{ id: string; birdCount: number; verificationStatus: string | null }>
-  >([]);
-  const [note, setNote] = useState("");
-  const [scheduleAt, setScheduleAt] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      const d = await fetchSignupPerson(token, userId);
-      setPerson(d.person);
-      setTouches(d.touches);
-      setProfiles(d.profiles);
-      setScoutApp(d.scoutApplication);
-      setLots(d.lots);
-    } catch (e) {
-      showToast("error", e instanceof Error ? e.message : "Could not load person");
-      onClose();
-    } finally {
-      setLoading(false);
-    }
-  }, [token, userId, showToast, onClose]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  async function run(fn: () => Promise<unknown>, okMsg: string) {
-    setBusy(true);
-    try {
-      await fn();
-      showToast("success", okMsg);
-      await reload();
-      onChanged();
-    } catch (e) {
-      showToast("error", e instanceof Error ? e.message : "Action failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal open onClose={onClose} title={person?.fullName || "Person"}>
-      {loading || !person ? (
-        <p className="text-sm text-[var(--text-muted)]">Loading…</p>
-      ) : (
-        <PersonCard
-          person={person}
-          touches={touches}
-          profiles={profiles}
-          lots={lots}
-          scoutApp={scoutApp}
-          note={note}
-          scheduleAt={scheduleAt}
-          busy={busy}
-          onNote={setNote}
-          onScheduleAt={setScheduleAt}
-          onStage={(stage) => void run(() => patchSignupPerson(token, userId, { stage }), "Stage updated")}
-          onLogCall={() =>
-            void run(
-              () =>
-                addSignupTouch(token, userId, {
-                  kind: "call",
-                  outcome: "reached",
-                  note: note || undefined,
-                }),
-              "Call logged"
-            )
-          }
-          onScheduleCall={() =>
-            void run(
-              () =>
-                addSignupTouch(token, userId, {
-                  kind: "call",
-                  outcome: "scheduled",
-                  scheduledFor: new Date(scheduleAt).toISOString(),
-                  note: note || undefined,
-                }).then(() =>
-                  patchSignupPerson(token, userId, {
-                    stage: "call_booked",
-                    nextCallAt: new Date(scheduleAt).toISOString(),
-                  })
-                ),
-              "Call scheduled"
-            )
-          }
-          onBlock={() => void run(() => patchSignupPerson(token, userId, { block: true }), "Account blocked")}
-          onApproveProfile={(id) =>
-            void run(() => verifyFarmProfile(token!, id, "verified"), "Profile approved")
-          }
-          onApproveLot={(id) => void run(() => verifyLot(token!, id, "verified"), "Flock approved")}
-          onApproveScout={() =>
-            void run(
-              () =>
-                verifyScoutApplication(token!, userId, "approved").then(() =>
-                  patchSignupPerson(token, userId, { stage: "onboarded" })
-                ),
-              "Scout approved"
-            )
-          }
-          onRejectScout={() =>
-            void run(
-              () =>
-                verifyScoutApplication(token!, userId, "rejected").then(() =>
-                  patchSignupPerson(token, userId, { stage: "not_a_fit" })
-                ),
-              "Marked not a fit"
-            )
-          }
-        />
-      )}
-    </Modal>
   );
 }
 

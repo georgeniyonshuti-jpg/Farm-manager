@@ -4,6 +4,7 @@ export type SellerApplyDraft = {
   contactName: string;
   phone: string;
   district: string;
+  sector: string;
   birds: number;
   avgKg: number;
 };
@@ -25,6 +26,7 @@ export function readSellerApply(): SellerApplyDraft | null {
       contactName: String(parsed.contactName || "").trim(),
       phone: String(parsed.phone || "").trim(),
       district: String(parsed.district || "").trim(),
+      sector: String(parsed.sector || "").trim(),
       birds: Number(parsed.birds) > 0 ? Number(parsed.birds) : 0,
       avgKg: Number(parsed.avgKg) > 0 ? Number(parsed.avgKg) : 0,
     };

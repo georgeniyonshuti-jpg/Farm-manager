@@ -135,6 +135,7 @@ export function PipelineScoutPage() {
       farmProfileId: farm.id,
       displayName: farm.displayName || "",
       district: farm.district || "",
+      sector: farm.sector || "",
       locationLabel: farm.locationLabel || "",
       contactPhone: farm.contactPhone || "",
       birdCount: farm.birdCount ? String(farm.birdCount) : "",
@@ -165,6 +166,7 @@ export function PipelineScoutPage() {
           ...f,
           displayName: f.displayName || lot?.farmLabel || s.farmLabel || "",
           district: f.district || lot?.district || "",
+          sector: f.sector || lot?.sector || "",
           contactPhone: f.contactPhone || lot?.contactPhone || "",
           birdCount: f.birdCount || String(lot?.birdCount ?? s.birdCount ?? ""),
           saleableBirds: f.saleableBirds || String(lot?.saleableBirds ?? s.birdCount ?? ""),
@@ -208,6 +210,7 @@ export function PipelineScoutPage() {
     const created = await createScoutFarm(token, {
       displayName: draft.displayName,
       district: draft.district,
+      sector: draft.sector,
       locationLabel: draft.locationLabel,
       contactPhone: draft.contactPhone,
       story: draft.story,
@@ -237,6 +240,7 @@ export function PipelineScoutPage() {
         farmLabel: draft.displayName || null,
         contactPhone: draft.contactPhone || null,
         district: draft.district.trim(),
+        sector: draft.sector.trim(),
         birdCount: Number(draft.birdCount),
         saleableBirds: draft.saleableBirds ? Number(draft.saleableBirds) : Number(draft.birdCount),
         breedCode: draft.breedCode || null,
@@ -309,6 +313,7 @@ export function PipelineScoutPage() {
         farmProfileId: farm.id,
         displayName: farm.displayName || "",
         district: farm.district || "",
+        sector: farm.sector || "",
         locationLabel: farm.locationLabel || "",
         contactPhone: farm.contactPhone || "",
         birdCount: farm.birdCount ? String(farm.birdCount) : "",
@@ -334,6 +339,7 @@ export function PipelineScoutPage() {
         await createScoutFarm(token, {
           displayName: draft.displayName,
           district: draft.district,
+          sector: draft.sector,
           locationLabel: draft.locationLabel,
           contactPhone: draft.contactPhone,
         });
@@ -361,6 +367,7 @@ export function PipelineScoutPage() {
           farmLabel: draft.displayName || null,
           contactPhone: draft.contactPhone || null,
           district: draft.district.trim(),
+        sector: draft.sector.trim(),
           birdCount: Number(draft.birdCount),
           saleableBirds: Number(draft.birdCount),
           avgWeightKg: draft.avgWeightKg ? Number(draft.avgWeightKg) : null,
@@ -423,7 +430,13 @@ export function PipelineScoutPage() {
           <Field label="Phone">
             <Input value={draft.contactPhone} onChange={(e) => setDraft((d) => ({ ...d, contactPhone: e.target.value }))} />
           </Field>
-          <DistrictSelect layout="stack" value={draft.district} onChange={(district) => setDraft((d) => ({ ...d, district }))} />
+          <DistrictSelect
+            layout="stack"
+            value={draft.district}
+            sector={draft.sector}
+            onChange={(district) => setDraft((d) => ({ ...d, district }))}
+            onSectorChange={(sector) => setDraft((d) => ({ ...d, sector }))}
+          />
           <Field label="Place">
             <Input value={draft.locationLabel} onChange={(e) => setDraft((d) => ({ ...d, locationLabel: e.target.value }))} />
           </Field>
@@ -612,7 +625,12 @@ export function PipelineScoutPage() {
             <Field label={fieldScout ? "Seller name" : "Farm name"}>
               <Input value={draft.displayName} onChange={(e) => setDraft((d) => ({ ...d, displayName: e.target.value }))} />
             </Field>
-            <DistrictSelect value={draft.district} onChange={(district) => setDraft((d) => ({ ...d, district }))} />
+            <DistrictSelect
+              value={draft.district}
+              sector={draft.sector}
+              onChange={(district) => setDraft((d) => ({ ...d, district }))}
+              onSectorChange={(sector) => setDraft((d) => ({ ...d, sector }))}
+            />
             <Field label="Approximate location">
               <Input value={draft.locationLabel} onChange={(e) => setDraft((d) => ({ ...d, locationLabel: e.target.value }))} />
             </Field>

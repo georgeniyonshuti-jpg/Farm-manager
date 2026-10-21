@@ -31,6 +31,7 @@ import { PublicFarmPage } from "./pages/public/PublicFarmPage";
 import { PublicFarmsPage } from "./pages/public/PublicFarmsPage";
 import { HowItWorksPage } from "./pages/public/HowItWorksPage";
 import { SellYourBirdsPage } from "./pages/public/SellYourBirdsPage";
+import { PrivacyPage } from "./pages/public/PrivacyPage";
 
 function FlockFcrLegacyRedirect() {
   const { id } = useParams<{ id: string }>();
@@ -65,7 +66,10 @@ function AppRoutes() {
     if (hostTarget) window.location.replace(hostTarget);
   }, [hostTarget]);
   const onMarketSite = isMarketHostname(host);
-  const isPublicStore = pathname.startsWith("/market") || (onMarketSite && (pathname === "/" || pathname === ""));
+  const isPublicStore =
+    pathname.startsWith("/market") ||
+    pathname === "/privacy" ||
+    (onMarketSite && (pathname === "/" || pathname === ""));
   const apiStatus = useApiHealthStatus(!bootstrapped && !isPublicStore);
   if (hostTarget) return null;
   if (!bootstrapped && !isPublicStore) return <AppLoadingScreen apiStatus={apiStatus} />;
@@ -100,6 +104,7 @@ function AppRoutes() {
         <Route path="/market/farm/:slug" element={<PublicFarmPage />} />
         <Route path="/market/how-it-works" element={<HowItWorksPage />} />
         <Route path="/market/sell" element={<SellYourBirdsPage />} />
+        <Route path="/privacy" element={<PrivacyPage />} />
       </Route>
 
       <Route element={<ProtectedRoute />}>
@@ -162,6 +167,10 @@ function AppRoutes() {
             <Route path="treatments" element={null} />
             <Route path="slaughter" element={null} />
             <Route path="pipeline" element={null} />
+            <Route path="pipeline/people" element={null} />
+            <Route path="pipeline/people/:contactId" element={null} />
+            <Route path="pipeline/flocks" element={null} />
+            <Route path="pipeline/flocks/:lotId" element={null} />
             <Route path="pipeline/buyers" element={null} />
             <Route path="pipeline/home" element={null} />
             <Route path="pipeline/how-it-works" element={null} />

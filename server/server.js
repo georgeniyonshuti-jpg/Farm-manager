@@ -11578,6 +11578,7 @@ app.use(
   createInsightsRouter({
     dbQuery,
     hasDb,
+    appendAudit,
   })
 );
 

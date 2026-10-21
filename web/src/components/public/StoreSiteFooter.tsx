@@ -69,6 +69,8 @@ export function StoreSiteFooter({ locale }: { locale: StoreLocale }) {
 
         <p className="store-footer-legal">
           © {year} {t("footerContact")}
+          {" · "}
+          <a href="/privacy">{t("privacy")}</a>
         </p>
       </div>
     </footer>

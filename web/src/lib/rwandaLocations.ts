@@ -1,3 +1,4 @@
+// Keep this file in step with server/src/data/rwandaLocations.json.
 import locations from "../data/rwandaLocations.json" with { type: "json" };
 
 export type RwandaProvinceName = keyof typeof locations;
@@ -38,4 +39,24 @@ export function provinceForDistrict(district: string): RwandaProvinceName | null
     if (province.districts.includes(name)) return province.name;
   }
   return null;
+}
+
+export function sectorsInDistrict(district: string): string[] {
+  const name = district.trim();
+  for (const province of PROVINCE_ORDER) {
+    const bag = locations[province] as Record<string, string[]>;
+    const sectors = bag[name];
+    if (sectors) return [...sectors].sort((a, b) => a.localeCompare(b));
+  }
+  return [];
+}
+
+export function isSectorInDistrict(district: string, sector: string): boolean {
+  const wanted = sector.trim();
+  if (!wanted) return false;
+  return sectorsInDistrict(district).includes(wanted);
+}
+
+export function allSectors(): string[] {
+  return RWANDA_DISTRICTS.flatMap((district) => sectorsInDistrict(district));
 }

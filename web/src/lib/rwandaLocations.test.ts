@@ -3,9 +3,12 @@ import { describe, it } from "node:test";
 import {
   RWANDA_DISTRICTS,
   RWANDA_PROVINCES,
+  allSectors,
   districtsInProvince,
   isRwandaDistrict,
+  isSectorInDistrict,
   provinceForDistrict,
+  sectorsInDistrict,
 } from "./rwandaLocations.ts";
 
 describe("rwandaLocations", () => {
@@ -21,5 +24,13 @@ describe("rwandaLocations", () => {
     assert.equal(isRwandaDistrict("Gasabo"), true);
     assert.equal(isRwandaDistrict("Not a district"), false);
     assert.deepEqual(districtsInProvince("Kigali City"), ["Gasabo", "Kicukiro", "Nyarugenge"]);
+  });
+
+  it("lists 416 sectors and keeps a sector under its own district", () => {
+    assert.equal(allSectors().length, 416);
+    assert.equal(sectorsInDistrict("Gasabo").includes("Kacyiru"), true);
+    assert.equal(isSectorInDistrict("Bugesera", "Nyarugenge"), true);
+    assert.equal(isSectorInDistrict("Gasabo", "Nyarugenge"), false);
+    assert.equal(isSectorInDistrict("Gasabo", ""), false);
   });
 });

@@ -1433,6 +1433,12 @@
   color: rgba(255, 248, 240, 0.55);
 }
 
+.store-footer-legal a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
 @media (max-width: 639px) {
   .store-nav {
     gap: 1.25rem;

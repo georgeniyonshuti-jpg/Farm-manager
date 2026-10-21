@@ -27,6 +27,7 @@ import {
 } from "../services/pipeline/farmProfiles.js";
 import { recordMarketEvent, validateMarketEvent } from "../services/pipeline/marketEvents.js";
 import { recordMarketReach } from "../services/pipeline/marketReach.js";
+import { upsertRecruitmentContact } from "../services/pipeline/recruitmentContacts.js";
 import { hashClaimToken } from "../services/pipeline/sellerClaim.js";
 import {
   capPricedOffers,
@@ -457,6 +458,11 @@ export function createPublicMarketRouter(deps) {
       params.push(district);
       where.push(`lower(l.district) = lower($${params.length})`);
     }
+    const sector = String(query.sector || "").trim();
+    if (sector) {
+      params.push(sector);
+      where.push(`lower(l.sector) = lower($${params.length})`);
+    }
     const minBirds = Number(query.minBirds);
     if (Number.isFinite(minBirds) && minBirds > 0) {
       params.push(minBirds);
@@ -815,6 +821,14 @@ export function createPublicMarketRouter(deps) {
         lotId,
         publicRef: lotRef,
       }).catch(() => {});
+      void upsertRecruitmentContact(dbQuery, {
+        phone: v.phone,
+        name: v.contactName,
+        district,
+        birds: v.birds,
+        want: "buy",
+        source: "market_form",
+      }).catch(() => {});
 
       res.status(201).json({ ok: true, reference });
     } catch (e) {
@@ -901,6 +915,14 @@ export function createPublicMarketRouter(deps) {
 
       void recordMarketEvent(dbQuery, {
         eventType: "request_submitted",
+      }).catch(() => {});
+      void upsertRecruitmentContact(dbQuery, {
+        phone: v.phone,
+        name: v.contactName,
+        district,
+        birds: v.birds,
+        want: "sell",
+        source: "market_form",
       }).catch(() => {});
 
       res.status(201).json({ ok: true, reference });

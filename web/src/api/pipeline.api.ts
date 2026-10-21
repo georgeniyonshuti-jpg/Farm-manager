@@ -21,6 +21,7 @@ export type PipelineBuyer = {
   name: string;
   buyerType: string;
   district: string | null;
+  sector?: string | null;
   whatsapp: string | null;
   phone: string | null;
   weeklyBirdsMin: number | null;
@@ -42,6 +43,7 @@ export type PipelineLot = {
   farmLabel: string | null;
   contactPhone: string | null;
   district: string | null;
+  sector?: string | null;
   birdCount: number;
   saleableBirds: number | null;
   breedCode: string | null;
@@ -157,6 +159,90 @@ export async function updatePipelineBuyer(
     headers: jsonAuthHeaders(token),
     body: JSON.stringify(body),
   });
+}
+
+export type FlockBookRow = {
+  id: string;
+  farmLabel: string | null;
+  district: string | null;
+  sector?: string | null;
+  birdCount: number;
+  status: string;
+  verificationStatus: string;
+  listedBy: string | null;
+  registeredByName: string | null;
+  assignedScoutUserId: string | null;
+  assignedScoutName: string | null;
+  scoutConfirmedAt: string | null;
+  readyFrom: string | null;
+  readyTo: string | null;
+  askPricePerKg: number | null;
+};
+
+export async function fetchFlockBook(token: string | null) {
+  return pipelineFetch<{ flocks: FlockBookRow[]; scouts: { id: string; name: string }[] }>("/flock-book", token);
+}
+
+export type NearbyBuyer = {
+  id: string;
+  name: string;
+  buyerType: string;
+  district: string | null;
+  sector: string | null;
+  weeklyBirdsMin: number | null;
+  weeklyBirdsMax: number | null;
+};
+
+export async function fetchFlockDesk(token: string | null, lotId: string) {
+  return pipelineFetch<{
+    flock: FlockBookRow;
+    scouts: { id: string; name: string }[];
+    buyers: { sameSector: NearbyBuyer[]; sameDistrict: NearbyBuyer[]; sameProvince: NearbyBuyer[] };
+  }>(`/flock-book/${encodeURIComponent(lotId)}`, token);
+}
+
+export async function updatePipelineLot(token: string | null, lotId: string, body: Record<string, unknown>) {
+  return pipelineFetch<{ lot: PipelineLot }>(`/lots/${encodeURIComponent(lotId)}`, token, {
+    method: "PATCH",
+    headers: jsonAuthHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function removeFlock(token: string | null, lotId: string) {
+  return pipelineFetch<{ ok: boolean; status: string }>(`/flock-book/${encodeURIComponent(lotId)}/remove`, token, {
+    method: "POST",
+    headers: jsonAuthHeaders(token),
+  });
+}
+
+export async function assignFlockScout(token: string | null, lotId: string, scoutUserId: string) {
+  return pipelineFetch<{ flock: { id: string; assignedScoutUserId: string } }>(
+    `/lots/${encodeURIComponent(lotId)}/assign-scout`,
+    token,
+    {
+      method: "POST",
+      headers: jsonAuthHeaders(token),
+      body: JSON.stringify({ scoutUserId }),
+    }
+  );
+}
+
+export type MyScoutFlock = {
+  id: string;
+  farmLabel: string | null;
+  district: string | null;
+  birdCount: number;
+  verificationStatus: string;
+  assignedScoutUserId: string | null;
+  listedBy: string | null;
+  scoutConfirmedAt: string | null;
+  assignedToMe: boolean;
+  registeredByMe: boolean;
+};
+
+export async function fetchMyScoutFlocks(token: string | null) {
+  return pipelineFetch<{ ready: boolean; flocks: MyScoutFlock[] }>("/market/scout/my-flocks", token);
 }
 
 export async function fetchPipelineLots(token: string | null, status?: string) {
@@ -453,6 +539,7 @@ export type FarmProfile = {
   displayName: string;
   story: string | null;
   district: string | null;
+  sector?: string | null;
   locationLabel: string | null;
   exactLocation: string | null;
   contactPhone: string | null;
@@ -1062,6 +1149,15 @@ export async function updateCrmSeller(
     headers: jsonAuthHeaders(token),
     body: JSON.stringify(body),
   });
+}
+
+export async function fetchCrmInboxStatus(token: string | null) {
+  const res = await fetch(legacyApiUrl("/api/crm/status"), {
+    headers: readAuthHeaders(token),
+  });
+  const data = (await res.json().catch(() => ({}))) as { configured?: boolean; error?: string };
+  if (!res.ok) return { configured: false };
+  return { configured: Boolean(data.configured) };
 }
 
 export async function launchCrmInbox(token: string | null) {

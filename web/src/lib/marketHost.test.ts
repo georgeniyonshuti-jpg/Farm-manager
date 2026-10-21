@@ -20,6 +20,11 @@ describe("market host", () => {
       hostRedirectTarget("farm.cleva.rw", "/signup", "?utm_source=facebook"),
       "https://market.cleva.rw/signup?utm_source=facebook",
     );
+    assert.equal(
+      hostRedirectTarget("farm.cleva.rw", "/privacy", ""),
+      "https://market.cleva.rw/privacy",
+    );
+    assert.equal(hostRedirectTarget("market.cleva.rw", "/privacy", ""), null);
     assert.equal(hostRedirectTarget("farm.cleva.rw", "/signup", ""), null);
     assert.equal(hostRedirectTarget("farm.cleva.rw", "/app/cleva/farm/pipeline", ""), null);
   });

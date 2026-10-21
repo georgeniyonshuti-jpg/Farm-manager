@@ -1,26 +1,32 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { sellerListingGate } from "../src/services/pipeline/farmProfiles.js";
+import { scoutReadyGate, sellerListingGate } from "../src/services/pipeline/farmProfiles.js";
 
 describe("seller listing gate", () => {
-  it("lets a pending market seller save flocks and holds them for review", () => {
+  it("keeps a pending market seller from registering flocks", () => {
     const gate = sellerListingGate({
       marketOnly: true,
       companyStatus: "verified",
       profileStatus: "pending",
     });
-    assert.equal(gate.allow, true);
-    assert.equal(gate.holdForReview, true);
+    assert.equal(gate.allow, false);
+    assert.equal(gate.code, "not_ready");
   });
 
-  it("lets an approved market seller list without the extra hold", () => {
+  it("lets a ready market seller register a flock that still waits for review", () => {
     const gate = sellerListingGate({
       marketOnly: true,
       companyStatus: "verified",
       profileStatus: "verified",
     });
     assert.equal(gate.allow, true);
-    assert.equal(gate.holdForReview, false);
+    assert.equal(gate.holdForReview, true);
+  });
+
+  it("blocks a scout until Cleva marks them ready", () => {
+    assert.equal(scoutReadyGate("pending").allow, false);
+    assert.equal(scoutReadyGate("approved").allow, true);
+    assert.equal(scoutReadyGate("rejected").allow, false);
   });
 
   it("blocks a rejected market seller", () => {

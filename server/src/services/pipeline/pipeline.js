@@ -302,6 +302,7 @@ export function mapLotRow(row) {
     farmLabel: row.farmLabel ?? row.farm_label ?? null,
     contactPhone: row.contactPhone ?? row.contact_phone ?? null,
     district: row.district ?? null,
+    sector: row.sector ?? null,
     birdCount: Number(row.birdCount ?? row.bird_count),
     saleableBirds:
       row.saleableBirds != null || row.saleable_birds != null
@@ -359,6 +360,7 @@ export const LOT_SELECT = `
   l.farm_label AS "farmLabel",
   l.contact_phone AS "contactPhone",
   l.district,
+  l.sector,
   l.bird_count AS "birdCount",
   l.saleable_birds AS "saleableBirds",
   l.breed_code AS "breedCode",

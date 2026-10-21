@@ -56,6 +56,10 @@ const FarmMortalityPage = lazyNamed(() => import("../pages/farm/FarmMortalityPag
 const FarmInventoryPage = lazyNamed(() => import("../pages/farm/FarmInventoryPage"), "FarmInventoryPage");
 const FarmSlaughterPage = lazyNamed(() => import("../pages/farm/FarmSlaughterPage"), "FarmSlaughterPage");
 const MarketOpsPage = lazyNamed(() => import("../pages/market/MarketOpsPage"), "MarketOpsPage");
+const PeopleBook = lazyNamed(() => import("../pages/market/PeopleBook"), "PeopleBook");
+const PersonPage = lazyNamed(() => import("../pages/market/PersonPage"), "PersonPage");
+const FlockBook = lazyNamed(() => import("../pages/market/FlockBook"), "FlockBook");
+const FlockPage = lazyNamed(() => import("../pages/market/FlockPage"), "FlockPage");
 const RedirectMarketBuyers = lazyNamed(() => import("../pages/market/MarketHubRedirect"), "RedirectMarketBuyers");
 const RedirectMarketPricing = lazyNamed(() => import("../pages/market/MarketHubRedirect"), "RedirectMarketPricing");
 const RedirectMarketJobs = lazyNamed(() => import("../pages/market/MarketHubRedirect"), "RedirectMarketJobs");
@@ -282,6 +286,44 @@ export function PersistentAppPages() {
           <LazyPage>
             <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
               <MarketOpsPage />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/farm/pipeline/people")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
+              <PeopleBook />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot
+          active={stripTenantPrefix(p).startsWith("/farm/pipeline/people/")}
+          mountDelayMs={0}
+        >
+          <LazyPage>
+            <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
+              <PersonPage />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/farm/pipeline/flocks")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
+              <FlockBook />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot
+          active={stripTenantPrefix(p).startsWith("/farm/pipeline/flocks/")}
+          mountDelayMs={0}
+        >
+          <LazyPage>
+            <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
+              <FlockPage />
             </PersistentRouteGuard>
           </LazyPage>
         </PersistentPageSlot>

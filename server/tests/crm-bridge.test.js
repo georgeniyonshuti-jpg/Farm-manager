@@ -9,6 +9,7 @@ import {
   crmRoleForUser,
   decideConvert,
   hashToken,
+  crmInboxConfigured,
   launchCrm,
   maskPhone,
   matchIsCompatible,
@@ -167,6 +168,9 @@ describe("launch roles", () => {
     const staff = { id: "11111111-1111-4111-8111-111111111111", email: "desk@cleva.rw", displayName: "Desk", role: "sales_coordinator" };
     const launch = launchCrm(staff, env);
     assert.equal(launch.configured, true);
+    assert.equal(crmInboxConfigured({ CRM_INTEGRATION_ENABLED: "false" }), false);
+    assert.equal(crmInboxConfigured({ CRM_INTEGRATION_ENABLED: "true", CRM_BASE_URL: "https://crm-staging.cleva.rw" }), false);
+    assert.equal(crmInboxConfigured(env), true);
     const [h, p, s] = launch.token.split(".");
     const verified = crypto.verify(
       "sha256",

@@ -93,12 +93,13 @@ export async function upsertPeopleOnboarding(dbQuery, input) {
   try {
     await dbQuery(
       `INSERT INTO people_onboarding (
-         user_id, account_type, phone, district, source,
+         user_id, account_type, phone, district, sector, source,
          utm_source, utm_medium, utm_campaign, stage, created_at, updated_at
-       ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
+       ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, now(), now())
        ON CONFLICT (user_id) DO UPDATE SET
          phone = COALESCE(EXCLUDED.phone, people_onboarding.phone),
          district = COALESCE(EXCLUDED.district, people_onboarding.district),
+         sector = COALESCE(NULLIF(people_onboarding.sector, ''), EXCLUDED.sector),
          source = CASE
            WHEN people_onboarding.source = 'unknown' AND EXCLUDED.source IS NOT NULL
              THEN EXCLUDED.source
@@ -113,6 +114,7 @@ export async function upsertPeopleOnboarding(dbQuery, input) {
         accountType,
         input.phone || null,
         input.district || null,
+        input.sector || null,
         attr.source || "direct",
         attr.utmSource || null,
         attr.utmMedium || null,

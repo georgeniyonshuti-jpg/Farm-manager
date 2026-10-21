@@ -68,6 +68,8 @@ import {
 } from "../services/pipeline/marketNotify.js";
 import { isPlatformSuperuser } from "../services/tenant/companyIsolation.js";
 import { recordMarketEvent } from "../services/pipeline/marketEvents.js";
+import { recruitmentTradingGate } from "../services/pipeline/recruitmentContacts.js";
+import { normalizePlace } from "../services/pipeline/rwandaLocations.js";
 import {
   appendFarmerLotScope,
   farmerOwnsLot,
@@ -560,6 +562,10 @@ export function registerPipelineMarketRoutes(router, ctx) {
         const buyer = await loadBuyerForUser(req.authUser.id);
         if (!requireVerifiedBuyer(buyer)) {
           return res.status(403).json({ error: "Buyer account is not active.", code: "buyer_inactive" });
+        }
+        const trade = await recruitmentTradingGate(dbQuery, req.authUser.id);
+        if (!trade.allow) {
+          return res.status(403).json({ error: trade.error, code: trade.code });
         }
         buyerId = buyer.id;
       } else if (!buyerId) {
@@ -1077,6 +1083,10 @@ export function registerPipelineMarketRoutes(router, ctx) {
     if (!canListFarmerLots(req.authUser)) {
       return res.status(403).json({ error: "Farmer account required." });
     }
+    const trade = await recruitmentTradingGate(dbQuery, req.authUser.id);
+    if (!trade.allow && trade.code === "kyc_required") {
+      return res.status(403).json({ error: trade.error, code: trade.code });
+    }
     const company = await loadCompanyVerification(req.authUser.companyId);
     const profile = await loadProfileForFarmer(dbQuery, req.authUser);
     const gate = sellerListingGate({
@@ -1098,7 +1108,8 @@ export function registerPipelineMarketRoutes(router, ctx) {
       readyTo: str(body.readyTo, 10),
     });
     if (!birdCount || birdCount <= 0) return res.status(400).json({ error: "birdCount is required." });
-    if (!district) return res.status(400).json({ error: "district is required." });
+    const located = normalizePlace(district, body.sector, { required: true });
+    if (!located.ok) return res.status(400).json({ error: located.error, code: located.code });
     if (!week.placementDate && !week.readyFrom) {
       return res.status(400).json({ error: "Chicks-in date is required." });
     }
@@ -1179,6 +1190,9 @@ export function registerPipelineMarketRoutes(router, ctx) {
           numOrNull(body.minOrderBirds),
         ]
       );
+      if (located.sector) {
+        await dbQuery(`UPDATE pipeline_lots SET sector = $2 WHERE id = $1::uuid`, [ins.rows[0].id, located.sector]);
+      }
       const refetch = await dbQuery(
         `SELECT ${LOT_SELECT} FROM pipeline_lots l WHERE l.id = $1::uuid`,
         [ins.rows[0].id]
@@ -1199,6 +1213,7 @@ export function registerPipelineMarketRoutes(router, ctx) {
               ask_price_per_kg AS "askPricePerKg",
               avg_weight_kg AS "avgWeightKg", expected_weight_kg AS "expectedWeightKg",
               contact_phone AS "contactPhone", notes, farm_label AS "farmLabel",
+              sector,
               saleable_birds AS "saleableBirds",
               source, flock_id::text AS "flockId",
               COALESCE(rank_eligible, true) AS "rankEligible",
@@ -1326,6 +1341,10 @@ export function registerPipelineMarketRoutes(router, ctx) {
 
       const nextBirds = birdCount ?? lot.birdCount;
       const nextDistrict = district ?? lot.district;
+      const located = normalizePlace(nextDistrict, body.sector !== undefined ? body.sector : lot.sector, {
+        sectorRequiredWithDistrict: body.district !== undefined || body.sector !== undefined,
+      });
+      if (!located.ok) return res.status(400).json({ error: located.error, code: located.code });
       const nextFrom = readyFrom || lot.readyFrom;
       const nextTo = readyTo || lot.readyTo;
       const nextAsk =
@@ -1431,6 +1450,9 @@ export function registerPipelineMarketRoutes(router, ctx) {
           req.params.lotId,
           nextStatus,
         ]);
+      }
+      if (body.district !== undefined || body.sector !== undefined) {
+        await dbQuery(`UPDATE pipeline_lots SET sector = $2 WHERE id = $1::uuid`, [req.params.lotId, located.sector]);
       }
       const refetch = await dbQuery(
         `SELECT ${LOT_SELECT} FROM pipeline_lots l WHERE l.id = $1::uuid`,

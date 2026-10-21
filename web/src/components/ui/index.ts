@@ -23,4 +23,5 @@ export { NoticeStrip } from "./NoticeStrip";
 export { Badge, StatusPill, type StatusTone } from "./StatusPill";
 export { StatCard } from "./StatCard";
 export { ConfirmDialog } from "./ConfirmDialog";
+export { ListBackLink } from "./ListBackLink";
 export { Button };

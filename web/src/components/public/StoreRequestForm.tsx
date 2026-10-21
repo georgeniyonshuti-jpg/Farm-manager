@@ -70,6 +70,7 @@ export function StoreRequestForm({
     })
   );
   const [ownDistrict, setOwnDistrict] = useState(district || "");
+  const [ownSector, setOwnSector] = useState("");
   const [message, setMessage] = useState("");
   const [honeypot, setHoneypot] = useState("");
   const [busy, setBusy] = useState(false);
@@ -297,7 +298,14 @@ export function StoreRequestForm({
           locale={locale}
         />
       ) : null}
-        <DistrictSelect variant="store" locale={locale} value={ownDistrict} onChange={setOwnDistrict} />
+        <DistrictSelect
+          variant="store"
+          locale={locale}
+          value={ownDistrict}
+          sector={ownSector}
+          onChange={setOwnDistrict}
+          onSectorChange={setOwnSector}
+        />
       <details className="store-more">
         <summary>{t("shopDetail")}</summary>
         <div className="store-form pt-1">

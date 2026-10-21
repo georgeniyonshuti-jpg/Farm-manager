@@ -75,6 +75,7 @@ export type PublicMarketSummary = {
 
 export type PublicLotsQuery = {
   district?: string;
+  sector?: string;
   week?: "this" | "next" | "later" | "";
   minBirds?: number;
   sort?: "ready" | "birds" | "price";
@@ -108,6 +109,7 @@ async function publicJson<T>(path: string, init?: RequestInit): Promise<T> {
 export function buildPublicLotsQuery(q: PublicLotsQuery): string {
   const sp = new URLSearchParams();
   if (q.district) sp.set("district", q.district);
+  if (q.sector) sp.set("sector", q.sector);
   if (q.week) sp.set("week", q.week);
   if (q.minBirds != null && q.minBirds > 0) sp.set("minBirds", String(q.minBirds));
   if (q.sort) sp.set("sort", q.sort);
@@ -200,6 +202,7 @@ export type PublicRequestPayload = {
   businessName?: string;
   buyerType?: string;
   district?: string;
+  sector?: string;
   birds?: number;
   avgWeightKg?: number;
   typicalBirdsPerWeek?: number;

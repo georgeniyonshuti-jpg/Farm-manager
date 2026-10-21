@@ -761,6 +761,12 @@ export async function recordStaffLink(query, user) {
   );
 }
 
+export function crmInboxConfigured(env = process.env) {
+  if (!crmEnabled(env)) return false;
+  const base = String(env.CRM_BASE_URL || "").replace(/\/$/, "");
+  return Boolean(base && loadSsoPrivateKey(env));
+}
+
 export function launchCrm(user, env = process.env) {
   if (!crmEnabled(env)) return { ok: false, status: 404, error: "Not found." };
   const role = crmRoleForUser(user);

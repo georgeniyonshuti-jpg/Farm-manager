@@ -306,3 +306,180 @@ export async function saveMarketExpectations(
   }
   return data as { expectations: MarketExpectations };
 }
+
+export type RecruitmentContact = {
+  id: string;
+  phone: string;
+  name: string | null;
+  email?: string | null;
+  detailsEditedAt?: string | null;
+  district: string | null;
+  sector?: string | null;
+  birdCount: number | null;
+  want: "sell" | "buy" | "scout";
+  stage: string;
+  source: string;
+  ownerUserId: string | null;
+  ownerName: string | null;
+  nextCallAt: string | null;
+  lastTouchAt: string | null;
+  userId: string | null;
+  hasAccount: boolean;
+  overdue: boolean;
+  locationConfirmed?: boolean | null;
+  locationCorrected?: string | null;
+  ownsBroilers?: boolean | null;
+  birdType?: string | null;
+  quantityMin?: number | null;
+  quantityMax?: number | null;
+  canSlaughter?: boolean | null;
+  canDeliver?: boolean | null;
+  challenges?: string | null;
+  nextAction?: string | null;
+  flockCount?: number | null;
+  listedCount?: number | null;
+  kycContractStatus?: string | null;
+  kycContractSnapshot?: string | null;
+  kycSignatureUrl?: string | null;
+  kycLocationStatus?: string | null;
+  kycPlace?: string | null;
+  kycPaymentStatus?: string | null;
+  kycMomoPhone?: string | null;
+  kycPaymentProofUrl?: string | null;
+  kycIdentityStatus?: string | null;
+  kycIdNumber?: string | null;
+  kycIdPhotoUrl?: string | null;
+  contractText?: string | null;
+  createdAt: string;
+};
+
+export type RecruitmentTouch = {
+  id: string;
+  kind: string;
+  outcome: string | null;
+  note: string | null;
+  challenges?: string | null;
+  nextAction?: string | null;
+  scheduledFor?: string | null;
+  createdAt: string;
+  byName: string | null;
+};
+
+export type RecruitmentQueue = {
+  contacts: RecruitmentContact[];
+  owners: { id: string | null; name: string; open: number; overdue: number; signedUp: number }[];
+  trend: { day: string; newContacts: number; signups: number; activated: number }[];
+  missing?: boolean;
+};
+
+async function recruitmentSend<T>(token: string | null, path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}/api/insights${path}`, {
+    ...init,
+    headers: init?.body ? jsonAuthHeaders(token) : readAuthHeaders(token),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error((data as { error?: string }).error || `Recruitment request failed (${res.status})`);
+  }
+  return data as T;
+}
+
+export function fetchRecruitmentQueue(
+  token: string | null,
+  query: {
+    days?: number;
+    stage?: string;
+    want?: string;
+    owner?: string;
+    overdue?: boolean;
+    q?: string;
+    district?: string;
+    kyc?: string;
+    sort?: string;
+    lane?: "recruitment" | "active";
+  }
+): Promise<RecruitmentQueue> {
+  const params = new URLSearchParams();
+  if (query.days) params.set("days", String(query.days));
+  if (query.stage) params.set("stage", query.stage);
+  if (query.want) params.set("want", query.want);
+  if (query.owner) params.set("owner", query.owner);
+  if (query.overdue) params.set("overdue", "1");
+  if (query.q) params.set("q", query.q);
+  if (query.lane) params.set("lane", query.lane);
+  if (query.district) params.set("district", query.district);
+  if (query.kyc) params.set("kyc", query.kyc);
+  if (query.sort) params.set("sort", query.sort);
+  return recruitmentSend(token, `/market/recruitment/contacts?${params.toString()}`);
+}
+
+export function createRecruitmentContact(
+  token: string | null,
+  body: { name?: string; phone: string; district?: string; birds?: number | null; want: string }
+) {
+  return recruitmentSend<{ contact?: RecruitmentContact }>(token, "/market/recruitment/contacts", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function patchRecruitmentContact(token: string | null, id: string, body: Record<string, unknown>) {
+  return recruitmentSend<{ contact: RecruitmentContact }>(token, `/market/recruitment/contacts/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function fetchRecruitmentContact(token: string | null, id: string) {
+  return recruitmentSend<{ contact: RecruitmentContact; touches: RecruitmentTouch[] }>(
+    token,
+    `/market/recruitment/contacts/${id}`
+  );
+}
+
+export function addRecruitmentTouch(
+  token: string | null,
+  id: string,
+  body: Record<string, unknown>
+) {
+  return recruitmentSend<{ contact: RecruitmentContact }>(token, `/market/recruitment/contacts/${id}/touches`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function decideRecruitmentContact(
+  token: string | null,
+  id: string,
+  body: { decision: string; note?: string; idempotencyKey?: string }
+) {
+  return recruitmentSend<{ contact: RecruitmentContact }>(token, `/market/recruitment/contacts/${id}/decision`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function fetchMyRecruitment(token: string | null) {
+  return recruitmentSend<{ contact: RecruitmentContact | null }>(token, "/market/recruitment/me");
+}
+
+export function submitMyKyc(token: string | null, body: Record<string, unknown>) {
+  return recruitmentSend<{ contact: RecruitmentContact }>(token, "/market/recruitment/me/kyc", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function submitRecruitmentKyc(token: string | null, id: string, body: Record<string, unknown>) {
+  return recruitmentSend<{ contact: RecruitmentContact }>(token, `/market/recruitment/contacts/${id}/kyc`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function attachRecruitmentAccount(token: string | null, id: string, email: string) {
+  return recruitmentSend<{ contact: RecruitmentContact }>(token, `/market/recruitment/contacts/${id}/attach`, {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}

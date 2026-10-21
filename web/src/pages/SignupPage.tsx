@@ -16,6 +16,7 @@ import { recordMarketReach, signupAttributionPayload } from "../lib/marketReach"
 import { isAdOrMarketSignupSearch } from "../lib/signupAttribution";
 import { isMarketHostname, isWorkspaceSignupSearch } from "../lib/marketHost";
 import { clevaMarketWhatsapp, waMeHref } from "../lib/marketWhatsapp";
+import { normalizeRwandaPhone, rwandaPhoneError } from "../lib/rwandaPhone";
 import { tenantPath } from "../lib/tenancy";
 import { defaultHomeForUser } from "../routes/ProtectedRoute";
 import type { SessionUser } from "../auth/types";
@@ -40,6 +41,7 @@ type SignupForm = {
   password: string;
   confirmPw: string;
   district: string;
+  sector: string;
   phone: string;
   buyerType: string;
 };
@@ -74,6 +76,7 @@ export function SignupPage() {
     password: "",
     confirmPw: "",
     district: params.get("district") || "",
+    sector: params.get("sector") || "",
     phone: params.get("phone") || "",
     buyerType: "butcher",
   });
@@ -116,6 +119,7 @@ export function SignupPage() {
       companyName: f.companyName || draft.contactName,
       phone: f.phone || draft.phone,
       district: f.district || draft.district,
+      sector: f.sector || draft.sector,
     }));
   }, [params]);
 
@@ -263,6 +267,21 @@ export function SignupPage() {
   async function handleSubmit(e: FormEvent): Promise<void> {
     e.preventDefault();
     setError(null);
+    if (isBuyer || isScout || fromMarket) {
+      if (!form.district.trim()) {
+        setError("District is required.");
+        return;
+      }
+      if (!form.sector.trim()) {
+        setError("Sector is required.");
+        return;
+      }
+      const phoneError = rwandaPhoneError(form.phone, { required: true });
+      if (phoneError) {
+        setError(phoneError);
+        return;
+      }
+    }
     if (form.password !== form.confirmPw) {
       setError("Passwords do not match.");
       return;
@@ -284,7 +303,8 @@ export function SignupPage() {
           email: form.email.trim(),
           password: form.password,
           district: form.district.trim() || undefined,
-          phone: form.phone.trim() || undefined,
+          sector: form.sector.trim() || undefined,
+          phone: normalizeRwandaPhone(form.phone) || undefined,
           buyerType: form.buyerType,
           from: fromMarket ? "market" : undefined,
           claim: claimToken || undefined,
@@ -364,7 +384,7 @@ export function SignupPage() {
               {isBuyer
                 ? "Opening the market…"
                 : isScout
-                  ? "Application sent. A manager approves you before you can find sellers."
+                  ? "Account ready. You can find sellers now."
                   : claimToken
                     ? "Opening your flock…"
                     : "Opening your flocks. They stay private until a manager approves them."}
@@ -465,9 +485,20 @@ export function SignupPage() {
                   setError(isBuyer ? "Business name is required." : isScout ? "Your name is required." : "Farm name is required.");
                   return;
                 }
-                if (isScout && (!form.phone.trim() || !form.district.trim())) {
-                  setError("Phone and district are required.");
-                  return;
+                if (isBuyer || isScout || fromMarket) {
+                  if (!form.district.trim()) {
+                    setError("District is required.");
+                    return;
+                  }
+                  if (!form.sector.trim()) {
+                    setError("Sector is required.");
+                    return;
+                  }
+                  const phoneError = rwandaPhoneError(form.phone, { required: true });
+                  if (phoneError) {
+                    setError(phoneError);
+                    return;
+                  }
                 }
                 if (isScout) {
                   setForm((f) => ({ ...f, fullName: f.fullName.trim() || f.companyName.trim() }));
@@ -530,8 +561,12 @@ export function SignupPage() {
                     <DistrictSelect
                       id="district"
                       locale={preLocale}
+                      required
+                      allowEmpty={false}
                       value={form.district}
+                      sector={form.sector}
                       onChange={(district) => setForm((f) => ({ ...f, district }))}
+                      onSectorChange={(sector) => setForm((f) => ({ ...f, sector }))}
                       className="w-full rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 py-3"
                     />
                     <div>
@@ -543,10 +578,20 @@ export function SignupPage() {
                       </label>
                       <input
                         id="phone"
+                        required
+                        inputMode="tel"
+                        autoComplete="tel"
+                        placeholder="0781234567"
                         value={form.phone}
                         onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
                         className="w-full rounded-xl border border-[var(--border-input)] bg-[var(--surface-input)] px-4 py-3"
                       />
+                      <p className="mt-1 text-xs text-[var(--text-muted)]">
+                        <Tr
+                          locale={preLocale}
+                          text="9 digits starting with 7, 10 starting with 0, or 12 starting with 250."
+                        />
+                      </p>
                     </div>
                   </>
                 ) : null}

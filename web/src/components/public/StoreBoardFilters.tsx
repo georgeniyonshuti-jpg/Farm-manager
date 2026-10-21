@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   defaultPublicMarketFilters,
@@ -27,7 +27,13 @@ export function StoreBoardFilters({
 }) {
   const t = (k: Parameters<typeof storeT>[1]) => storeT(locale, k);
   const [open, setOpen] = useState(false);
-  const count = [filters.week, filters.service, filters.district].filter(Boolean).length;
+  const filtersRef = useRef(filters);
+  filtersRef.current = filters;
+  function emit(next: PublicMarketFilters) {
+    filtersRef.current = next;
+    onChange(next);
+  }
+  const count = [filters.week, filters.service, filters.district, filters.sector].filter(Boolean).length;
 
   useEffect(() => {
     if (!open) return;
@@ -117,9 +123,14 @@ export function StoreBoardFilters({
             <button
               type="button"
               className="store-pill"
-              onClick={() => onChange({ ...filters, district: "" })}
+              onClick={() => onChange({ ...filters, district: "", sector: "" })}
             >
               {filters.district} ×
+            </button>
+          ) : null}
+          {filters.sector ? (
+            <button type="button" className="store-pill" onClick={() => onChange({ ...filters, sector: "" })}>
+              {filters.sector} ×
             </button>
           ) : null}
           <button type="button" className="store-text-link" onClick={() => onChange(defaultPublicMarketFilters())}>
@@ -169,7 +180,9 @@ export function StoreBoardFilters({
                 variant="filter"
                 locale={locale}
                 value={filters.district}
-                onChange={(district) => onChange({ ...filters, district })}
+                sector={filters.sector}
+                onChange={(district) => emit({ ...filtersRef.current, district })}
+                onSectorChange={(sector) => emit({ ...filtersRef.current, sector })}
                 emptyLabel={t("allDistricts")}
               />
             </div>

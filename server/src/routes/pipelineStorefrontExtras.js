@@ -8,10 +8,13 @@ import {
   createClaimToken,
   createUniqueFarmSlug,
   isMarketOnlySeller,
+  scoutReadyGate,
   loadProfileForFarmer as loadOwnedProfileForFarmer,
   mapFarmProfileRow,
   normalizeSpecialties,
 } from "../services/pipeline/farmProfiles.js";
+import { normalizePlace } from "../services/pipeline/rwandaLocations.js";
+import { recruitmentTradingGate } from "../services/pipeline/recruitmentContacts.js";
 import {
   buildSignedUpload,
   cloudinaryConfigFromEnv,
@@ -141,6 +144,8 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
     const body = req.body ?? {};
     const displayName = str(body.displayName, 160);
     if (!displayName) return res.status(400).json({ error: "displayName is required." });
+    const located = normalizePlace(body.district, body.sector, { sectorRequiredWithDistrict: true });
+    if (!located.ok) return res.status(400).json({ error: located.error, code: located.code });
     try {
       let profile = await loadProfileForFarmer(req.authUser);
       const specialties = normalizeSpecialties(body.specialties);
@@ -148,18 +153,19 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
         const slug = await uniqueSlug(displayName);
         const ins = await dbQuery(
           `INSERT INTO farm_profiles
-             (company_id, slug, display_name, story, district, location_label, exact_location,
+             (company_id, slug, display_name, story, district, sector, location_label, exact_location,
               contact_phone, contact_whatsapp, contact_email, specialties,
               slaughter_available, delivery_available, disclose_contact,
               disclose_exact_location, disclose_exact_price, created_by, owner_user_id)
-           VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::text[], $12, $13, $14, $15, $16, $17::uuid, $18::uuid)
+           VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::text[], $13, $14, $15, $16, $17, $18::uuid, $19::uuid)
            RETURNING id::text AS id`,
           [
             req.authUser.companyId,
             slug,
             displayName,
             str(body.story, 4000),
-            str(body.district, 120),
+            located.district,
+            located.sector,
             str(body.locationLabel, 200),
             str(body.exactLocation, 240),
             str(body.contactPhone, 40),
@@ -183,6 +189,7 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
               display_name = $2,
               story = $3,
               district = $4,
+              sector = $16,
               location_label = $5,
               exact_location = $6,
               contact_phone = $7,
@@ -200,7 +207,7 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
             profile.id,
             displayName,
             str(body.story, 4000),
-            str(body.district, 120),
+            located.district,
             str(body.locationLabel, 200),
             str(body.exactLocation, 240),
             str(body.contactPhone, 40),
@@ -212,6 +219,7 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
             bool(body.discloseContact, profile.discloseContact),
             bool(body.discloseExactLocation, profile.discloseExactLocation),
             bool(body.discloseExactPrice, profile.discloseExactPrice),
+            located.sector,
           ]
         );
         profile = await loadProfileById(profile.id);
@@ -495,7 +503,12 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
               ORDER BY created_at DESC
               LIMIT 1
            ) l ON true
-          WHERE ($1::boolean = true OR fp.scouted_by = $2::uuid)
+          WHERE ($1::boolean = true OR fp.scouted_by = $2::uuid OR EXISTS (
+                  SELECT 1 FROM pipeline_lots al
+                   WHERE al.farm_profile_id = fp.id
+                     AND al.assigned_scout_user_id = $2::uuid
+                     AND al.status <> 'cancelled'
+                ))
             AND ($3::text IS NULL
                  OR fp.display_name ILIKE $3
                  OR fp.district ILIKE $3
@@ -526,12 +539,6 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
           scoutConfirmedAt: row.scoutConfirmedAt || null,
         };
       });
-      if (!desk) {
-        const hidden = farms.filter((farm) => farm.scoutedBy && farm.scoutedBy !== req.authUser.id);
-        if (hidden.length) {
-          return res.status(403).json({ error: "Not allowed." });
-        }
-      }
       res.json({ farms });
     } catch (e) {
       res.status(503).json({ error: e instanceof Error ? e.message : "Could not list farms." });
@@ -541,24 +548,38 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
   router.post("/market/scout/farms", async (req, res) => {
     if (!requireDb(res)) return;
     if (!canScoutPipeline(req.authUser)) return res.status(403).json({ error: "Not allowed." });
+    if (req.authUser.role === "vet" || req.authUser.role === "vet_manager") {
+      const app = await dbQuery(
+        `SELECT status FROM scout_applications WHERE user_id = $1::uuid`,
+        [req.authUser.id]
+      ).catch(() => ({ rows: [] }));
+      const trade = await recruitmentTradingGate(dbQuery, req.authUser.id);
+      if (!trade.allow && trade.code === "kyc_required") {
+        return res.status(403).json({ error: trade.error, code: trade.code });
+      }
+      const gate = scoutReadyGate(app.rows[0]?.status);
+      if (!gate.allow) return res.status(403).json({ error: gate.error });
+    }
     const displayName = str(req.body?.displayName ?? req.body?.farmLabel, 160);
     const district = str(req.body?.district, 120);
+    const located = normalizePlace(district, req.body?.sector, { required: true });
     if (!displayName) return res.status(400).json({ error: "Farm name is required." });
-    if (!district) return res.status(400).json({ error: "District is required." });
+    if (!located.ok) return res.status(400).json({ error: located.error, code: located.code });
     try {
       const slug = await uniqueSlug(displayName);
       const ins = await dbQuery(
         `INSERT INTO farm_profiles
-           (slug, display_name, story, district, location_label, contact_phone, contact_whatsapp,
+           (slug, display_name, story, district, sector, location_label, contact_phone, contact_whatsapp,
             specialties, slaughter_available, delivery_available, verification_status,
             published, consent_status, scouted_by, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, $10, 'pending', false, 'none', $11::uuid, $11::uuid)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::text[], $10, $11, 'pending', false, 'none', $12::uuid, $12::uuid)
          RETURNING id::text AS id`,
         [
           slug,
           displayName,
           str(req.body?.story, 4000),
-          district,
+          located.district,
+          located.sector,
           str(req.body?.locationLabel, 200),
           str(req.body?.contactPhone, 40),
           str(req.body?.contactWhatsapp, 40),

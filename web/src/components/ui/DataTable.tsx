@@ -194,7 +194,7 @@ export function DataTable<T>({
             </div>
           ) : null}
           <div
-            className={`institutional-table-wrapper max-h-[min(70vh,40rem)] overflow-auto ${
+            className={`institutional-table-wrapper ${
               renderMobileCard ? "hidden md:block" : ""
             }`}
           >

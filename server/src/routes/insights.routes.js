@@ -30,6 +30,17 @@ import {
   saveMarketExpectations,
 } from "../services/pipeline/marketRecruitment.js";
 import {
+  addRecruitmentTouch,
+  attachRecruitmentAccount,
+  decideRecruitmentContact,
+  getMyRecruitmentContact,
+  getRecruitmentContact,
+  listRecruitmentQueue,
+  patchRecruitmentContact,
+  submitRecruitmentKyc,
+  upsertRecruitmentContact,
+} from "../services/pipeline/recruitmentContacts.js";
+import {
   loadMarketDashboardMap,
   packDashboardsFromMap,
   isMarketSupersetEmbedReady,
@@ -421,6 +432,246 @@ export function createInsightsRouter(deps) {
       res.status(500).json({
         error: e instanceof Error ? e.message : "Unable to build recruitment analytics",
       });
+    }
+  });
+
+  router.get("/market/recruitment/contacts", async (req, res) => {
+    try {
+      if (!isPipelineDesk(req.authUser)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable." });
+        return;
+      }
+      const data = await listRecruitmentQueue(dbQuery, {
+        stage: req.query.stage,
+        want: req.query.want,
+        lane: req.query.lane,
+        owner: req.query.owner === "mine" ? req.authUser.id : req.query.owner,
+        overdue: req.query.overdue === "1" || req.query.overdue === "true",
+        q: req.query.q,
+        district: req.query.district,
+        kyc: req.query.kyc,
+        sort: req.query.sort,
+        days: req.query.days,
+      });
+      if (!data.ok) {
+        res.status(500).json({ error: data.error });
+        return;
+      }
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Could not load the queue." });
+    }
+  });
+
+  router.post("/market/recruitment/contacts", async (req, res) => {
+    try {
+      if (!isPipelineDesk(req.authUser)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable." });
+        return;
+      }
+      const saved = await upsertRecruitmentContact(dbQuery, {
+        ...(req.body || {}),
+        source: "whatsapp",
+        userId: null,
+      });
+      if (!saved.ok) {
+        res.status(saved.missing ? 503 : 400).json({ error: saved.error });
+        return;
+      }
+      const full = await getRecruitmentContact(dbQuery, saved.id);
+      res.status(201).json(full.ok ? full : { ok: true, id: saved.id });
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Could not add the person." });
+    }
+  });
+
+  router.get("/market/recruitment/contacts/:id", async (req, res) => {
+    try {
+      if (!isPipelineDesk(req.authUser)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable." });
+        return;
+      }
+      const data = await getRecruitmentContact(dbQuery, req.params.id);
+      if (!data.ok) {
+        res.status(data.status || 404).json({ error: data.error });
+        return;
+      }
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Could not load the person." });
+    }
+  });
+
+  router.patch("/market/recruitment/contacts/:id", async (req, res) => {
+    try {
+      if (!isPipelineDesk(req.authUser)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable." });
+        return;
+      }
+      const data = await patchRecruitmentContact(dbQuery, req.params.id, req.body || {}, req.authUser.role);
+      if (!data.ok) {
+        res.status(data.status || 400).json({ error: data.error });
+        return;
+      }
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Could not update the person." });
+    }
+  });
+
+  router.post("/market/recruitment/contacts/:id/touches", async (req, res) => {
+    try {
+      if (!isPipelineDesk(req.authUser)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable." });
+        return;
+      }
+      const data = await addRecruitmentTouch(dbQuery, req.params.id, {
+        ...(req.body || {}),
+        byUserId: req.authUser.id,
+      });
+      if (!data.ok) {
+        res.status(data.status || 400).json({ error: data.error });
+        return;
+      }
+      res.status(201).json(data);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Could not save the touch." });
+    }
+  });
+
+  router.get("/market/recruitment/me", async (req, res) => {
+    try {
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable." });
+        return;
+      }
+      const data = await getMyRecruitmentContact(dbQuery, req.authUser.id);
+      if (!data.ok) {
+        res.status(data.status || 400).json({ error: data.error });
+        return;
+      }
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Could not load your checks." });
+    }
+  });
+
+  router.post("/market/recruitment/me/kyc", async (req, res) => {
+    try {
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable." });
+        return;
+      }
+      const mine = await getMyRecruitmentContact(dbQuery, req.authUser.id);
+      if (!mine.ok || !mine.contact) {
+        res.status(404).json({ error: "No recruitment record for this account." });
+        return;
+      }
+      const data = await submitRecruitmentKyc(dbQuery, mine.contact.id, req.body || {}, {
+        userId: req.authUser.id,
+        role: req.authUser.role,
+        desk: false,
+        audit: deps.appendAudit,
+      });
+      if (!data.ok) {
+        res.status(data.status || 400).json({ error: data.error });
+        return;
+      }
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Could not save the check." });
+    }
+  });
+
+  router.post("/market/recruitment/contacts/:id/kyc", async (req, res) => {
+    try {
+      if (!isPipelineDesk(req.authUser)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable." });
+        return;
+      }
+      const data = await submitRecruitmentKyc(dbQuery, req.params.id, req.body || {}, {
+        userId: req.authUser.id,
+        role: req.authUser.role,
+        desk: true,
+        audit: deps.appendAudit,
+      });
+      if (!data.ok) {
+        res.status(data.status || 400).json({ error: data.error });
+        return;
+      }
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Could not save the check." });
+    }
+  });
+
+  router.post("/market/recruitment/contacts/:id/decision", async (req, res) => {
+    try {
+      if (!isPipelineDesk(req.authUser)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable." });
+        return;
+      }
+      const data = await decideRecruitmentContact(dbQuery, req.params.id, req.body || {}, {
+        userId: req.authUser.id,
+        role: req.authUser.role,
+        audit: deps.appendAudit,
+      });
+      if (!data.ok) {
+        res.status(data.status || 400).json({ error: data.error });
+        return;
+      }
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Could not save the decision." });
+    }
+  });
+
+  router.post("/market/recruitment/contacts/:id/attach", async (req, res) => {
+    try {
+      if (!isPipelineDesk(req.authUser)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable." });
+        return;
+      }
+      const data = await attachRecruitmentAccount(dbQuery, req.params.id, req.body || {});
+      if (!data.ok) {
+        res.status(data.status || 400).json({ error: data.error });
+        return;
+      }
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Could not attach the account." });
     }
   });
 

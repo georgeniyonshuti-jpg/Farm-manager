@@ -564,7 +564,7 @@ html[data-density="compact"] .institutional-table th {
   width: 100%;
   max-width: 100%;
   overflow-x: auto;
-  overflow-y: clip;
+  overflow-y: visible;
   -webkit-overflow-scrolling: touch;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-lg);
@@ -607,7 +607,7 @@ html[data-density="compact"] .institutional-table th {
   border-radius: 0;
   box-shadow: none;
   overflow-x: auto;
-  overflow-y: clip;
+  overflow-y: visible;
 }
 
 /* Flock list: dense horizontal table with zebra striping (spec: traditional data grid). */
@@ -914,6 +914,10 @@ html[data-density="compact"] .institutional-table th {
   gap: 1px;
   /* Soft indent under titles — no tree line (reads noisy with many groups) */
   padding-left: 4px;
+}
+
+.mgr-nav-group__items--flat {
+  padding-left: 0;
 }
 
 .mgr-sidebar-nav--collapsed .mgr-nav-group__items,
