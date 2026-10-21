@@ -1,11 +1,5 @@
--- Cleva side of the CRM bridge. Reversible. Does not change ERPNext accounting tables.
--- Rollback:
---   DROP TABLE IF EXISTS crm_seller_queue;
---   DROP TABLE IF EXISTS crm_inbound_requests;
---   DROP TABLE IF EXISTS crm_sync_outbox;
---   DROP TABLE IF EXISTS signup_tracking_links;
---   DROP TABLE IF EXISTS crm_user_links;
---   DROP TABLE IF EXISTS crm_links;
+-- Cleva side of the CRM bridge. Does not change ERPNext accounting tables.
+-- To undo, remove the six tables below in reverse dependency order.
 
 CREATE TABLE IF NOT EXISTS crm_links (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
