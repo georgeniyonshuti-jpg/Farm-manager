@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../../../auth/AuthContext";
 import { useToast } from "../../../components/Toast";
 import { ErrorState, SkeletonList } from "../../../components/LoadingSkeleton";
 import { DistrictSelect } from "../../../components/DistrictSelect";
+import { useCompanyNav } from "../../../hooks/useCompanyNav";
 import {
   Button,
   DataTable,
@@ -26,6 +28,7 @@ import {
   verifyCompany,
   verifyFarmProfile,
   verifyLot,
+  verifyScoutApplication,
   type MarketLead,
   type PipelineBuyer,
   type FulfillmentJob,
@@ -552,12 +555,14 @@ function LeadsSubpanel() {
 function VerifySubpanel() {
   const { token } = useAuth();
   const { showToast } = useToast();
+  const { companyHref } = useCompanyNav();
   const [apiFailed, setApiFailed] = useState(false);
   const demo = useMarketDemoFlag(apiFailed);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [queue, setQueue] = useState<Awaited<ReturnType<typeof fetchVerifyQueue>> | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [reasons, setReasons] = useState<Record<string, string>>({});
 
   const reload = useCallback(async () => {
     if (!token && !demo) return;
@@ -596,6 +601,7 @@ function VerifySubpanel() {
               buyers: q.buyers.filter((b) => b.id !== id),
               lots: q.lots.filter((l) => l.id !== id),
               profiles: (q.profiles ?? []).filter((p) => p.id !== id),
+              scouts: (q.scouts ?? []).filter((s) => s.id !== id),
             }
           : q
       );
@@ -620,43 +626,70 @@ function VerifySubpanel() {
 
   const sections = [
     {
-      title: "Companies",
-      rows: queue.companies.map((c) => ({
-        id: c.id,
-        label: c.name,
-        meta: c.slug,
-        approve: () => verifyCompany(token, c.id, "verified"),
-        reject: () => verifyCompany(token, c.id, "rejected"),
+      title: "Scouts",
+      hint: "They can already work. Approve after the intro call to unlock payouts.",
+      rows: (queue.scouts ?? []).map((s) => ({
+        id: s.id,
+        label: s.fullName,
+        meta: [s.district || "No district", s.phone || null, s.email].filter(Boolean).join(" · "),
+        needsReason: false,
+        approve: () => verifyScoutApplication(token, s.id, "approved"),
+        reject: () => verifyScoutApplication(token, s.id, "rejected"),
+      })),
+    },
+    {
+      title: "Sellers",
+      hint: "Approve the person so flocks can go public. They already have an account.",
+      rows: (queue.profiles ?? []).map((p) => ({
+        id: p.id,
+        label: p.displayName,
+        meta: [
+          p.district || "No district",
+          p.contactPhone || null,
+          `${p.flockCount ?? 0} flocks`,
+          p.scoutName ? `scout ${p.scoutName}` : "applied themselves",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        needsReason: true,
+        approve: () => verifyFarmProfile(token, p.id, "verified"),
+        reject: () => verifyFarmProfile(token, p.id, "rejected", reasons[p.id]?.trim() || ""),
+      })),
+    },
+    {
+      title: "Flocks",
+      hint: "These are remembered flocks. Approving one lets it go through the rest of review.",
+      rows: queue.lots.map((l) => ({
+        id: l.id,
+        label: l.farmLabel || "Flock",
+        meta: `${l.birdCount ?? l.remainingBirds ?? 0} birds${l.district ? ` · ${l.district}` : ""}`,
+        needsReason: true,
+        approve: () => verifyLot(token, l.id, "verified"),
+        reject: () => verifyLot(token, l.id, "rejected", reasons[l.id]?.trim() || ""),
       })),
     },
     {
       title: "Buyers",
+      hint: "",
       rows: queue.buyers.map((b) => ({
         id: b.id,
         label: b.name,
         meta: `${b.buyerType}${b.district ? ` · ${b.district}` : ""}`,
+        needsReason: false,
         approve: () => verifyBuyer(token, b.id, "verified"),
         reject: () => verifyBuyer(token, b.id, "rejected"),
       })),
     },
     {
-      title: "Lots",
-      rows: queue.lots.map((l) => ({
-        id: l.id,
-        label: l.farmLabel || l.breedCode || "Lot",
-        meta: `${l.remainingBirds ?? l.birdCount} birds`,
-        approve: () => verifyLot(token, l.id, "verified"),
-        reject: () => verifyLot(token, l.id, "rejected"),
-      })),
-    },
-    {
-      title: "Storefronts",
-      rows: (queue.profiles ?? []).map((p) => ({
-        id: p.id,
-        label: p.displayName,
-        meta: p.district || p.slug,
-        approve: () => verifyFarmProfile(token, p.id, "verified"),
-        reject: () => verifyFarmProfile(token, p.id, "rejected"),
+      title: "Farms",
+      hint: "",
+      rows: queue.companies.map((c) => ({
+        id: c.id,
+        label: c.name,
+        meta: c.slug,
+        needsReason: false,
+        approve: () => verifyCompany(token, c.id, "verified"),
+        reject: () => verifyCompany(token, c.id, "rejected"),
       })),
     },
   ];
@@ -665,6 +698,13 @@ function VerifySubpanel() {
 
   return (
     <div className="space-y-stack">
+      <p className="text-sm text-[var(--text-secondary)]">
+        For calls, stages, and ad sources see{" "}
+        <Link to={companyHref("/admin/signups?tab=people")} className="font-semibold text-[var(--primary-color)] hover:underline">
+          Signups
+        </Link>
+        .
+      </p>
       {total === 0 ? (
         <p className="type-caption text-[var(--text-muted)]">Nothing pending verification.</p>
       ) : (
@@ -672,34 +712,53 @@ function VerifySubpanel() {
           sec.rows.length === 0 ? null : (
             <div key={sec.title} className="table-block">
               <div className="table-toolbar">
-                <p className="text-sm font-semibold">{sec.title}</p>
+                <div>
+                  <p className="text-sm font-semibold">{sec.title}</p>
+                  {sec.hint ? <p className="type-caption text-[var(--text-muted)]">{sec.hint}</p> : null}
+                </div>
                 <span className="text-xs text-[var(--text-muted)] tabular-nums">{sec.rows.length}</span>
               </div>
               <ul className="divide-y divide-[var(--border-color)]">
                 {sec.rows.map((r) => (
-                  <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 px-card py-3 text-sm">
-                    <div>
-                      <p className="font-semibold">{r.label}</p>
-                      <p className="type-caption text-[var(--text-muted)]">{r.meta}</p>
+                  <li key={r.id} className="space-y-2 px-card py-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="font-semibold">{r.label}</p>
+                        <p className="type-caption text-[var(--text-muted)]">{r.meta}</p>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <Button
+                          size="xs"
+                          variant="secondary"
+                          disabled={busyId === r.id}
+                          onClick={() => void act(r.id, r.approve, "Approved")}
+                        >
+                          Approve
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="dangerGhost"
+                          disabled={busyId === r.id}
+                          onClick={() => {
+                            if (r.needsReason && !reasons[r.id]?.trim()) {
+                              showToast("error", "Add a reason before rejecting.");
+                              return;
+                            }
+                            void act(r.id, r.reject, "Rejected");
+                          }}
+                        >
+                          Reject
+                        </Button>
+                      </div>
                     </div>
-                    <div className="flex gap-1.5">
-                      <Button
-                        size="xs"
-                        variant="secondary"
-                        disabled={busyId === r.id}
-                        onClick={() => void act(r.id, r.approve, "Verified")}
-                      >
-                        Approve
-                      </Button>
-                      <Button
-                        size="xs"
-                        variant="dangerGhost"
-                        disabled={busyId === r.id}
-                        onClick={() => void act(r.id, r.reject, "Rejected")}
-                      >
-                        Reject
-                      </Button>
-                    </div>
+                    {r.needsReason ? (
+                      <input
+                        className="w-full min-h-11 rounded-lg border border-[var(--border-color)] bg-[var(--surface-input)] px-3 text-sm"
+                        placeholder="Reason if you reject"
+                        value={reasons[r.id] || ""}
+                        onChange={(e) => setReasons((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                      />
+                    ) : null}
                   </li>
                 ))}
               </ul>

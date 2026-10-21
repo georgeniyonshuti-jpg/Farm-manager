@@ -10,7 +10,6 @@ import { resolveFieldChromeMode } from "../../lib/fieldChrome";
 import { FinancialRestrictedBanner } from "./FinancialRestrictedBanner";
 import { FieldShellBottomNav } from "./FieldShellBottomNav";
 import { MarketLocaleProvider } from "../../context/MarketLocaleContext";
-import { StoreWhatsAppFab } from "../public/StoreWhatsAppFab";
 import { SidebarNav } from "./SidebarNav";
 import { AnnouncementBanner } from "../AnnouncementBanner";
 import { TrialBanner } from "../TrialBanner";
@@ -139,7 +138,6 @@ export function AppShell() {
                 <div className="w-full">{pageBody}</div>
               </main>
               <FieldShellBottomNav />
-              <StoreWhatsAppFab liftForNav />
             </div>
           </MarketLocaleProvider>
         </ERPNextConnectionProvider>
@@ -155,7 +153,7 @@ export function AppShell() {
             {user && !user.canViewSensitiveFinancial ? <FinancialRestrictedBanner /> : null}
             <main
               className={`app-page-enter min-h-0 flex-1 overflow-auto px-4 pb-2 ${
-                fieldChromeMode === "hidden" ? "pt-0" : "pt-1"
+                fieldChromeMode === "hidden" ? "pt-0" : "pt-4"
               }`}
             >
               <div className="w-full">{pageBody}</div>

@@ -9,6 +9,7 @@ import {
   readyWindowHitsThisOrNextWeek,
   remainingBirds,
 } from "./pipeline.js";
+import { scoutPublicConsentSql } from "./sellerClaim.js";
 
 export const DEFAULT_GROWOUT_MIN = 35;
 export const DEFAULT_GROWOUT_MAX = 42;
@@ -176,6 +177,7 @@ export function publicEligibleWhereSql(now = new Date()) {
   AND l.scout_confirmed_at IS NOT NULL
   AND l.ready_from::date <= '${to}'::date
   AND l.ready_to::date >= '${from}'::date
+  ${scoutPublicConsentSql("l")}
 `;
 }
 

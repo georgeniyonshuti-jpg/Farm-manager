@@ -96,6 +96,7 @@ describe("public shop gate", () => {
   it("SQL requires scout_confirmed_at and this/next week", () => {
     const sql = publicEligibleWhereSql(now);
     assert.match(sql, /scout_confirmed_at IS NOT NULL/);
+    assert.match(sql, /consent_status = 'granted'/);
     assert.match(sql, /2026-09-2/);
   });
 });

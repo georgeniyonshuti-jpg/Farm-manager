@@ -19,6 +19,7 @@ export function DistrictSelect({
   className,
   variant = "app",
   locale,
+  layout = "split",
 }: {
   value: string;
   onChange: (district: string) => void;
@@ -30,6 +31,8 @@ export function DistrictSelect({
   className?: string;
   variant?: "app" | "store" | "filter";
   locale?: StoreLocale;
+  /** `stack` stays one column even on a wide screen, so a narrow phone column does not clip the labels. */
+  layout?: "split" | "stack";
 }) {
   const t = (k: Parameters<typeof storeT>[1], fallback: string) =>
     locale ? storeT(locale, k) : fallback;
@@ -116,7 +119,7 @@ export function DistrictSelect({
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className={layout === "stack" ? "grid gap-3" : "grid gap-3 sm:grid-cols-2"}>
       <Field label={provinceLabel} htmlFor={provinceId}>
         <Select
           id={provinceId}

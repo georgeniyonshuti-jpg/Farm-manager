@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import type { SessionUser } from "../../auth/types";
-import { isSuperuser, canManageUsers } from "../../auth/permissions";
+import { isSuperuser, canManageUsers, accountKindLabel } from "../../auth/permissions";
 import { PageHeader } from "../../components/PageHeader";
 import { EmptyState } from "../../components/EmptyState";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
@@ -95,6 +95,10 @@ const ROLE_LABELS: Record<string, string> = {
 };
 function humanRole(role: string): string {
   return ROLE_LABELS[role] ?? role.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function userLabel(u: SessionUser): string {
+  return accountKindLabel(u) ?? humanRole(u.role);
 }
 
 const BU_LABELS: Record<string, string> = { farm: "Farm", clevacredit: "ClevaCredit", both: "Farm + ClevaCredit" };
@@ -251,7 +255,7 @@ export function UserManagementPage() {
     const q = userSearch.trim().toLowerCase();
     if (!q) return users;
     return users.filter((u) =>
-      [u.displayName, u.email, u.role, u.businessUnitAccess, humanRole(u.role)]
+      [u.displayName, u.email, u.role, u.businessUnitAccess, userLabel(u)]
         .filter(Boolean)
         .join(" ")
         .toLowerCase()
@@ -266,7 +270,7 @@ export function UserManagementPage() {
         key: "role",
         header: "Role",
         badge: true,
-        render: (u) => <StatusPill tone="info">{humanRole(u.role)}</StatusPill>,
+        render: (u) => <StatusPill tone="info">{userLabel(u)}</StatusPill>,
       },
       { key: "unit", header: "Unit", render: (u) => u.businessUnitAccess },
       { key: "email", header: "Email", render: (u) => u.email },
@@ -291,6 +295,8 @@ export function UserManagementPage() {
     [editingUserId, user?.id]
   );
 
+  const editingUser = users.find((u) => u.id === editingUserId) ?? null;
+  const editingKind = accountKindLabel(editingUser);
   const totalPages = Math.max(1, Math.ceil(auditTotal / pageSize));
   const auditBusy = (loading && !loadError) || auditLoading;
 
@@ -471,7 +477,7 @@ export function UserManagementPage() {
                 <div className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-semibold text-sm">{u.displayName}</span>
-                    <StatusPill tone="info">{humanRole(u.role)}</StatusPill>
+                    <StatusPill tone="info">{userLabel(u)}</StatusPill>
                   </div>
                   <p className="text-xs text-[var(--text-muted)]">{u.email}</p>
                   <div className="flex gap-2">
@@ -533,7 +539,7 @@ export function UserManagementPage() {
               >
                 {editableRoleOptions.map((r) => (
                   <option key={r} value={r}>
-                    {humanRole(r)}
+                    {editingUser && r === editingUser.role && editingKind ? editingKind : humanRole(r)}
                   </option>
                 ))}
               </select>
@@ -541,7 +547,14 @@ export function UserManagementPage() {
             <div className="sm:col-span-2 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm text-neutral-700">
               <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">What this role can do</p>
               <ul className="mt-1 list-inside list-disc">
-                {(ROLE_CAPABILITY_BLURBS[editForm.role] ?? ["Standard farm access"]).map((line) => (
+                {(editingKind === "Seller"
+                  ? ["List birds on the market", "Flocks stay hidden until a manager approves them"]
+                  : editingKind === "Scout"
+                    ? ["Find sellers nearby", "Weigh flocks and hand them off"]
+                    : editingKind === "Buyer"
+                      ? ["Browse the market and book lots"]
+                      : (ROLE_CAPABILITY_BLURBS[editForm.role] ?? ["Standard farm access"])
+                ).map((line) => (
                   <li key={line}>{line}</li>
                 ))}
               </ul>

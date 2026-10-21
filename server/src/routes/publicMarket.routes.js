@@ -26,6 +26,8 @@ import {
   marketplaceStorefrontsEnabled,
 } from "../services/pipeline/farmProfiles.js";
 import { recordMarketEvent, validateMarketEvent } from "../services/pipeline/marketEvents.js";
+import { recordMarketReach } from "../services/pipeline/marketReach.js";
+import { hashClaimToken } from "../services/pipeline/sellerClaim.js";
 import {
   capPricedOffers,
   computeOffer,
@@ -340,6 +342,65 @@ export function createPublicMarketRouter(deps) {
       }
     );
   }
+
+  router.get("/claim-preview", requestLimit, async (req, res) => {
+    if (!requireDb(res)) return;
+    const raw = String(req.query.token || req.query.claim || "").trim();
+    if (!raw) return res.status(400).json({ error: "Invite link is required." });
+    try {
+      const hash = hashClaimToken(raw);
+      const r = await dbQuery(
+        `SELECT c.status, c.expires_at AS "expiresAt",
+                fp.display_name AS "farmName",
+                l.bird_count AS "birdCount",
+                l.breed_code AS "breedCode",
+                l.ready_from AS "readyFrom",
+                l.ready_to AS "readyTo"
+           FROM farm_profile_claims c
+           JOIN farm_profiles fp ON fp.id = c.farm_profile_id
+           LEFT JOIN LATERAL (
+             SELECT bird_count, breed_code, ready_from, ready_to
+               FROM pipeline_lots
+              WHERE farm_profile_id = fp.id AND status <> 'cancelled'
+              ORDER BY created_at DESC
+              LIMIT 1
+           ) l ON true
+          WHERE c.token_hash = $1 OR c.token = $1
+          LIMIT 1`,
+        [hash]
+      );
+      const row = r.rows[0];
+      if (!row) return res.status(404).json({ error: "This invite link is not valid.", code: "invalid" });
+      const expired = row.expiresAt && new Date(row.expiresAt).getTime() < Date.now();
+      const preview = {
+        farmName: row.farmName,
+        birdCount: row.birdCount != null ? Number(row.birdCount) : null,
+        breedCode: row.breedCode || null,
+        readyFrom: row.readyFrom || null,
+        readyTo: row.readyTo || null,
+      };
+      if (row.status === "accepted") {
+        return res.status(400).json({ ...preview, error: "This invite link has already been used.", code: "used" });
+      }
+      if (row.status === "expired" || expired || row.status === "revoked") {
+        return res.status(400).json({
+          ...preview,
+          error: "This invite link has expired. Ask your scout for a new one.",
+          code: "expired",
+        });
+      }
+      if (row.status === "needs_review") {
+        return res.status(409).json({
+          ...preview,
+          error: "We could not attach this flock automatically. Contact Cleva and we will finish it for you.",
+          code: "needs_review",
+        });
+      }
+      res.json({ ok: true, ...preview });
+    } catch (e) {
+      res.status(503).json({ error: e instanceof Error ? e.message : "Could not load this invite." });
+    }
+  });
 
   router.get("/quote", browseLimit, async (req, res) => {
     if (!requireDb(res)) return;
@@ -862,6 +923,21 @@ export function createPublicMarketRouter(deps) {
       return res.status(400).json({ error: "Reservations are recorded by the booking API." });
     }
     await recordMarketEvent(dbQuery, v);
+    res.status(202).json({ ok: true });
+  });
+
+  router.post("/reach", browseLimit, async (req, res) => {
+    if (!requireDb(res)) return;
+    const event = String(req.body?.event || "");
+    if (event !== "opened" && event !== "join_started") {
+      return res.status(400).json({ error: "Unknown event." });
+    }
+    const result = await recordMarketReach(dbQuery, {
+      eventType: event,
+      source: req.body?.source,
+      visitorId: req.body?.visitorId,
+    });
+    if (!result.ok) return res.status(400).json({ error: result.error || "Could not record visit." });
     res.status(202).json({ ok: true });
   });
 

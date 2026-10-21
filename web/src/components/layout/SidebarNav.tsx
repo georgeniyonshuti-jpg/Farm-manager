@@ -29,6 +29,7 @@ import {
   LogOut,
   LayoutDashboard,
   Truck,
+  TrendingUp,
 } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
 import type { ActiveWorkspace, SessionUser } from "../../auth/types";
@@ -65,6 +66,9 @@ const ICON_CLS = "mgr-nav-icon h-4 w-4 shrink-0";
 
 const PATH_ICONS: Record<string, ReactNode> = {
   "/dashboard/management": <LayoutDashboard className={ICON_CLS} aria-hidden />,
+  "/dashboard/market": <BarChart3 className={ICON_CLS} aria-hidden />,
+  "/dashboard/market/trends": <TrendingUp className={ICON_CLS} aria-hidden />,
+  "/dashboard/market/recruitment": <Users className={ICON_CLS} aria-hidden />,
   "/dashboard/laborer": <Home className={ICON_CLS} aria-hidden />,
   "/dashboard/vet": <Stethoscope className={ICON_CLS} aria-hidden />,
   "/farm/checkin": <ClipboardCheck className={ICON_CLS} aria-hidden />,
@@ -81,6 +85,7 @@ const PATH_ICONS: Record<string, ReactNode> = {
   "/farm/pipeline": <Truck className={ICON_CLS} aria-hidden />,
   "/farm/pipeline/buyers": <Users className={ICON_CLS} aria-hidden />,
   "/farm/pipeline/scout": <Truck className={ICON_CLS} aria-hidden />,
+  "/farm/pipeline/sellers": <Users className={ICON_CLS} aria-hidden />,
   "/farm/pipeline/weigh": <ClipboardCheck className={ICON_CLS} aria-hidden />,
   "/market/listings": <Package className={ICON_CLS} aria-hidden />,
   "/market/jobs": <ClipboardCheck className={ICON_CLS} aria-hidden />,
@@ -225,9 +230,25 @@ function SidebarNavBody({
     activeWorkspace === "farm" && canAccessPipelineDesk(user) && canSee("farm_pipeline")
       ? { to: "/farm/pipeline", label: "Market" }
       : null;
+  const marketOverviewNavItem: NavItem | null =
+    activeWorkspace === "farm" && canAccessPipelineDesk(user) && canSee("dashboard_market")
+      ? { to: "/dashboard/market", label: "Market overview", end: true }
+      : null;
+  const marketTrendsNavItem: NavItem | null =
+    activeWorkspace === "farm" && canAccessPipelineDesk(user) && canSee("dashboard_market")
+      ? { to: "/dashboard/market/trends", label: "Market trends" }
+      : null;
+  const marketRecruitmentNavItem: NavItem | null =
+    activeWorkspace === "farm" && canAccessPipelineDesk(user) && canSee("dashboard_market")
+      ? { to: "/dashboard/market/recruitment", label: "Recruitment" }
+      : null;
   const pipelineScoutNavItem: NavItem | null =
     activeWorkspace === "farm" && canScoutPipeline(user) && !canAccessPipelineDesk(user)
       ? { to: "/farm/pipeline/scout", label: "Inventory scout" }
+      : null;
+  const pipelineSellersNavItem: NavItem | null =
+    activeWorkspace === "farm" && canScoutPipeline(user) && !canAccessPipelineDesk(user)
+      ? { to: "/farm/pipeline/sellers", label: "My sellers" }
       : null;
   const pipelineWeighNavItem: NavItem | null =
     activeWorkspace === "farm" && canScoutPipeline(user) && !canAccessPipelineDesk(user)
@@ -281,6 +302,7 @@ function SidebarNavBody({
     slaughterNavItem,
     pipelineDeskNavItem,
     pipelineScoutNavItem,
+    pipelineSellersNavItem,
     pipelineWeighNavItem,
     marketListingsNavItem,
     marketCommissionsNavItem,
@@ -344,6 +366,14 @@ function SidebarNavBody({
 
   const adminLink =
     canManageUsers(user) && canSee("admin_users") ? { to: "/admin/users", label: isOfficeFarmDesktopRole(user) ? "Users" : "User management" } : null;
+  const signupsLink =
+    (user.role === "superuser" || user.role === "sales_coordinator") && canSee("admin_signups")
+      ? { to: "/admin/signups", label: "Signups" }
+      : null;
+  const messagesLink =
+    user.role === "superuser" || user.role === "sales_coordinator"
+      ? { to: "/farm/pipeline/messages", label: "Messages" }
+      : null;
   const superAdminLink =
     user.role === "superuser" ? { to: "/admin/super", label: "Super admin" } : null;
   const typeLink =
@@ -351,14 +381,23 @@ function SidebarNavBody({
       ? (canSee("admin_system_config") ? { to: "/admin/system-config", label: isOfficeFarmDesktopRole(user) ? "Lists & types" : "Type settings" } : null)
       : null;
 
-  const adminItems = (isOfficeFarmDesktopRole(user) ? [superAdminLink] : [adminLink, superAdminLink, typeLink]).filter(Boolean) as NavItem[];
+  const adminItems = (
+    isOfficeFarmDesktopRole(user)
+      ? [messagesLink, signupsLink, superAdminLink]
+      : [messagesLink, signupsLink, adminLink, superAdminLink, typeLink]
+  ).filter(Boolean) as NavItem[];
 
   const groupedFarmNav = useMemo(() => {
     const byPath = new Map(farmNav.map((item) => [item.to, item]));
     const pick = (paths: string[]) => paths.map((p) => byPath.get(p)).filter(Boolean) as NavItem[];
+    const marketGlance = [
+      marketOverviewNavItem,
+      marketTrendsNavItem,
+      marketRecruitmentNavItem,
+    ].filter(Boolean) as NavItem[];
     if (isPipelineSalesRole(user)) {
       return {
-        overview: [] as NavItem[],
+        overview: marketGlance,
         operations: [] as NavItem[],
         health: [] as NavItem[],
         inventory: farmNav,
@@ -372,7 +411,10 @@ function SidebarNavBody({
 
     if (office) {
       return {
-        overview: effectiveDashLink ? [{ ...effectiveDashLink, label: "Today" }] : [],
+        overview: [
+          ...(effectiveDashLink ? [{ ...effectiveDashLink, label: "Today" }] : []),
+          ...marketGlance,
+        ],
         operations: [] as NavItem[],
         health: pick(["/farm/vet-logs", "/farm/treatments", "/farm/mortality", "/farm/checkin-review"]),
         inventory: pick([
@@ -390,7 +432,7 @@ function SidebarNavBody({
     }
 
     return {
-      overview: effectiveDashLink ? [effectiveDashLink] : [],
+      overview: [...(effectiveDashLink ? [effectiveDashLink] : []), ...marketGlance],
       operations: pick([
         "/farm/checkin",
         "/farm/feed",
@@ -405,6 +447,7 @@ function SidebarNavBody({
         "/farm/slaughter",
         "/farm/pipeline",
         "/farm/pipeline/scout",
+        "/farm/pipeline/sellers",
         "/farm/pipeline/weigh",
         "/market/listings",
         "/market/commissions",
@@ -423,7 +466,21 @@ function SidebarNavBody({
         "/farm/reports",
       ]),
     };
-  }, [farmNav, effectiveDashLink, user, adminLink, payrollNavItem, typeLink, logPayrollItem, erpnextSetupNavItem, erpnextDeskNavItem, reportsCenterNavItem]);
+  }, [
+    farmNav,
+    effectiveDashLink,
+    user,
+    adminLink,
+    payrollNavItem,
+    typeLink,
+    logPayrollItem,
+    erpnextSetupNavItem,
+    erpnextDeskNavItem,
+    reportsCenterNavItem,
+    marketOverviewNavItem,
+    marketTrendsNavItem,
+    marketRecruitmentNavItem,
+  ]);
 
   const compactPrimary = (() => {
     const base =

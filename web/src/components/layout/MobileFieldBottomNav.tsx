@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import type { ReactNode } from "react";
 
 export type MobileFieldNavItem = {
@@ -8,6 +8,8 @@ export type MobileFieldNavItem = {
   icon: ReactNode;
   /** When set, overrides NavLink pathname matching (needed for ?tab= routes). */
   active?: boolean;
+  /** Navigate again even when this tab is already open. */
+  reselect?: boolean;
 };
 
 type Props = {
@@ -22,6 +24,7 @@ type Props = {
  * In-flow at the bottom of the phone column (visible on all breakpoints unless className hides it).
  */
 export function MobileFieldBottomNav({ items, ariaLabel = "Primary", className = "" }: Props) {
+  const navigate = useNavigate();
   return (
     <nav
       className={`z-40 flex min-h-14 shrink-0 flex-col justify-end border-t border-[var(--border-color)] bg-[var(--surface-elevated)]/95 pb-[env(safe-area-inset-bottom,0px)] shadow-[var(--shadow-soft)] backdrop-blur-md ${className}`.trim()}
@@ -33,6 +36,11 @@ export function MobileFieldBottomNav({ items, ariaLabel = "Primary", className =
             key={item.to}
             to={item.to}
             end={item.end}
+            onClick={(event) => {
+              if (!item.reselect) return;
+              event.preventDefault();
+              navigate(item.to, { replace: Boolean(item.active), state: { board: Date.now() } });
+            }}
             className={({ isActive }) =>
               [
                 "bounce-tap flex min-h-[44px] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-0.5 text-center",

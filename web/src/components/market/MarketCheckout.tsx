@@ -136,7 +136,7 @@ export function MarketCheckout({
                 inputMode="tel"
               />
             </label>
-            <button type="button" className="store-btn store-btn-ember w-full" disabled={busy} onClick={() => void sent()}>
+            <button type="button" className="store-btn store-btn-ember store-sheet-action w-full" disabled={busy} onClick={() => void sent()}>
               {busy ? t("sending") : t("paySent")}
             </button>
           </>
@@ -211,7 +211,7 @@ export function MarketCheckout({
           <p className="mt-1 text-xs text-[var(--store-muted)]">{t("liveDeliveryHint")}</p>
         ) : null}
       </div>
-      <button type="button" className="store-btn store-btn-ember w-full" disabled={busy} onClick={() => void startOrder()}>
+      <button type="button" className="store-btn store-btn-ember store-sheet-action w-full" disabled={busy} onClick={() => void startOrder()}>
         {busy ? t("sending") : t("payToConfirm")}
       </button>
       {error ? <p className="text-sm text-red-700">{error}</p> : null}

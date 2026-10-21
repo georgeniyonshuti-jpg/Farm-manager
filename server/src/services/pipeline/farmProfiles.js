@@ -269,6 +269,33 @@ export function isMarketOnlySeller(user) {
   return access.length > 0 && access.every((key) => key === "farm_market");
 }
 
+/**
+ * Market sellers share the host company, so their own profile is the approval.
+ * A pending profile may save flocks. Those flocks stay off the public board.
+ * A full-farm company still has to be verified before any listing is saved.
+ */
+export function sellerListingGate({ marketOnly, companyStatus, profileStatus }) {
+  if (marketOnly) {
+    const status = profileStatus || "pending";
+    if (status === "rejected") {
+      return {
+        allow: false,
+        code: "rejected",
+        error: "This seller account was not approved.",
+      };
+    }
+    return { allow: true, holdForReview: status !== "verified" };
+  }
+  if (companyStatus !== "verified") {
+    return {
+      allow: false,
+      code: "pending_verification",
+      error: "Farm must be verified before listing.",
+    };
+  }
+  return { allow: true, holdForReview: false };
+}
+
 /** Host-company market seller (Cleva Technologies tenant + market-only access). */
 export function isHostMarketSeller(user, hostCompanyId) {
   if (!isMarketOnlySeller(user)) return false;

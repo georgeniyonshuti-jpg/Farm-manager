@@ -251,6 +251,13 @@ export type MarketMe = {
   verificationStatus: string;
   buyer?: { id: string; name: string; verificationStatus: string } | null;
   company?: { id: string; name: string; verificationStatus: string } | null;
+  profile?: {
+    id: string;
+    displayName?: string | null;
+    district?: string | null;
+    contactPhone?: string | null;
+    verificationStatus?: string | null;
+  } | null;
 };
 
 export type HandshakePhase =
@@ -314,11 +321,24 @@ export type FulfillmentJob = {
 
 export type MarketOrder = FulfillmentJob;
 
+export type CommissionForecast = {
+  lotId: string;
+  label: string;
+  district: string | null;
+  birds: number;
+  avgKg: number | null;
+  pricePerKg: number | null;
+  priceSource: "listed" | "predicted" | null;
+  amountRwf: number;
+};
+
 export type CommissionMine = {
   ratePct: number;
+  guidePricePerKg?: number | null;
   couldEarn: number;
   accruedUnpaid: number;
   paidThisMonth: number;
+  forecast?: CommissionForecast[];
   rows: Array<{
     id: string;
     kind?: "visit" | "trade";
@@ -362,6 +382,14 @@ export async function submitLotWeigh(
   });
 }
 
+export async function saveScoutCommission(token: string | null, ratePct: number) {
+  return pipelineFetch<{ ratePct: number }>("/market/scout-commission", token, {
+    method: "PATCH",
+    headers: jsonAuthHeaders(token),
+    body: JSON.stringify({ ratePct }),
+  });
+}
+
 export async function saveVisitFee(token: string | null, visitFeeRwf: number) {
   return pipelineFetch<{ visitFeeRwf: number }>("/market/visit-fee", token, {
     method: "PATCH",
@@ -387,9 +415,33 @@ export type VerifyQueue = {
     slug: string;
     displayName: string;
     district: string | null;
+    contactPhone?: string | null;
     verificationStatus: string;
     consentStatus: string;
     published: boolean;
+    createdAt: string;
+    claimed?: boolean;
+    scoutName?: string | null;
+    flockCount?: number;
+  }>;
+  claimReviews?: Array<{
+    id: string;
+    reviewReason: string | null;
+    invitedEmail: string | null;
+    farmProfileId: string;
+    farmName: string;
+    district: string | null;
+    consentStatus: string | null;
+    claimed: boolean;
+    scoutName: string | null;
+    createdAt: string;
+  }>;
+  scouts?: Array<{
+    id: string;
+    fullName: string;
+    email: string;
+    phone: string | null;
+    district: string | null;
     createdAt: string;
   }>;
 };
@@ -416,6 +468,8 @@ export type FarmProfile = {
   discloseContact: boolean;
   discloseExactLocation: boolean;
   discloseExactPrice: boolean;
+  ownerUserId?: string | null;
+  claimEmail?: string | null;
 };
 
 export type MarketMedia = {
@@ -447,6 +501,15 @@ export type FarmAnalytics = {
 
 export async function fetchMarketMe(token: string | null) {
   return pipelineFetch<MarketMe>("/market/me", token);
+}
+
+export async function fetchMarketReach(token: string | null) {
+  return pipelineFetch<{
+    todayOpened: number;
+    week: { opened: number; joinStarted: number; accounts: number };
+    sources: { source: string; opened: number; joinStarted: number; accounts: number }[];
+    links: { source: string; url: string }[];
+  }>("/market/reach", token);
 }
 
 export async function fetchMarketOpsSummary(token: string | null) {
@@ -746,11 +809,16 @@ export async function verifyBuyer(token: string | null, id: string, status: "ver
   });
 }
 
-export async function verifyLot(token: string | null, id: string, status: "verified" | "rejected") {
+export async function verifyLot(
+  token: string | null,
+  id: string,
+  status: "verified" | "rejected",
+  reason?: string
+) {
   return pipelineFetch<{ ok: boolean }>(`/verify/lot/${encodeURIComponent(id)}`, token, {
     method: "POST",
     headers: jsonAuthHeaders(token),
-    body: JSON.stringify({ status }),
+    body: JSON.stringify({ status, reason }),
   });
 }
 
@@ -951,9 +1019,70 @@ export async function patchMarketMedia(token: string | null, id: string, body: R
   });
 }
 
+export type ScoutFarmRow = FarmProfile & {
+  claimStatus?: string | null;
+  statusChips?: string[];
+  lotId?: string | null;
+  birdCount?: number | null;
+  breedCode?: string | null;
+  readyFrom?: string | null;
+  readyTo?: string | null;
+  lotVerification?: string | null;
+  scoutConfirmedAt?: string | null;
+};
+
+export type CrmSellerRow = {
+  id: string;
+  contactName: string;
+  phone: string;
+  district: string | null;
+  birdCount: number | null;
+  availabilityDate: string | null;
+  handoffNote: string | null;
+  visitStatus: string;
+  nextActionAt: string | null;
+  outcomeNote: string | null;
+};
+
+export async function fetchCrmSellers(token: string | null) {
+  return pipelineFetch<{ sellers: CrmSellerRow[] }>("/market/scout/crm-sellers", token);
+}
+
+export async function fetchCrmSeller(token: string | null, id: string) {
+  return pipelineFetch<{ seller: CrmSellerRow }>(`/market/scout/crm-sellers/${encodeURIComponent(id)}`, token);
+}
+
+export async function updateCrmSeller(
+  token: string | null,
+  id: string,
+  body: { action: string; nextActionAt?: string; outcomeNote?: string }
+) {
+  return pipelineFetch<{ seller: CrmSellerRow }>(`/market/scout/crm-sellers/${encodeURIComponent(id)}`, token, {
+    method: "POST",
+    headers: jsonAuthHeaders(token),
+    body: JSON.stringify(body),
+  });
+}
+
+export async function launchCrmInbox(token: string | null) {
+  const res = await fetch(legacyApiUrl("/api/crm/launch"), {
+    method: "POST",
+    headers: jsonAuthHeaders(token),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    configured?: boolean;
+    url?: string | null;
+    token?: string | null;
+    message?: string | null;
+    error?: string;
+  };
+  if (!res.ok) throw new Error(data.error || "Could not open messages.");
+  return data;
+}
+
 export async function fetchScoutFarms(token: string | null, q?: string) {
   const query = q ? `?q=${encodeURIComponent(q)}` : "";
-  return pipelineFetch<{ farms: FarmProfile[] }>(`/market/scout/farms${query}`, token);
+  return pipelineFetch<{ farms: ScoutFarmRow[] }>(`/market/scout/farms${query}`, token);
 }
 
 export async function createScoutFarm(token: string | null, body: Record<string, unknown>) {
@@ -972,8 +1101,12 @@ export async function recordScoutVisit(token: string | null, farmId: string, bod
   );
 }
 
-export async function inviteScoutFarm(token: string | null, farmId: string, body: { email?: string; phone?: string }) {
-  return pipelineFetch<{ ok: boolean; token: string }>(
+export async function inviteScoutFarm(
+  token: string | null,
+  farmId: string,
+  body: { email?: string; phone?: string }
+) {
+  return pipelineFetch<{ ok: boolean; url: string; emailSent: boolean; emailError?: string | null }>(
     `/market/scout/farms/${encodeURIComponent(farmId)}/invite`,
     token,
     { method: "POST", headers: jsonAuthHeaders(token), body: JSON.stringify(body) }
@@ -987,12 +1120,29 @@ export async function fetchVerifyProfiles(token: string | null) {
   );
 }
 
-export async function verifyFarmProfile(token: string | null, id: string, status: "verified" | "rejected") {
+export async function verifyFarmProfile(
+  token: string | null,
+  id: string,
+  status: "verified" | "rejected",
+  reason?: string
+) {
   return pipelineFetch<{ ok: boolean; profile: FarmProfile }>(
     `/verify/profile/${encodeURIComponent(id)}`,
     token,
-    { method: "POST", headers: jsonAuthHeaders(token), body: JSON.stringify({ status }) }
+    { method: "POST", headers: jsonAuthHeaders(token), body: JSON.stringify({ status, reason }) }
   );
+}
+
+export async function verifyScoutApplication(
+  token: string | null,
+  id: string,
+  status: "approved" | "rejected"
+) {
+  return pipelineFetch<{ ok: boolean; status: string }>(`/verify/scout/${encodeURIComponent(id)}`, token, {
+    method: "POST",
+    headers: jsonAuthHeaders(token),
+    body: JSON.stringify({ status }),
+  });
 }
 
 export async function convertMarketLead(token: string | null, id: string) {
@@ -1052,6 +1202,7 @@ export async function fetchMarketRates(token: string | null) {
       visitFeeRwf?: number;
     };
     visitFeeRwf?: number;
+    scoutTradePct?: number;
   }>("/market/rates", token);
 }
 

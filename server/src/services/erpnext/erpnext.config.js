@@ -210,5 +210,14 @@ export async function ensureFarmCompanyForErp(erpnextCompany, opts = {}) {
     [companyId, name, slug]
   );
   await setErpnextCompanyLink(companyId, name, idpUrl);
+  try {
+    const { bootstrapCompanyInsights } = await import("../insightsBootstrap.js");
+    await bootstrapCompanyInsights(companyId, _dbQuery, { marketHost: false });
+  } catch (e) {
+    console.warn(
+      "[erpnext.config] insights bootstrap skipped:",
+      e instanceof Error ? e.message : e
+    );
+  }
   return { companyId, erpnextCompany: name, erpnextBaseUrl: idpUrl, slug, name };
 }

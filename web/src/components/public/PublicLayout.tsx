@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { Link, Outlet } from "react-router-dom";
 import { BrandLogo } from "../BrandLogo";
 import { type LaborerLocale, writePreLoginLocale } from "../../i18n/laborerI18n";
-import { isSellPath } from "../../lib/marketAudience";
+import { isMarketHostname } from "../../lib/marketHost";
 import { storeT, type StoreLocale } from "../../lib/publicStoreCopy";
 import { StoreAccountMenu } from "./StoreAccountMenu";
 import { StoreLocaleSelect } from "./StoreLocaleSelect";
@@ -23,9 +23,7 @@ export type PublicOutletCtx = {
 };
 
 export function PublicLayout() {
-  const location = useLocation();
   const [locale, setLocale] = useState<StoreLocale>(readInitialLocale);
-  const onSell = isSellPath(location.pathname);
   const t = (k: Parameters<typeof storeT>[1]) => storeT(locale, k);
 
   const pickLocale = (l: StoreLocale) => {
@@ -38,21 +36,17 @@ export function PublicLayout() {
       <header className="store-header">
         <div className="store-wrap">
           <div className="store-header-row">
-            <Link to="/market" className="store-brand" aria-label={t("storeBrand")}>
+            <Link to={isMarketHostname(window.location.hostname) ? "/" : "/market"} className="store-brand" aria-label={t("storeBrand")}>
               <BrandLogo size={26} />
               <span>{t("storeBrand")}</span>
             </Link>
 
             <div className="store-header-tools">
               <StoreLocaleSelect locale={locale} onChange={pickLocale} />
-              <StoreAccountMenu
-                locale={locale}
-                signupTo={
-                  onSell
-                    ? "/signup?from=market&accountType=farmer"
-                    : "/signup?from=market&accountType=buyer"
-                }
-              />
+              <Link to="/signup?from=market" className="store-join">
+                {t("join")}
+              </Link>
+              <StoreAccountMenu locale={locale} signupTo="/signup?from=market" />
             </div>
           </div>
         </div>

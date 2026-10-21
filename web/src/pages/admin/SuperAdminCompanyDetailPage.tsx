@@ -23,8 +23,20 @@ import {
 } from "./superAdminTypes";
 
 type ErpnextCompanyOption = { name: string; company_name?: string };
+type CigPreset = { erpnextBaseUrl: string; erpnextCompany: string; subdomain: string };
 
 const mgrInput = "!min-h-10 h-10 box-border py-0 text-sm leading-10";
+
+function subdomainFromBaseUrl(url: string | null | undefined): string {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  try {
+    const host = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).hostname;
+    return host.split(".")[0] || "";
+  } catch {
+    return raw.replace(/^https?:\/\//i, "").split(".")[0] || raw;
+  }
+}
 
 export function SuperAdminCompanyDetailPage() {
   const { companyId = "" } = useParams<{ companyId: string }>();
@@ -34,6 +46,10 @@ export function SuperAdminCompanyDetailPage() {
   const [company, setCompany] = useState<SuperAdminCompany | null>(null);
   const [erpnextCompanies, setErpnextCompanies] = useState<ErpnextCompanyOption[]>([]);
   const [linkDraft, setLinkDraft] = useState("");
+  const [subdomainDraft, setSubdomainDraft] = useState("");
+  const [baseUrlHint, setBaseUrlHint] = useState("");
+  const [listError, setListError] = useState<string | null>(null);
+  const [cigPreset, setCigPreset] = useState<CigPreset | null>(null);
   const [planDraft, setPlanDraft] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +71,9 @@ export function SuperAdminCompanyDetailPage() {
       const c = body.company ?? null;
       setCompany(c);
       setLinkDraft(c?.erpnext_company ?? "");
+      const sub = subdomainFromBaseUrl(c?.erpnext_base_url);
+      setSubdomainDraft(sub);
+      setBaseUrlHint(c?.erpnext_base_url ?? "");
       setPlanDraft(
         c && ASSIGNABLE_PLANS.includes(c.plan as (typeof ASSIGNABLE_PLANS)[number]) ? c.plan : ""
       );
@@ -66,34 +85,59 @@ export function SuperAdminCompanyDetailPage() {
     }
   }
 
+  async function loadErpnextCompanies(subdomain: string): Promise<void> {
+    if (!token) return;
+    setListError(null);
+    try {
+      const q = subdomain.trim()
+        ? `?subdomain=${encodeURIComponent(subdomain.trim())}`
+        : "";
+      const res = await fetch(`${API_BASE_URL}/api/super-admin/erpnext/companies${q}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        companies?: ErpnextCompanyOption[];
+        error?: string;
+        erpnextBaseUrl?: string;
+        cigPreset?: CigPreset;
+      };
+      if (body.cigPreset) setCigPreset(body.cigPreset);
+      if (!res.ok) {
+        setErpnextCompanies([]);
+        setListError(body.error || "Could not load companies from that ERP site.");
+        return;
+      }
+      setErpnextCompanies(body.companies ?? []);
+      if (body.erpnextBaseUrl) setBaseUrlHint(body.erpnextBaseUrl);
+      if (!(body.companies ?? []).length) {
+        setListError(
+          "No Company docs returned from that site. You can still type the ERPNext company name below (e.g. Cleva Investments Group)."
+        );
+      }
+    } catch (err) {
+      setErpnextCompanies([]);
+      setListError(err instanceof Error ? err.message : "Could not load ERPNext companies.");
+    }
+  }
+
   useEffect(() => {
     void loadCompany();
   }, [token, companyId]);
 
   useEffect(() => {
     if (!token) return;
-    void (async () => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/super-admin/erpnext/companies`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) {
-          setErpnextCompanies([]);
-          return;
-        }
-        const body = (await res.json()) as { companies?: ErpnextCompanyOption[] };
-        setErpnextCompanies(body.companies ?? []);
-      } catch {
-        setErpnextCompanies([]);
-      }
-    })();
+    void loadErpnextCompanies(subdomainDraft);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once token ready; subdomain reload is explicit
   }, [token]);
 
-  async function saveErpnextLink(): Promise<void> {
+  async function saveErpnextLink(opts?: { useCig?: boolean }): Promise<void> {
     if (!company) return;
-    const erpnextCompany = linkDraft.trim();
+    const useCig = Boolean(opts?.useCig);
+    const erpnextCompany = useCig
+      ? (cigPreset?.erpnextCompany || linkDraft.trim() || "Cleva Investments Group")
+      : linkDraft.trim();
     if (!erpnextCompany) {
-      showToast("error", "Select an ERPNext company before linking.");
+      showToast("error", "Enter or select an ERPNext company name before linking.");
       return;
     }
     setBusy(true);
@@ -104,12 +148,23 @@ export function SuperAdminCompanyDetailPage() {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ erpnextCompany }),
+        body: JSON.stringify(
+          useCig
+            ? { useCig: true, erpnextCompany }
+            : {
+                erpnextCompany,
+                subdomain: subdomainDraft.trim() || undefined,
+                erpnextBaseUrl: baseUrlHint.trim() || undefined,
+              }
+        ),
       });
-      const body = (await res.json()) as { ok?: boolean; error?: string };
+      const body = (await res.json()) as { ok?: boolean; error?: string; link?: { erpnextBaseUrl?: string } };
       if (!res.ok || !body.ok) throw new Error(body.error ?? "Failed to save ERPNext link.");
       await loadCompany();
-      showToast("success", `Linked ${erpnextCompany}.`);
+      showToast(
+        "success",
+        `Linked ${erpnextCompany}${body.link?.erpnextBaseUrl ? ` → ${body.link.erpnextBaseUrl}` : ""}.`
+      );
     } catch (err) {
       showToast("error", err instanceof Error ? err.message : "Could not save ERPNext link.");
     } finally {
@@ -311,38 +366,117 @@ export function SuperAdminCompanyDetailPage() {
 
           <section className="space-y-stack rounded-xl border border-[var(--border-color)] p-card">
             <h2 className="type-h3 text-[var(--text-primary)]">ERPNext</h2>
+            <p className="type-caption text-[var(--text-muted)]">
+              Tenant sites use{" "}
+              <span className="font-mono text-[var(--text-secondary)]">
+                {"{slug}"}.cleva.rw
+              </span>{" "}
+              (e.g. <span className="font-mono">cig</span> →{" "}
+              <span className="font-mono">https://cig.cleva.rw</span>). The Farm company name
+              and the ERPNext Company doc can differ — link by subdomain + Company name.
+            </p>
             <div className="flex flex-wrap items-end gap-3">
-              <Field label="Linked company" className="min-w-[14rem] flex-1">
-                <Select
+              <Field label="ERP subdomain" className="min-w-[10rem]">
+                <Input
                   className={mgrInput}
-                  value={linkDraft}
-                  disabled={busy || erpnextCompanies.length === 0}
-                  onChange={(e) => setLinkDraft(e.target.value)}
-                >
-                  <option value="">Not linked</option>
-                  {erpnextCompanies.map((c) => (
-                    <option key={c.name} value={c.name}>
-                      {c.company_name || c.name}
-                    </option>
-                  ))}
-                </Select>
+                  value={subdomainDraft}
+                  disabled={busy}
+                  placeholder="cig"
+                  onChange={(e) => setSubdomainDraft(e.target.value.trim().toLowerCase())}
+                  onBlur={() => {
+                    if (subdomainDraft.trim()) void loadErpnextCompanies(subdomainDraft);
+                  }}
+                />
               </Field>
               <Button
                 size="sm"
-                disabled={
-                  busy ||
-                  !linkDraft.trim() ||
-                  linkDraft === (company.erpnext_company ?? "")
-                }
+                variant="secondary"
+                disabled={busy || !subdomainDraft.trim()}
+                onClick={() => void loadErpnextCompanies(subdomainDraft)}
+              >
+                Load companies
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  const sub = cigPreset?.subdomain || "cig";
+                  const name = cigPreset?.erpnextCompany || "Cleva Investments Group";
+                  setSubdomainDraft(sub);
+                  setLinkDraft(name);
+                  setBaseUrlHint(cigPreset?.erpnextBaseUrl || `https://${sub}.cleva.rw`);
+                  void loadErpnextCompanies(sub);
+                }}
+              >
+                Use CIG preset
+              </Button>
+            </div>
+            {baseUrlHint ? (
+              <p className="type-caption text-[var(--text-secondary)]">
+                Site: <span className="font-mono">{baseUrlHint}</span>
+                {company.erpnext_company
+                  ? ` · currently linked as ${company.erpnext_company}`
+                  : " · not linked yet"}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap items-end gap-3">
+              <Field label="ERPNext Company" className="min-w-[14rem] flex-1">
+                {erpnextCompanies.length > 0 ? (
+                  <Select
+                    className={mgrInput}
+                    value={
+                      erpnextCompanies.some((c) => c.name === linkDraft) ? linkDraft : ""
+                    }
+                    disabled={busy}
+                    onChange={(e) => setLinkDraft(e.target.value)}
+                  >
+                    <option value="">Select from site…</option>
+                    {erpnextCompanies.map((c) => (
+                      <option key={c.name} value={c.name}>
+                        {c.company_name || c.name}
+                      </option>
+                    ))}
+                  </Select>
+                ) : (
+                  <Input
+                    className={mgrInput}
+                    value={linkDraft}
+                    disabled={busy}
+                    placeholder="Cleva Investments Group"
+                    onChange={(e) => setLinkDraft(e.target.value)}
+                  />
+                )}
+              </Field>
+              {erpnextCompanies.length > 0 ? (
+                <Field label="Or type name" className="min-w-[12rem] flex-1">
+                  <Input
+                    className={mgrInput}
+                    value={linkDraft}
+                    disabled={busy}
+                    placeholder="Exact Company name"
+                    onChange={(e) => setLinkDraft(e.target.value)}
+                  />
+                </Field>
+              ) : null}
+              <Button
+                size="sm"
+                disabled={busy || !linkDraft.trim()}
                 onClick={() => void saveErpnextLink()}
               >
                 Save link
               </Button>
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={busy}
+                onClick={() => void saveErpnextLink({ useCig: true })}
+              >
+                Link to CIG
+              </Button>
             </div>
-            {erpnextCompanies.length === 0 ? (
-              <p className="type-caption text-[var(--text-muted)]">
-                ERPNext company list unavailable (check API credentials).
-              </p>
+            {listError ? (
+              <NoticeStrip tone="warning">{listError}</NoticeStrip>
             ) : null}
           </section>
 

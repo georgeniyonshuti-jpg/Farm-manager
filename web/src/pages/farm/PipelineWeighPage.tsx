@@ -99,7 +99,7 @@ export function PipelineWeighPage() {
   if (!allowed) {
     return (
       <div className="space-y-3 pb-8">
-        <FieldNavHeader title="Weigh visits" variant="hub" showAccount />
+        <FieldNavHeader title="Weigh visits" variant="hub" />
         <p className="text-sm text-[var(--text-secondary)]">Scout only.</p>
       </div>
     );
@@ -114,6 +114,7 @@ export function PipelineWeighPage() {
         submitLabel="Log visit"
         submittingLabel="Saving…"
         busy={busy}
+        showAccount={false}
         submitDisabled={outcome === "ready" && (!(birds > 0) || !(avgKg > 0))}
         onSubmit={() => void submit()}
       >

@@ -9,6 +9,8 @@ import {
   canScoutPipeline,
   isBuyerRole,
   isMarketOnlySeller,
+  isMarketScout,
+  accountKindLabel,
   isPipelineSalesRole,
   usesMarketPartnerShell,
 } from "./permissions.ts";
@@ -102,5 +104,20 @@ describe("sales_coordinator pipeline permissions", () => {
     const su = user("superuser");
     assert.equal(canAccessPipelineDesk(su), true);
     assert.equal(canFlockAction(su, "flock.view"), true);
+  });
+});
+
+describe("account kind labels", () => {
+  it("labels market accounts as seller, buyer, and scout", () => {
+    assert.equal(accountKindLabel(user("manager", ["farm_market"])), "Seller");
+    assert.equal(accountKindLabel(user("buyer", ["farm_market"])), "Buyer");
+    assert.equal(accountKindLabel(user("vet", ["farm_pipeline", "farm_market"])), "Scout");
+    assert.equal(isMarketScout(user("vet", ["farm_pipeline"])), true);
+  });
+
+  it("keeps farm staff on their role name", () => {
+    assert.equal(accountKindLabel(user("manager", ["farm_flocks", "farm_market"])), null);
+    assert.equal(accountKindLabel(user("vet", ["farm_vet_logs", "farm_pipeline"])), null);
+    assert.equal(accountKindLabel(user("superuser")), null);
   });
 });

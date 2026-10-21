@@ -373,19 +373,68 @@ export async function getBalanceSheet(company, fromDate, toDate, sessionCookie =
   return runQueryReport("Balance Sheet", { company, from_date: fromDate, to_date: toDate }, sessionCookie);
 }
 
-export async function getCompanyList(sessionCookie = null) {
-  if (!sessionCookie) {
-    return erpnextFetch(
+/**
+ * Normalize ERPNext Company list payloads (custom method or /api/resource/Company).
+ * @param {unknown} raw
+ * @returns {Array<{ name: string, company_name?: string, default_currency?: string, country?: string }>}
+ */
+export function normalizeCompanyList(raw) {
+  let rows = raw;
+  if (rows && typeof rows === "object" && !Array.isArray(rows)) {
+    rows = rows.companies || rows.data || rows.message || rows.result || [];
+  }
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .map((row) => {
+      if (typeof row === "string") {
+        const name = row.trim();
+        return name ? { name, company_name: name } : null;
+      }
+      if (!row || typeof row !== "object") return null;
+      const name = String(row.name || row.company_name || "").trim();
+      if (!name) return null;
+      return {
+        name,
+        company_name: String(row.company_name || row.name || name).trim(),
+        default_currency: row.default_currency,
+        country: row.country,
+      };
+    })
+    .filter(Boolean);
+}
+
+/**
+ * List ERPNext Company docs on a tenant site (subdomain IdP).
+ * Prefer clevafarm_integration method; fall back to Resource API.
+ * @param {string | null} [sessionCookie]
+ * @param {{ baseUrl?: string }} [opts]
+ */
+export async function getCompanyList(sessionCookie = null, opts = {}) {
+  const baseUrl = String(opts.baseUrl || ERPNEXT_BASE_URL).replace(/\/+$/, "");
+  const resourcePath = `/api/resource/Company?fields=${encodeURIComponent(
+    JSON.stringify(["name", "company_name", "default_currency", "country"])
+  )}&limit_page_length=200`;
+
+  if (sessionCookie) {
+    return normalizeCompanyList(await erpnextFetch(resourcePath, { baseUrl }, sessionCookie));
+  }
+
+  try {
+    const viaMethod = await erpnextFetch(
       "/api/method/clevafarm_integration.api.company.list_erpnext_companies",
-      { method: "GET" },
+      { method: "GET", baseUrl },
       null
     );
+    const normalized = normalizeCompanyList(viaMethod);
+    if (normalized.length) return normalized;
+  } catch (e) {
+    console.warn(
+      "[erpnext] list_erpnext_companies failed, trying Resource API:",
+      e instanceof Error ? e.message : e
+    );
   }
-  return erpnextFetch(
-    `/api/resource/Company?fields=${encodeURIComponent(JSON.stringify(["name", "company_name", "default_currency", "country"]))}&limit_page_length=50`,
-    {},
-    sessionCookie
-  );
+
+  return normalizeCompanyList(await erpnextFetch(resourcePath, { baseUrl }, null));
 }
 
 export async function getChartReadiness(company, sessionCookie = null) {

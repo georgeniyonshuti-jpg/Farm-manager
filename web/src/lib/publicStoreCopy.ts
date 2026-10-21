@@ -3,6 +3,7 @@ export type StoreLocale = "en" | "rw";
 const EN = {
   how: "How it works",
   signIn: "Sign in",
+  join: "Join",
   listBirds: "List a flock",
   forFarmsLine: "Got birds to sell?",
   needBirds: "Need birds",
@@ -222,7 +223,7 @@ const EN = {
   vsLastWeek: "vs last week",
   waCleva: "Message Cleva on WhatsApp",
   waFab: "Chat with us",
-  waPrefill: "I need birds this week.",
+  waPrefill: "Hi Cleva — I need birds this week. (Or register here: https://market.cleva.rw/signup?from=market&utm_source=whatsapp)",
   splitFarmer: "To the farm",
   splitService: "Cleva service",
   splitProcessing: "Processing",
@@ -274,6 +275,7 @@ const EN = {
 const RW: typeof EN = {
   how: "Uko bikora",
   signIn: "Injira",
+  join: "Iyandikishe",
   listBirds: "Andika ishyo",
   forFarmsLine: "Ufite inkoko zo kugurisha?",
   needBirds: "Ukeneye inkoko",
@@ -493,7 +495,7 @@ const RW: typeof EN = {
   vsLastWeek: "ugereranyije n'icyumweru gishize",
   waCleva: "Andikira Cleva kuri WhatsApp",
   waFab: "Tuvugishe",
-  waPrefill: "Nkeneye inkoko muri iki cyumweru.",
+  waPrefill: "Muraho Cleva — nkeneye inkoko muri iki cyumweru. (Kwiyandikisha: https://market.cleva.rw/signup?from=market&utm_source=whatsapp)",
   splitFarmer: "Ku murima",
   splitService: "Serivisi ya Cleva",
   splitProcessing: "Kubaga",

@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { isBuyerRole } from "../../auth/permissions";
 import type { PublicLot } from "../../api/publicMarket.api";
@@ -39,8 +40,8 @@ export function StoreRequestSheet({
 
   if (!open) return null;
 
-  return (
-    <div className="store-sheet-root">
+  return createPortal(
+    <div className="public-store store-sheet-root">
       <button type="button" className="store-sheet-backdrop" aria-label={t("close")} onClick={onClose} />
       <div
         role="dialog"
@@ -49,7 +50,7 @@ export function StoreRequestSheet({
         className="store-sheet"
       >
         <div className="store-sheet-handle" aria-hidden />
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex shrink-0 items-start justify-between gap-3">
           <div>
             <h2 className="font-[var(--font-display)] text-2xl font-extrabold leading-tight">
               {checkout ? t("payToConfirm") : lot ? t("requestThese") : t("request")}
@@ -65,7 +66,7 @@ export function StoreRequestSheet({
             ✕
           </button>
         </div>
-        <div className="relative mt-5">
+        <div className="store-sheet-body relative mt-5">
           {checkout && lot ? (
             <MarketCheckout locale={locale} lot={lot} onDone={onClose} />
           ) : (
@@ -73,6 +74,7 @@ export function StoreRequestSheet({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

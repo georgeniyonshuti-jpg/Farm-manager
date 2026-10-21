@@ -45,16 +45,20 @@ const OPTIONS: Array<{ id: StoreLocale; label: string; Flag: typeof FlagEn }> = 
 export function StoreLocaleSelect({
   locale,
   onChange,
+  variant = "menu",
+  className,
 }: {
   locale: StoreLocale;
   onChange: (locale: StoreLocale) => void;
+  variant?: "menu" | "flags";
+  className?: string;
 }) {
+  const aria = locale === "rw" ? "Ururimi" : "Language";
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const current = OPTIONS.find((o) => o.id === locale) || OPTIONS[0];
   const Flag = current.Flag;
-  const aria = locale === "rw" ? "Ururimi" : "Language";
 
   useEffect(() => {
     if (!open) return;
@@ -71,6 +75,29 @@ export function StoreLocaleSelect({
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
+  if (variant === "flags") {
+    return (
+      <div className={className ? `store-locale-flags ${className}` : "store-locale-flags"} role="group" aria-label={aria}>
+        {OPTIONS.map((opt) => {
+          const OptFlag = opt.Flag;
+          const selected = opt.id === locale;
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              className="store-locale-flagbtn"
+              aria-pressed={selected}
+              aria-label={opt.id === "rw" ? "Kinyarwanda" : "English"}
+              onClick={() => onChange(opt.id)}
+            >
+              <OptFlag />
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div className="store-locale" ref={rootRef}>

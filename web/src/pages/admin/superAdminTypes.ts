@@ -7,6 +7,7 @@ export type SuperAdminCompany = {
   is_active: boolean;
   payment_overdue: boolean;
   erpnext_company: string | null;
+  erpnext_base_url?: string | null;
   users: number;
   flocks: number;
 };

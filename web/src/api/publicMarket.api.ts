@@ -227,3 +227,27 @@ export async function submitPublicSellRequest(payload: PublicRequestPayload) {
     body: JSON.stringify(payload),
   });
 }
+
+export type ClaimPreview = {
+  ok?: boolean;
+  farmName?: string;
+  birdCount?: number | null;
+  breedCode?: string | null;
+  readyFrom?: string | null;
+  readyTo?: string | null;
+  error?: string;
+  code?: string;
+};
+
+export async function fetchClaimPreview(token: string): Promise<ClaimPreview> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/market/claim-preview?token=${encodeURIComponent(token)}`
+  );
+  const body = (await res.json().catch(() => ({}))) as ClaimPreview;
+  if (!res.ok) {
+    const err = new Error(body.error || "This invite link is not valid.") as Error & { preview?: ClaimPreview };
+    err.preview = body;
+    throw err;
+  }
+  return body;
+}

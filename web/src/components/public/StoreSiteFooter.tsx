@@ -37,9 +37,11 @@ export function StoreSiteFooter({ locale }: { locale: StoreLocale }) {
           <div className="store-footer-col">
             <p className="store-footer-label">{t("footerMarket")}</p>
             <nav className="store-footer-links" aria-label={t("footerMarket")}>
+              <Link to="/signup?from=market">{t("createAccount")}</Link>
               <Link to="/market">{t("listingsThisWeek")}</Link>
               <Link to={howHref}>{t("how")}</Link>
-              <Link to="/market?sell=1">{t("gotBirdsAsk")}</Link>
+              <Link to="/market/sell">{t("gotBirdsAsk")}</Link>
+              <Link to="/signup?from=market&accountType=scout">Become a scout</Link>
             </nav>
           </div>
 

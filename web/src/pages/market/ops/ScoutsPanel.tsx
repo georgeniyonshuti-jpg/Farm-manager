@@ -6,6 +6,8 @@ import { useToast } from "../../../components/Toast";
 import { ErrorState, SkeletonList } from "../../../components/LoadingSkeleton";
 import {
   Button,
+  Field,
+  Input,
   DataTable,
   type DataColumn,
   SegmentedControl,
@@ -13,8 +15,10 @@ import {
   TableToolbar,
 } from "../../../components/ui";
 import {
+  fetchMarketRates,
   fetchOpsCommissions,
   fetchWeighQueue,
+  saveScoutCommission,
   markCommissionPaid,
   voidCommission,
   type WeighQueueLot,
@@ -189,6 +193,8 @@ function PaySubpanel() {
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<OpsCommission[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [ratePct, setRatePct] = useState("2");
+  const [savingRate, setSavingRate] = useState(false);
 
   const reload = useCallback(async () => {
     if (!token && !demo) return;
@@ -200,9 +206,13 @@ function PaySubpanel() {
         setApiFailed(false);
         return;
       }
-      const res = await fetchOpsCommissions(token, "accrued");
+      const [res, rates] = await Promise.all([
+        fetchOpsCommissions(token, "accrued"),
+        fetchMarketRates(token).catch(() => null),
+      ]);
       setApiFailed(false);
       setRows(res.commissions);
+      if (rates?.scoutTradePct != null) setRatePct(String(rates.scoutTradePct));
     } catch (e) {
       if (isMarketDemoEligibleError(e)) {
         setApiFailed(true);
@@ -262,7 +272,7 @@ function PaySubpanel() {
         render: (r) => (
           <div>
             <p className="font-semibold">
-              {formatRwf(Number(r.commissionAmountRwf || 0))} · {r.kind === "visit" ? "Visit" : "Trade"}
+              {formatRwf(Number(r.commissionAmountRwf || 0))} · Sale
             </p>
             <p className="type-caption text-[var(--text-muted)]">
               {r.scoutName || "Scout"}
@@ -308,19 +318,55 @@ function PaySubpanel() {
     [busyId]
   );
 
+  async function saveRate() {
+    const pct = Number(ratePct);
+    if (!(pct > 0) || pct > 20) {
+      showToast("error", "Use a small percent of the sale, up to 20.");
+      return;
+    }
+    if (demo) {
+      showToast("success", "Scout commission saved (demo)");
+      return;
+    }
+    setSavingRate(true);
+    try {
+      const saved = await saveScoutCommission(token, pct);
+      setRatePct(String(saved.ratePct));
+      showToast("success", "Scout commission saved");
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Could not save commission");
+    } finally {
+      setSavingRate(false);
+    }
+  }
+
   if (loading) return <SkeletonList rows={3} />;
   if (error) return <ErrorState message={error} onRetry={() => void reload()} />;
 
   return (
-    <div className="table-block">
-      <DataTable
-        flush
-        columns={columns}
-        rows={rows}
-        rowKey={(r) => r.id}
-        emptyTitle="No unpaid commissions"
-        toolbar={<TableToolbar meta={`${rows.length} unpaid`} />}
-      />
+    <div className="space-y-3">
+      <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--surface-card)] p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-[10rem] flex-1">
+            <Field label="Scout commission (% of the sale)">
+              <Input type="number" min={0.1} max={20} step="0.1" value={ratePct} onChange={(e) => setRatePct(e.target.value)} />
+            </Field>
+          </div>
+          <Button type="button" disabled={savingRate} onClick={() => void saveRate()}>
+            {savingRate ? "Saving…" : "Save"}
+          </Button>
+        </div>
+      </div>
+      <div className="table-block">
+        <DataTable
+          flush
+          columns={columns}
+          rows={rows}
+          rowKey={(r) => r.id}
+          emptyTitle="No unpaid sales"
+          toolbar={<TableToolbar meta={`${rows.length} unpaid`} />}
+        />
+      </div>
     </div>
   );
 }

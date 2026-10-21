@@ -1,10 +1,12 @@
+import { isAdOrMarketSignup } from "./signupAttribution.js";
+
 /** Legacy single-tenant anchor — never a marketplace home. See docs/tenant-policy.md. */
 export const DEFAULT_FARM_COMPANY_ID = "00000000-0000-4000-8000-000000000001";
 export const DEFAULT_FARM_SLUG = "default-farm";
-export const DEFAULT_MARKET_HOST_SLUG = "cleva-technologies";
+export const DEFAULT_MARKET_HOST_SLUG = "cleva-tech";
 
 /**
- * Resolve how to look up the Cleva Technologies host tenant.
+ * Resolve the CIG marketplace host (slug cleva-tech).
  * Missing or default-farm config is a hard fail — do not invent a company.
  * @param {NodeJS.ProcessEnv} [env]
  */
@@ -24,8 +26,7 @@ export function marketHostLookup(env = process.env) {
 }
 
 export function isMarketSignupRequest(req) {
-  const from = String(req?.body?.from ?? req?.query?.from ?? "").trim().toLowerCase();
-  return from === "market";
+  return isAdOrMarketSignup(req);
 }
 
 /**
@@ -51,6 +52,15 @@ export async function loadMarketHostCompany(dbQuery, env = process.env) {
     }
     if (row.id === DEFAULT_FARM_COMPANY_ID || row.slug === DEFAULT_FARM_SLUG) {
       return { ok: false, error: "Market host cannot be the default farm." };
+    }
+    try {
+      const { bootstrapMarketInsights } = await import("../insightsBootstrap.js");
+      await bootstrapMarketInsights(row.id, dbQuery);
+    } catch (e) {
+      console.warn(
+        "[marketHost] insights bootstrap skipped:",
+        e instanceof Error ? e.message : e
+      );
     }
     return { ok: true, company: row };
   } catch (e) {

@@ -8,6 +8,12 @@ import {
   type InsightsMeta,
   type InsightsPack,
 } from "../../api/insights.api";
+import {
+  fetchMarketInsightsEmbedToken,
+  fetchMarketInsightsMeta,
+} from "../../api/marketInsights.api";
+import { Link } from "react-router-dom";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
 
 const DEFAULT_SDK_URL =
   (import.meta.env.VITE_SUPERSET_SDK_URL as string | undefined) ||
@@ -123,6 +129,10 @@ type Props = {
   packs?: InsightsPack[];
   /** Host-owned Barn / Flock scope (Superset filter bar is hidden). */
   scope?: InsightsScope;
+  /** Farm Trends (default) vs Market Analytics embed token routes. */
+  surface?: "farm" | "market";
+  /** Skip meta fetch when the parent already loaded market/farm meta. */
+  metaOverride?: InsightsMeta | null;
 };
 
 async function embedOne(
@@ -131,14 +141,18 @@ async function embedOne(
   supersetUrl: string,
   token: string | null,
   scope: InsightsScope | undefined,
-  onDataAsOf?: (value: string | null) => void
+  onDataAsOf?: (value: string | null) => void,
+  surface: "farm" | "market" = "farm"
 ) {
   await window.supersetEmbeddedSdk!.embedDashboard({
     id: dashboardUuid,
     supersetDomain: supersetUrl,
     mountPoint,
     fetchGuestToken: async () => {
-      const payload = await fetchInsightsEmbedToken(token, dashboardUuid);
+      const payload =
+        surface === "market"
+          ? await fetchMarketInsightsEmbedToken(token, dashboardUuid)
+          : await fetchInsightsEmbedToken(token, dashboardUuid);
       if (payload.dataAsOf) onDataAsOf?.(payload.dataAsOf);
       return payload.token;
     },
@@ -177,34 +191,60 @@ export function SupersetInsightsEmbed({
   onDataAsOf,
   packs,
   scope,
+  surface = "farm",
+  metaOverride = null,
 }: Props) {
   const { token } = useAuth();
+  const { companyHref } = useCompanyNav();
   const mountRef = useRef<HTMLDivElement | null>(null);
   const [phase, setPhase] = useState<"loading" | "ready" | "empty" | "error">("loading");
   const [message, setMessage] = useState("Loading Insights…");
   const [detail, setDetail] = useState<string | undefined>();
+  const [showMarketCta, setShowMarketCta] = useState(false);
   const packsKey = JSON.stringify((packs || []).map((p) => [p.id, p.enabled]));
   const scopeKey = `${scope?.barn || ""}|${scope?.flock || ""}`;
+  const metaKey = metaOverride
+    ? JSON.stringify({
+        configured: metaOverride.configured,
+        supersetUrl: metaOverride.supersetUrl,
+        dashboardUuid: metaOverride.dashboardUuid,
+        packDashboards: metaOverride.packDashboards,
+      })
+    : "";
 
   useEffect(() => {
     let cancelled = false;
     setPhase("loading");
     setMessage("Loading Insights…");
     setDetail(undefined);
+    setShowMarketCta(false);
 
     (async () => {
       try {
-        const nextMeta: InsightsMeta = await fetchInsightsMeta(token);
+        const nextMeta: InsightsMeta =
+          metaOverride ||
+          (surface === "market"
+            ? await fetchMarketInsightsMeta(token)
+            : await fetchInsightsMeta(token));
         if (cancelled) return;
         onDataAsOf?.(nextMeta.dataAsOf ?? null);
 
         if (!nextMeta.configured) {
           setPhase("empty");
-          setMessage("Insights is not configured yet.");
-          setDetail(
-            nextMeta.error ||
-              "Ask your Cleva administrator to finish farm analytics setup for this company."
-          );
+          if (surface === "farm") {
+            setMessage("Barn Insights is not linked for this company.");
+            setDetail(
+              nextMeta.error ||
+                "Marketplace KPIs live under Market overview. Barn Trends need an ERPNext company link and Command Center packs."
+            );
+            setShowMarketCta(true);
+          } else {
+            setMessage("Market Insights is not configured yet.");
+            setDetail(
+              nextMeta.error ||
+                "Ask your Cleva administrator to finish market analytics setup."
+            );
+          }
           return;
         }
 
@@ -213,12 +253,18 @@ export function SupersetInsightsEmbed({
           setPhase("empty");
           setMessage("No Insights packs selected.");
           setDetail("Open Widgets and enable at least one pack, or ask an admin to finish setup.");
+          if (surface === "farm") setShowMarketCta(true);
           return;
         }
         if (!nextMeta.supersetUrl) {
           setPhase("empty");
           setMessage("Insights dashboard is missing.");
-          setDetail("The tenant Command Center UUID is not set on the ERPNext site.");
+          setDetail(
+            surface === "farm"
+              ? "The tenant Command Center UUID is not set on the ERPNext site."
+              : "Set MARKET_INSIGHTS_DASHBOARD_UUID / pack UUIDs after provisioning Superset."
+          );
+          if (surface === "farm") setShowMarketCta(true);
           return;
         }
 
@@ -248,7 +294,15 @@ export function SupersetInsightsEmbed({
           const mountPoint = document.createElement("div");
           mountPoint.className = iframeClass;
           root.appendChild(mountPoint);
-          await embedOne(mountPoint, resolved.ids[0], supersetUrl, token, effectiveScope, onDataAsOf);
+          await embedOne(
+            mountPoint,
+            resolved.ids[0],
+            supersetUrl,
+            token,
+            effectiveScope,
+            onDataAsOf,
+            surface
+          );
         } else {
           for (let i = 0; i < resolved.ids.length; i++) {
             const section = document.createElement("div");
@@ -261,7 +315,15 @@ export function SupersetInsightsEmbed({
             mountPoint.className = iframeClass;
             section.appendChild(mountPoint);
             root.appendChild(section);
-            await embedOne(mountPoint, resolved.ids[i], supersetUrl, token, effectiveScope, onDataAsOf);
+            await embedOne(
+              mountPoint,
+              resolved.ids[i],
+              supersetUrl,
+              token,
+              effectiveScope,
+              onDataAsOf,
+              surface
+            );
             if (cancelled) return;
           }
         }
@@ -272,6 +334,7 @@ export function SupersetInsightsEmbed({
         setPhase("error");
         setMessage("Could not load Insights.");
         setDetail(e instanceof Error ? e.message : "Unknown error");
+        if (surface === "farm") setShowMarketCta(true);
       }
     })();
 
@@ -279,10 +342,28 @@ export function SupersetInsightsEmbed({
       cancelled = true;
       if (mountRef.current) mountRef.current.innerHTML = "";
     };
-  }, [token, refreshKey, onDataAsOf, packsKey, packs, scopeKey, scope]);
+    // metaKey / packsKey stand in for object identity of metaOverride + packs
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional stable keys
+  }, [token, refreshKey, onDataAsOf, packsKey, scopeKey, scope, surface, metaKey]);
 
   if (phase === "empty" || phase === "error") {
-    return <EmptyState title={message} description={detail} variant="compact" />;
+    return (
+      <EmptyState
+        title={message}
+        description={detail}
+        variant="compact"
+        action={
+          showMarketCta ? (
+            <Link
+              to={companyHref("/dashboard/market")}
+              className="inline-flex min-h-control-sm items-center rounded-control bg-[var(--primary-color)] px-2.5 text-xs font-medium text-[var(--text-on-primary)]"
+            >
+              Open Market overview
+            </Link>
+          ) : undefined
+        }
+      />
+    );
   }
 
   return (

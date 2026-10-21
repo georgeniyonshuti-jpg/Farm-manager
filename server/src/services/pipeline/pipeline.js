@@ -123,7 +123,15 @@ export function canAccessPipelineDesk(user) {
   return role === "superuser" || role === "sales_coordinator";
 }
 
+export const SCOUT_PENDING_KEY = "scout_pending";
+
+export function isScoutApplicant(user) {
+  const keys = user?.departmentKeys;
+  return Array.isArray(keys) && keys.includes(SCOUT_PENDING_KEY);
+}
+
 export function canScoutPipeline(user) {
+  if (isScoutApplicant(user)) return false;
   const role = user?.role;
   return (
     role === "superuser" ||

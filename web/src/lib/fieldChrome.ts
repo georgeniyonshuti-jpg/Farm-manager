@@ -35,7 +35,14 @@ export function resolveFieldChromeMode(pathname: string, search: string): FieldC
     path === "/market/verify" ||
     path === "/market/rates" ||
     path === "/market/jobs" ||
-    path === "/market/commissions"
+    path === "/market/commissions" ||
+    path === "/farm/pipeline/home" ||
+    path === "/farm/pipeline/how-it-works" ||
+    path === "/farm/pipeline/sellers" ||
+    path === "/farm/pipeline/crm-sellers" ||
+    path === "/farm/pipeline/messages" ||
+    path.startsWith("/farm/pipeline/scout") ||
+    path.startsWith("/farm/pipeline/weigh")
   ) {
     return "home";
   }

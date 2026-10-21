@@ -102,6 +102,7 @@ export function defaultHomePathForRole(role: UserRole): string {
     case "dispatcher":
       return "/dashboard/laborer";
     case "vet":
+      return "/farm/pipeline/home";
     case "vet_manager":
       return "/dashboard/vet";
     case "investor":

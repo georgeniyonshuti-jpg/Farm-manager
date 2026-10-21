@@ -13,7 +13,6 @@ import {
   canScoutPipeline,
   computeScoutCommission,
   DEFAULT_SCOUT_COMMISSION_RATE_PCT,
-  estimateLotCommission,
   forwardWeekBuckets,
   isBuyerRole,
   mapLotRow,
@@ -21,6 +20,11 @@ import {
   deriveLotStatusAfterMatch,
 } from "../services/pipeline/pipeline.js";
 import { isSellLead, normalizeWhatsapp } from "../services/pipeline/publicMarket.js";
+import { loadMarketReach } from "../services/pipeline/marketReach.js";
+import {
+  patchPeopleOnboarding,
+  scoutPayoutAllowed,
+} from "../services/pipeline/peopleOnboarding.js";
 import {
   CARD_SELECT,
   buildMoneySplit,
@@ -37,6 +41,7 @@ import {
   loadLatestCard,
   loadPublishedCard,
   merchantTierOf,
+  pickBand,
   resolveLockedBookPrices,
   shouldSkipListingReview,
   parseCardRow,
@@ -55,6 +60,7 @@ import {
   buildCommissionPaidEmail,
   buildFarmVerifiedEmail,
   buildLotLiveEmail,
+  buildLotRejectedEmail,
   emailForUserId,
   emailsForCompanyAdmins,
   emailsForLotOwners,
@@ -67,6 +73,7 @@ import {
   farmerOwnsLot,
   isMarketOnlySeller,
   loadProfileForFarmer,
+  sellerListingGate,
   normalizeProductType,
   normalizeVisibilityTier,
 } from "../services/pipeline/farmProfiles.js";
@@ -80,7 +87,6 @@ import {
   resolveDeliveryActor,
 } from "../services/pipeline/fulfillment.js";
 import { runLegacyConfirmDelivered } from "./pipelineFulfillmentExtras.js";
-import { listVisitCommissionRows } from "./pipelineWeighExtras.js";
 import {
   canAppearOnPublicShop,
   decorateListing,
@@ -250,6 +256,7 @@ export function registerPipelineMarketRoutes(router, ctx) {
         cards,
         published: published || null,
         visitFeeRwf,
+        scoutTradePct: await getCommissionRatePct(),
         whatsapp,
         suggestion,
         preview: sample
@@ -286,6 +293,27 @@ export function registerPipelineMarketRoutes(router, ctx) {
       res.json({ visitFeeRwf: Math.round(fee) });
     } catch (e) {
       res.status(503).json({ error: e instanceof Error ? e.message : "Could not save visit fee." });
+    }
+  });
+
+  router.patch("/market/scout-commission", async (req, res) => {
+    if (!requireDb(res) || !requireDesk(req, res)) return;
+    const pct = Number(req.body?.ratePct ?? req.body?.scoutTradePct);
+    if (!Number.isFinite(pct) || pct <= 0 || pct > 20) {
+      return res.status(400).json({ error: "Scout commission is a small percent of the sale, from 0.1 to 20." });
+    }
+    const ratePct = Math.round(pct * 100) / 100;
+    try {
+      await dbQuery(
+        `INSERT INTO app_settings (setting_key, setting_value)
+         VALUES ('pipeline_scout_commission_rate_pct', $1)
+         ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value`,
+        [String(ratePct)]
+      );
+      audit(req.authUser, "pipeline.scout_commission.set", "app_settings", "pipeline_scout_commission_rate_pct", { ratePct });
+      res.json({ ratePct });
+    } catch (e) {
+      res.status(503).json({ error: e instanceof Error ? e.message : "Could not save scout commission." });
     }
   });
 
@@ -900,7 +928,7 @@ export function registerPipelineMarketRoutes(router, ctx) {
       return res.status(403).json({ error: "Not allowed." });
     }
     try {
-      if (canListFarmerLots(req.authUser) && !canAccessPipelineDesk(req.authUser)) {
+      if (canListFarmerLots(req.authUser) && !canAccessPipelineDesk(req.authUser) && !isMarketOnlySeller(req.authUser)) {
         const company = await loadCompanyVerification(req.authUser.companyId);
         if (company && company.verificationStatus === "pending") {
           return res.status(403).json({
@@ -1050,17 +1078,19 @@ export function registerPipelineMarketRoutes(router, ctx) {
       return res.status(403).json({ error: "Farmer account required." });
     }
     const company = await loadCompanyVerification(req.authUser.companyId);
-    if (!company || company.verificationStatus !== "verified") {
-      return res.status(403).json({
-        error: "Farm must be verified before listing.",
-        code: "pending_verification",
-      });
-    }
     const profile = await loadProfileForFarmer(dbQuery, req.authUser);
+    const gate = sellerListingGate({
+      marketOnly: isMarketOnlySeller(req.authUser),
+      companyStatus: company?.verificationStatus,
+      profileStatus: profile?.verificationStatus,
+    });
+    if (!gate.allow) {
+      return res.status(403).json({ error: gate.error, code: gate.code });
+    }
     const body = req.body ?? {};
     const birdCount = numOrNull(body.birdCount);
     const district = str(body.district, 120);
-    const farmLabel = str(body.farmLabel, 200) || profile?.displayName || company.name;
+    const farmLabel = str(body.farmLabel, 200) || profile?.displayName || company?.name || "Seller";
     const week = resolveSellingWeek({
       placementDate: str(body.placementDate, 10),
       chicksInRelative: str(body.chicksInRelative, 40),
@@ -1096,10 +1126,13 @@ export function registerPipelineMarketRoutes(router, ctx) {
         priceOnly: true,
         inRail: rail.inRail,
       });
-      const verificationStatus = !rail.inRail || !skipReview ? "pending_review" : "verified";
-      const rankEligible = rail.inRail
-        ? rankEligibleUntilConfirm({ confirmed: false, railEligible: rail.rankEligible })
-        : false;
+      const verificationStatus =
+        gate.holdForReview || !rail.inRail || !skipReview ? "pending_review" : "verified";
+      const rankEligible = gate.holdForReview
+        ? false
+        : rail.inRail
+          ? rankEligibleUntilConfirm({ confirmed: false, railEligible: rail.rankEligible })
+          : false;
       const ins = await dbQuery(
         `INSERT INTO pipeline_lots
            (source, company_id, farm_label, contact_phone, district,
@@ -1468,8 +1501,14 @@ export function registerPipelineMarketRoutes(router, ctx) {
             LIMIT 100`
         ),
         dbQuery(
-          `SELECT ${LOT_SELECT}
+          `SELECT ${LOT_SELECT},
+                  u.full_name AS "scoutName",
+                  fp.display_name AS "farmName",
+                  fp.consent_status AS "consentStatus",
+                  (fp.owner_user_id IS NOT NULL) AS claimed
              FROM pipeline_lots l
+             LEFT JOIN users u ON u.id = l.scouted_by
+             LEFT JOIN farm_profiles fp ON fp.id = l.farm_profile_id
             WHERE COALESCE(l.verification_status, 'verified') = 'pending_review'
               AND l.status <> 'cancelled'
             ORDER BY l.created_at ASC
@@ -1480,9 +1519,16 @@ export function registerPipelineMarketRoutes(router, ctx) {
       try {
         const pr = await dbQuery(
           `SELECT id::text AS id, slug, display_name AS "displayName", district,
+                  contact_phone AS "contactPhone",
                   verification_status AS "verificationStatus",
                   consent_status AS "consentStatus", published,
-                  created_at AS "createdAt"
+                  owner_user_id IS NOT NULL AS claimed,
+                  scouted_by::text AS "scoutedBy",
+                  rejection_reason AS "rejectionReason",
+                  created_at AS "createdAt",
+                  (SELECT full_name FROM users WHERE id = farm_profiles.scouted_by) AS "scoutName",
+                  (SELECT COUNT(*)::int FROM pipeline_lots l
+                    WHERE l.farm_profile_id = farm_profiles.id AND l.status <> 'cancelled') AS "flockCount"
              FROM farm_profiles
             WHERE verification_status = 'pending'
                OR consent_status = 'pending'
@@ -1493,14 +1539,103 @@ export function registerPipelineMarketRoutes(router, ctx) {
       } catch {
         profiles = [];
       }
+      let scouts = [];
+      try {
+        const sr = await dbQuery(
+          `SELECT u.id::text AS id, u.full_name AS "fullName", u.email,
+                  a.phone, a.district, a.created_at AS "createdAt"
+             FROM scout_applications a
+             JOIN users u ON u.id = a.user_id
+            WHERE a.status = 'pending'
+              AND u.is_active IS NOT FALSE
+            ORDER BY a.created_at ASC
+            LIMIT 100`
+        );
+        scouts = sr.rows;
+      } catch {
+        scouts = [];
+      }
+      let claimReviews = [];
+      try {
+        const cr = await dbQuery(
+          `SELECT c.id::text AS id, c.review_reason AS "reviewReason", c.invited_email AS "invitedEmail",
+                  c.created_at AS "createdAt",
+                  fp.id::text AS "farmProfileId", fp.display_name AS "farmName", fp.district,
+                  fp.consent_status AS "consentStatus",
+                  (fp.owner_user_id IS NOT NULL) AS claimed,
+                  u.full_name AS "scoutName"
+             FROM farm_profile_claims c
+             JOIN farm_profiles fp ON fp.id = c.farm_profile_id
+             LEFT JOIN users u ON u.id = fp.scouted_by
+            WHERE c.status = 'needs_review'
+            ORDER BY c.created_at ASC
+            LIMIT 100`
+        );
+        claimReviews = cr.rows;
+      } catch {
+        claimReviews = [];
+      }
       res.json({
         companies: companies.rows,
         buyers: buyers.rows,
-        lots: lots.rows.map(mapLotRow),
+        lots: lots.rows.map((row) => ({
+          ...mapLotRow(row),
+          scoutName: row.scoutName || null,
+          farmName: row.farmName || null,
+          consentStatus: row.consentStatus || null,
+          claimed: Boolean(row.claimed),
+        })),
         profiles,
+        claimReviews,
+        scouts,
       });
     } catch (e) {
       res.status(503).json({ error: e instanceof Error ? e.message : "Could not load queue." });
+    }
+  });
+
+  router.post("/verify/scout/:id", async (req, res) => {
+    if (!requireDb(res) || !requireDesk(req, res)) return;
+    const status = str(req.body?.status, 20);
+    if (status !== "approved" && status !== "rejected") {
+      return res.status(400).json({ error: "status must be approved or rejected." });
+    }
+    try {
+      const id = req.params.id;
+      const updated = await dbQuery(
+        `UPDATE scout_applications
+            SET status = $2, reviewed_at = now(), reviewed_by = $3::uuid
+          WHERE user_id = $1::uuid AND status = 'pending'
+          RETURNING user_id::text AS id`,
+        [id, status, req.authUser.id]
+      );
+      if (!updated.rows[0]) return res.status(404).json({ error: "No pending scout application." });
+      // Clear legacy scout_pending; never deactivate on reject — use Signups "Block account".
+      await dbQuery(
+        `UPDATE users
+            SET department_keys = (
+              SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb)
+                FROM jsonb_array_elements(COALESCE(department_keys, '[]'::jsonb)) elem
+               WHERE elem #>> '{}' NOT IN ('scout_pending', 'scout_rejected')
+            ),
+            updated_at = now()
+          WHERE id = $1::uuid`,
+        [id]
+      );
+      void patchPeopleOnboarding(dbQuery, id, {
+        stage: status === "approved" ? "onboarded" : "not_a_fit",
+      }).catch(() => {});
+      if (status === "approved") {
+        const { emitCrmMilestone } = await import("../services/pipeline/crmBridge.js");
+        void emitCrmMilestone({
+          eventType: "scout.approved",
+          entities: [{ type: "user", id }],
+        });
+      }
+      audit(req.authUser, "pipeline.scout.application", "user", id, { status });
+      res.json({ ok: true, status });
+    } catch (e) {
+      res.status(503).json({ error: e instanceof Error ? e.message : "Could not review scout." });
     }
   });
 
@@ -1571,14 +1706,22 @@ export function registerPipelineMarketRoutes(router, ctx) {
   router.post("/verify/lot/:id", async (req, res) => {
     if (!requireDb(res) || !requireDesk(req, res)) return;
     const status = str(req.body?.status, 20);
+    const reason = str(req.body?.reason, 500);
     if (!["verified", "rejected"].includes(status)) {
       return res.status(400).json({ error: "status must be verified or rejected." });
     }
+    if (status === "rejected" && !reason) {
+      return res.status(400).json({ error: "A reason is required to reject a flock." });
+    }
     try {
       const lotBefore = await dbQuery(
-        `SELECT listed_by::text AS "listedBy", company_id::text AS "companyId",
-                district, bird_count AS "birdCount"
-           FROM pipeline_lots WHERE id = $1::uuid`,
+        `SELECT l.listed_by::text AS "listedBy", l.company_id::text AS "companyId",
+                l.district, l.bird_count AS "birdCount", l.source,
+                l.farm_profile_id::text AS "farmProfileId",
+                fp.owner_user_id::text AS "ownerUserId"
+           FROM pipeline_lots l
+           LEFT JOIN farm_profiles fp ON fp.id = l.farm_profile_id
+          WHERE l.id = $1::uuid`,
         [req.params.id]
       );
       await dbQuery(
@@ -1586,22 +1729,40 @@ export function registerPipelineMarketRoutes(router, ctx) {
             verification_status = $2,
             verified_at = CASE WHEN $2 = 'verified' THEN now() ELSE NULL END,
             verified_by = $3::uuid,
+            rejection_reason = CASE WHEN $2 = 'rejected' THEN $4 ELSE NULL END,
             updated_at = now()
           WHERE id = $1::uuid`,
-        [req.params.id, status === "verified" ? "verified" : "rejected", req.authUser.id]
+        [req.params.id, status === "verified" ? "verified" : "rejected", req.authUser.id, reason || null]
       );
-      audit(req.authUser, "pipeline.verify.lot", "pipeline_lot", req.params.id, { status });
+      audit(req.authUser, "pipeline.verify.lot", "pipeline_lot", req.params.id, { status, reason: reason || null });
+      if (status === "verified") {
+        const { emitCrmMilestone } = await import("../services/pipeline/crmBridge.js");
+        void emitCrmMilestone({
+          eventType: "listing.first_published",
+          entities: [
+            { type: "pipeline_lot", id: req.params.id },
+            { type: "farm_profile", id: lotBefore.rows[0]?.farmProfileId },
+          ],
+        });
+      }
       res.json({ ok: true, status });
       const lot = lotBefore.rows[0];
-      if (status === "verified" && lot) {
-        void emailsForLotOwners(dbQuery, { listedBy: lot.listedBy, companyId: lot.companyId })
+      if (lot) {
+        void emailsForLotOwners(dbQuery, lot)
           .then((owners) =>
             notifyMany(owners, (u) =>
-              buildLotLiveEmail({
-                name: u.fullName,
-                district: lot.district,
-                birds: lot.birdCount,
-              })
+              status === "verified"
+                ? buildLotLiveEmail({
+                    name: u.fullName,
+                    district: lot.district,
+                    birds: lot.birdCount,
+                  })
+                : buildLotRejectedEmail({
+                    name: u.fullName,
+                    district: lot.district,
+                    birds: lot.birdCount,
+                    reason,
+                  })
             )
           )
           .catch(() => {});
@@ -1623,6 +1784,7 @@ export function registerPipelineMarketRoutes(router, ctx) {
       : req.authUser.id;
     const ratePct = await getCommissionRatePct();
     try {
+      const card = await loadPublishedCard(dbQuery).catch(() => null);
       const openLots = await dbQuery(
         `SELECT ${LOT_SELECT},
                 COALESCE(m.matched, 0)::int AS "matchedBirds"
@@ -1637,11 +1799,42 @@ export function registerPipelineMarketRoutes(router, ctx) {
             AND COALESCE(l.verification_status, 'verified') IN ('verified', 'pending_review')`,
         [scoutId]
       );
+      const forecast = [];
       let couldEarn = 0;
       for (const row of openLots.rows) {
         const mapped = mapLotRow(row);
-        mapped.remainingBirds = remainingBirds(mapped.birdCount, Number(row.matchedBirds ?? 0));
-        couldEarn += estimateLotCommission(mapped, ratePct).amountRwf;
+        const birds = remainingBirds(mapped.birdCount, Number(row.matchedBirds ?? 0));
+        if (!(birds > 0)) continue;
+        const weight =
+          Number(mapped.avgWeightKg) > 0
+            ? Number(mapped.avgWeightKg)
+            : Number(mapped.expectedWeightKg) > 0
+              ? Number(mapped.expectedWeightKg)
+              : 0;
+        const ask = Number(mapped.askPricePerKg) > 0 ? Math.round(Number(mapped.askPricePerKg)) : 0;
+        const band = weight > 0 && card ? pickBand(card.bands, weight) : null;
+        const predicted = band ? band.farmGateRwfPerKg : 0;
+        const pricePerKg = ask || predicted || null;
+        const priceSource = ask ? "listed" : predicted ? "predicted" : null;
+        const amountRwf = pricePerKg
+          ? computeScoutCommission({
+              birds,
+              avgWeightKg: weight,
+              agreedPricePerKg: pricePerKg,
+              ratePct,
+            }).amountRwf
+          : 0;
+        if (amountRwf > 0) couldEarn += amountRwf;
+        forecast.push({
+          lotId: mapped.id,
+          label: mapped.farmLabel || mapped.district || "Flock",
+          district: mapped.district || null,
+          birds,
+          avgKg: weight || null,
+          pricePerKg,
+          priceSource,
+          amountRwf,
+        });
       }
 
       const ledger = await dbQuery(
@@ -1662,16 +1855,7 @@ export function registerPipelineMarketRoutes(router, ctx) {
           LIMIT 200`,
         [scoutId]
       );
-      let visits = [];
-      try {
-        visits = await listVisitCommissionRows(dbQuery, { scoutId });
-      } catch {
-        visits = [];
-      }
-      const rows = [
-        ...ledger.rows,
-        ...visits,
-      ].sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+      const rows = ledger.rows;
       const accruedUnpaid = rows
         .filter((r) => r.commissionStatus === "accrued")
         .reduce((s, r) => s + Number(r.commissionAmountRwf || 0), 0);
@@ -1687,11 +1871,14 @@ export function registerPipelineMarketRoutes(router, ctx) {
         )
         .reduce((s, r) => s + Number(r.commissionAmountRwf || 0), 0);
 
+      const guideBand = card ? pickBand(card.bands, 1.8) || card.bands?.[0] : null;
       res.json({
         ratePct,
+        guidePricePerKg: guideBand ? guideBand.farmGateRwfPerKg : null,
         couldEarn: Math.round(couldEarn * 100) / 100,
         accruedUnpaid: Math.round(accruedUnpaid * 100) / 100,
         paidThisMonth: Math.round(paidThisMonth * 100) / 100,
+        forecast,
         rows,
       });
     } catch (e) {
@@ -1723,16 +1910,7 @@ export function registerPipelineMarketRoutes(router, ctx) {
           LIMIT 300`,
         [status]
       );
-      let visits = [];
-      try {
-        visits = await listVisitCommissionRows(dbQuery, { status: status || null });
-      } catch {
-        visits = [];
-      }
-      const commissions = [...r.rows, ...visits].sort((a, b) =>
-        String(b.createdAt || "").localeCompare(String(a.createdAt || ""))
-      );
-      res.json({ commissions });
+      res.json({ commissions: r.rows });
     } catch (e) {
       res.status(503).json({ error: e instanceof Error ? e.message : "Could not list commissions." });
     }
@@ -1756,6 +1934,16 @@ export function registerPipelineMarketRoutes(router, ctx) {
         if (row.status !== "accrued") {
           return res.status(400).json({ error: `Cannot pay visit fee in status ${row.status}.` });
         }
+        if (row.scoutId) {
+          const gate = await scoutPayoutAllowed(dbQuery, row.scoutId);
+          if (!gate.allowed) {
+            return res.status(400).json({
+              error: "Scout payout is held until their intro call is complete (onboarded).",
+              code: "scout_not_onboarded",
+              stage: gate.reason,
+            });
+          }
+        }
         const amount = Number(row.amount || 0);
         await dbQuery(
           `UPDATE farm_visits SET fee_status = 'paid', updated_at = now() WHERE id = $1::uuid`,
@@ -1774,6 +1962,16 @@ export function registerPipelineMarketRoutes(router, ctx) {
       if (!row) return res.status(404).json({ error: "Match not found." });
       if (row.status !== "accrued") {
         return res.status(400).json({ error: `Cannot pay commission in status ${row.status}.` });
+      }
+      if (row.scoutId) {
+        const gate = await scoutPayoutAllowed(dbQuery, row.scoutId);
+        if (!gate.allowed) {
+          return res.status(400).json({
+            error: "Scout payout is held until their intro call is complete (onboarded).",
+            code: "scout_not_onboarded",
+            stage: gate.reason,
+          });
+        }
       }
       const amount = Number(row.amount || 0);
       await dbQuery(
@@ -1834,6 +2032,15 @@ export function registerPipelineMarketRoutes(router, ctx) {
       res.json({ ok: true });
     } catch (e) {
       res.status(503).json({ error: e instanceof Error ? e.message : "Could not void." });
+    }
+  });
+
+  router.get("/market/reach", async (req, res) => {
+    if (!requireDb(res) || !requireDesk(req, res)) return;
+    try {
+      res.json(await loadMarketReach(dbQuery));
+    } catch (e) {
+      res.status(503).json({ error: e instanceof Error ? e.message : "Could not load link opens." });
     }
   });
 
@@ -2262,9 +2469,12 @@ export function registerPipelineMarketRoutes(router, ctx) {
       if (canListFarmerLots(req.authUser) && !canAccessPipelineDesk(req.authUser)) {
         const company = await loadCompanyVerification(req.authUser.companyId);
         const profile = await loadProfileForFarmer(dbQuery, req.authUser);
+        const marketOnly = isMarketOnlySeller(req.authUser);
         return res.json({
           accountType: "farmer",
-          verificationStatus: company?.verificationStatus ?? "pending",
+          verificationStatus: marketOnly
+            ? profile?.verificationStatus || "pending"
+            : company?.verificationStatus ?? "pending",
           company,
           profile,
         });

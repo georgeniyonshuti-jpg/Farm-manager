@@ -29,6 +29,7 @@ import { registerPipelineStorefrontRoutes } from "./pipelineStorefrontExtras.js"
 import { registerPipelineFulfillmentRoutes } from "./pipelineFulfillmentExtras.js";
 import { registerPipelineWeighRoutes } from "./pipelineWeighExtras.js";
 import { registerPipelineSettlementRoutes } from "./pipelineSettlementExtras.js";
+import { registerCrmScoutRoutes } from "./crmBridge.routes.js";
 import {
   decorateListing,
   loadClevaRunRecentConfirm,
@@ -1280,5 +1281,6 @@ registerPipelineStorefrontRoutes(router, marketRouteCtx);
 registerPipelineFulfillmentRoutes(router, marketRouteCtx);
 registerPipelineWeighRoutes(router, marketRouteCtx);
 registerPipelineSettlementRoutes(router, marketRouteCtx);
+registerCrmScoutRoutes(router, marketRouteCtx);
 
 export default router;

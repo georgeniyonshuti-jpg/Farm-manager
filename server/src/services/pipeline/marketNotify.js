@@ -84,11 +84,23 @@ export async function emailsForLotOwners(dbQuery, lot) {
       seen.add(String(u.email).toLowerCase());
     }
   }
-  for (const u of await emailsForCompanyAdmins(dbQuery, lot?.companyId)) {
-    const key = String(u.email).toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(u);
+  if (lot?.ownerUserId) {
+    const owner = await emailForUserId(dbQuery, lot.ownerUserId);
+    if (owner?.email) {
+      const key = String(owner.email).toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        out.push(owner);
+      }
+    }
+  }
+  if (!lot?.ownerUserId) {
+    for (const u of await emailsForCompanyAdmins(dbQuery, lot?.companyId)) {
+      const key = String(u.email).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(u);
+    }
   }
   return out;
 }
@@ -241,6 +253,29 @@ ${district ? `<li>District: ${escapeHtml(district)}</li>` : ""}
 ${lotRef ? `<li>Lot: ${escapeHtml(lotRef)}</li>` : ""}
 </ul>
 <p>Open Clevafarm → <strong>Market → Leads</strong> to triage.</p>
+<p>— Clevafarm</p>`;
+  return { subject, text, html };
+}
+
+export function buildLotRejectedEmail({ name, district, birds, reason }) {
+  const who = name || "there";
+  const place = district || "your flock";
+  const subject = `Flock not approved — ${place}`;
+  const text = [
+    `Hi ${who},`,
+    "",
+    `Cleva could not approve the flock at ${place}${birds ? ` (${birds} birds)` : ""}.`,
+    reason ? `Reason: ${reason}` : "",
+    "Your scout can update the visit and send it again.",
+    "",
+    "— Clevafarm",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const html = `<p>Hi ${escapeHtml(who)},</p>
+<p>Cleva could not approve the flock at <strong>${escapeHtml(place)}</strong>${birds ? ` (${escapeHtml(String(birds))} birds)` : ""}.</p>
+${reason ? `<p>Reason: ${escapeHtml(reason)}</p>` : ""}
+<p>Your scout can update the visit and send it again.</p>
 <p>— Clevafarm</p>`;
   return { subject, text, html };
 }

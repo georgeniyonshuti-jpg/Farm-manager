@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useEffect, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "./Button";
 
 type Props = {
@@ -87,7 +88,7 @@ export function Modal({ open, title, onClose, children, footer, wide }: Props) {
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[90] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
       <button type="button" className="absolute inset-0 cursor-default" aria-label="Close" onClick={onClose} />
       <div
@@ -96,23 +97,24 @@ export function Modal({ open, title, onClose, children, footer, wide }: Props) {
         aria-modal="true"
         aria-label={title}
         aria-describedby={bodyId}
-        className={`relative z-[1] max-h-[92vh] w-full overflow-y-auto rounded-t-2xl border border-[var(--border-color)] bg-[var(--surface-card)] shadow-[var(--shadow-elevated)] sm:rounded-2xl ${
+        className={`relative z-[1] flex max-h-[100dvh] w-full flex-col overflow-hidden rounded-t-2xl border border-[var(--border-color)] bg-[var(--surface-card)] pb-[env(safe-area-inset-bottom)] shadow-[var(--shadow-elevated)] sm:max-h-[92vh] sm:rounded-2xl sm:pb-0 ${
           wide ? "sm:max-w-3xl" : "sm:max-w-lg"
         }`}
       >
-        <div className="sticky top-0 z-[1] flex items-center justify-between gap-3 border-b border-[var(--border-color)] bg-[var(--surface-card)] px-4 py-3">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border-color)] bg-[var(--surface-card)] px-4 py-3">
           <h2 className="type-h3 text-[var(--text-primary)]">{title}</h2>
           <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close dialog">
             ✕
           </Button>
         </div>
-        <div id={bodyId} data-modal-content className="px-4 py-4">{children}</div>
+        <div id={bodyId} data-modal-content className="min-h-0 flex-1 overflow-y-auto px-4 py-4">{children}</div>
         {footer ? (
-          <div className="sticky bottom-0 flex justify-end gap-2 border-t border-[var(--border-color)] bg-[var(--surface-card)] px-4 py-3">
+          <div className="flex shrink-0 justify-end gap-2 border-t border-[var(--border-color)] bg-[var(--surface-card)] px-4 py-3">
             {footer}
           </div>
         ) : null}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

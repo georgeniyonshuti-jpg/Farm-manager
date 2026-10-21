@@ -13,7 +13,7 @@ This document describes how Clevafarm separates **platform operators** from **te
 
 - Anchor for legacy single-tenant data migrated before multi-tenancy.
 - Fallback `company_id` when backfilling rows that cannot be matched to a flock or user (see migration `054_inventory_company_id.sql`).
-- **Not** used for new signups — Farm OS `/signup` creates a new company UUID. Marketplace `/signup?from=market` attaches the user to the host company (`MARKET_HOST_COMPANY_ID` / `cleva-technologies`), never to `default-farm`. If the host env is missing, market signup returns 503.
+- **Not** used for new signups — Farm OS `/signup` creates a new company UUID. Marketplace `/signup?from=market` attaches the user to the host company (`MARKET_HOST_COMPANY_ID` / `cleva-tech`), never to `default-farm`. If the host env is missing, market signup returns 503.
 
 ### Protections
 
@@ -61,10 +61,20 @@ Farm OS signup creates **`company_admin`**, not `manager`. Marketplace `from=mar
 
 Public `/market` and `/sell` guests stay leads. When they create an account with `from=market`, they become users on **one** host company (Cleva Technologies).
 
-- Set `MARKET_HOST_COMPANY_ID` (UUID) or `MARKET_HOST_COMPANY_SLUG` (default `cleva-technologies`).
+- Set `MARKET_HOST_COMPANY_ID` (UUID) or `MARKET_HOST_COMPANY_SLUG` (default `cleva-tech`, the CIG company).
 - Do **not** point the host at `default-farm`.
 - Farm OS `/signup` (no `from=market`) still creates a farm company + trial.
 - Desk (`superuser`, `sales_coordinator`) stays the only place that sees `market_leads`. Other farm companies cannot.
+
+### Link host farm company → CIG ERPNext
+
+Tenant ERP sites are `{slug}.cleva.rw` (not the platform `erp.clevacredit.com` control plane). Super-admin → company detail → **ERPNext**:
+
+1. Enter subdomain `cig` (or click **Use CIG preset** / **Link to CIG**).
+2. That resolves to `https://cig.cleva.rw` and Company **Cleva Investments Group** (override via `ERPNEXT_CIG_BASE_URL` / `ERPNEXT_CIG_COMPANY`).
+3. If the company dropdown is empty (API key / method unavailable), type the exact ERPNext Company name and **Save link** anyway — the link is stored in `erpnext_config` and is what Insights/Trends uses.
+
+Farm slug `cleva-tech` and ERP Company `Cleva Investments Group` are intentionally different names; the link row ties them together.
 
 ## Company lifecycle
 

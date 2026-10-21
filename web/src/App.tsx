@@ -1,3 +1,4 @@
+import { lazy, Suspense, useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthContext";
 import { LaborerI18nProvider } from "./i18n/laborerI18n";
@@ -47,12 +48,26 @@ import { RootRedirect } from "./routes/RootRedirect";
 import { FarmBootstrapProvider } from "./context/FarmBootstrapContext";
 import { ActiveFlockProvider } from "./context/ActiveFlockContext";
 import { contractRouteAliasRoutes } from "./routes/ContractRouteAliases";
+import { hostRedirectTarget, isMarketHostname } from "./lib/marketHost";
+
+const SignupPersonPreview = import.meta.env.DEV
+  ? lazy(() =>
+      import("./pages/admin/SignupsPage").then((m) => ({ default: m.SignupPersonPreview }))
+    )
+  : null;
 
 function AppRoutes() {
   const { bootstrapped } = useAuth();
-  const { pathname } = useLocation();
-  const isPublicStore = pathname.startsWith("/market");
+  const { pathname, search } = useLocation();
+  const host = typeof window === "undefined" ? "" : window.location.hostname;
+  const hostTarget = hostRedirectTarget(host, pathname, search);
+  useEffect(() => {
+    if (hostTarget) window.location.replace(hostTarget);
+  }, [hostTarget]);
+  const onMarketSite = isMarketHostname(host);
+  const isPublicStore = pathname.startsWith("/market") || (onMarketSite && (pathname === "/" || pathname === ""));
   const apiStatus = useApiHealthStatus(!bootstrapped && !isPublicStore);
+  if (hostTarget) return null;
   if (!bootstrapped && !isPublicStore) return <AppLoadingScreen apiStatus={apiStatus} />;
   return (
     <Routes>
@@ -60,6 +75,16 @@ function AppRoutes() {
       <Route path="/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/signup" element={<SignupPage />} />
+      {SignupPersonPreview ? (
+        <Route
+          path="/dev/signup-card"
+          element={
+            <Suspense fallback={null}>
+              <SignupPersonPreview />
+            </Suspense>
+          }
+        />
+      ) : null}
       <Route path="/auth/erpnext/callback" element={<ERPNextOAuthCallbackPage />} />
       <Route path="/auth/cleva/callback" element={<ClevaOAuthCallbackPage />} />
       <Route path="/billing/pricing" element={<PricingPage />} />
@@ -68,6 +93,7 @@ function AppRoutes() {
       <Route path="/billing/trial-expired" element={<TrialExpiredPage />} />
 
       <Route element={<PublicLayout />}>
+        {onMarketSite ? <Route path="/" element={<PublicMarketPage />} /> : null}
         <Route path="/market" element={<PublicMarketPage />} />
         <Route path="/market/lot/:publicRef" element={<PublicLotDetailPage />} />
         <Route path="/market/farms" element={<PublicFarmsPage />} />
@@ -107,6 +133,9 @@ function AppRoutes() {
           <Route path="dashboard/laborer" element={null} />
           <Route path="dashboard/vet" element={null} />
           <Route path="dashboard/management" element={null} />
+          <Route path="dashboard/market" element={null} />
+          <Route path="dashboard/market/trends" element={null} />
+          <Route path="dashboard/market/recruitment" element={null} />
           <Route path="laborer/earnings" element={null} />
 
           <Route path="farm" element={<FarmSection />}>
@@ -134,7 +163,13 @@ function AppRoutes() {
             <Route path="slaughter" element={null} />
             <Route path="pipeline" element={null} />
             <Route path="pipeline/buyers" element={null} />
+            <Route path="pipeline/home" element={null} />
+            <Route path="pipeline/how-it-works" element={null} />
             <Route path="pipeline/scout" element={null} />
+            <Route path="pipeline/scout/handoff" element={null} />
+            <Route path="pipeline/sellers" element={null} />
+            <Route path="pipeline/crm-sellers" element={null} />
+            <Route path="pipeline/messages" element={null} />
             <Route path="pipeline/weigh" element={null} />
             <Route path="pipeline/weigh/:lotId" element={null} />
             <Route path="batch-schedule" element={null} />
@@ -165,6 +200,7 @@ function AppRoutes() {
           </Route>
 
           <Route path="admin/users" element={null} />
+          <Route path="admin/signups" element={null} />
           <Route path="admin/system-config" element={null} />
 
           <Route element={<SuperAdminRoute />}>

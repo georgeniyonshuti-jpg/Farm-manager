@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   defaultPublicMarketFilters,
   type PublicMarketFilters,
@@ -127,17 +128,19 @@ export function StoreBoardFilters({
         </div>
       ) : null}
 
-      {open ? (
-        <div className="store-sheet-root">
+      {open
+        ? createPortal(
+        <div className="public-store store-sheet-root">
           <button type="button" className="store-sheet-backdrop" aria-label={t("close")} onClick={() => setOpen(false)} />
           <div role="dialog" aria-modal="true" aria-label={t("filters")} className="store-sheet">
             <div className="store-sheet-handle" aria-hidden />
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex shrink-0 items-start justify-between gap-3">
               <h2 className="font-[var(--font-display)] text-2xl font-extrabold leading-tight">{t("filters")}</h2>
               <button type="button" className="store-sheet-x" onClick={() => setOpen(false)} aria-label={t("close")}>
                 ✕
               </button>
             </div>
+            <div className="store-sheet-body">
             <div className="store-filters store-filters-sheet">
               <label className="store-filter">
                 <span>{t("filterWeek")}</span>
@@ -178,8 +181,10 @@ export function StoreBoardFilters({
                 {t("done")}
               </button>
             </div>
+            </div>
           </div>
-        </div>
+        </div>,
+        document.body
       ) : null}
     </div>
   );

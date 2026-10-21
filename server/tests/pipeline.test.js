@@ -77,6 +77,10 @@ describe("pipeline helpers", () => {
     assert.equal(canScoutPipeline({ role: "vet_manager" }), true);
     assert.equal(canScoutPipeline({ role: "manager" }), true);
     assert.equal(canScoutPipeline({ role: "laborer" }), false);
+    assert.equal(
+      canScoutPipeline({ role: "vet", departmentKeys: ["scout_pending"] }),
+      false
+    );
   });
 
   it("managed flock opt-in excludes field laborers and plain vets", () => {

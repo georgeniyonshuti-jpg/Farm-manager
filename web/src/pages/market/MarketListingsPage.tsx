@@ -46,8 +46,7 @@ import { FulfillmentCard } from "../../components/market/FulfillmentCard";
 import { FarmerMoneySplitView } from "../../components/market/MoneySplit";
 import { useOptionalMarketLocale } from "../../context/MarketLocaleContext";
 import { storeT } from "../../lib/publicStoreCopy";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { useCompanyNav } from "../../hooks/useCompanyNav";
+import { useSearchParams } from "react-router-dom";
 import {
   publicListingPreview,
   previewDisclosureLines,
@@ -173,8 +172,6 @@ function ListingFormFields({
 export function MarketListingsPage() {
   const { token, user } = useAuth();
   const locale = useOptionalMarketLocale()?.locale || "en";
-  const { companyHref } = useCompanyNav();
-  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const { showToast } = useToast();
   const allowed = canListFarmerMarketLots(user);
@@ -182,6 +179,7 @@ export function MarketListingsPage() {
     params.get("tab") === "storefront" ? "storefront" : params.get("tab") === "jobs" ? "jobs" : "listings";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reviewPending, setReviewPending] = useState(false);
   const [lots, setLots] = useState<PipelineLot[]>([]);
   const [profile, setProfile] = useState<FarmProfile | null>(null);
   const [media, setMedia] = useState<MarketMedia[]>([]);
@@ -215,10 +213,6 @@ export function MarketListingsPage() {
     setError(null);
     try {
       const me = await fetchMarketMe(token);
-      if (me.accountType === "farmer" && me.verificationStatus !== "verified") {
-        navigate(companyHref("/market/pending"), { replace: true });
-        return;
-      }
       const [listRes, prof, jobsRes] = await Promise.all([
         fetchMyListings(token),
         fetchFarmProfile(token).catch(() => ({ profile: null, media: [], analytics: null })),
@@ -229,6 +223,9 @@ export function MarketListingsPage() {
       setProfile(prof.profile);
       setMedia(prof.media || []);
       setAnalytics(prof.analytics);
+      setReviewPending(
+        me.accountType === "farmer" && me.verificationStatus !== "verified"
+      );
       if (prof.profile) {
         setStorefront({
           displayName: prof.profile.displayName || "",
@@ -246,15 +243,11 @@ export function MarketListingsPage() {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not load listings";
-      if (msg.toLowerCase().includes("verification")) {
-        navigate(companyHref("/market/pending"), { replace: true });
-        return;
-      }
       setError(msg);
     } finally {
       setLoading(false);
     }
-  }, [allowed, token, navigate, companyHref]);
+  }, [allowed, token]);
 
   useEffect(() => {
     void reload();
@@ -489,6 +482,11 @@ export function MarketListingsPage() {
         }
       />
       {sellerMeta ? <p className="type-caption text-[var(--store-muted)]">{sellerMeta}</p> : null}
+      {reviewPending ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          Your flocks are saved and go live after a quick call with our team. You can keep adding birds now.
+        </div>
+      ) : null}
       <div className="hidden md:block">
         <PageTabs
           value={tab}
@@ -657,6 +655,11 @@ export function MarketListingsPage() {
         </div>
       ) : (
         <ul className="space-y-3">
+          {lots.some((lot) => lot.verificationStatus === "pending_review") ? (
+            <p className="rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)] p-3 text-sm text-[var(--text-secondary)]">
+              This flock is waiting for Cleva to check it. It is not on the public board yet.
+            </p>
+          ) : null}
           {lots.map((lot) => {
             const stats = analytics?.byLot?.[lot.id];
             const phase = listingPhaseCopy(lot.listingPhase);
@@ -678,7 +681,9 @@ export function MarketListingsPage() {
                         </p>
                       ) : null}
                     </div>
-                    <StatusPill tone={phase.tone}>{phase.label}</StatusPill>
+                    <StatusPill tone={lot.verificationStatus === "pending_review" ? "warning" : phase.tone}>
+                      {lot.verificationStatus === "pending_review" ? "Pending review" : phase.label}
+                    </StatusPill>
                   </div>
                   {stats ? (
                     <p className="mt-2 type-caption text-[var(--text-secondary)]">

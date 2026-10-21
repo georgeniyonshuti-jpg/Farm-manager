@@ -1,0 +1,17 @@
+---
+description: Rules for the Cleva CRM + WhatsApp integration project
+alwaysApply: true
+---
+
+Project: integrate Frappe CRM + Frappe WhatsApp with Cleva Market. Source of truth: docs/crm/MASTER_PLAN.md. This repo currently contains the Cleva side (`crm_bridge`) only. Frappe CRM is not installed here.
+
+- Read MASTER_PLAN.md sections 4 (ground rules), 6 (decisions), 7 (data model) and 8 (contracts) before changing any CRM-related code.
+- Inspect the existing code and follow its conventions; never assume file paths, table names or frameworks.
+- Work on one phase at a time. Stop after each phase with the Appendix B report.
+- Never touch ERPNext accounting. Never create public listings from WhatsApp data.
+- No secrets in code. Mask personal data in logs. All internal endpoints must be HMAC-authenticated, replay-protected and idempotent.
+- Never trust roles from tokens or request bodies. Map CRM launch roles from the Cleva user on the server.
+- Migrations must be reversible and shown to the user before applying.
+- Everything behind CRM_INTEGRATION_ENABLED. Write tests with the code.
+- If the plan conflicts with the codebase or a verified fact, stop and ask.
+- Explain changes in plain language for a beginner.

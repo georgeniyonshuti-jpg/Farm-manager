@@ -27,7 +27,7 @@ export function FieldGlobalHeader({ mode }: Props) {
     user.role === "sales_coordinator"
       ? companyHref("/farm/pipeline")
       : user.role === "vet"
-        ? companyHref("/dashboard/vet")
+        ? companyHref("/farm/pipeline/home")
         : companyHref("/dashboard/laborer");
 
   const headerShell = (children: ReactNode, className = "") => (
@@ -47,7 +47,7 @@ export function FieldGlobalHeader({ mode }: Props) {
   }
 
   return headerShell(
-    <div className="flex min-h-[48px] items-center gap-2 px-2.5 py-1.5">
+    <div className="flex min-h-[48px] items-center gap-2 px-4 py-1.5">
       <Link to={homeTo} className="flex shrink-0 items-center" aria-label={appName}>
         <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--primary-color-soft)]">
           <BrandLogo size={30} />

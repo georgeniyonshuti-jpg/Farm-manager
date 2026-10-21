@@ -69,7 +69,7 @@ export function PersistentPageSlot({ active, mountDelayMs = 0, children }: Props
   return (
     <div
       ref={rootRef}
-      className={active ? "relative z-[1] w-full" : "hidden"}
+      className={active ? "relative w-full" : "hidden"}
       hidden={!active}
       aria-hidden={!active}
     >

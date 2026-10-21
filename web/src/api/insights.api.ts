@@ -120,17 +120,21 @@ export function resolveEmbedDashboardIds(
   const list = packs && packs.length ? packs : [];
   const enabled = list.filter((p) => p.enabled);
   const coreIds = ["executive", "growth", "feed", "health", "operations"];
+  const looksLikeFarmPacks =
+    !list.length || list.some((p) => coreIds.includes(p.id) || p.id === "finance");
   const allCoreOn =
-    !list.length ||
-    coreIds.every((id) => {
-      const p = list.find((x) => x.id === id);
-      return !p || p.enabled;
-    });
+    looksLikeFarmPacks &&
+    (!list.length ||
+      coreIds.every((id) => {
+        const p = list.find((x) => x.id === id);
+        return !p || p.enabled;
+      }));
 
+  if ((allCoreOn || Object.keys(packMap).length === 0) && mega) {
+    return { mode: "mega", ids: [mega], labels: ["Command Center"] };
+  }
   if (allCoreOn || Object.keys(packMap).length === 0) {
-    return mega
-      ? { mode: "mega", ids: [mega], labels: ["Command Center"] }
-      : { mode: "empty", ids: [], labels: [] };
+    return { mode: "empty", ids: [], labels: [] };
   }
 
   const ids: string[] = [];

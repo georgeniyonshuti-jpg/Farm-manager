@@ -18,6 +18,27 @@ import {
   loadMarketHostCompany,
 } from "../services/pipeline/marketHostCompany.js";
 import { createUniqueFarmSlug } from "../services/pipeline/farmProfiles.js";
+import {
+  classifyClaim,
+  executeSellerClaim,
+  loadClaimByToken,
+} from "../services/pipeline/sellerClaim.js";
+import { recordMarketReach } from "../services/pipeline/marketReach.js";
+import { attributionFieldsFromReq } from "../services/pipeline/signupAttribution.js";
+import {
+  buildSignupDeskEmail,
+  logSignupAttemptFromReq,
+  upsertPeopleOnboarding,
+} from "../services/pipeline/peopleOnboarding.js";
+import { emailsForDeskRoles, notifyMany } from "../services/pipeline/marketNotify.js";
+import {
+  accountTypeForContact,
+  classifySignupToken,
+  consumeSignupToken,
+  contactTypeKey,
+  crmEnabled,
+  loadSignupToken,
+} from "../services/pipeline/crmBridge.js";
 
 import {
   createBillingPlan,
@@ -57,7 +78,45 @@ export function createSaasRouter(deps) {
     usersByEmail,
     usersById,
     scrubCompanyFromMemory,
+    dbPool,
   } = deps;
+
+  async function signupEntityForCrm(q, userId, accountType) {
+    if (accountType === "buyer") {
+      const r = await q(
+        `SELECT id::text AS id FROM pipeline_buyers WHERE user_id = $1::uuid LIMIT 1`,
+        [userId]
+      );
+      return { type: "pipeline_buyer", id: r.rows[0]?.id || userId };
+    }
+    if (accountType === "scout") return { type: "user", id: userId };
+    const r = await q(
+      `SELECT id::text AS id FROM farm_profiles WHERE owner_user_id = $1::uuid ORDER BY created_at DESC LIMIT 1`,
+      [userId]
+    );
+    return { type: "farm_profile", id: r.rows[0]?.id || userId };
+  }
+
+  async function withDbTransaction(fn) {
+    if (!dbPool?.connect) return fn(dbQuery);
+    const client = await dbPool.connect();
+    try {
+      await client.query("BEGIN");
+      const q = (sql, params = []) => client.query(sql, params);
+      const out = await fn(q);
+      await client.query("COMMIT");
+      return out;
+    } catch (err) {
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* already aborted */
+      }
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
 
   const router = express.Router();
 
@@ -75,13 +134,54 @@ export function createSaasRouter(deps) {
     return r.rows[0] ?? null;
   }
 
+  router.get("/auth/crm-signup", async (req, res) => {
+    if (!crmEnabled()) return res.status(404).json({ error: "Not found." });
+    if (!hasDb()) return res.status(503).json({ error: "Database unavailable." });
+    const raw = String(req.query.t || "").trim();
+    if (!raw) return res.status(400).json({ error: "Missing link." });
+    try {
+      const row = await loadSignupToken(dbQuery, raw);
+      const gate = classifySignupToken(row);
+      if (!gate.ok) return res.status(gate.status || 400).json({ error: gate.message, code: gate.code });
+      const prefill = row.prefill_json || {};
+      res.json({
+        accountType: accountTypeForContact(row.contact_type),
+        fullName: prefill.name || prefill.fullName || "",
+        phone: prefill.phone || "",
+        district: prefill.district || "",
+        companyName: prefill.businessName || prefill.companyName || "",
+      });
+    } catch (e) {
+      console.error("[ERROR]", "[crm] signup preview failed:", e instanceof Error ? e.message : "error");
+      res.status(503).json({ error: "Could not read signup link." });
+    }
+  });
+
   router.post("/auth/signup", async (req, res) => {
+    const fail = (status, body) => {
+      const errorCode = body?.code || `http_${status}`;
+      const errorMessage = body?.error || "Signup failed";
+      void logSignupAttemptFromReq(dbQuery, req, {
+        outcome: "failed",
+        errorCode,
+        errorMessage,
+        accountType: String(req.body?.accountType ?? "farmer").trim().toLowerCase(),
+        email: req.body?.email,
+        phone: req.body?.phone ?? req.body?.whatsapp,
+        fullName: req.body?.fullName,
+        district: req.body?.district,
+      }).catch(() => {});
+      res.status(status).json(body);
+    };
+
     if (!hasDb()) {
-      res.status(503).json({ error: "Database unavailable." });
+      fail(503, { error: "Database unavailable." });
       return;
     }
     const accountTypeRaw = String(req.body?.accountType ?? "farmer").trim().toLowerCase();
-    const accountType = accountTypeRaw === "buyer" ? "buyer" : "farmer";
+    let accountType =
+      accountTypeRaw === "buyer" ? "buyer" : accountTypeRaw === "scout" ? "scout" : "farmer";
+    const crmToken = String(req.body?.crmToken ?? "").trim();
     const companyName = String(req.body?.companyName ?? req.body?.businessName ?? "").trim();
     const fullName = String(req.body?.fullName ?? "").trim();
     const email = String(req.body?.email ?? "").trim().toLowerCase();
@@ -90,26 +190,71 @@ export function createSaasRouter(deps) {
     const phone = String(req.body?.phone ?? req.body?.whatsapp ?? "").trim().slice(0, 40);
     const buyerType = String(req.body?.buyerType ?? "butcher").trim().slice(0, 40) || "butcher";
 
-    if (!companyName || !fullName || !email || !password) {
-      res.status(400).json({
+    if ((!companyName && accountType !== "scout") || !fullName || !email || !password) {
+      fail(400, {
         error:
           accountType === "buyer"
             ? "businessName, fullName, email, and password are required."
-            : "companyName, fullName, email, and password are required.",
+            : accountType === "scout"
+              ? "fullName, email, and password are required."
+              : "companyName, fullName, email, and password are required.",
+        code: "validation",
+      });
+      return;
+    }
+    if (accountType === "scout" && (!phone || !district)) {
+      fail(400, {
+        error: "Phone and district are required to apply as a scout.",
+        code: "scout_contact_required",
       });
       return;
     }
     if (password.length < 8) {
-      res.status(400).json({ error: "Password must be at least 8 characters." });
+      fail(400, { error: "Password must be at least 8 characters.", code: "weak_password" });
       return;
     }
+    if (crmToken) {
+      if (!crmEnabled()) {
+        fail(404, { error: "Not found.", code: "crm_off" });
+        return;
+      }
+      if (!hasDb()) {
+        fail(503, { error: "Database unavailable." });
+        return;
+      }
+      try {
+        const crmRow = await loadSignupToken(dbQuery, crmToken);
+        const gate = classifySignupToken(crmRow);
+        if (!gate.ok) {
+          fail(gate.status || 400, { error: gate.message, code: gate.code || "crm_token" });
+          return;
+        }
+        const forced = accountTypeForContact(contactTypeKey(crmRow.contact_type));
+        if (forced) accountType = forced;
+      } catch (e) {
+        console.error("[ERROR]", "[crm] signup token failed:", e instanceof Error ? e.message : "error");
+        fail(503, { error: "Could not read signup link.", code: "crm_token" });
+        return;
+      }
+      if (accountType === "scout" && (!phone || !district)) {
+        fail(400, {
+          error: "Phone and district are required to apply as a scout.",
+          code: "scout_contact_required",
+        });
+        return;
+      }
+      if (accountType !== "scout" && !companyName && !fullName) {
+        fail(400, { error: "fullName is required.", code: "validation" });
+        return;
+      }
+    }
     if (usersByEmail.has(email)) {
-      res.status(409).json({ error: "An account with this email already exists." });
+      fail(409, { error: "An account with this email already exists.", code: "email_taken" });
       return;
     }
     try {
       if (await fetchClevaUserExists(email)) {
-        res.status(409).json({
+        fail(409, {
           error: "This email is registered in Cleva. Use Login with Cleva instead of signup.",
           code: "cleva_login_required",
         });
@@ -119,14 +264,63 @@ export function createSaasRouter(deps) {
       /* lookup best-effort */
     }
 
-    const fromMarket = isMarketSignupRequest(req);
+    const claimRaw = String(req.body?.claim ?? "").trim();
+    const fromMarket =
+      isMarketSignupRequest(req) ||
+      accountType === "scout" ||
+      (accountType === "farmer" && claimRaw.length > 0) ||
+      crmToken.length > 0;
+    if (claimRaw && accountType !== "farmer") {
+      fail(400, { error: "This invite link is for a seller account.", code: "claim_wrong_type" });
+      return;
+    }
     const slugBase = slugify(companyName) || (accountType === "buyer" ? "buyer" : "farm");
     const userId = crypto.randomUUID();
-    const role = accountType === "buyer" ? "buyer" : fromMarket ? "manager" : "company_admin";
+    const role =
+      accountType === "buyer" ? "buyer" : accountType === "scout" ? "vet" : fromMarket ? "manager" : "company_admin";
+    // Scouts get instant access; intro call is tracked in people_onboarding, not scout_pending.
+    const departmentKeys = [];
     const pageAccess =
-      accountType === "buyer" || fromMarket ? JSON.stringify(["farm_market"]) : null;
+      accountType === "scout"
+        ? JSON.stringify(["farm_pipeline"])
+        : accountType === "buyer" || fromMarket
+          ? JSON.stringify(["farm_market"])
+          : null;
+    const attr = attributionFieldsFromReq(req);
 
     try {
+      if (claimRaw) {
+        const existingClaim = await loadClaimByToken(dbQuery, claimRaw);
+        const early = classifyClaim({
+          claim: existingClaim,
+          email,
+          userId: null,
+          marketOnly: true,
+          existingProfile: null,
+          listingCount: 0,
+        });
+        if (!early.ok) {
+          if (early.action === "needs_review" && existingClaim) {
+            await dbQuery(
+              `UPDATE farm_profile_claims
+                  SET status = 'needs_review', review_reason = $2
+                WHERE id = $1::uuid AND status = 'pending'`,
+              [existingClaim.id, early.code]
+            );
+          } else if (early.code === "expired" && existingClaim?.status === "pending") {
+            await dbQuery(
+              `UPDATE farm_profile_claims SET status = 'expired' WHERE id = $1::uuid AND status = 'pending'`,
+              [existingClaim.id]
+            );
+          }
+          fail(early.status || 400, {
+            error: early.message,
+            code: early.code || "claim_failed",
+          });
+          return;
+        }
+      }
+
       let companyId;
       let slug;
       let hostCompanyName = companyName;
@@ -134,8 +328,9 @@ export function createSaasRouter(deps) {
       if (fromMarket) {
         const host = await loadMarketHostCompany(dbQuery);
         if (!host.ok) {
-          res.status(503).json({
+          fail(503, {
             error: host.error || "Market signup is unavailable. Ask ops to set MARKET_HOST_COMPANY_ID.",
+            code: "market_host_missing",
           });
           return;
         }
@@ -157,6 +352,17 @@ export function createSaasRouter(deps) {
            VALUES ($1::uuid, 'trialing', 'trial', $2::timestamptz)`,
           [companyId, trialEndsInDays(TRIAL_DAYS)]
         );
+        try {
+          const { bootstrapCompanyInsights } = await import(
+            "../services/insightsBootstrap.js"
+          );
+          await bootstrapCompanyInsights(companyId, dbQuery, { marketHost: false });
+        } catch (bootErr) {
+          console.warn(
+            "[saas] insights bootstrap skipped:",
+            bootErr instanceof Error ? bootErr.message : bootErr
+          );
+        }
       }
 
       const passwordHash = hashPassword(password);
@@ -168,46 +374,93 @@ export function createSaasRouter(deps) {
         role,
         businessUnitAccess: accountType === "buyer" || fromMarket ? "farm" : "both",
         canViewSensitiveFinancial: accountType === "farmer" && !fromMarket,
-        departmentKeys: [],
-        pageAccess: accountType === "buyer" || fromMarket ? ["farm_market"] : null,
+        departmentKeys,
+        pageAccess:
+          accountType === "scout"
+            ? ["farm_pipeline"]
+            : accountType === "buyer" || fromMarket
+              ? ["farm_market"]
+              : null,
         companyId,
       };
 
-      await dbQuery(
-        `INSERT INTO users (
-          id, email, full_name, role, password_hash, business_unit_access,
-          can_view_sensitive_financial, department_keys, page_access, company_id
-        ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, '[]'::jsonb, $8::jsonb, $9::uuid)`,
-        [
-          userId,
-          email,
-          fullName,
-          role,
-          passwordHash,
-          accountType === "buyer" || fromMarket ? "farm" : "both",
-          accountType === "farmer" && !fromMarket,
-          pageAccess,
-          companyId,
-        ]
-      );
+      async function writeAccount(q) {
+        await q(
+          `INSERT INTO users (
+            id, email, full_name, role, password_hash, business_unit_access,
+            can_view_sensitive_financial, department_keys, page_access, company_id
+          ) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::uuid)`,
+          [
+            userId,
+            email,
+            fullName,
+            role,
+            passwordHash,
+            accountType === "buyer" || fromMarket ? "farm" : "both",
+            accountType === "farmer" && !fromMarket,
+            JSON.stringify(departmentKeys),
+            pageAccess,
+            companyId,
+          ]
+        );
 
-      if (accountType === "buyer") {
-        await dbQuery(
-          `INSERT INTO pipeline_buyers
-             (name, buyer_type, district, phone, whatsapp, user_id, verification_status, active)
-           VALUES ($1, $2, $3, $4, $4, $5::uuid, 'verified', true)`,
-          [companyName || fullName, buyerType, district || null, phone || null, userId]
-        );
-      } else if (fromMarket) {
-        const profileSlug = await createUniqueFarmSlug(dbQuery, companyName);
-        await dbQuery(
-          `INSERT INTO farm_profiles
-             (company_id, slug, display_name, district, contact_phone, contact_whatsapp,
-              created_by, owner_user_id, verification_status)
-           VALUES ($1::uuid, $2, $3, $4, $5, $5, $6::uuid, $6::uuid, 'pending')`,
-          [companyId, profileSlug, companyName, district || null, phone || null, userId]
-        );
+        if (accountType === "buyer") {
+          await q(
+            `INSERT INTO pipeline_buyers
+               (name, buyer_type, district, phone, whatsapp, user_id, verification_status, active)
+             VALUES ($1, $2, $3, $4, $4, $5::uuid, 'verified', true)`,
+            [companyName || fullName, buyerType, district || null, phone || null, userId]
+          );
+        } else if (fromMarket && claimRaw) {
+          const claimed = await executeSellerClaim(q, {
+            rawToken: claimRaw,
+            userId,
+            email,
+            hostCompanyId: companyId,
+            marketOnly: true,
+          });
+          if (!claimed.ok) {
+            const err = new Error(claimed.message || "Could not claim this flock.");
+            err.statusCode = claimed.status || 400;
+            err.code = claimed.code;
+            throw err;
+          }
+        } else if (accountType === "scout") {
+          await q(
+            `INSERT INTO scout_applications (user_id, phone, district, status)
+             VALUES ($1::uuid, $2, $3, 'pending')`,
+            [userId, phone || null, district || null]
+          );
+        } else if (fromMarket) {
+          const profileSlug = await createUniqueFarmSlug(q, companyName);
+          await q(
+            `INSERT INTO farm_profiles
+               (company_id, slug, display_name, district, contact_phone, contact_whatsapp,
+                created_by, owner_user_id, verification_status)
+             VALUES ($1::uuid, $2, $3, $4, $5, $5, $6::uuid, $6::uuid, 'pending')`,
+            [companyId, profileSlug, companyName, district || null, phone || null, userId]
+          );
+        }
+        if (crmToken) {
+          const entity = await signupEntityForCrm(q, userId, accountType);
+          const consumed = await consumeSignupToken(q, {
+            raw: crmToken,
+            userId,
+            entityType: entity.type,
+            entityId: entity.id,
+            phone,
+          });
+          if (!consumed.ok) {
+            const err = new Error(consumed.message || "This signup link could not be used.");
+            err.statusCode = consumed.status || 400;
+            err.code = consumed.code || "crm_token";
+            throw err;
+          }
+        }
       }
+
+      if (claimRaw || crmToken) await withDbTransaction(writeAccount);
+      else await writeAccount(dbQuery);
 
       row.companySlug = slug;
       row.companyName = fromMarket ? hostCompanyName : companyName;
@@ -219,7 +472,60 @@ export function createSaasRouter(deps) {
         companyName,
         accountType,
         from: fromMarket ? "market" : "farm_os",
+        source: attr.source,
       });
+      if (fromMarket) {
+        void recordMarketReach(dbQuery, {
+          eventType: "account_created",
+          source: attr.source,
+          visitorId: attr.visitorId || req.body?.visitorId,
+          userId,
+          accountType,
+        }).catch(() => {});
+        void upsertPeopleOnboarding(dbQuery, {
+          userId,
+          accountType,
+          phone,
+          district,
+          attr,
+          stage: accountType === "buyer" ? "active" : "new",
+        }).catch(() => {});
+        void logSignupAttemptFromReq(dbQuery, req, {
+          outcome: "succeeded",
+          userId,
+          accountType,
+          email,
+          phone,
+          fullName,
+          district,
+        }).catch(() => {});
+        void emailsForDeskRoles(dbQuery)
+          .then((recipients) =>
+            notifyMany(
+              recipients,
+              buildSignupDeskEmail({
+                accountType,
+                fullName,
+                email,
+                phone,
+                district,
+                source: attr.source,
+                companyName,
+              })
+            )
+          )
+          .catch(() => {});
+      } else {
+        void logSignupAttemptFromReq(dbQuery, req, {
+          outcome: "succeeded",
+          userId,
+          accountType,
+          email,
+          phone,
+          fullName,
+          district,
+        }).catch(() => {});
+      }
       res.status(201).json({
         token,
         user: sanitizeUser(row),
@@ -228,20 +534,32 @@ export function createSaasRouter(deps) {
         from: fromMarket ? "market" : "farm_os",
       });
     } catch (e) {
+      if (e && e.statusCode) {
+        fail(e.statusCode, { error: e.message, code: e.code || "claim_failed" });
+        return;
+      }
       const msg = e instanceof Error ? e.message : "Signup failed";
       if (msg.includes("companies_slug") || msg.includes("unique")) {
-        res.status(409).json({ error: "Company name is already taken. Try a different name." });
+        fail(409, { error: "Company name is already taken. Try a different name.", code: "slug_taken" });
+        return;
+      }
+      if (msg.includes("scout_applications")) {
+        fail(500, {
+          error: "Scout signup needs migration 077_scout_applications. Ask ops to apply it.",
+          code: "migration_077",
+        });
         return;
       }
       if (msg.includes("verification_status") || msg.includes("column")) {
         console.error("[ERROR]", "[saas] signup schema:", msg);
-        res.status(500).json({
+        fail(500, {
           error: "Marketplace migrations required. Ask ops to apply 063_marketplace_accounts.",
+          code: "migration_063",
         });
         return;
       }
       console.error("[ERROR]", "[saas] signup:", msg);
-      res.status(500).json({ error: "Could not create workspace. Please try again." });
+      fail(500, { error: "Could not create workspace. Please try again.", code: "signup_failed" });
     }
   });
 
@@ -497,6 +815,7 @@ export function createSaasRouter(deps) {
 
   const SUPER_ADMIN_COMPANY_SELECT = `SELECT c.id::text, c.name, c.slug, c.plan, c.trial_ends_at, c.is_active, c.payment_overdue,
                 ec.erpnext_company,
+                ec.erpnext_base_url,
                 (SELECT COUNT(*)::int FROM users u WHERE u.company_id = c.id) AS users,
                 (SELECT COUNT(*)::int FROM poultry_flocks f
                   WHERE f.company_id = c.id AND f.status <> 'archived') AS flocks
@@ -628,24 +947,45 @@ export function createSaasRouter(deps) {
     }
   });
 
-  router.get("/super-admin/erpnext/companies", requireAuth, requireSuperuser, async (_req, res) => {
+  router.get("/super-admin/erpnext/companies", requireAuth, requireSuperuser, async (req, res) => {
     try {
-      const companies = await erp.getCompanyList();
-      res.json({ companies: Array.isArray(companies) ? companies : [] });
+      const { resolveErpBaseFromInput, cigErpDefaults } =
+        await import("../services/erpnext/erpBaseFromInput.js");
+      const resolved = resolveErpBaseFromInput({
+        erpnextBaseUrl: req.query.baseUrl,
+        subdomain: req.query.subdomain,
+      });
+      if (!resolved.ok) {
+        res.status(400).json({ error: resolved.error, companies: [] });
+        return;
+      }
+      const companies = await erp.getCompanyList(null, { baseUrl: resolved.erpnextBaseUrl });
+      const cig = cigErpDefaults();
+      res.json({
+        companies,
+        erpnextBaseUrl: resolved.erpnextBaseUrl,
+        subdomain: resolved.subdomain,
+        cigPreset: cig,
+      });
     } catch (e) {
-      res.status(500).json({ error: e instanceof Error ? e.message : "Could not load ERPNext companies." });
+      res.status(500).json({
+        error: e instanceof Error ? e.message : "Could not load ERPNext companies.",
+        companies: [],
+      });
     }
+  });
+
+  router.get("/super-admin/erpnext/cig-preset", requireAuth, requireSuperuser, async (_req, res) => {
+    const { cigErpDefaults } = await import("../services/erpnext/erpBaseFromInput.js");
+    res.json(cigErpDefaults());
   });
 
   router.post("/super-admin/companies/:id/erpnext-link", requireAuth, requireSuperuser, async (req, res) => {
     const id = String(req.params.id ?? "");
-    const erpnextCompany = String(req.body?.erpnextCompany ?? "").trim();
+    const useCig = Boolean(req.body?.useCig);
+    let erpnextCompany = String(req.body?.erpnextCompany ?? "").trim();
     if (!id) {
       res.status(400).json({ error: "Company id is required." });
-      return;
-    }
-    if (!erpnextCompany) {
-      res.status(400).json({ error: "erpnextCompany is required." });
       return;
     }
     if (!hasDb()) {
@@ -653,12 +993,39 @@ export function createSaasRouter(deps) {
       return;
     }
     try {
+      const { resolveErpBaseFromInput, cigErpDefaults } =
+        await import("../services/erpnext/erpBaseFromInput.js");
+      const cig = cigErpDefaults();
+      const resolved = useCig
+        ? { ok: true, erpnextBaseUrl: cig.erpnextBaseUrl, subdomain: cig.subdomain }
+        : resolveErpBaseFromInput({
+            erpnextBaseUrl: req.body?.erpnextBaseUrl,
+            subdomain: req.body?.subdomain,
+          });
+      if (!resolved.ok) {
+        res.status(400).json({ error: resolved.error });
+        return;
+      }
+      if (useCig && !erpnextCompany) erpnextCompany = cig.erpnextCompany;
+      if (!erpnextCompany) {
+        res.status(400).json({ error: "erpnextCompany is required." });
+        return;
+      }
       const exists = await dbQuery(`SELECT id FROM companies WHERE id = $1::uuid`, [id]);
       if (!exists.rows[0]) {
         res.status(404).json({ error: "Company not found." });
         return;
       }
-      const link = await setErpnextCompanyLink(id, erpnextCompany);
+      const link = await setErpnextCompanyLink(id, erpnextCompany, resolved.erpnextBaseUrl);
+      try {
+        const { bootstrapFarmInsightsPacks } = await import("../services/insightsBootstrap.js");
+        await bootstrapFarmInsightsPacks(id, dbQuery);
+      } catch (bootErr) {
+        console.warn(
+          "[saas] farm insights bootstrap after ERP link:",
+          bootErr instanceof Error ? bootErr.message : bootErr
+        );
+      }
       res.json({ ok: true, link });
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : "Could not save ERPNext company link." });

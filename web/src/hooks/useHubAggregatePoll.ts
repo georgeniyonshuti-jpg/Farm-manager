@@ -11,7 +11,7 @@ export function useHubAggregatePoll(load: () => void | Promise<void>, enabled = 
   useEffect(() => {
     if (!enabled) return;
 
-    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let intervalId: number | null = null;
 
     const clearTimer = () => {
       if (intervalId != null) {

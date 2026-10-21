@@ -12,6 +12,13 @@ type Props = {
 const PAGES: Array<{ label: string; to: string; keywords: string }> = [
   { label: "Today", to: "/dashboard/management", keywords: "command center home today" },
   { label: "Trends", to: "/dashboard/management?tab=trends", keywords: "charts analytics scorecard" },
+  { label: "Market overview", to: "/dashboard/market", keywords: "market analytics kpis gmv match" },
+  { label: "Market trends", to: "/dashboard/market/trends", keywords: "market charts superset deep dive" },
+  {
+    label: "Recruitment",
+    to: "/dashboard/market/recruitment",
+    keywords: "recruit sellers scouts buyers facebook instagram google channel targets",
+  },
   { label: "Flocks", to: "/farm/flocks", keywords: "birds flocks" },
   { label: "Vet logs", to: "/farm/vet-logs", keywords: "health visit" },
   { label: "Medicine", to: "/farm/treatments", keywords: "treatment rounds" },

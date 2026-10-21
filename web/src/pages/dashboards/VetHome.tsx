@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { CheckinStatusBlock, type CheckinStatus, type OpsGlanceSummary } from "../farm/FarmCheckinPage";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
@@ -27,7 +27,7 @@ import { BlockersStacked, FcrTargetBars, FlockWeightTrendLines, MortalityTrendLi
 import { useWeighInTrends } from "../../hooks/useWeighInTrends";
 import { ManagerPage } from "../../components/layout/ManagerPage";
 import { Button } from "../../components/ui/Button";
-import { VetFieldHub } from "./VetFieldHub";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
 import { readAuthHeaders } from "../../lib/authHeaders";
 
 type VetHubFlockRow = {
@@ -62,9 +62,14 @@ function vetChip(label: string, ok: boolean) {
 export function VetHome() {
   const { user } = useAuth();
   if (user?.role === "vet") {
-    return <VetFieldHub />;
+    return <FieldScoutHomeRedirect />;
   }
   return <VetManagerDashboard />;
+}
+
+function FieldScoutHomeRedirect() {
+  const { companyHref } = useCompanyNav();
+  return <Navigate to={companyHref("/farm/pipeline/home")} replace />;
 }
 
 function VetManagerDashboard() {

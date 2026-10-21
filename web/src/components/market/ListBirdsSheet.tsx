@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { FarmerMoneySplitView, type FarmerMoneySplit } from "./MoneySplit";
 import { fetchListingRankPreview } from "../../api/pipeline.api";
 import { useOptionalMarketLocale } from "../../context/MarketLocaleContext";
@@ -163,12 +164,12 @@ export function ListBirdsSheet({
 
   if (!open) return null;
 
-  return (
-    <div className="store-sheet-root">
+  return createPortal(
+    <div className="public-store store-sheet-root">
       <button type="button" className="store-sheet-backdrop" aria-label={t("close")} onClick={onClose} />
       <div role="dialog" aria-modal="true" aria-label={title} className="store-sheet">
         <div className="store-sheet-handle" aria-hidden />
-        <div className="flex items-start justify-between gap-3">
+        <div className="flex shrink-0 items-start justify-between gap-3">
           <div>
             {beat > 1 ? (
               <button type="button" className="store-text-link mb-2 text-sm font-bold" onClick={goBack}>
@@ -182,7 +183,7 @@ export function ListBirdsSheet({
           </button>
         </div>
 
-        <div className="relative mt-5 space-y-4">
+        <div className="store-sheet-body relative mt-5 space-y-4">
           {beat === 1 ? (
             <>
               <div className="store-field">
@@ -235,6 +236,7 @@ export function ListBirdsSheet({
               <button
                 type="button"
                 className="w-full rounded-2xl border border-[var(--store-line)] bg-[var(--store-paper)] p-4 text-left"
+                aria-label="Selling week"
                 onClick={() => setEditWeek((v) => !v)}
               >
                 <p className="font-[var(--font-display)] text-xl font-extrabold text-[var(--store-ink)]">
@@ -335,11 +337,12 @@ export function ListBirdsSheet({
             </>
           )}
 
-          <button type="button" className="store-btn store-btn-ember w-full" disabled={busy || submitDisabled} onClick={goNext}>
+          <button type="button" className="store-btn store-btn-ember store-sheet-action w-full" disabled={busy || submitDisabled} onClick={goNext}>
             {busy ? "Saving…" : submitLabel}
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

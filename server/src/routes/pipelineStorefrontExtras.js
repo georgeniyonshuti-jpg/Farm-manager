@@ -28,10 +28,18 @@ import {
   notifyMany,
 } from "../services/pipeline/marketNotify.js";
 import {
+  claimSignupUrl,
+  marketPublicOrigin,
+  executeSellerClaim,
+  hashClaimToken,
+  sellerStatusChips,
+} from "../services/pipeline/sellerClaim.js";
+import {
   canAccessPipelineDesk,
   canListFarmerLots,
   canScoutPipeline,
 } from "../services/pipeline/pipeline.js";
+import { loadMarketHostCompany } from "../services/pipeline/marketHostCompany.js";
 
 /**
  * @param {import('express').Router} router
@@ -285,44 +293,29 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
   router.post("/market/profile/claim", async (req, res) => {
     if (!requireDb(res)) return;
     if (!canListFarmerLots(req.authUser) || !req.authUser.companyId) {
-      return res.status(403).json({ error: "Farmer account required." });
+      return res.status(403).json({ error: "Seller account required." });
     }
-    const token = str(req.body?.token, 80);
-    if (!token) return res.status(400).json({ error: "Claim token is required." });
+    const rawToken = str(req.body?.token, 80);
+    if (!rawToken) return res.status(400).json({ error: "Invite link is required." });
     try {
-      const existing = await loadProfileForFarmer(req.authUser);
-      if (existing) {
-        return res.status(400).json({ error: "This farm already has a storefront." });
+      const host = await loadMarketHostCompany(dbQuery);
+      if (!host.ok) {
+        return res.status(503).json({ error: host.error || "Market signup is unavailable." });
       }
-      const claimR = await dbQuery(
-        `SELECT id::text AS id, farm_profile_id::text AS "farmProfileId", status, expires_at AS "expiresAt"
-           FROM farm_profile_claims WHERE token = $1 LIMIT 1`,
-        [token]
-      );
-      const claim = claimR.rows[0];
-      if (!claim || claim.status !== "pending") {
-        return res.status(404).json({ error: "Claim is not valid." });
+      const claimed = await executeSellerClaim(dbQuery, {
+        rawToken,
+        userId: req.authUser.id,
+        email: req.authUser.email,
+        hostCompanyId: host.company.id,
+        marketOnly: isMarketOnlySeller(req.authUser),
+      });
+      if (!claimed.ok) {
+        return res.status(claimed.status || 400).json({ error: claimed.message, code: claimed.code });
       }
-      if (claim.expiresAt && new Date(claim.expiresAt) < new Date()) {
-        await dbQuery(`UPDATE farm_profile_claims SET status = 'expired' WHERE id = $1::uuid`, [claim.id]);
-        return res.status(400).json({ error: "This invite has expired." });
-      }
-      const profile = await loadProfileById(claim.farmProfileId);
-      if (!profile || profile.companyId) {
-        return res.status(400).json({ error: "This farm is already claimed." });
-      }
-      await dbQuery(
-        `UPDATE farm_profiles SET company_id = $2::uuid, updated_at = now() WHERE id = $1::uuid`,
-        [profile.id, req.authUser.companyId]
-      );
-      await dbQuery(
-        `UPDATE farm_profile_claims SET
-            status = 'accepted', claimed_by_user_id = $2::uuid, claimed_company_id = $3::uuid, accepted_at = now()
-          WHERE id = $1::uuid`,
-        [claim.id, req.authUser.id, req.authUser.companyId]
-      );
-      audit(req.authUser, "pipeline.profile.claim", "farm_profile", profile.id, {});
-      res.json({ profile: await loadProfileById(profile.id) });
+      audit(req.authUser, "pipeline.profile.claim", "farm_profile", claimed.profileId, {
+        action: claimed.action,
+      });
+      res.json({ profile: await loadProfileById(claimed.profileId), action: claimed.action });
     } catch (e) {
       res.status(503).json({ error: e instanceof Error ? e.message : "Could not claim farm." });
     }
@@ -476,19 +469,70 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
     if (!canScoutPipeline(req.authUser)) return res.status(403).json({ error: "Not allowed." });
     const q = str(req.query.q, 120);
     try {
+      const desk = canAccessPipelineDesk(req.authUser);
       const r = await dbQuery(
-        `SELECT ${FARM_PROFILE_SELECT}
+        `SELECT ${FARM_PROFILE_SELECT},
+                c.status AS "claimStatus",
+                l.id::text AS "lotId",
+                l.bird_count AS "birdCount",
+                l.breed_code AS "breedCode",
+                l.ready_from AS "readyFrom",
+                l.ready_to AS "readyTo",
+                l.verification_status AS "lotVerification",
+                l.scout_confirmed_at AS "scoutConfirmedAt",
+                l.scouted_by::text AS "lotScoutedBy"
            FROM farm_profiles fp
-          WHERE ($1::boolean = true OR fp.scouted_by = $2::uuid OR fp.company_id IS NULL)
+           LEFT JOIN LATERAL (
+             SELECT status FROM farm_profile_claims
+              WHERE farm_profile_id = fp.id
+              ORDER BY created_at DESC
+              LIMIT 1
+           ) c ON true
+           LEFT JOIN LATERAL (
+             SELECT id, bird_count, breed_code, ready_from, ready_to, verification_status, scout_confirmed_at, scouted_by
+               FROM pipeline_lots
+              WHERE farm_profile_id = fp.id AND status <> 'cancelled'
+              ORDER BY created_at DESC
+              LIMIT 1
+           ) l ON true
+          WHERE ($1::boolean = true OR fp.scouted_by = $2::uuid)
             AND ($3::text IS NULL
                  OR fp.display_name ILIKE $3
                  OR fp.district ILIKE $3
                  OR fp.slug ILIKE $3)
           ORDER BY fp.updated_at DESC
           LIMIT 80`,
-        [canAccessPipelineDesk(req.authUser), req.authUser.id, q ? `%${q}%` : null]
+        [desk, req.authUser.id, q ? `%${q}%` : null]
       );
-      res.json({ farms: r.rows.map(mapFarmProfileRow) });
+      const farms = r.rows.map((row) => {
+        const profile = mapFarmProfileRow(row);
+        const chips = sellerStatusChips({
+          ownerUserId: profile.ownerUserId,
+          claimStatus: row.claimStatus,
+          lotVerification: row.lotVerification,
+          consentStatus: profile.consentStatus,
+          profileVerification: profile.verificationStatus,
+        });
+        return {
+          ...profile,
+          claimStatus: row.claimStatus || null,
+          statusChips: chips,
+          lotId: row.lotId || null,
+          birdCount: row.birdCount != null ? Number(row.birdCount) : null,
+          breedCode: row.breedCode || null,
+          readyFrom: row.readyFrom || null,
+          readyTo: row.readyTo || null,
+          lotVerification: row.lotVerification || null,
+          scoutConfirmedAt: row.scoutConfirmedAt || null,
+        };
+      });
+      if (!desk) {
+        const hidden = farms.filter((farm) => farm.scoutedBy && farm.scoutedBy !== req.authUser.id);
+        if (hidden.length) {
+          return res.status(403).json({ error: "Not allowed." });
+        }
+      }
+      res.json({ farms });
     } catch (e) {
       res.status(503).json({ error: e instanceof Error ? e.message : "Could not list farms." });
     }
@@ -537,7 +581,11 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
     if (!canScoutPipeline(req.authUser)) return res.status(403).json({ error: "Not allowed." });
     const profile = await loadProfileById(req.params.id);
     if (!profile) return res.status(404).json({ error: "Farm not found." });
-    if (!canMutateProfile(req.authUser, profile) && !canAccessPipelineDesk(req.authUser)) {
+    if (
+      profile.scoutedBy !== req.authUser.id &&
+      !canMutateProfile(req.authUser, profile) &&
+      !canAccessPipelineDesk(req.authUser)
+    ) {
       return res.status(403).json({ error: "Not allowed." });
     }
     const [media, visits] = await Promise.all([
@@ -588,6 +636,11 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
         ]
       );
       audit(req.authUser, "pipeline.scout.visit", "farm_visit", ins.rows[0].id, { farmProfileId: profile.id });
+      const { emitCrmMilestone } = await import("../services/pipeline/crmBridge.js");
+      void emitCrmMilestone({
+        eventType: "visit.completed",
+        entities: [{ type: "farm_profile", id: profile.id }],
+      });
       res.status(201).json({ visit: ins.rows[0], profile: await loadProfileById(profile.id) });
     } catch (e) {
       res.status(503).json({ error: e instanceof Error ? e.message : "Could not save visit." });
@@ -601,35 +654,71 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
     }
     const profile = await loadProfileById(req.params.id);
     if (!profile) return res.status(404).json({ error: "Farm not found." });
-    if (profile.companyId) return res.status(400).json({ error: "This farm is already claimed." });
+    if (profile.companyId && profile.ownerUserId) {
+      return res.status(400).json({ error: "This seller already has an account." });
+    }
     const email = str(req.body?.email, 160);
     const phone = str(req.body?.phone, 40);
-    if (!email && !phone) return res.status(400).json({ error: "Email or phone is required." });
+    const origin = marketPublicOrigin();
+    if (!origin) {
+      return res.status(503).json({
+        error: "FRONTEND_URL is not set. An admin must set it before invite links work.",
+      });
+    }
     try {
-      const token = createClaimToken();
-      await dbQuery(
-        `INSERT INTO farm_profile_claims (farm_profile_id, invited_email, invited_phone, token)
-         VALUES ($1::uuid, $2, $3, $4)`,
-        [profile.id, email, phone, token]
+      const recent = await dbQuery(
+        `SELECT created_at AS "createdAt" FROM farm_profile_claims
+          WHERE farm_profile_id = $1::uuid AND status = 'pending'
+          ORDER BY created_at DESC LIMIT 1`,
+        [profile.id]
       );
-      await dbQuery(
-        `UPDATE farm_profiles SET claim_email = $2, claim_token = $3, updated_at = now() WHERE id = $1::uuid`,
-        [profile.id, email, token]
-      );
-      const origin = String(process.env.FRONTEND_URL || "").replace(/\/$/, "");
-      if (email) {
-        await notifyMany([{ email, fullName: profile.displayName }], () =>
-          buildFarmClaimEmail({
-            name: profile.displayName,
-            claimUrl: origin ? `${origin}/signup?claim=${token}` : token,
-            farmName: profile.displayName,
-          })
-        );
+      if (recent.rows[0]?.createdAt) {
+        const age = Date.now() - new Date(recent.rows[0].createdAt).getTime();
+        if (age >= 0 && age < 20_000) {
+          return res.status(429).json({ error: "Wait a few seconds before sending another invite link." });
+        }
       }
-      audit(req.authUser, "pipeline.scout.invite", "farm_profile", profile.id, {});
-      res.status(201).json({ ok: true, token });
+      const token = createClaimToken();
+      const tokenHash = hashClaimToken(token);
+      const url = claimSignupUrl(origin, token);
+      if (!url.ok) {
+        return res.status(503).json({ error: url.error });
+      }
+      await dbQuery(
+        `UPDATE farm_profile_claims SET status = 'revoked'
+          WHERE farm_profile_id = $1::uuid AND status = 'pending'`,
+        [profile.id]
+      );
+      await dbQuery(
+        `INSERT INTO farm_profile_claims
+           (farm_profile_id, invited_email, invited_phone, token, token_hash, expires_at)
+         VALUES ($1::uuid, $2, $3, $4, $4, now() + interval '14 days')`,
+        [profile.id, email || null, phone || null, tokenHash]
+      );
+      await dbQuery(
+        `UPDATE farm_profiles SET claim_email = $2, claim_token = NULL, updated_at = now() WHERE id = $1::uuid`,
+        [profile.id, email || null]
+      );
+      let emailSent = false;
+      let emailError = null;
+      if (email) {
+        try {
+          await notifyMany([{ email, fullName: profile.displayName }], () =>
+            buildFarmClaimEmail({
+              name: profile.displayName,
+              claimUrl: url.url,
+              farmName: profile.displayName,
+            })
+          );
+          emailSent = true;
+        } catch (err) {
+          emailError = err instanceof Error ? err.message : "Email could not be sent.";
+        }
+      }
+      audit(req.authUser, "pipeline.scout.invite", "farm_profile", profile.id, { emailSent });
+      res.status(201).json({ ok: true, url: url.url, emailSent, emailError });
     } catch (e) {
-      res.status(503).json({ error: e instanceof Error ? e.message : "Could not send invite." });
+      res.status(503).json({ error: e instanceof Error ? e.message : "Could not create invite link." });
     }
   });
 
@@ -660,8 +749,12 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
   router.post("/verify/profile/:id", async (req, res) => {
     if (!requireDb(res) || !requireDesk(req, res)) return;
     const status = str(req.body?.status, 20);
+    const reason = str(req.body?.reason, 500);
     if (!["verified", "rejected"].includes(status)) {
       return res.status(400).json({ error: "status must be verified or rejected." });
+    }
+    if (status === "rejected" && !reason) {
+      return res.status(400).json({ error: "A reason is required to reject a farm." });
     }
     try {
       const profile = await loadProfileById(req.params.id);
@@ -672,9 +765,10 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
             verified_at = CASE WHEN $2 = 'verified' THEN now() ELSE NULL END,
             verified_by = $3::uuid,
             published = CASE WHEN $2 = 'rejected' THEN false ELSE published END,
+            rejection_reason = CASE WHEN $2 = 'rejected' THEN $4 ELSE NULL END,
             updated_at = now()
           WHERE id = $1::uuid`,
-        [req.params.id, status, req.authUser.id]
+        [req.params.id, status, req.authUser.id, reason || null]
       );
       if (status === "verified" && str(req.body?.grantConsent, 10) === "true") {
         await dbQuery(
@@ -684,6 +778,13 @@ export function registerPipelineStorefrontRoutes(router, ctx) {
         );
       }
       audit(req.authUser, "pipeline.verify.profile", "farm_profile", req.params.id, { status });
+      if (status === "verified") {
+        const { emitCrmMilestone } = await import("../services/pipeline/crmBridge.js");
+        void emitCrmMilestone({
+          eventType: "seller.verified",
+          entities: [{ type: "farm_profile", id: req.params.id }],
+        });
+      }
       const next = await loadProfileById(req.params.id);
       res.json({ ok: true, profile: next });
       if (status === "verified" && next.companyId) {

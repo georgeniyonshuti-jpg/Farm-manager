@@ -10,6 +10,8 @@
     "test:clevafarm": "node scripts/testClevafarmConnection.js",
     "diagnose:clevafarm": "node scripts/diagnoseClevaFarmSync.js",
     "backfill:migration-map": "node scripts/backfill-migration-map.js",
+    "cleanup:demo": "node scripts/cleanupDemoData.js",
+    "provision:market-superset": "node scripts/provisionMarketSuperset.js",
     "export:clevafarm-registry": "node ../scripts/export-clevafarm-registry.js",
     "diff:clevafarm-registry": "node ../scripts/diff-clevafarm-registry.js"
   },

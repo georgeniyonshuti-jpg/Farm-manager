@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import type { UserRole } from "../../auth/types";
+import { accountKindLabel } from "../../auth/permissions";
 import { useAuth } from "../../auth/AuthContext";
 import { isLaborerLocaleUser, useLaborerT } from "../../i18n/laborerI18n";
 import { LaborerLanguageToggle } from "../LaborerLanguageToggle";
@@ -50,7 +51,7 @@ export function AppTopBar({
   const { companyHref } = useCompanyNav();
   const location = useLocation();
   const chrome = usePageChrome();
-  const roleBadge = useLaborerT(user ? ROLE_LABEL_EN[user.role] : "");
+  const roleBadge = useLaborerT(user ? (accountKindLabel(user) ?? ROLE_LABEL_EN[user.role]) : "");
   const appName = useLaborerT("Clevafarm");
   const linkEarnings = useLaborerT("My earnings");
   const batchCta = useLaborerT("Round schedule");

@@ -154,7 +154,7 @@ export function StoreSellForm({ locale }: { locale: StoreLocale }) {
         </label>
       </div>
       {error ? <p className="text-sm text-[#9a3412]">{error}</p> : null}
-      <button type="submit" className="store-btn store-btn-ember w-full" disabled={busy}>
+      <button type="submit" className="store-btn store-btn-ember store-sheet-action w-full" disabled={busy}>
         {busy ? t("sending") : t("listBirds")}
       </button>
       <p className="store-form-footer">{t("formFooterSell")}</p>

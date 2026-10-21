@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
 import { ManagerPage } from "../../components/layout/ManagerPage";
 import { Button, NoticeStrip, PageTabs } from "../../components/ui";
@@ -24,8 +24,17 @@ const TABS: { value: MarketOpsTab; label: string }[] = [
   { value: "scouts", label: "Scouts" },
 ];
 
-function parseTab(raw: string | null): MarketOpsTab {
-  if (raw === "book" || raw === "buyers" || raw === "pricing" || raw === "scouts" || raw === "today") return raw;
+function parseTab(raw: string | null): MarketOpsTab | "analytics" {
+  if (
+    raw === "book" ||
+    raw === "buyers" ||
+    raw === "pricing" ||
+    raw === "scouts" ||
+    raw === "analytics" ||
+    raw === "today"
+  ) {
+    return raw;
+  }
   return "today";
 }
 
@@ -35,7 +44,8 @@ export function MarketOpsPage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const allowed = canAccessPipelineDesk(user);
-  const tab = parseTab(params.get("tab"));
+  const rawTab = parseTab(params.get("tab"));
+  const tab: MarketOpsTab = rawTab === "analytics" ? "today" : rawTab;
   const panel = params.get("panel") ?? "";
   const queue = params.get("queue") ?? "";
   const demo = forceMarketDemoFromUrl(params.toString());
@@ -79,6 +89,22 @@ export function MarketOpsPage() {
     );
   };
 
+  const openOpsTab = (t: MarketOpsTab, opts?: { panel?: string; queue?: string }) => {
+    setParams(
+      (prev) => {
+        const n = new URLSearchParams(prev);
+        if (t === "today") n.delete("tab");
+        else n.set("tab", t);
+        if (opts?.panel) n.set("panel", opts.panel);
+        else n.delete("panel");
+        if (opts?.queue) n.set("queue", opts.queue);
+        else n.delete("queue");
+        return n;
+      },
+      { replace: true }
+    );
+  };
+
   const setPanel = (next: string) => {
     setParams(
       (prev) => {
@@ -113,6 +139,10 @@ export function MarketOpsPage() {
     return null;
   }, [tab, navigate, companyHref]);
 
+  if (rawTab === "analytics") {
+    return <Navigate to={companyHref("/dashboard/market")} replace />;
+  }
+
   if (!allowed) {
     return (
       <ManagerPage>
@@ -130,7 +160,14 @@ export function MarketOpsPage() {
           <PageTabs
             aria-label="Market areas"
             value={tab}
-            onChange={(v) => setTab(parseTab(v))}
+            onChange={(v) => {
+              const next = parseTab(v);
+              if (next === "analytics") {
+                navigate(companyHref("/dashboard/market"));
+                return;
+              }
+              setTab(next);
+            }}
             options={TABS}
           />
         }
@@ -149,26 +186,7 @@ export function MarketOpsPage() {
         </NoticeStrip>
       ) : null}
 
-      {tab === "today" ? (
-        <TodayPanel
-          queue={queue}
-          onOpenTab={(t, opts) => {
-            setParams(
-              (prev) => {
-                const n = new URLSearchParams(prev);
-                if (t === "today") n.delete("tab");
-                else n.set("tab", t);
-                if (opts?.panel) n.set("panel", opts.panel);
-                else n.delete("panel");
-                if (opts?.queue) n.set("queue", opts.queue);
-                else n.delete("queue");
-                return n;
-              },
-              { replace: true }
-            );
-          }}
-        />
-      ) : null}
+      {tab === "today" ? <TodayPanel queue={queue} onOpenTab={openOpsTab} /> : null}
       {tab === "book" ? <BookPanel /> : null}
       {tab === "buyers" ? (
         <BuyersPanel

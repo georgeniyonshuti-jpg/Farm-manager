@@ -71,7 +71,7 @@ export function FieldStepSheet({
         <Button
           type="button"
           size="field"
-          className="w-full"
+          className="sticky bottom-2 z-10 w-full shadow-[0_-12px_16px_var(--background-color)]"
           disabled={busy || submitDisabled}
           onClick={onSubmit}
         >
@@ -81,7 +81,7 @@ export function FieldStepSheet({
         <Button
           type="button"
           size="field"
-          className="w-full"
+          className="sticky bottom-2 z-10 w-full shadow-[0_-12px_16px_var(--background-color)]"
           disabled={nextDisabled}
           onClick={onNext}
         >

@@ -28,7 +28,10 @@ describe("Farm PWA Insights Trends surface", () => {
     assert.match(text, /fetchInsightsMeta/);
     assert.match(text, /embedDashboard/);
     assert.match(text, /hideChartControls: true/);
-    assert.match(text, /Insights is not configured yet/);
+    assert.match(text, /Barn Insights is not linked/);
+    assert.match(text, /Open Market overview/);
+    assert.match(text, /surface === "market"/);
+    assert.match(text, /fetchMarketInsightsMeta/);
   });
 
   it("insights.api hits farmapi routes", () => {
@@ -36,5 +39,24 @@ describe("Farm PWA Insights Trends surface", () => {
     assert.match(text, /\/api\/insights\/meta/);
     assert.match(text, /\/api\/insights\/embed\/token/);
     assert.match(text, /\/api\/insights\/packs/);
+  });
+
+  it("Market analytics lives on dashboard overview + trends", () => {
+    const ops = readFileSync(join(srcRoot, "pages/market/MarketOpsPage.tsx"), "utf8");
+    assert.doesNotMatch(ops, /AnalyticsPanel/);
+    assert.match(ops, /\/dashboard\/market/);
+
+    const overview = readFileSync(
+      join(srcRoot, "pages/dashboards/MarketOverviewPage.tsx"),
+      "utf8"
+    );
+    assert.match(overview, /AnalyticsPanel/);
+    assert.match(overview, /mode="glance"/);
+
+    const trends = readFileSync(
+      join(srcRoot, "pages/dashboards/MarketTrendsPage.tsx"),
+      "utf8"
+    );
+    assert.match(trends, /mode="deep"/);
   });
 });

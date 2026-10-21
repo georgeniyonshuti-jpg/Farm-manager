@@ -459,6 +459,15 @@ export function registerPipelineFulfillmentRoutes(router, ctx) {
           true
         );
       } else if (result.settle) {
+        const { emitCrmMilestone } = await import("../services/pipeline/crmBridge.js");
+        void emitCrmMilestone({
+          eventType: "trade.first_completed",
+          entities: [
+            { type: "pipeline_buyer", id: job.buyerId },
+            { type: "farm_profile", id: job.farmProfileId },
+            { type: "pipeline_lot", id: job.lotId },
+          ],
+        });
         void store.notifyParties(job, (u) =>
           buildFulfillmentSettledEmail({
             name: u.fullName,
@@ -500,6 +509,15 @@ export function registerPipelineFulfillmentRoutes(router, ctx) {
     await store.writePatch(job.id, result.patch);
     const commission = await store.accrueIfSettled(job, result.patch, req.authUser.id);
     await store.refreshLotStatus(job.lotId);
+    const { emitCrmMilestone } = await import("../services/pipeline/crmBridge.js");
+    void emitCrmMilestone({
+      eventType: "trade.first_completed",
+      entities: [
+        { type: "pipeline_buyer", id: job.buyerId },
+        { type: "farm_profile", id: job.farmProfileId },
+        { type: "pipeline_lot", id: job.lotId },
+      ],
+    });
     audit(req.authUser, "pipeline.fulfill.settle", "pipeline_match", job.id, {
       commissionAccrued: commission.accrued,
     });

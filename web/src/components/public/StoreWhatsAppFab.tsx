@@ -39,3 +39,18 @@ export function StoreWhatsAppFab({
     </a>
   );
 }
+
+/** Icon in the signed-in market header. The floating button stays on the public site. */
+export function StoreWhatsAppHeader({ locale: localeProp }: { locale?: StoreLocale }) {
+  const ctx = useOptionalMarketLocale();
+  const locale = ctx?.locale ?? localeProp ?? "en";
+  const t = (k: Parameters<typeof storeT>[1]) => storeT(locale, k);
+  const href = waMeHref(clevaMarketWhatsapp(), t("waPrefill"));
+  if (!href) return null;
+
+  return (
+    <a className="store-wa-header" href={href} target="_blank" rel="noreferrer" aria-label={t("waFab")}>
+      <WhatsAppMark />
+    </a>
+  );
+}

@@ -18,7 +18,7 @@ export function StoreSideRecovery({
     return (
       <p className={`text-sm ${muted}`}>
         {t("forFarmsLine")}{" "}
-        <Link to="/market?sell=1" className={linkClass}>
+        <Link to="/market/sell" className={linkClass}>
           {t("listBirds")}
         </Link>
       </p>

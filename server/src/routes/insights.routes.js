@@ -1,5 +1,6 @@
 /**
  * Farm Insights (embedded Superset) — meta, guest token proxy, pack prefs.
+ * Market Analytics: /market/* (native Command Center + optional Superset embed).
  */
 
 import express from "express";
@@ -17,6 +18,23 @@ import {
   normalizePackPayload,
   packsSettingsKey,
 } from "../services/insightsPacks.js";
+import {
+  mergeMarketPackPreferences,
+  normalizeMarketPackPayload,
+  marketPacksSettingsKey,
+} from "../services/marketInsightsPacks.js";
+import { buildMarketAnalytics } from "../services/pipeline/marketAnalytics.js";
+import {
+  buildRecruitmentAnalytics,
+  loadMarketExpectations,
+  saveMarketExpectations,
+} from "../services/pipeline/marketRecruitment.js";
+import {
+  loadMarketDashboardMap,
+  packDashboardsFromMap,
+  isMarketSupersetEmbedReady,
+} from "../services/superset/marketDashboardMap.js";
+import { getSupersetPublicUrl, mintSupersetGuestToken } from "../services/superset/guestToken.js";
 
 const router = express.Router();
 
@@ -35,6 +53,10 @@ const ROLE_RANK = {
 
 function isManagerOrAbove(user) {
   return (ROLE_RANK[user?.role] ?? -1) >= (ROLE_RANK.manager ?? 999);
+}
+
+function isPipelineDesk(user) {
+  return user?.role === "superuser" || user?.role === "sales_coordinator";
 }
 
 /**
@@ -93,6 +115,40 @@ async function savePackPrefs(companyId, prefs, dbQuery) {
      ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value`,
     [packsSettingsKey(companyId), JSON.stringify(prefs)]
   );
+}
+
+async function loadMarketPackPrefs(companyId, dbQuery, hasDb) {
+  if (!hasDb || !dbQuery || !companyId) {
+    return mergeMarketPackPreferences(null);
+  }
+  try {
+    const r = await dbQuery("SELECT setting_value FROM app_settings WHERE setting_key = $1", [
+      marketPacksSettingsKey(companyId),
+    ]);
+    if (!r.rows.length) return mergeMarketPackPreferences(null);
+    let parsed;
+    try {
+      parsed = JSON.parse(r.rows[0].setting_value);
+    } catch {
+      parsed = null;
+    }
+    return mergeMarketPackPreferences(parsed);
+  } catch {
+    return mergeMarketPackPreferences(null);
+  }
+}
+
+async function saveMarketPackPrefs(companyId, prefs, dbQuery) {
+  await dbQuery(
+    `INSERT INTO app_settings (setting_key, setting_value)
+     VALUES ($1, $2)
+     ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value`,
+    [marketPacksSettingsKey(companyId), JSON.stringify(prefs)]
+  );
+}
+
+async function resolveCompanyId(req) {
+  return (await getUserCompanyId(req.authUser?.id)) || req.authUser?.companyId || null;
 }
 
 /**
@@ -226,6 +282,183 @@ export function createInsightsRouter(deps) {
       res.json(mergePackPreferences(prefs));
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : "Unable to save packs" });
+    }
+  });
+
+  // ── Market Analytics (no ERPNext link required) ──────────────────────────
+
+  router.get("/market/meta", async (req, res) => {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const packState = await loadMarketPackPrefs(companyId, dbQuery, hasDb());
+      const map = await loadMarketDashboardMap(companyId, dbQuery, hasDb());
+      const embedReady = isMarketSupersetEmbedReady(map);
+      const nativeReady = hasDb() && Boolean(dbQuery);
+      res.json({
+        configured: nativeReady || embedReady,
+        mode: embedReady ? "superset" : nativeReady ? "native" : "unconfigured",
+        reason: nativeReady || embedReady ? undefined : "database_unavailable",
+        marketAnalyticsPath: "/dashboard/market",
+        barnTrendsHint:
+          "Barn Trends (Management → Trends) needs an ERPNext company link. Marketplace KPIs live under Market overview / Market trends.",
+        supersetUrl: embedReady ? getSupersetPublicUrl() : "",
+        dashboardUuid: map.mega || "",
+        packDashboards: packDashboardsFromMap(map),
+        dataAsOf: new Date().toISOString(),
+        packs: packState.packs,
+        packsNote: packState.note,
+      });
+    } catch (e) {
+      res.status(500).json({
+        configured: false,
+        mode: "unconfigured",
+        error: e instanceof Error ? e.message : "Unable to load market Insights meta",
+      });
+    }
+  });
+
+  router.get("/market/embed/token", async (req, res) => {
+    try {
+      const companyId = await resolveCompanyId(req);
+      const map = await loadMarketDashboardMap(companyId, dbQuery, hasDb());
+      if (!isMarketSupersetEmbedReady(map)) {
+        res.status(503).json({
+          error: "Market Superset dashboards are not configured. Native Analytics is available.",
+          code: "market_superset_not_configured",
+        });
+        return;
+      }
+      const qUuid =
+        typeof req.query.dashboardUuid === "string" ? req.query.dashboardUuid.trim() : "";
+      const dashboardUuid = qUuid || map.mega || Object.values(packDashboardsFromMap(map))[0];
+      const payload = await mintSupersetGuestToken({
+        dashboardUuid,
+        username: req.authUser?.email || "farm-market-embed",
+        rls: [],
+      });
+      res.json({
+        ...payload,
+        dataAsOf: new Date().toISOString(),
+        rlsApplied: false,
+      });
+    } catch (e) {
+      const status = e?.status || 502;
+      res.status(status).json({
+        error: e instanceof Error ? e.message : "Unable to mint market guest token",
+        code: e?.code || "market_token_error",
+      });
+    }
+  });
+
+  router.get("/market/summary", async (req, res) => {
+    try {
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable.", code: "db_unavailable" });
+        return;
+      }
+      const days = Number(req.query.days) || 30;
+      const data = await buildMarketAnalytics({ dbQuery, days });
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({
+        error: e instanceof Error ? e.message : "Unable to build market analytics",
+      });
+    }
+  });
+
+  router.get("/market/packs", async (req, res) => {
+    try {
+      if (!isManagerOrAbove(req.authUser)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      const companyId = await resolveCompanyId(req);
+      res.json(await loadMarketPackPrefs(companyId, dbQuery, hasDb()));
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Unable to load packs" });
+    }
+  });
+
+  router.put("/market/packs", async (req, res) => {
+    try {
+      if (!isManagerOrAbove(req.authUser)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      const companyId = await resolveCompanyId(req);
+      if (!companyId) {
+        res.status(400).json({ error: "No company linked to this user." });
+        return;
+      }
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable." });
+        return;
+      }
+      const prefs = normalizeMarketPackPayload(req.body?.packs ?? req.body);
+      await saveMarketPackPrefs(companyId, prefs, dbQuery);
+      res.json(mergeMarketPackPreferences(prefs));
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Unable to save packs" });
+    }
+  });
+
+  // ── Recruitment (growth altitude) ────────────────────────────────────────
+
+  router.get("/market/recruitment", async (req, res) => {
+    try {
+      if (!isPipelineDesk(req.authUser) && !isManagerOrAbove(req.authUser)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable.", code: "db_unavailable" });
+        return;
+      }
+      const days = Number(req.query.days) || 7;
+      const data = await buildRecruitmentAnalytics({ dbQuery, days });
+      res.json(data);
+    } catch (e) {
+      res.status(500).json({
+        error: e instanceof Error ? e.message : "Unable to build recruitment analytics",
+      });
+    }
+  });
+
+  router.get("/market/expectations", async (req, res) => {
+    try {
+      if (!isPipelineDesk(req.authUser) && !isManagerOrAbove(req.authUser)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable." });
+        return;
+      }
+      res.json({ expectations: await loadMarketExpectations(dbQuery) });
+    } catch (e) {
+      res.status(500).json({
+        error: e instanceof Error ? e.message : "Unable to load expectations",
+      });
+    }
+  });
+
+  router.put("/market/expectations", async (req, res) => {
+    try {
+      if (!isPipelineDesk(req.authUser) && !isManagerOrAbove(req.authUser)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable." });
+        return;
+      }
+      const body = req.body?.expectations ?? req.body;
+      const expectations = await saveMarketExpectations(dbQuery, body);
+      res.json({ expectations });
+    } catch (e) {
+      res.status(500).json({
+        error: e instanceof Error ? e.message : "Unable to save expectations",
+      });
     }
   });
 

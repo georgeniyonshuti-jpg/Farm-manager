@@ -146,6 +146,34 @@ export function canBrowseMarket(user: SessionUser | null): boolean {
   return isBuyerRole(user) || canAccessPipelineDesk(user);
 }
 
+export const SCOUT_PENDING_KEY = "scout_pending";
+const SCOUT_REJECTED_KEY = "scout_rejected";
+const MARKET_SCOUT_PAGE_KEYS = new Set(["farm_pipeline", "farm_market"]);
+
+/** Self-serve scout: pending, rejected, or a vet whose pages are only the scout tools. */
+export function isMarketScout(user: SessionUser | null): boolean {
+  if (!user || user.role !== "vet") return false;
+  const keys = user.departmentKeys ?? [];
+  if (keys.includes(SCOUT_PENDING_KEY) || keys.includes(SCOUT_REJECTED_KEY)) return true;
+  const access = Array.isArray(user.pageAccess) ? user.pageAccess.filter(Boolean) : [];
+  return access.length > 0 && access.every((key) => MARKET_SCOUT_PAGE_KEYS.has(key));
+}
+
+/** What this account is on the market. Farm staff keep their role name. */
+export function accountKindLabel(user: SessionUser | null): "Seller" | "Buyer" | "Scout" | null {
+  if (!user) return null;
+  if (isBuyerRole(user)) return "Buyer";
+  if (isMarketOnlySeller(user)) return "Seller";
+  if (isMarketScout(user)) return "Scout";
+  return null;
+}
+
+export function isScoutApplicant(user: SessionUser | null): boolean {
+  if (!user) return false;
+  // Legacy flag only — new scouts are not blocked. Prefer people_onboarding stage.
+  return user.departmentKeys.includes(SCOUT_PENDING_KEY);
+}
+
 /** Vet / manager inventory scout (managed or off-platform lots). */
 export function canScoutPipeline(user: SessionUser | null): boolean {
   if (!user) return false;
@@ -296,6 +324,11 @@ export const PAGE_ACCESS_DEFS: Array<{ key: string; label: string; prefixes: str
   { key: "dashboard_laborer", label: "Action center", prefixes: ["/dashboard/laborer"] },
   { key: "dashboard_vet", label: "Vet home", prefixes: ["/dashboard/vet"] },
   { key: "dashboard_management", label: "Today", prefixes: ["/dashboard/management"] },
+  {
+    key: "dashboard_market",
+    label: "Market overview",
+    prefixes: ["/dashboard/market"],
+  },
   { key: "laborer_earnings", label: "My earnings", prefixes: ["/laborer/earnings"] },
   { key: "farm_checkin", label: "Round check-in", prefixes: ["/farm/checkin"] },
   { key: "farm_feed", label: "Feed log", prefixes: ["/farm/feed"] },
@@ -324,6 +357,7 @@ export const PAGE_ACCESS_DEFS: Array<{ key: string; label: string; prefixes: str
   { key: "cleva_credit_scoring", label: "Credit scoring", prefixes: ["/cleva/credit-scoring"] },
   { key: "admin_system_config", label: "Type settings", prefixes: ["/admin/system-config"] },
   { key: "admin_users", label: "User management", prefixes: ["/admin/users"] },
+  { key: "admin_signups", label: "Signups CRM", prefixes: ["/admin/signups"] },
 ];
 const PAGE_KEYS = new Set(PAGE_ACCESS_DEFS.map((d) => d.key));
 
@@ -336,8 +370,15 @@ export function canAccessPageByKey(user: SessionUser | null, key: string): boole
   const access = Array.isArray(user.pageAccess) ? user.pageAccess : [];
   if (access.length === 0) return true;
   if (access.includes(key)) return true;
+  // Desk roles always see Signups CRM.
+  if (key === "admin_signups" && user.role === "sales_coordinator") return true;
   // Legacy pageAccess snapshots predate farm_market; pipeline desk ops need market routes.
   if (key === "farm_market") {
+    if (user.role === "sales_coordinator") return true;
+    if (access.includes("farm_pipeline")) return true;
+  }
+  // Market overview / trends sit next to farm Today for desk roles.
+  if (key === "dashboard_market") {
     if (user.role === "sales_coordinator") return true;
     if (access.includes("farm_pipeline")) return true;
   }

@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../../../auth/AuthContext";
 import { ErrorState, SkeletonList } from "../../../components/LoadingSkeleton";
+import { useCompanyNav } from "../../../hooks/useCompanyNav";
 import {
   fetchMarketJobs,
   fetchMarketLeads,
   fetchMarketOpsSummary,
+  fetchMarketReach,
   fetchOpsCommissions,
   fetchVerifyQueue,
   fetchWeighQueue,
@@ -39,6 +42,7 @@ type QueueCard = {
 
 export function TodayPanel({ queue, onOpenTab }: Props) {
   const { token } = useAuth();
+  const { companyHref } = useCompanyNav();
   const [apiFailed, setApiFailed] = useState(false);
   const demo = useMarketDemoFlag(apiFailed);
   const [loading, setLoading] = useState(true);
@@ -57,6 +61,12 @@ export function TodayPanel({ queue, onOpenTab }: Props) {
   const [unpaidCommissions, setUnpaidCommissions] = useState(0);
   const [newLeads, setNewLeads] = useState(0);
   const [jobs, setJobs] = useState<typeof DEMO_JOBS>([]);
+  const [reach, setReach] = useState<{
+    todayOpened: number;
+    week: { opened: number; joinStarted: number; accounts: number };
+    sources: { source: string; opened: number; joinStarted: number; accounts: number }[];
+    links: { source: string; url: string }[];
+  } | null>(null);
 
   const reload = useCallback(async () => {
     if (!token && !demo) return;
@@ -85,10 +95,11 @@ export function TodayPanel({ queue, onOpenTab }: Props) {
         setJobs(DEMO_JOBS);
         setUnpaidCommissions(DEMO_COMMISSIONS.length);
         setNewLeads(DEMO_LEADS.length);
+        setReach(null);
         setApiFailed(false);
         return;
       }
-      const [summary, weigh, verify, jobsRes, commissions, leads] = await Promise.all([
+      const [summary, weigh, verify, jobsRes, commissions, leads, reachRes] = await Promise.all([
         fetchMarketOpsSummary(token).catch(() => null),
         fetchWeighQueue(token, true).catch(() => ({ lots: [], dueThisWeek: 0, visitFeeRwf: 0 })),
         fetchVerifyQueue(token).catch(() => ({
@@ -96,10 +107,12 @@ export function TodayPanel({ queue, onOpenTab }: Props) {
           buyers: [],
           lots: [],
           profiles: [],
+          scouts: [],
         })),
         fetchMarketJobs(token, "open").catch(() => ({ jobs: [] })),
         fetchOpsCommissions(token, "accrued").catch(() => ({ commissions: [] })),
         fetchMarketLeads(token, "new").catch(() => ({ leads: [] })),
+        fetchMarketReach(token).catch(() => null),
       ]);
       // If every call soft-failed empty and summary is null, try a hard probe
       if (!summary) {
@@ -119,7 +132,8 @@ export function TodayPanel({ queue, onOpenTab }: Props) {
         (verify.companies?.length ?? 0) +
         (verify.buyers?.length ?? 0) +
         (verify.lots?.length ?? 0) +
-        (verify.profiles?.length ?? 0);
+        (verify.profiles?.length ?? 0) +
+        (verify.scouts?.length ?? 0);
       setVerifyPending(v);
       setUnpaidLocks(
         jobsRes.jobs.filter(
@@ -134,6 +148,7 @@ export function TodayPanel({ queue, onOpenTab }: Props) {
       setJobs(jobsRes.jobs);
       setUnpaidCommissions(commissions.commissions.length);
       setNewLeads(leads.leads.length);
+      setReach(reachRes);
     } catch (e) {
       if (isMarketDemoEligibleError(e)) {
         setApiFailed(true);
@@ -200,6 +215,23 @@ export function TodayPanel({ queue, onOpenTab }: Props) {
 
   return (
     <div className="space-y-stack">
+      <LinkOpens reach={reach} />
+
+      <div className="flex flex-wrap gap-3">
+        <Link
+          to={companyHref("/dashboard/market")}
+          className="text-sm font-semibold text-[var(--primary-color)] hover:underline"
+        >
+          Market overview →
+        </Link>
+        <Link
+          to={companyHref("/dashboard/market/recruitment")}
+          className="text-sm font-semibold text-[var(--primary-color)] hover:underline"
+        >
+          Recruitment →
+        </Link>
+      </div>
+
       {!demo && ops ? (
         <div className="flex flex-wrap gap-3 type-caption tabular-nums text-[var(--text-primary)]">
           <span>{ops.openLotBirds} birds open</span>
@@ -239,6 +271,59 @@ export function TodayPanel({ queue, onOpenTab }: Props) {
         <JobsInline jobs={jobs} onDone={() => onOpenTab("today")} />
       ) : null}
     </div>
+  );
+}
+
+function sourceLabel(source: string): string {
+  if (source === "instagram") return "Instagram";
+  if (source === "whatsapp") return "WhatsApp";
+  if (source === "facebook") return "Facebook";
+  if (source === "direct") return "Direct";
+  return source;
+}
+
+function LinkOpens({
+  reach,
+}: {
+  reach: {
+    todayOpened: number;
+    week: { opened: number; joinStarted: number; accounts: number };
+    sources: { source: string; opened: number }[];
+    links: { source: string; url: string }[];
+  } | null;
+}) {
+  const { companyHref } = useCompanyNav();
+  const week = reach?.week ?? { opened: 0, joinStarted: 0, accounts: 0 };
+  const sourceLine = (reach?.sources ?? [])
+    .filter((row) => row.opened > 0)
+    .map((row) => `${sourceLabel(row.source)} ${row.opened}`)
+    .join(" · ");
+
+  return (
+    <section className="rounded-[var(--radius-xl)] border border-[var(--border-color)] bg-[var(--surface-card)] px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="type-label text-[var(--text-primary)]">Link opens</p>
+          <p className="mt-1 font-display text-2xl font-semibold tabular-nums text-[var(--text-primary)]">
+            {reach?.todayOpened ?? 0}
+            <span className="ml-2 type-caption font-sans font-medium text-[var(--text-secondary)]">today</span>
+          </p>
+        </div>
+        <Link
+          to={companyHref("/admin/signups?tab=funnel")}
+          className="text-sm font-semibold text-[var(--primary-color)] hover:underline"
+        >
+          Open Signups
+        </Link>
+      </div>
+      <p className="mt-2 text-sm text-[var(--text-primary)]">
+        Last 7 days · {week.opened} opened · {week.joinStarted} started joining · {week.accounts} accounts
+      </p>
+      {sourceLine ? <p className="mt-1 text-sm text-[var(--text-secondary)]">{sourceLine}</p> : null}
+      <p className="mt-2 text-xs text-[var(--text-muted)]">
+        People, failed attempts, and ad links live in Signups.
+      </p>
+    </section>
   );
 }
 

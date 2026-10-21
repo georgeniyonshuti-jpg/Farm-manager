@@ -34,6 +34,7 @@ import { useActiveFlock } from "../../context/ActiveFlockContext";
 import { fieldRoute } from "../../lib/fieldRoutes";
 import { useLocation } from "react-router-dom";
 import { stripTenantPrefix } from "../../lib/tenancy";
+import { defaultHomePathForRole } from "../../routes/ProtectedRoute";
 import { useOptionalMarketLocale } from "../../context/MarketLocaleContext";
 import { storeT } from "../../lib/publicStoreCopy";
 
@@ -134,6 +135,12 @@ export function FieldShellBottomNav() {
         icon: <Inbox className={iconCls} aria-hidden />,
       },
       {
+        to: companyHref("/farm/pipeline/messages"),
+        label: "Messages",
+        icon: <Inbox className={iconCls} aria-hidden />,
+        active: appPath.startsWith("/farm/pipeline/messages"),
+      },
+      {
         to: companyHref("/farm/pipeline?tab=scouts"),
         label: "Scouts",
         icon: <BadgeCheck className={iconCls} aria-hidden />,
@@ -145,6 +152,51 @@ export function FieldShellBottomNav() {
       },
     ];
     return <MobileFieldBottomNav items={salesItems} ariaLabel="Market ops" />;
+  }
+
+  if (
+    canScoutPipeline(user) &&
+    !canAccessPipelineDesk(user) &&
+    !(canListFarmerMarketLots(user) && appPath.startsWith("/market"))
+  ) {
+    const onSellers = appPath.startsWith("/farm/pipeline/sellers") || appPath.startsWith("/farm/pipeline/scout/handoff");
+    const fieldScout = user.role === "vet";
+    const homeTo = fieldScout
+      ? companyHref("/farm/pipeline/home")
+      : companyHref(defaultHomePathForRole(user.role));
+    return (
+      <MobileFieldBottomNav
+        ariaLabel="Scout"
+        items={[
+          {
+            to: homeTo,
+            label: tHome,
+            end: true,
+            icon: <Home className={iconCls} aria-hidden />,
+            active: fieldScout && appPath === "/farm/pipeline/home",
+          },
+          {
+            to: companyHref("/farm/pipeline/scout?mode=offplatform"),
+            label: "Find",
+            icon: <Search className={iconCls} aria-hidden />,
+            active: appPath.startsWith("/farm/pipeline/scout") && !onSellers,
+            reselect: true,
+          },
+          {
+            to: companyHref("/farm/pipeline/sellers"),
+            label: "Sellers",
+            icon: <BadgeCheck className={iconCls} aria-hidden />,
+            active: onSellers,
+          },
+          {
+            to: companyHref("/market/commissions"),
+            label: "Earnings",
+            icon: <Wallet className={iconCls} aria-hidden />,
+            active: appPath.startsWith("/market/commissions"),
+          },
+        ]}
+      />
+    );
   }
 
   // Farmer listing shell on market routes — phone only; desktop uses PageTabs.
@@ -182,32 +234,6 @@ export function FieldShellBottomNav() {
     }
     return (
       <MobileFieldBottomNav className="md:hidden" ariaLabel="Farmer market" items={sellerItems} />
-    );
-  }
-
-  if (user.role === "vet" && canScoutPipeline(user) && appPath.startsWith("/market/commissions")) {
-    return (
-      <MobileFieldBottomNav
-        ariaLabel="Scout commissions"
-        items={[
-          {
-            to: companyHref("/dashboard/vet"),
-            label: tHome,
-            end: true,
-            icon: <Home className={iconCls} aria-hidden />,
-          },
-          {
-            to: companyHref("/market/commissions"),
-            label: "Earnings",
-            icon: <Wallet className={iconCls} aria-hidden />,
-          },
-          {
-            to: companyHref("/farm/pipeline/scout"),
-            label: "Scout",
-            icon: <Search className={iconCls} aria-hidden />,
-          },
-        ]}
-      />
     );
   }
 

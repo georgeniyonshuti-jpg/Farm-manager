@@ -76,6 +76,8 @@ import { projectionToCsv, varianceToCsv, compareToCsv, heatmapsToCsv } from "./b
 import ias41Router, { initIas41Service } from "./src/routes/ias41Routes.js";
 import farmSalesRouter, { initFarmSalesRouter } from "./src/routes/farmSales.routes.js";
 import pipelineRouter, { initPipelineRouter } from "./src/routes/pipeline.routes.js";
+import { createCrmInternalRouter, createCrmStaffRouter } from "./src/routes/crmBridge.routes.js";
+import { enqueueUserDeactivated, initCrmBridge, processCrmOutbox } from "./src/services/pipeline/crmBridge.js";
 import farmPayrollClosuresRouter, { initFarmPayrollClosuresRouter } from "./src/routes/farmPayrollClosures.routes.js";
 import erpnextRouter from "./src/routes/erpnext.routes.js";
 import { createInsightsRouter } from "./src/routes/insights.routes.js";
@@ -135,6 +137,7 @@ import {
   resolveAssignCompanyId,
 } from "./src/services/tenant/companyAdmin.js";
 import { createSaasRouter } from "./src/routes/saasRoutes.js";
+import { createSignupsRouter } from "./src/routes/signupsRoutes.js";
 import { createClevaAuthRouter } from "./src/routes/clevaAuth.routes.js";
 import { createPublicMarketRouter } from "./src/routes/publicMarket.routes.js";
 import { autoDraftReadyLots, syncManagedLotFromFlock } from "./src/services/pipeline/autoDraftLots.js";
@@ -170,6 +173,7 @@ const dbPool = process.env.DATABASE_URL
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   "https://farm.cleva.rw",
+  "https://market.cleva.rw",
   "https://farm.clevacredit.com",
   "http://localhost:5173",
   "http://127.0.0.1:5173",
@@ -209,7 +213,8 @@ app.use(cors({
     if (
       IS_PRODUCTION &&
       (/^https:\/\/([a-z0-9-]+\.)*clevacredit\.com$/i.test(origin) ||
-        /^https:\/\/(([a-z0-9-]+)\.)?farm\.cleva\.rw$/i.test(origin))
+        /^https:\/\/(([a-z0-9-]+)\.)?farm\.cleva\.rw$/i.test(origin) ||
+        /^https:\/\/market\.cleva\.rw$/i.test(origin))
     ) {
       callback(null, true);
       return;
@@ -224,7 +229,14 @@ app.use(cors({
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-ERPNext-Session"],
 }));
-app.use(express.json({ limit: "20mb" }));
+app.use(express.json({
+  limit: "20mb",
+  verify: (req, _res, buf) => {
+    if (String(req.originalUrl || "").startsWith("/api/internal/crm")) {
+      req.rawBody = buf.toString("utf8");
+    }
+  },
+}));
 app.set("trust proxy", 1); // required for Render
 app.use(session({
   // PROD-FIX: persistent session store for multi-instance deployment (reuse dbPool so IPv4 + ssl match migrate/main queries)
@@ -240,6 +252,15 @@ app.use(session({
     maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
   },
 }));
+
+app.use(
+  "/api/auth/signup",
+  systemConfig.ipWindowRateLimitMiddleware(
+    () => systemConfig.getAppSettingNumber("rate_limit_login_max", 10),
+    () => systemConfig.getAppSettingNumber("rate_limit_login_window_ms", 15 * 60 * 1000),
+    { error: "Too many signup attempts. Try again in 15 minutes." },
+  ),
+);
 
 app.use(
   "/api/auth/login",
@@ -380,6 +401,7 @@ const PAGE_ACCESS_KEYS = [
   "cleva_credit_scoring",
   "admin_system_config",
   "admin_users",
+  "admin_signups",
 ];
 const PAGE_ACCESS_KEY_SET = new Set(PAGE_ACCESS_KEYS);
 
@@ -627,6 +649,21 @@ async function requireFlockForReport(req, res, flockId) {
 
 async function hydrateUserCompanyFromDb(userRow) {
   if (!hasDb() || !userRow) return userRow;
+  if (Array.isArray(userRow.departmentKeys) && userRow.departmentKeys.includes("scout_pending")) {
+    try {
+      const keysR = await dbQuery(
+        `SELECT COALESCE(department_keys, '[]'::jsonb) AS keys FROM users WHERE id = $1::uuid`,
+        [userRow.id]
+      );
+      const next = keysR.rows[0]?.keys;
+      const list = Array.isArray(next) ? next : [];
+      if (!list.includes("scout_pending")) {
+        userRow = updateUserRecord(userRow, { departmentKeys: list });
+      }
+    } catch {
+      /* keep the pending flag until the database answers */
+    }
+  }
   if (userRow.companyId && userRow.companySlug && userRow.fieldReportingMode) return userRow;
   const r = await dbQuery(
     `SELECT u.company_id::text AS "companyId", c.slug AS "companySlug", c.name AS "companyName",
@@ -808,6 +845,17 @@ function seedUsers() {
       ...demoCompany,
     },
     {
+      id: "usr_scout",
+      email: "scout@demo.com",
+      displayName: "Field Scout",
+      passwordHash: hashPassword("demo"),
+      role: "vet",
+      businessUnitAccess: "farm",
+      canViewSensitiveFinancial: false,
+      departmentKeys: [],
+      ...demoCompany,
+    },
+    {
       id: "usr_sales",
       email: "sales@demo.com",
       displayName: "Sales Coordinator",
@@ -858,25 +906,18 @@ const LEGACY_PRODUCTION_SUPERUSER_EMAILS = ["george@clevacredit.com"];
 async function ensureRequiredProductionSuperusers() {
   if (!IS_PRODUCTION || !hasDb()) return 0;
   let upserted = 0;
-  let marketHostCompanyId = DEFAULT_COMPANY_ID;
-  let marketHostSlug = "default-farm";
-  let marketHostName = "Default farm";
-  try {
-    const { loadMarketHostCompany } = await import("./src/services/pipeline/marketHostCompany.js");
-    const host = await loadMarketHostCompany(dbQuery);
-    if (host.ok && host.company) {
-      marketHostCompanyId = host.company.id;
-      marketHostSlug = host.company.slug || "cleva-technologies";
-      marketHostName = host.company.name || "Cleva Technologies";
-    }
-  } catch (e) {
-    console.error("[ERROR]", "[startup] market host lookup:", e instanceof Error ? e.message : e);
-  }
 
   for (const requiredUser of REQUIRED_PRODUCTION_SUPERUSERS) {
     const email = String(requiredUser.email).trim().toLowerCase();
     const existingId = usersByEmail.get(email);
     const existing = existingId ? usersById.get(existingId) : null;
+    if (!existing) {
+      const prior = await dbQuery(
+        `SELECT id::text AS id, is_active FROM users WHERE lower(email) = $1`,
+        [email]
+      );
+      if (prior.rows.length > 0 && prior.rows.every((r) => r.is_active === false)) continue;
+    }
     const row = {
       id: existing?.id ?? crypto.randomUUID(),
       email,
@@ -887,17 +928,9 @@ async function ensureRequiredProductionSuperusers() {
       canViewSensitiveFinancial: true,
       departmentKeys: [],
       pageAccess: [...PAGE_ACCESS_KEYS],
-      companyId: existing?.companyId && existing.companyId !== DEFAULT_COMPANY_ID
-        ? existing.companyId
-        : marketHostCompanyId,
-      companySlug:
-        existing?.companyId && existing.companyId !== DEFAULT_COMPANY_ID
-          ? existing.companySlug
-          : marketHostSlug,
-      companyName:
-        existing?.companyId && existing.companyId !== DEFAULT_COMPANY_ID
-          ? existing.companyName
-          : marketHostName,
+      companyId: existing?.companyId || DEFAULT_COMPANY_ID,
+      companySlug: existing?.companySlug || "default-farm",
+      companyName: existing?.companyName || "Default farm",
     };
     try {
       await persistUserToDb(row);
@@ -3406,6 +3439,9 @@ app.put("/api/users/:id", requireAuth, requireUserManagementAccess, requirePageA
     businessUnitAccess,
     passwordReset: Boolean(password.trim()),
   });
+  const wasDesk = existing.role === "superuser" || existing.role === "sales_coordinator";
+  const stillDesk = role === "superuser" || role === "sales_coordinator";
+  if (wasDesk && !stillDesk) void enqueueUserDeactivated(id);
   res.json({ user: sanitizeUser(updated) });
 });
 
@@ -3433,6 +3469,7 @@ app.delete("/api/users/:id", requireAuth, requireUserManagementAccess, requirePa
     // Soft delete: user rows are referenced by ON DELETE RESTRICT foreign keys,
     // so we deactivate to revoke access while preserving historical records.
     await dbQuery(`UPDATE users SET is_active = false WHERE id = $1::uuid`, [id]);
+    void enqueueUserDeactivated(id);
   } catch (e) {
     console.error("[ERROR]", "[db] DELETE /api/users/:id:", e instanceof Error ? e.message : e);
     res.status(503).json({ error: "Database unavailable. Please retry shortly." });
@@ -11519,6 +11556,8 @@ app.get("/api/farm/weigh-in-trends", requireAuth, requireFarmAccess, requireAnyP
 app.use("/api/ias41", requireAuth, ias41Router);
 app.use("/api/farm-sales", requireAuth, farmSalesRouter);
 app.use("/api/pipeline", requireAuth, pipelineRouter);
+app.use("/api/internal/crm", createCrmInternalRouter({ dbQuery, hasDb }));
+app.use("/api/crm", requireAuth, createCrmStaffRouter({ dbQuery, hasDb }));
 app.use(
   "/api/market",
   createPublicMarketRouter({
@@ -11617,6 +11656,18 @@ app.use(
     usersByEmail,
     usersById,
     scrubCompanyFromMemory,
+    dbPool,
+  })
+);
+
+app.use(
+  "/api/signups",
+  createSignupsRouter({
+    dbQuery,
+    hasDb,
+    requireAuth,
+    appendAudit,
+    usersById,
   })
 );
 
@@ -11665,6 +11716,7 @@ app.use((err, _req, res, _next) => {
   initIas41Service(dbQuery, hasDb);
   initFarmSalesRouter(dbQuery, hasDb);
   initPipelineRouter(dbQuery, hasDb, appendAudit);
+  initCrmBridge(dbQuery);
   initFarmPayrollClosuresRouter(dbQuery, hasDb);
   const runAutoDraftLots = () => {
     if (!hasDb()) return;
@@ -11682,6 +11734,9 @@ app.use((err, _req, res, _next) => {
     if (hasDb()) {
       processClevaFarmOutbox(25).catch((e) => {
         console.error("[ERROR]", "[clevafarm-worker] background run:", e instanceof Error ? e.message : e);
+      });
+      processCrmOutbox(20).catch((e) => {
+        console.error("[ERROR]", "[crm] outbox:", e instanceof Error ? e.message : e);
       });
     }
   }, 45 * 1000);

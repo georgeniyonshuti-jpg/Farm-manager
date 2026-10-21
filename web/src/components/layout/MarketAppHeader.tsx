@@ -7,6 +7,7 @@ import { useCompanyNav } from "../../hooks/useCompanyNav";
 import { useMarketLocale } from "../../context/MarketLocaleContext";
 import { UserMenuChip } from "./UserMenuChip";
 import { StoreLocaleSelect } from "../public/StoreLocaleSelect";
+import { StoreWhatsAppHeader } from "../public/StoreWhatsAppFab";
 
 export function MarketPageHead({ title, action }: { title: string; action?: ReactNode }) {
   return (
@@ -51,6 +52,7 @@ export function MarketAppHeader() {
 
           <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
             <StoreLocaleSelect locale={locale} onChange={setLocale} />
+            <StoreWhatsAppHeader locale={locale} />
             <UserMenuChip
               user={user}
               roleBadge={roleBadge}

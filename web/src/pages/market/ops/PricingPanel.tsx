@@ -7,6 +7,7 @@ import {
   fetchMarketRates,
   publishMarketRate,
   saveMarketRateDraft,
+  saveScoutCommission,
   saveVisitFee,
   type MarketRateCard,
 } from "../../../api/pipeline.api";
@@ -52,6 +53,7 @@ export function PricingPanel({ publishSignal = 0 }: Props) {
   const [commissionPct, setCommissionPct] = useState("5");
   const [clevaRunCommissionPct, setClevaRunCommissionPct] = useState("2");
   const [visitFeeRwf, setVisitFeeRwf] = useState("5000");
+  const [scoutTradePct, setScoutTradePct] = useState("2");
   const [quantityTiers, setQuantityTiers] = useState<NonNullable<MarketRateCard["quantityTiers"]>>(DEFAULT_QUANTITY_TIERS);
   const [slaughter, setSlaughter] = useState("200");
   const [delivery, setDelivery] = useState("0");
@@ -119,6 +121,7 @@ export function PricingPanel({ publishSignal = 0 }: Props) {
         setDraftId(draft?.id ?? null);
         applyCard(draft || res.published, res.defaults);
         setVisitFeeRwf(String(res.visitFeeRwf ?? 5000));
+        setScoutTradePct("2");
         setApiFailed(false);
         return;
       }
@@ -129,6 +132,7 @@ export function PricingPanel({ publishSignal = 0 }: Props) {
       setDraftId(draft?.id ?? null);
       applyCard(draft || res.published, res.defaults);
       setVisitFeeRwf(String(res.visitFeeRwf ?? res.defaults?.visitFeeRwf ?? 5000));
+      if (res.scoutTradePct != null) setScoutTradePct(String(res.scoutTradePct));
     } catch (e) {
       if (isMarketDemoEligibleError(e)) {
         setApiFailed(true);
@@ -177,6 +181,8 @@ export function PricingPanel({ publishSignal = 0 }: Props) {
       setDraftId(res.card.id);
       const fee = Number(visitFeeRwf);
       if (fee > 0) await saveVisitFee(token, fee);
+      const scoutPct = Number(scoutTradePct);
+      if (scoutPct > 0) await saveScoutCommission(token, scoutPct);
       showToast("success", "Draft saved");
       await reload();
     } catch (e) {
@@ -198,6 +204,8 @@ export function PricingPanel({ publishSignal = 0 }: Props) {
       await publishMarketRate(token, saved.card.id);
       const fee = Number(visitFeeRwf);
       if (fee > 0) await saveVisitFee(token, fee);
+      const scoutPct = Number(scoutTradePct);
+      if (scoutPct > 0) await saveScoutCommission(token, scoutPct);
       showToast("success", "This week’s board is live");
       await reload();
     } catch (e) {
@@ -346,7 +354,7 @@ export function PricingPanel({ publishSignal = 0 }: Props) {
             <Field label="Valid to">
               <Input type="date" value={validTo} onChange={(e) => setValidTo(e.target.value)} />
             </Field>
-            <Field label="Market-only take %">
+            <Field label="Cleva's take from bird price (market-only %)">
               <Input
                 type="number"
                 min={0}
@@ -356,7 +364,7 @@ export function PricingPanel({ publishSignal = 0 }: Props) {
                 onChange={(e) => setCommissionPct(e.target.value)}
               />
             </Field>
-            <Field label="Cleva-run take %">
+            <Field label="Cleva's take from bird price (Cleva-run %)">
               <Input
                 type="number"
                 min={0}
@@ -375,6 +383,24 @@ export function PricingPanel({ publishSignal = 0 }: Props) {
             <Field label="Delivery RWF / trip">
               <Input type="number" min={0} value={delivery} onChange={(e) => setDelivery(e.target.value)} />
             </Field>
+            <p className="sm:col-span-2 text-xs leading-relaxed text-[var(--text-muted)]">
+              Cleva's take is the percent kept from the bird price. It is not scout pay.
+            </p>
+            <div className="sm:col-span-2 rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] p-3">
+              <Field label="Scout commission (% of the sale)">
+                <Input
+                  type="number"
+                  min={0.1}
+                  max={20}
+                  step="0.1"
+                  value={scoutTradePct}
+                  onChange={(e) => setScoutTradePct(e.target.value)}
+                />
+              </Field>
+              <p className="mt-2 text-xs leading-relaxed text-[var(--text-muted)]">
+                A small share of the sale total. Separate from Cleva's take.
+              </p>
+            </div>
           </div>
         ) : null}
       </div>

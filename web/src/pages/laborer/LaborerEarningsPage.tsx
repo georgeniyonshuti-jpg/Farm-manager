@@ -61,7 +61,7 @@ export function LaborerEarningsPage() {
   const { entries, totals, error, loading, reload } = usePayrollMonthTotals({ from, to });
 
   const backHref = useMemo(() => {
-    if (user?.role === "vet") return companyHref("/dashboard/vet");
+    if (user?.role === "vet") return companyHref("/farm/pipeline/home");
     return companyHref("/dashboard/laborer");
   }, [user?.role, companyHref]);
 

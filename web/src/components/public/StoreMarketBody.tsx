@@ -245,7 +245,7 @@ export function StoreMarketBody({
         {side === "sell" ? (
           <p className="store-os">
             {t("sellOsHint")}{" "}
-            <Link to="/signup?from=market&accountType=farmer" className="store-text-link">
+            <Link to="/market/sell" className="store-text-link">
               {t("sellOsLink")}
             </Link>
           </p>

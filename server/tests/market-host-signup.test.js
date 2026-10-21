@@ -18,23 +18,25 @@ describe("marketHostLookup", () => {
     const banned = marketHostLookup({ MARKET_HOST_COMPANY_ID: DEFAULT_FARM_COMPANY_ID });
     assert.equal(banned.ok, false);
 
-    const bySlug = marketHostLookup({ MARKET_HOST_COMPANY_SLUG: "cleva-technologies" });
-    assert.deepEqual(bySlug, { ok: true, by: "slug", value: "cleva-technologies" });
+    const bySlug = marketHostLookup({ MARKET_HOST_COMPANY_SLUG: "cleva-tech" });
+    assert.deepEqual(bySlug, { ok: true, by: "slug", value: "cleva-tech" });
 
     const defaultSlug = marketHostLookup({ MARKET_HOST_COMPANY_SLUG: DEFAULT_FARM_SLUG });
     assert.equal(defaultSlug.ok, false);
   });
 
-  it("defaults slug to cleva-technologies when env is empty", () => {
+  it("defaults slug to cleva-tech when env is empty", () => {
     const lookup = marketHostLookup({});
-    assert.deepEqual(lookup, { ok: true, by: "slug", value: "cleva-technologies" });
+    assert.deepEqual(lookup, { ok: true, by: "slug", value: "cleva-tech" });
   });
 });
 
 describe("isMarketSignupRequest", () => {
-  it("reads from=market on body or query", () => {
+  it("reads from=market on body or query and ad channels", () => {
     assert.equal(isMarketSignupRequest({ body: { from: "market" } }), true);
     assert.equal(isMarketSignupRequest({ query: { from: "market" } }), true);
+    assert.equal(isMarketSignupRequest({ body: { from: "facebook" } }), true);
+    assert.equal(isMarketSignupRequest({ body: { utm_source: "google" } }), true);
     assert.equal(isMarketSignupRequest({ body: { from: "farm" } }), false);
     assert.equal(isMarketSignupRequest({ body: {} }), false);
   });
@@ -43,13 +45,13 @@ describe("isMarketSignupRequest", () => {
 describe("loadMarketHostCompany", () => {
   it("returns 503-style miss when the host row is absent", async () => {
     const miss = await loadMarketHostCompany(async () => ({ rows: [] }), {
-      MARKET_HOST_COMPANY_SLUG: "cleva-technologies",
+      MARKET_HOST_COMPANY_SLUG: "cleva-tech",
     });
     assert.equal(miss.ok, false);
 
     const banned = await loadMarketHostCompany(
       async () => ({ rows: [{ id: DEFAULT_FARM_COMPANY_ID, slug: DEFAULT_FARM_SLUG, name: "Default" }] }),
-      { MARKET_HOST_COMPANY_SLUG: "cleva-technologies" }
+      { MARKET_HOST_COMPANY_SLUG: "cleva-tech" }
     );
     assert.equal(banned.ok, false);
   });
@@ -57,12 +59,12 @@ describe("loadMarketHostCompany", () => {
   it("returns the host company when the row is real", async () => {
     const hit = await loadMarketHostCompany(
       async () => ({
-        rows: [{ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", slug: "cleva-technologies", name: "Cleva Technologies" }],
+        rows: [{ id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", slug: "cleva-tech", name: "Cleva Technologies" }],
       }),
-      { MARKET_HOST_COMPANY_SLUG: "cleva-technologies" }
+      { MARKET_HOST_COMPANY_SLUG: "cleva-tech" }
     );
     assert.equal(hit.ok, true);
-    if (hit.ok) assert.equal(hit.company.slug, "cleva-technologies");
+    if (hit.ok) assert.equal(hit.company.slug, "cleva-tech");
   });
 });
 
@@ -105,7 +107,9 @@ describe("host seller listing scope", () => {
     assert.ok(extras.includes("farmerOwnsLot"));
     assert.ok(extras.includes("loadProfileForFarmer"));
     assert.ok(extras.includes("listingRailDecision"));
-    assert.ok(extras.includes('verificationStatus = !rail.inRail || !skipReview ? "pending_review" : "verified"'));
+    assert.ok(
+      extras.includes('gate.holdForReview || !rail.inRail || !skipReview ? "pending_review" : "verified"')
+    );
     assert.ok(fulfillment.includes("isMarketOnlySeller"));
     assert.ok(fulfillment.includes("listedBy"));
     assert.ok(weigh.includes("owner_user_id"));

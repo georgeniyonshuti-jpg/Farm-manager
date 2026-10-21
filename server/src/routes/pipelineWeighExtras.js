@@ -195,6 +195,16 @@ export function registerPipelineWeighRoutes(router, ctx) {
         `SELECT ${LOT_SELECT} FROM pipeline_lots l WHERE l.id = $1::uuid`,
         [lotId]
       );
+      if (applied.confirm) {
+        const { emitCrmMilestone } = await import("../services/pipeline/crmBridge.js");
+        void emitCrmMilestone({
+          eventType: "flock.first_captured",
+          entities: [
+            { type: "farm_profile", id: farmProfileId },
+            { type: "pipeline_lot", id: lotId },
+          ],
+        });
+      }
       audit(req.authUser, "pipeline.lot.weigh", "pipeline_lot", lotId, { outcome, visitId: visit.rows[0]?.id });
       res.status(201).json({
         lot: decorateListing(mapLotRow(refetch.rows[0])),

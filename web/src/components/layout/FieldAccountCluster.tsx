@@ -1,6 +1,6 @@
 import { useAuth } from "../../auth/AuthContext";
 import type { ActiveWorkspace, UserRole } from "../../auth/types";
-import { canAccessWorkspace } from "../../auth/permissions";
+import { canAccessWorkspace, accountKindLabel } from "../../auth/permissions";
 import { isLaborerLocaleUser, useLaborerT } from "../../i18n/laborerI18n";
 import { LaborerLanguageToggle } from "../LaborerLanguageToggle";
 import { UserMenuChip } from "./UserMenuChip";
@@ -30,7 +30,7 @@ export function FieldAccountCluster({ compact = false }: Props) {
   const farmWorkspace = useLaborerT("Farm / Poultry");
   const clevaWorkspace = useLaborerT("Clevafarm Finance");
   const switchWorkspaceAria = useLaborerT("Switch active business unit");
-  const roleBadge = useLaborerT(user ? ROLE_LABEL_EN[user.role] : "");
+  const roleBadge = useLaborerT(user ? (accountKindLabel(user) ?? ROLE_LABEL_EN[user.role]) : "");
 
   if (!user) return null;
 
