@@ -10,7 +10,8 @@ import { canAccessPipelineDesk } from "../../auth/permissions";
 import { useCompanyNav } from "../../hooks/useCompanyNav";
 import { PageHeader } from "../../components/PageHeader";
 import { ManagerPage } from "../../components/layout/ManagerPage";
-import { Button, PageTabs } from "../../components/ui";
+import { Button, SegmentedControl } from "../../components/ui";
+import { INSIGHTS_LANE, LaneNav } from "../../components/layout/LaneNav";
 import { IconButton } from "../../components/ui/IconButton";
 import { EmptyState } from "../../components/EmptyState";
 import { SkeletonList } from "../../components/LoadingSkeleton";
@@ -120,33 +121,18 @@ export function MarketTrendsPage() {
     <ManagerPage>
       <div className="flex w-full flex-col gap-3 pb-4">
         <PageHeader
-          title="Market trends"
-          tabs={
-            enabled.length > 1 ? (
-              <PageTabs
-                aria-label="Market Insights packs"
-                value={activePack}
-                onChange={setActivePack}
-                options={enabled.map((p) => ({ value: p.id, label: p.label }))}
-              />
-            ) : undefined
-          }
+          title="Insights"
+          tabs={<LaneNav chrome label="Insights" items={INSIGHTS_LANE} />}
           action={
             <div className="flex flex-wrap items-center justify-end gap-2">
               {dataAsOf ? (
                 <span className="type-caption text-[var(--text-muted)]">Data as of {dataAsOf}</span>
               ) : null}
-              <Link
-                to={companyHref("/dashboard/market")}
-                className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] transition-colors"
-              >
-                Overview
-              </Link>
               <Button variant="secondary" size="sm" onClick={() => setRefreshKey((k) => k + 1)}>
                 Refresh
               </Button>
               {canConfigure && embedReady ? (
-                <Button variant="secondary" size="sm" onClick={() => setConfigOpen(true)}>
+                <Button variant="ghost" size="sm" onClick={() => setConfigOpen(true)}>
                   Widgets
                 </Button>
               ) : null}
@@ -216,6 +202,15 @@ export function MarketTrendsPage() {
                 Open Market overview
               </Link>
             }
+          />
+        ) : null}
+
+        {embedReady && enabled.length > 1 ? (
+          <SegmentedControl
+            label="Pack"
+            value={activePack}
+            onChange={setActivePack}
+            options={enabled.map((p) => ({ value: p.id, label: p.label }))}
           />
         ) : null}
 

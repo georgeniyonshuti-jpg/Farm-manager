@@ -3,6 +3,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { FarmVetLogsFieldView } from "./FarmVetLogsFieldView";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { PageHeader } from "../../components/PageHeader";
+import { HEALTH_LANE, LaneNav } from "../../components/layout/LaneNav";
 import { FieldBlockedScreen } from "../../components/field/FieldBlockedScreen";
 import { useLaborerT } from "../../i18n/laborerI18n";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
@@ -367,6 +368,7 @@ function FarmVetLogsManagerPage() {
 
   return (
     <ManagerPage>
+      <LaneNav label="Health" items={HEALTH_LANE} />
       <PageHeader
         title="Vet logs"
         action={

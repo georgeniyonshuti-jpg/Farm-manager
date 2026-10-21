@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { PageHeader } from "../../components/PageHeader";
+import { HEALTH_LANE, LaneNav } from "../../components/layout/LaneNav";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { useToast } from "../../components/Toast";
 import {
@@ -176,6 +177,7 @@ export function FarmCheckinReviewPage() {
 
   return (
     <ManagerPage>
+      <LaneNav label="Health" items={HEALTH_LANE} />
       <PageHeader
         title="Review check-ins"
         action={

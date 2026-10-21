@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
+import { STOCK_LANE, LaneNav } from "../../components/layout/LaneNav";
 import { useAuth } from "../../auth/AuthContext";
 import { canFlockAction, canOptInPipelineFlock } from "../../auth/permissions";
 import { API_BASE_URL } from "../../api/config";
@@ -492,6 +493,7 @@ export function FarmSlaughterPage() {
 
   return (
     <ManagerPage>
+      <LaneNav label="Stock" items={STOCK_LANE} />
       <PageHeader
         title="Slaughter"
         tabs={

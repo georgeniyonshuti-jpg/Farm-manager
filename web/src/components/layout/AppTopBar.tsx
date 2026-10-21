@@ -1,6 +1,14 @@
 import { Link, useLocation } from "react-router-dom";
 import type { UserRole } from "../../auth/types";
-import { accountKindLabel } from "../../auth/permissions";
+import {
+  accountKindLabel,
+  canAccessPageByKey,
+  isCompanyLevelAdmin,
+  isFarmOpsLead,
+  isOfficeFarmDesktopRole,
+} from "../../auth/permissions";
+import { canEditFlockScheduleRole } from "../../farm/scheduleAccess";
+import { useFarmCapabilities } from "../../hooks/useFarmCapabilities";
 import { useAuth } from "../../auth/AuthContext";
 import { isLaborerLocaleUser, useLaborerT } from "../../i18n/laborerI18n";
 import { LaborerLanguageToggle } from "../LaborerLanguageToggle";
@@ -49,6 +57,27 @@ export function AppTopBar({
 }: AppTopBarProps) {
   const { user, logout } = useAuth();
   const { companyHref } = useCompanyNav();
+  const { erpnextAccess } = useFarmCapabilities();
+  const settingsLinks = user && isOfficeFarmDesktopRole(user)
+    ? [
+        isFarmOpsLead(user) && canAccessPageByKey(user, "admin_system_config")
+          ? { href: companyHref("/admin/system-config"), label: "Lists & types" }
+          : null,
+        isFarmOpsLead(user) && canAccessPageByKey(user, "farm_schedule_settings") && canEditFlockScheduleRole(user.role)
+          ? { href: companyHref("/farm/schedule-settings"), label: "Schedule settings" }
+          : null,
+        erpnextAccess && isCompanyLevelAdmin(user)
+          ? { href: companyHref("/farm/erpnext-setup"), label: "ERPNext" }
+          : null,
+        erpnextAccess && isCompanyLevelAdmin(user)
+          ? { href: companyHref("/farm/erpnext"), label: "ERPNext desk" }
+          : null,
+        (user.role === "vet" || isFarmOpsLead(user)) && canAccessPageByKey(user, "farm_reports")
+          ? { href: companyHref("/farm/reports"), label: "Reports" }
+          : null,
+        user.role === "superuser" ? { href: companyHref("/admin/super"), label: "Super admin" } : null,
+      ].filter(Boolean) as { href: string; label: string }[]
+    : [];
   const location = useLocation();
   const chrome = usePageChrome();
   const roleBadge = useLaborerT(user ? (accountKindLabel(user) ?? ROLE_LABEL_EN[user.role]) : "");
@@ -157,6 +186,7 @@ export function AppTopBar({
           includeThemeToggle
           includeDensityToggle
           showRolePill={false}
+          menuLinks={settingsLinks}
         />
       </div>
 

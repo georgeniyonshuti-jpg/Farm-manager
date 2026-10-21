@@ -41,10 +41,8 @@ const DAYS_OPTS = [
 const PACK_COLORS = ["var(--brand-primary)", "#2a9d8f", "#e9c46a", "#f4a261", "#264653"];
 
 type Props = {
-  onOpenSignups?: () => void;
   /** glance = native manager KPIs; deep = Superset Command Center. */
   mode?: "glance" | "deep";
-  trendsHref?: string;
 };
 
 function Kpi({
@@ -109,7 +107,7 @@ function ChartFrame({ title, children }: { title: string; children: ReactNode })
   );
 }
 
-export function AnalyticsPanel({ onOpenSignups, mode = "glance", trendsHref }: Props) {
+export function AnalyticsPanel({ mode = "glance" }: Props) {
   const { token } = useAuth();
   const [days, setDays] = useState("30");
   const [meta, setMeta] = useState<MarketInsightsMeta | null>(null);
@@ -247,19 +245,6 @@ export function AnalyticsPanel({ onOpenSignups, mode = "glance", trendsHref }: P
           <Button size="sm" variant="secondary" onClick={() => setRefreshKey((n) => n + 1)}>
             Refresh
           </Button>
-          {onOpenSignups ? (
-            <Button size="sm" variant="ghost" onClick={onOpenSignups}>
-              Signups CRM
-            </Button>
-          ) : null}
-          {preferNative && trendsHref ? (
-            <Link
-              to={trendsHref}
-              className="inline-flex min-h-control-sm items-center px-2 text-sm font-semibold text-[var(--primary-color)] hover:underline"
-            >
-              Deep dive →
-            </Link>
-          ) : null}
         </div>
       </div>
 

@@ -1,5 +1,5 @@
-import { NavLink, Link } from "react-router-dom";
-import { useMemo, type ReactNode } from "react";
+import { NavLink, Link, useLocation, useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Home,
   ClipboardCheck,
@@ -23,6 +23,7 @@ import {
   HandCoins,
   FileText,
   Gauge,
+  MessageSquare,
   Users,
   Shield,
   Settings2,
@@ -53,6 +54,7 @@ import { useCompanyNav } from "../../hooks/useCompanyNav";
 import { useFarmCapabilities } from "../../hooks/useFarmCapabilities";
 import { BrandLogo } from "../BrandLogo";
 import { useTenant } from "../../context/TenantContext";
+import { stripTenantPrefix } from "../../lib/tenancy";
 
 function NavText({ text }: { text: string }) {
   const t = useLaborerT(text);
@@ -102,6 +104,8 @@ const PATH_ICONS: Record<string, ReactNode> = {
   "/cleva/general-lending": <HandCoins className={ICON_CLS} aria-hidden />,
   "/cleva/investor-memos": <FileText className={ICON_CLS} aria-hidden />,
   "/cleva/credit-scoring": <Gauge className={ICON_CLS} aria-hidden />,
+  "/farm/pipeline/messages": <MessageSquare className={ICON_CLS} aria-hidden />,
+  "/admin/signups": <FileText className={ICON_CLS} aria-hidden />,
   "/admin/users": <Users className={ICON_CLS} aria-hidden />,
   "/admin/super": <Shield className={ICON_CLS} aria-hidden />,
   "/admin/system-config": <Settings2 className={ICON_CLS} aria-hidden />,
@@ -158,6 +162,23 @@ function SidebarNavBody({
   collapsed = false,
 }: SidebarNavBodyProps) {
   const { logout, setActiveWorkspace } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const appPath = stripTenantPrefix(location.pathname);
+  const [navLane, setNavLane] = useState<"farm" | "market">("farm");
+  useEffect(() => {
+    if (
+      appPath.startsWith("/dashboard/market") ||
+      appPath.startsWith("/admin/signups") ||
+      appPath.startsWith("/farm/pipeline")
+    ) {
+      setNavLane("market");
+      return;
+    }
+    if (appPath.startsWith("/dashboard") || appPath.startsWith("/farm") || appPath.startsWith("/admin")) {
+      setNavLane("farm");
+    }
+  }, [appPath]);
   const { tenantCompany } = useTenant();
   const { can, erpnextAccess, hasBootstrap, fieldReportingMode } = useFarmCapabilities();
   const href = (path: string) => companyHref(path);
@@ -387,6 +408,26 @@ function SidebarNavBody({
       : [messagesLink, signupsLink, adminLink, superAdminLink, typeLink]
   ).filter(Boolean) as NavItem[];
 
+  const office = isOfficeFarmDesktopRole(user);
+  const desk = canAccessPipelineDesk(user);
+  const showMarketLane = office && desk && activeWorkspace === "farm";
+  const marketLane: NavItem[] = showMarketLane
+    ? ([
+        pipelineDeskNavItem ? { ...pipelineDeskNavItem, label: "Desk" } : null,
+        messagesLink,
+        signupsLink,
+        marketOverviewNavItem ? { ...marketOverviewNavItem, label: "Insights" } : null,
+      ].filter(Boolean) as NavItem[])
+    : [];
+  const footerAdmin = office
+    ? adminItems.filter(
+        (item) =>
+          item.to !== "/farm/pipeline/messages" &&
+          item.to !== "/admin/signups" &&
+          item.to !== "/admin/super"
+      )
+    : adminItems;
+
   const groupedFarmNav = useMemo(() => {
     const byPath = new Map(farmNav.map((item) => [item.to, item]));
     const pick = (paths: string[]) => paths.map((p) => byPath.get(p)).filter(Boolean) as NavItem[];
@@ -410,23 +451,16 @@ function SidebarNavBody({
     const office = isOfficeFarmDesktopRole(user);
 
     if (office) {
+      const healthPages = pick(["/farm/vet-logs", "/farm/treatments", "/farm/mortality", "/farm/checkin-review"]);
+      const stockPages = pick(["/farm/inventory", "/farm/slaughter", "/market/listings"]);
       return {
-        overview: [
-          ...(effectiveDashLink ? [{ ...effectiveDashLink, label: "Today" }] : []),
-          ...marketGlance,
-        ],
+        overview: [...(effectiveDashLink ? [{ ...effectiveDashLink, label: "Today" }] : [])],
         operations: [] as NavItem[],
-        health: pick(["/farm/vet-logs", "/farm/treatments", "/farm/mortality", "/farm/checkin-review"]),
-        inventory: pick([
-          "/farm/inventory",
-          "/farm/slaughter",
-          "/farm/pipeline",
-          "/market/listings",
-          "/market/commissions",
-        ]),
+        health: healthPages.length ? [{ to: healthPages[0].to, label: "Health" }] : [],
+        inventory: stockPages.length ? [{ to: stockPages[0].to, label: "Stock" }] : [],
         planning_workforce: pick(["/farm/flocks"]),
         people: [adminLink, payrollNavItem].filter(Boolean) as NavItem[],
-        settings: [typeLink, logPayrollItem, erpnextSetupNavItem, erpnextDeskNavItem, reportsCenterNavItem].filter(Boolean) as NavItem[],
+        settings: [] as NavItem[],
         finance: [] as NavItem[],
       };
     }
@@ -484,7 +518,9 @@ function SidebarNavBody({
 
   const compactPrimary = (() => {
     const base =
-      activeWorkspace === "farm"
+      showMarketLane && navLane === "market"
+        ? marketLane
+        : activeWorkspace === "farm"
         ? [
             ...groupedFarmNav.overview,
             ...groupedFarmNav.operations,
@@ -548,11 +584,11 @@ function SidebarNavBody({
 
   const footerBlock = (
     <div className={`mgr-sidebar-footer ${collapsed ? "mgr-sidebar-footer--collapsed" : ""}`}>
-      {adminItems.length > 0 ? (
+      {footerAdmin.length > 0 ? (
         <div className="mgr-nav-group">
           {!collapsed ? <p className="mgr-nav-label">Admin</p> : null}
           <div className="mgr-nav-group__items">
-            {adminItems.map((item) => (
+            {footerAdmin.map((item) => (
               <MgrLink key={item.to} item={item} compact={collapsed} />
             ))}
           </div>
@@ -594,30 +630,47 @@ function SidebarNavBody({
               <span className="mgr-brand-name block truncate text-[15px] leading-tight">
                 {companyLabel}
               </span>
-              {!showWorkspaceSwitch ? (
+              {!(showWorkspaceSwitch || (office && desk)) ? (
                 <span className="mt-0.5 block truncate text-[10px] font-medium tracking-wide text-white/55">
                   {workspaceLabel}
                 </span>
               ) : null}
             </span>
           </Link>
-          {showWorkspaceSwitch ? (
+          {showWorkspaceSwitch || (office && desk) ? (
             <label className="mt-3 block">
               <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.06em] text-white/40">
                 Workspace
               </span>
               <select
                 className="mgr-sidebar-select"
-                value={activeWorkspace ?? "farm"}
+                value={activeWorkspace === "clevacredit" ? "clevacredit" : showMarketLane ? navLane : "farm"}
                 aria-label={switchWorkspaceAria}
-                onChange={(e) => setActiveWorkspace(e.target.value as ActiveWorkspace)}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  if (next === "clevacredit") {
+                    setActiveWorkspace("clevacredit");
+                    return;
+                  }
+                  if (activeWorkspace !== "farm") setActiveWorkspace("farm");
+                  if (next === "market") {
+                    setNavLane("market");
+                    navigate(href("/dashboard/market"));
+                    return;
+                  }
+                  setNavLane("farm");
+                  navigate(href("/dashboard/management"));
+                }}
               >
                 <option value="farm" disabled={!canAccessWorkspace(user, "farm")}>
                   {farmWorkspace}
                 </option>
-                <option value="clevacredit" disabled={!canAccessWorkspace(user, "clevacredit")}>
-                  {clevaWorkspace}
-                </option>
+                {office && desk ? <option value="market">Market</option> : null}
+                {showWorkspaceSwitch ? (
+                  <option value="clevacredit" disabled={!canAccessWorkspace(user, "clevacredit")}>
+                    {clevaWorkspace}
+                  </option>
+                ) : null}
               </select>
             </label>
           ) : null}
@@ -644,6 +697,8 @@ function SidebarNavBody({
           </div>
         ) : activeWorkspace === "farm" && isPipelineSalesRole(user) ? (
           <GroupSection title="Supply" items={groupedFarmNav.inventory} />
+        ) : activeWorkspace === "farm" && isOfficeFarmDesktopRole(user) && navLane === "market" && showMarketLane ? (
+          <GroupSection title="Market" items={marketLane} />
         ) : activeWorkspace === "farm" && isOfficeFarmDesktopRole(user) ? (
           <>
             <GroupSection title="Today" items={groupedFarmNav.overview} />

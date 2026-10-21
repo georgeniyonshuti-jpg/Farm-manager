@@ -3,7 +3,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, Navigate, useSearchParams } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
 import { isPipelineSalesRole } from "../../auth/permissions";
 import { useOpsBoardData } from "../../hooks/useOpsBoardData";
@@ -157,12 +157,6 @@ export function ManagementHome() {
             {homeTab === "trends" && dataAsOf ? (
               <span className="type-caption text-[var(--text-muted)]">Data as of {dataAsOf}</span>
             ) : null}
-            <Link
-              to={`${companyHref("farm/reports")}?type=farm_operations`}
-              className="rounded-[var(--radius-md)] border border-[var(--border-color)] bg-[var(--surface-card)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-elevated)] transition-colors"
-            >
-              Reports
-            </Link>
             <Button variant="secondary" size="sm" onClick={handleRefresh}>
               Refresh
             </Button>

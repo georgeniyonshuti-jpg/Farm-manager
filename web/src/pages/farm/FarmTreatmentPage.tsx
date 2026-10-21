@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { PageHeader } from "../../components/PageHeader";
+import { HEALTH_LANE, LaneNav } from "../../components/layout/LaneNav";
 import { useAuth } from "../../auth/AuthContext";
 import { FarmTreatmentFieldView } from "./FarmTreatmentFieldView";
 import { readAuthHeaders, jsonAuthHeaders } from "../../lib/authHeaders";
@@ -488,6 +489,7 @@ function FarmTreatmentManagerPage() {
 
   return (
     <ManagerPage>
+      <LaneNav label="Health" items={HEALTH_LANE} />
       <PageHeader
         title="Medicine tracking"
         action={

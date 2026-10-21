@@ -4,6 +4,7 @@ import { useAuth } from "../../auth/AuthContext";
 import { readAuthHeaders } from "../../lib/authHeaders";
 import { TranslatedText, useLaborerT } from "../../i18n/laborerI18n";
 import { PageHeader } from "../../components/PageHeader";
+import { HEALTH_LANE, LaneNav } from "../../components/layout/LaneNav";
 import { ErrorState, SkeletonList } from "../../components/LoadingSkeleton";
 import { API_BASE_URL } from "../../api/config";
 import { useCompanyNav } from "../../hooks/useCompanyNav";
@@ -216,6 +217,7 @@ export function FarmMortalityPage() {
 
   return (
     <ManagerPage>
+      <LaneNav label="Health" items={HEALTH_LANE} />
       <PageHeader
         title={tTitle}
         primaryAction={{ label: tLog, onClick: () => navigate(companyHref("/farm/mortality-log")) }}

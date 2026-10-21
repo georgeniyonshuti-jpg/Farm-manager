@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
+import { INSIGHTS_LANE, LaneNav } from "../../components/layout/LaneNav";
 import { useAuth } from "../../auth/AuthContext";
 import { canAccessPipelineDesk } from "../../auth/permissions";
 import { useCompanyNav } from "../../hooks/useCompanyNav";
@@ -161,7 +162,8 @@ export function MarketRecruitmentPage() {
   return (
     <ManagerPage>
       <PageHeader
-        title="Recruitment"
+        title="Insights"
+        tabs={<LaneNav chrome label="Insights" items={INSIGHTS_LANE} />}
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <SegmentedControl label="Range" value={days} onChange={setDays} options={DAYS_OPTS} />
@@ -171,12 +173,6 @@ export function MarketRecruitmentPage() {
             <Button size="sm" variant="secondary" onClick={() => setRefreshKey((n) => n + 1)}>
               Refresh
             </Button>
-            <Link
-              to={companyHref("/admin/signups")}
-              className="text-sm font-semibold text-[var(--primary-color)] hover:underline"
-            >
-              Signups CRM →
-            </Link>
           </div>
         }
       />

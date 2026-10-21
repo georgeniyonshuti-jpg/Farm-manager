@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { Link } from "react-router-dom";
 import type { SessionUser, UserRole } from "../../auth/types";
 import { useLaborerT } from "../../i18n/laborerI18n";
 import { useTheme } from "../../context/ThemeContext";
@@ -69,6 +70,7 @@ type UserMenuChipProps = {
   showChevron?: boolean;
   detailLines?: string[];
   avatarTone?: "role" | "store";
+  menuLinks?: { href: string; label: string }[];
 };
 
 export function UserMenuChip({
@@ -82,6 +84,7 @@ export function UserMenuChip({
   showChevron = false,
   detailLines = [],
   avatarTone = "role",
+  menuLinks = [],
 }: UserMenuChipProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -168,6 +171,21 @@ export function UserMenuChip({
               </p>
             ))}
           </div>
+          {menuLinks.length > 0 ? (
+            <div className="border-b border-[var(--border-color)] py-1">
+              {menuLinks.map((item) => (
+                <Link
+                  key={item.href}
+                  to={item.href}
+                  role="menuitem"
+                  className="block px-3 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--primary-color-soft)]"
+                  onClick={() => setOpen(false)}
+                >
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+          ) : null}
           {includeThemeToggle ? (
             <button
               type="button"

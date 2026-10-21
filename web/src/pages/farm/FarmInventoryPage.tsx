@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader } from "../../components/PageHeader";
+import { STOCK_LANE, LaneNav } from "../../components/layout/LaneNav";
 import { useAuth } from "../../auth/AuthContext";
 import { jsonAuthHeaders, readAuthHeaders } from "../../lib/authHeaders";
 import { API_BASE_URL } from "../../api/config";
@@ -262,6 +263,7 @@ export function FarmInventoryPage() {
 
   return (
     <ManagerPage>
+      <LaneNav label="Stock" items={STOCK_LANE} />
       <PageHeader
         title="Feed inventory"
         primaryAction={
