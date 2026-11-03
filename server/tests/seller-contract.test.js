@@ -164,7 +164,7 @@ describe("seller contract text", () => {
       footer: "Sample only.",
     });
     assert.equal(pdf.subarray(0, 4).toString(), "%PDF");
-    const sql = readFileSync(join(root, "database/migrations/093_seller_contracts.sql"), "utf8");
+    const sql = readFileSync(join(root, "database/migrations/094_seller_contracts.sql"), "utf8");
     assert.doesNotMatch(sql, /DROP TABLE|TRUNCATE|DELETE FROM/i);
     assert.match(sql, /seller_contract_settings/);
     assert.match(sql, /seller_contracts/);

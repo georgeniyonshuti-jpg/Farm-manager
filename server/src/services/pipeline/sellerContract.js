@@ -42,7 +42,7 @@ import {
 
 function dbError(e, fallback) {
   if (String(e?.code) === "42P01") {
-    return { ok: false, status: 503, error: "The contract tables are not in the database yet. Run migration 093 after a backup." };
+    return { ok: false, status: 503, error: "The contract tables are not in the database yet. Run migration 094 after a backup." };
   }
   return { ok: false, status: 500, error: e instanceof Error ? e.message : fallback };
 }
