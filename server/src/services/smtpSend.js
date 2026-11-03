@@ -1,5 +1,24 @@
+import { randomBytes } from "node:crypto";
 import net from "node:net";
 import tls from "node:tls";
+
+function rfc5322Date(date = new Date()) {
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${days[date.getUTCDay()]}, ${pad(date.getUTCDate())} ${months[date.getUTCMonth()]} ${date.getUTCFullYear()} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())} +0000`;
+}
+
+function fromHeader(from) {
+  const raw = String(from || "").trim();
+  if (raw.includes("<")) return raw;
+  return `Clevafarm <${raw}>`;
+}
+
+function messageIdFor(from) {
+  const domain = String(from).split("@").pop()?.replace(/[<>]/g, "").trim() || "clevagroup.africa";
+  return `<${Date.now()}.${randomBytes(8).toString("hex")}@${domain}>`;
+}
 
 /**
  * Minimal STARTTLS / SSL SMTP sender for Mailcow.
@@ -73,12 +92,13 @@ export async function sendMail(cfg, mail) {
 
   let socket = useImplicitTls ? await connectTls() : await connectPlain();
   try {
+    const ehloHost = String(cfg.host).trim();
     await expect(socket, 220);
-    await expect(socket, 250, "EHLO clevafarm");
+    await expect(socket, 250, `EHLO ${ehloHost}`);
     if (!useImplicitTls) {
       await expect(socket, 220, "STARTTLS");
       socket = await connectTls(socket);
-      await expect(socket, 250, "EHLO clevafarm");
+      await expect(socket, 250, `EHLO ${ehloHost}`);
     }
     await expect(socket, 334, "AUTH LOGIN");
     await expect(socket, 334, encodeLogin(cfg.user));
@@ -88,9 +108,12 @@ export async function sendMail(cfg, mail) {
     await expect(socket, 354, "DATA");
     const boundary = `cleva_${Date.now()}`;
     const headers = [
-      `From: ${cfg.from}`,
+      `From: ${fromHeader(cfg.from)}`,
       `To: ${mail.to}`,
       `Subject: ${mail.subject}`,
+      `Date: ${rfc5322Date()}`,
+      `Message-ID: ${messageIdFor(cfg.from)}`,
+      "Auto-Submitted: auto-generated",
       "MIME-Version: 1.0",
       mail.html
         ? `Content-Type: multipart/alternative; boundary="${boundary}"`

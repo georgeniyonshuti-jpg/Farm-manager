@@ -24,6 +24,9 @@ export type SignupQueryish = {
   gclid?: string | null;
   fbclid?: string | null;
   source?: string | null;
+  link?: string | null;
+  scout?: string | null;
+  hear?: string | null;
 };
 
 function pick(q: SignupQueryish, ...keys: (keyof SignupQueryish)[]): string {
@@ -48,6 +51,9 @@ export function parseSignupSearch(search = ""): SignupQueryish {
     gclid: get("gclid"),
     fbclid: get("fbclid"),
     source: get("source"),
+    link: get("link"),
+    scout: get("scout"),
+    hear: get("hear"),
   };
 }
 

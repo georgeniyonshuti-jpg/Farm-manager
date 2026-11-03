@@ -43,11 +43,14 @@ export function kycClear(contact) {
   );
 }
 
-/** Call approval opens KYC. The account becomes Active only when KYC is already clear. */
+/** Call approval opens KYC. The account becomes Onboarded only when KYC is already clear. */
 export function stageAfterDecision(decision, contact) {
-  if (decision === "not_a_fit" || decision === "unreachable") return decision;
-  if (decision === "follow_up") return "follow_up";
-  if (decision === "approved") return kycClear(contact) ? "active" : "kyc";
+  if (decision === "not_a_fit") return { stage: "closed", deskStatus: "not_a_fit" };
+  if (decision === "unreachable") return { stage: "contact", deskStatus: "unreachable" };
+  if (decision === "follow_up") return { stage: "contact", deskStatus: "follow_up" };
+  if (decision === "approved") {
+    return kycClear(contact) ? { stage: "onboarded", deskStatus: null } : { stage: "kyc", deskStatus: null };
+  }
   return null;
 }
 
@@ -57,7 +60,7 @@ export function stageAfterDecision(decision, contact) {
  */
 export function tradingAllowed(contact) {
   if (!contact) return { allow: true };
-  if (contact.stage === "active") return { allow: true };
+  if (contact.stage === "onboarded" || contact.stage === "active") return { allow: true };
   if (contact.stage === "kyc") {
     return {
       allow: false,
@@ -92,21 +95,14 @@ export function validateKycTask(input = {}, contact = {}) {
   if (review && review !== "approved" && review !== "rejected") {
     return { ok: false, error: "Review must approve or reject." };
   }
+  if (task === "contract") {
+    return {
+      ok: false,
+      error: "The contract is signed from the link sent to their phone. Staff review that signed copy.",
+    };
+  }
   if (review === "rejected") {
     return { ok: true, task, review, status: "rejected" };
-  }
-  if (task === "contract") {
-    const signatureUrl = imageRef(input.signatureUrl);
-    if (signatureUrl === undefined) return { ok: false, error: "Draw a signature, or attach a signature image." };
-    if (!signatureUrl) return { ok: false, error: "Draw a signature." };
-    return {
-      ok: true,
-      task,
-      review,
-      status: review === "approved" ? "approved" : "submitted",
-      signatureUrl,
-      snapshot: contractFor(contact.want),
-    };
   }
   if (task === "location") {
     const located = normalizePlace(input.district, input.sector, { required: true });

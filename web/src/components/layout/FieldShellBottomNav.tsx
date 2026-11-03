@@ -190,6 +190,21 @@ export function FieldShellBottomNav() {
 
   const isField =
     user.role === "laborer" || user.role === "dispatcher" || user.role === "vet";
+  if (user.role === "sales_officer") {
+    return (
+      <MobileFieldBottomNav
+        ariaLabel="Recruitment"
+        items={[
+          {
+            to: companyHref("/farm/pipeline/people"),
+            label: "People",
+            icon: <Users className={iconCls} aria-hidden />,
+            active: appPath.startsWith("/farm/pipeline/people"),
+          },
+        ]}
+      />
+    );
+  }
   if (!isField) return null;
 
   const flockPath = (path: string) => companyHref(fieldRoute(path, activeFlockId || null));

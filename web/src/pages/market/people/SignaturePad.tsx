@@ -78,7 +78,10 @@ export function SignaturePad({ onChange }: Props) {
         onPointerLeave={end}
       />
       <Button type="button" size="sm" variant="ghost" className="mt-2" onClick={clear}>
-        Clear signature
+        Clear
+      </Button>
+      <Button type="button" size="sm" variant="ghost" className="mt-2" onClick={clear}>
+        Redo
       </Button>
     </div>
   );

@@ -14,6 +14,9 @@ export type MarketFirstTouch = {
   gclid: string;
   fbclid: string;
   landingPath: string;
+  link: string;
+  scout: string;
+  hear: string;
 };
 
 export function marketVisitorId(): string {
@@ -67,6 +70,9 @@ export function rememberMarketAttribution(search = "", landingPath = ""): Market
     gclid: "",
     fbclid: "",
     landingPath: "",
+    link: "",
+    scout: "",
+    hear: "",
   };
   try {
     let prev: MarketFirstTouch = empty;
@@ -86,8 +92,11 @@ export function rememberMarketAttribution(search = "", landingPath = ""): Market
       gclid: (q.gclid || "").trim() || prev.gclid,
       fbclid: (q.fbclid || "").trim() || prev.fbclid,
       landingPath: landingPath.trim() || prev.landingPath || (typeof window !== "undefined" ? window.location.pathname : ""),
+      link: (q.link || "").trim() || prev.link,
+      scout: (q.scout || "").trim() || prev.scout,
+      hear: (q.hear || "").trim() || prev.hear,
     };
-    if (next.utm_source || next.gclid || next.fbclid || next.source || next.landingPath) {
+    if (next.utm_source || next.gclid || next.fbclid || next.source || next.landingPath || next.link || next.scout) {
       localStorage.setItem(ATTR_KEY, JSON.stringify(next));
     }
     return next;
@@ -108,6 +117,9 @@ export function readMarketAttribution(): MarketFirstTouch {
         gclid: "",
         fbclid: "",
         landingPath: "",
+        link: "",
+        scout: "",
+        hear: "",
       };
     }
     const parsed = JSON.parse(raw) as Partial<MarketFirstTouch>;
@@ -119,6 +131,9 @@ export function readMarketAttribution(): MarketFirstTouch {
       gclid: parsed.gclid || "",
       fbclid: parsed.fbclid || "",
       landingPath: parsed.landingPath || "",
+      link: parsed.link || "",
+      scout: parsed.scout || "",
+      hear: parsed.hear || "",
     };
   } catch {
     return {
@@ -129,6 +144,9 @@ export function readMarketAttribution(): MarketFirstTouch {
       gclid: "",
       fbclid: "",
       landingPath: "",
+      link: "",
+      scout: "",
+      hear: "",
     };
   }
 }
@@ -146,6 +164,9 @@ export function signupAttributionPayload(search = ""): Record<string, string> {
   if (attr.gclid) out.gclid = attr.gclid;
   if (attr.fbclid) out.fbclid = attr.fbclid;
   if (attr.landingPath) out.landingPath = attr.landingPath;
+  if (attr.link) out.link = attr.link;
+  if (attr.scout) out.scout = attr.scout;
+  if (attr.hear) out.hear = attr.hear;
   return out;
 }
 

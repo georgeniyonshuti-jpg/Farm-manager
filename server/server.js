@@ -81,6 +81,7 @@ import { enqueueUserDeactivated, initCrmBridge, processCrmOutbox } from "./src/s
 import farmPayrollClosuresRouter, { initFarmPayrollClosuresRouter } from "./src/routes/farmPayrollClosures.routes.js";
 import erpnextRouter from "./src/routes/erpnext.routes.js";
 import { createInsightsRouter } from "./src/routes/insights.routes.js";
+import { createRecruitmentAnalyticsRouter } from "./src/routes/recruitmentAnalytics.routes.js";
 import erpnextWebhookRouter, { initErpnextWebhookRouter } from "./src/routes/erpnext-webhooks.routes.js";
 import clevafarmEntitiesRouter, { initClevaFarmEntitiesRouter } from "./src/routes/clevafarmEntities.routes.js";
 import { initErpnextDb } from "./src/services/erpnext/erpnext.syncLog.js";
@@ -140,10 +141,14 @@ import { createSaasRouter } from "./src/routes/saasRoutes.js";
 import { createSignupsRouter } from "./src/routes/signupsRoutes.js";
 import { createClevaAuthRouter } from "./src/routes/clevaAuth.routes.js";
 import { createPublicMarketRouter } from "./src/routes/publicMarket.routes.js";
+import {
+  createSellerContractAdminRouter,
+  createSellerContractPublicRouter,
+} from "./src/routes/sellerContract.routes.js";
 import { autoDraftReadyLots, syncManagedLotFromFlock } from "./src/services/pipeline/autoDraftLots.js";
 import { fetchClevaUserExists } from "./src/services/clevaSso.js";
 import { createPasswordResetService } from "./src/services/passwordReset.js";
-import { smtpConfigFromEnv } from "./src/services/smtpSend.js";
+import { sendMail, smtpConfigFromEnv } from "./src/services/smtpSend.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -370,6 +375,7 @@ function sanitizeUser(row) {
     companySlug: row.companySlug ?? null,
     companyName: row.companyName ?? null,
     authSource: row.authSource === "cleva" ? "cleva" : "local",
+    mustChangePassword: Boolean(row.mustChangePassword),
   };
 }
 
@@ -421,6 +427,7 @@ function hasUserPageAccess(user, key) {
   if (user.role === "superuser") return true;
   // Company admin is the tenant sovereign for company-scoped pages (incl. Reports).
   if (user.role === "company_admin") return true;
+  if (user.role === "sales_officer") return String(key) === "farm_pipeline";
   if (!PAGE_ACCESS_KEY_SET.has(String(key))) return true;
   const access = Array.isArray(user.pageAccess) ? user.pageAccess.map(String) : [];
   if (access.length === 0) {
@@ -549,6 +556,7 @@ function upsertUser(u) {
   }
   // Backfill market key for sales ops whose pageAccess was saved before farm_market existed.
   if (
+    u.role !== "sales_officer" &&
     (u.role === "sales_coordinator" || u.pageAccess.includes("farm_pipeline")) &&
     !u.pageAccess.includes("farm_market") &&
     PAGE_ACCESS_KEY_SET.has("farm_market")
@@ -704,10 +712,11 @@ async function persistUserToDb(row) {
   await dbQuery(
     `INSERT INTO users (
       id, email, full_name, role, password_hash, business_unit_access,
-      can_view_sensitive_financial, department_keys, page_access, company_id, auth_source
+      can_view_sensitive_financial, department_keys, page_access, company_id, auth_source,
+      must_change_password
     )
     VALUES (
-      $1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::uuid, $11
+      $1::uuid, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::uuid, $11, $12
     )
     ON CONFLICT (id) DO UPDATE SET
       email = EXCLUDED.email,
@@ -719,7 +728,8 @@ async function persistUserToDb(row) {
       department_keys = EXCLUDED.department_keys,
       page_access = EXCLUDED.page_access,
       company_id = COALESCE(EXCLUDED.company_id, users.company_id),
-      auth_source = EXCLUDED.auth_source`,
+      auth_source = EXCLUDED.auth_source,
+      must_change_password = EXCLUDED.must_change_password`,
     [
       row.id,
       row.email,
@@ -732,6 +742,7 @@ async function persistUserToDb(row) {
       JSON.stringify(normalizePageAccess(row.pageAccess, PAGE_ACCESS_KEYS)),
       companyId,
       authSource,
+      Boolean(row.mustChangePassword),
     ]
   );
 }
@@ -752,7 +763,8 @@ async function syncUsersFromDbToMemory() {
       u.company_id::text AS "companyId",
       c.slug AS "companySlug",
       c.name AS "companyName",
-      COALESCE(u.auth_source, 'local') AS "authSource"
+      COALESCE(u.auth_source, 'local') AS "authSource",
+      COALESCE(u.must_change_password, false) AS "mustChangePassword"
     FROM users u
     LEFT JOIN companies c ON c.id = u.company_id
     WHERE u.is_active IS NOT FALSE
@@ -775,6 +787,7 @@ async function syncUsersFromDbToMemory() {
       companySlug: row.companySlug ? String(row.companySlug) : "default-farm",
       companyName: row.companyName ? String(row.companyName) : "Default farm",
       authSource: row.authSource === "cleva" ? "cleva" : "local",
+      mustChangePassword: Boolean(row.mustChangePassword),
     });
   }
   return result.rowCount ?? 0;
@@ -3240,6 +3253,39 @@ app.post("/api/auth/logout", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+app.post("/api/auth/change-password", requireAuth, async (req, res) => {
+  const currentPassword = String(req.body?.currentPassword ?? "");
+  const newPassword = String(req.body?.newPassword ?? "");
+  const user = req.authUser;
+  if (!currentPassword || user.passwordHash !== hashPassword(currentPassword)) {
+    res.status(400).json({ error: "Current password is not correct" });
+    return;
+  }
+  if (newPassword.length < 8) {
+    res.status(400).json({ error: "Password must be at least 8 characters" });
+    return;
+  }
+  if (newPassword === currentPassword) {
+    res.status(400).json({ error: "Choose a password that is different from the temporary one" });
+    return;
+  }
+  const updated = {
+    ...user,
+    passwordHash: hashPassword(newPassword),
+    mustChangePassword: false,
+  };
+  try {
+    await persistUserToDb(updated);
+  } catch (e) {
+    console.error("[ERROR]", "[auth] change-password:", e instanceof Error ? e.message : e);
+    res.status(503).json({ error: "Could not save the new password" });
+    return;
+  }
+  updateUserRecord(user, updated);
+  appendAudit(user.id, user.role, "auth.change_password", "user", user.id, {});
+  res.json({ user: sanitizeUser(updated) });
+});
+
 app.get("/api/auth/me", requireAuth, async (req, res) => {
   const u = await hydrateUserCompanyFromDb(req.authUser);
   res.json({ user: sanitizeUser(u) });
@@ -3301,12 +3347,13 @@ app.post("/api/users", requireAuth, requireUserManagementAccess, requirePageAcce
   const body = req.body ?? {};
   const email = String(body.email ?? "").trim().toLowerCase();
   const displayName = String(body.displayName ?? "").trim();
-  const password = String(body.password ?? "");
   const role = String(body.role ?? "laborer");
   const businessUnitAccess = String(body.businessUnitAccess ?? "farm");
   const canViewSensitiveFinancial = Boolean(body.canViewSensitiveFinancial);
   const departmentKeys = Array.isArray(body.departmentKeys) ? body.departmentKeys.map(String) : [];
-  const pageAccess = normalizePageAccess(body.pageAccess, PAGE_ACCESS_KEYS);
+  const pageAccess = role === "sales_officer"
+    ? ["farm_pipeline"]
+    : normalizePageAccess(body.pageAccess, PAGE_ACCESS_KEYS);
   for (const dk of departmentKeys) {
     if (!systemConfig.validateAgainstCategory("department_key", dk, systemConfig.getStaticFallbackCodes("department_key"))) {
       res.status(400).json({ error: `Invalid department key: ${dk}` });
@@ -3314,8 +3361,8 @@ app.post("/api/users", requireAuth, requireUserManagementAccess, requirePageAcce
     }
   }
 
-  if (!email || !displayName || !password) {
-    res.status(400).json({ error: "email, displayName, password required" });
+  if (!email || !displayName) {
+    res.status(400).json({ error: "email and displayName are required" });
     return;
   }
   if (!actorCanAssignRole(req.authUser, role)) {
@@ -3338,17 +3385,19 @@ app.post("/api/users", requireAuth, requireUserManagementAccess, requirePageAcce
     res.status(400).json({ error: "companyId required" });
     return;
   }
+  const temporaryPassword = crypto.randomBytes(9).toString("base64url");
   const row = {
     id,
     email,
     displayName,
-    passwordHash: hashPassword(password),
+    passwordHash: hashPassword(temporaryPassword),
     role,
     businessUnitAccess,
     canViewSensitiveFinancial,
     departmentKeys,
     pageAccess,
     companyId: assignCompanyId,
+    mustChangePassword: true,
   };
   try {
     await persistUserToDb(row);
@@ -3364,7 +3413,45 @@ app.post("/api/users", requireAuth, requireUserManagementAccess, requirePageAcce
     businessUnitAccess,
     canViewSensitiveFinancial,
   });
-  res.json({ user: sanitizeUser(row) });
+  let emailSent = false;
+  const smtp = smtpConfigFromEnv();
+  if (smtp) {
+    try {
+      const safeName = String(displayName).replace(/[<>&"]/g, "");
+      const loginUrl = FRONTEND_BASE_URL;
+      await sendMail(smtp, {
+        to: email,
+        subject: "Your Clevafarm account is ready",
+        text: [
+          `Hello ${safeName},`,
+          "",
+          "A Clevafarm account was created for you.",
+          `Sign in at ${loginUrl}`,
+          `Email: ${email}`,
+          `One-time sign-in code: ${temporaryPassword}`,
+          "",
+          "After you sign in, choose your own password.",
+          "",
+          "— Clevafarm",
+          loginUrl,
+        ].join("\n"),
+        html: `<p>Hello ${safeName},</p>
+<p>A Clevafarm account was created for you.</p>
+<p><a href="${loginUrl}">Sign in to Clevafarm</a></p>
+<p>Email: ${email}<br/>One-time sign-in code: ${temporaryPassword}</p>
+<p>After you sign in, choose your own password.</p>
+<p>— Clevafarm</p>`,
+      });
+      emailSent = true;
+    } catch (e) {
+      console.error("[ERROR]", "[users] welcome email failed:", e instanceof Error ? e.message : e);
+    }
+  }
+  res.json({
+    user: sanitizeUser(row),
+    emailSent,
+    ...(emailSent ? {} : { temporaryPassword }),
+  });
 });
 
 app.put("/api/users/:id", requireAuth, requireUserManagementAccess, requirePageAccess("admin_users"), async (req, res) => {
@@ -3394,7 +3481,9 @@ app.put("/api/users/:id", requireAuth, requireUserManagementAccess, requirePageA
   const businessUnitAccess = String(body.businessUnitAccess ?? existing.businessUnitAccess);
   const canViewSensitiveFinancial = Boolean(body.canViewSensitiveFinancial ?? existing.canViewSensitiveFinancial);
   const departmentKeys = Array.isArray(body.departmentKeys) ? body.departmentKeys.map(String) : existing.departmentKeys;
-  const pageAccess = normalizePageAccess(body.pageAccess, existing.pageAccess ?? PAGE_ACCESS_KEYS);
+  const pageAccess = role === "sales_officer"
+    ? ["farm_pipeline"]
+    : normalizePageAccess(body.pageAccess, existing.pageAccess ?? PAGE_ACCESS_KEYS);
   for (const dk of departmentKeys) {
     if (!systemConfig.validateAgainstCategory("department_key", dk, systemConfig.getStaticFallbackCodes("department_key"))) {
       res.status(400).json({ error: `Invalid department key: ${dk}` });
@@ -3504,7 +3593,9 @@ app.patch("/api/users/:id/page-access", requireAuth, requireUserManagementAccess
     return;
   }
   const body = req.body ?? {};
-  const pageAccess = normalizePageAccess(body.pageAccess, existing.pageAccess ?? PAGE_ACCESS_KEYS);
+  const pageAccess = existing.role === "sales_officer"
+    ? ["farm_pipeline"]
+    : normalizePageAccess(body.pageAccess, existing.pageAccess ?? PAGE_ACCESS_KEYS);
   const updatedDraft = {
     ...existing,
     pageAccess,
@@ -11579,6 +11670,30 @@ app.use(
     dbQuery,
     hasDb,
     appendAudit,
+  })
+);
+app.use(
+  "/api/super-admin/contracts",
+  requireAuth,
+  requireSuperuser,
+  createSellerContractAdminRouter({ dbQuery, hasDb, appendAudit })
+);
+app.use(
+  "/api/public/contracts",
+  requireAuth,
+  createSellerContractPublicRouter({ dbQuery, hasDb })
+);
+app.use(
+  "/api/analytics/recruitment",
+  requireAuth,
+  createRecruitmentAnalyticsRouter({
+    dbQuery,
+    hasDb,
+    appendAudit,
+    connect: () => {
+      if (!dbPool) throw new Error("Database pool not configured");
+      return dbPool.connect();
+    },
   })
 );
 

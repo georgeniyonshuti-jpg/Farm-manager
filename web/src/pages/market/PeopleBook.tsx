@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { usePageActive } from "../../components/layout/PageActiveContext";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
-import { canAccessPipelineDesk } from "../../auth/permissions";
+import { canWorkRecruitment } from "../../auth/permissions";
 import { PageHeader } from "../../components/PageHeader";
 import { ManagerPage } from "../../components/layout/ManagerPage";
 import { Button, DataTable, FacetFilter, Input, PageTabs, Select, StatusPill, TableToolbar, ToolbarSearch, type DataColumn } from "../../components/ui";
@@ -17,7 +18,8 @@ import {
   provinceForDistrict,
   sectorsInDistrict,
 } from "../../lib/rwandaLocations";
-import { kycWaiting, listingState, PEOPLE_SORTS, PEOPLE_WANTS, RECRUITMENT_STAGES, stageLabel, wantLabel } from "./people/peopleWork";
+import { cardBadge, CONTACT_STATUSES, contractBadgeLabel, deskPlacement, KYC_STATUSES, listingState, liveSellerWarning, PEOPLE_SORTS, PEOPLE_WANTS, RECRUITMENT_STAGES, wantLabel } from "./people/peopleWork";
+import { setBoardRows, useBoardRevision, useMovingIds, useRecruitmentBoard } from "./people/recruitmentBoard";
 
 type Lane = "recruitment" | "active";
 
@@ -25,12 +27,17 @@ export function PeopleBook() {
   const { token, user } = useAuth();
   const { companyHref, navTo } = useCompanyNav();
   const { showToast } = useToast();
-  const allowed = canAccessPipelineDesk(user);
+  const pageActive = usePageActive();
+  const boardRevision = useBoardRevision();
+  const movingIds = useMovingIds();
+  const rows = useRecruitmentBoard();
+  const allowed = canWorkRecruitment(user);
+  const recruitmentOnly = user?.role === "sales_officer";
   const [lane, setLane] = useState<Lane>("recruitment");
   const [want, setWant] = useState("");
   const [district, setDistrict] = useState("");
   const [owner, setOwner] = useState("");
-  const [overdue, setOverdue] = useState(false);
+  const [calls, setCalls] = useState("");
   const [kyc, setKyc] = useState("");
   const [sort, setSort] = useState("newest");
   const [q, setQ] = useState("");
@@ -41,9 +48,9 @@ export function PeopleBook() {
   const [activeSector, setActiveSector] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [rows, setRows] = useState<RecruitmentContact[]>([]);
   const [owners, setOwners] = useState<Array<{ id: string | null; name: string }>>([]);
   const [adding, setAdding] = useState(false);
+  const [addNotice, setAddNotice] = useState<string | null>(null);
   const [draft, setDraft] = useState({ name: "", phone: "", district: "", want: "sell" });
 
   const reload = useCallback(async () => {
@@ -53,22 +60,41 @@ export function PeopleBook() {
     try {
       const data = await fetchRecruitmentQueue(
         token,
-        lane === "active"
-          ? { lane, q: activeSearch, want: activeWant }
-          : { lane, want, district, owner, overdue, kyc, sort, q }
+        recruitmentOnly || lane !== "active"
+          ? {
+              lane: "recruitment",
+              want,
+              district,
+              owner,
+              overdue: calls === "overdue",
+              deskStatus: calls && calls !== "overdue" ? calls : "",
+              kyc,
+              sort,
+              q,
+            }
+          : { lane, q: activeSearch, want: activeWant }
       );
-      setRows(data.contacts || []);
+      setBoardRows(data.contacts || []);
       setOwners(data.owners || []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load people");
     } finally {
       setLoading(false);
     }
-  }, [activeSearch, activeWant, allowed, district, kyc, lane, overdue, owner, q, sort, token, want]);
+  }, [activeSearch, activeWant, allowed, calls, district, kyc, lane, owner, q, recruitmentOnly, sort, token, want]);
 
   useEffect(() => {
+    if (!pageActive) return;
     void reload();
-  }, [reload]);
+  }, [pageActive, boardRevision, reload]);
+
+  useEffect(() => {
+    if (!pageActive) return;
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") void reload();
+    }, 20000);
+    return () => window.clearInterval(id);
+  }, [pageActive, reload]);
 
   const activeColumns = useMemo<DataColumn<RecruitmentContact>[]>(
     () => [
@@ -138,22 +164,26 @@ export function PeopleBook() {
     const buckets = new Map<string, RecruitmentContact[]>();
     for (const item of RECRUITMENT_STAGES) buckets.set(item[0], []);
     for (const row of rows) {
-      const key = buckets.has(row.stage) ? row.stage : "application";
-      buckets.get(key)?.push(row);
+      const key = deskPlacement(row.stage, row.deskStatus).stage;
+      buckets.get(buckets.has(key) ? key : "application")?.push(row);
     }
     return buckets;
   }, [rows]);
 
   async function addPerson() {
     if (!token) return;
+    setAddNotice(null);
     try {
-      await createRecruitmentContact(token, draft);
+      const saved = await createRecruitmentContact(token, draft);
+      const note = liveSellerWarning(saved.contact || null);
       setAdding(false);
       setDraft({ name: "", phone: "", district: "", want: "sell" });
-      showToast("success", "Added to Application");
+      showToast(note ? "info" : "success", note || "Added to Application");
       await reload();
     } catch (e) {
-      showToast("error", e instanceof Error ? e.message : "Could not add this person");
+      const message = e instanceof Error ? e.message : "Could not add this person";
+      setAddNotice(message);
+      showToast("error", message);
     }
   }
 
@@ -161,7 +191,7 @@ export function PeopleBook() {
     return (
       <ManagerPage>
         <PageHeader title="People" />
-        <p className="text-sm text-[var(--text-secondary)]">Sales coordinator or superuser access required.</p>
+        <p className="text-sm text-[var(--text-secondary)]">Sales officer, sales coordinator, or superuser access required.</p>
       </ManagerPage>
     );
   }
@@ -171,6 +201,7 @@ export function PeopleBook() {
       <PageHeader
         title="People"
         tabs={
+          recruitmentOnly ? undefined : (
           <PageTabs
             value={lane}
             aria-label="People"
@@ -180,6 +211,7 @@ export function PeopleBook() {
               { value: "active", label: "Active people" },
             ]}
           />
+          )
         }
         action={
           lane === "recruitment" ? (
@@ -220,17 +252,23 @@ export function PeopleBook() {
             />
             <FacetFilter
               label="Calls"
-              value={overdue ? "overdue" : ""}
+              value={calls}
               allValue=""
-              onChange={(value) => setOverdue(value === "overdue")}
-              options={[{ value: "overdue", label: "Overdue" }]}
+              onChange={setCalls}
+              options={[
+                ...CONTACT_STATUSES.map(([value, label]) => ({ value, label })),
+                { value: "overdue", label: "Overdue" },
+              ]}
             />
             <FacetFilter
               label="KYC"
               value={kyc}
               allValue=""
               onChange={setKyc}
-              options={[{ value: "review", label: "Waiting for review" }]}
+              options={[
+                ...KYC_STATUSES.map(([value, label]) => ({ value, label })),
+                { value: "review", label: "Waiting for review" },
+              ]}
             />
             <FacetFilter
               label="Sort"
@@ -269,34 +307,45 @@ export function PeopleBook() {
             </Select>
             <Button type="submit" size="sm">Save</Button>
           </div>
+          {addNotice ? <p className="sm:col-span-4 text-sm text-[var(--status-warning)]">{addNotice}</p> : null}
         </form>
       ) : null}
-      {loading ? <SkeletonList rows={4} /> : null}
+      {loading && rows.length === 0 ? <SkeletonList rows={4} /> : null}
       {error ? <ErrorState message={error} onRetry={() => void reload()} /> : null}
       {lane === "recruitment" && !loading && !error && rows.length === 0 ? (
         <p className="mt-4 text-sm text-[var(--text-secondary)]">Nobody is in this list.</p>
       ) : null}
-      {lane === "recruitment" && !loading && !error ? (
-        <div className="mt-3 flex gap-3 overflow-x-auto pb-3">
+      {lane === "recruitment" && !(loading && rows.length === 0) && !error ? (
+        <div className="mt-3 flex gap-4 overflow-x-auto pb-3">
           {RECRUITMENT_STAGES.map(([value, label]) => {
             const people = grouped.get(value) || [];
+            const empty = people.length === 0;
             return (
-              <section key={value} className="flex max-h-[calc(100vh-11rem)] w-72 shrink-0 flex-col rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)]">
-                <h2 className="flex items-center justify-between gap-2 border-b border-[var(--border-color)] px-3 py-2 text-sm font-semibold text-[var(--text-primary)]">
-                  {label}
-                  <span className="inline-flex min-w-6 items-center justify-center rounded-full bg-[var(--surface-subtle)] px-2 text-xs">{people.length}</span>
+              <section
+                key={value}
+                className={
+                  empty
+                    ? "flex w-28 shrink-0 flex-col rounded-xl border border-[var(--border-color)] bg-[var(--surface-subtle)] text-[var(--text-secondary)] opacity-70"
+                    : "flex max-h-[calc(100vh-11rem)] w-72 shrink-0 flex-col rounded-xl border border-[var(--border-color)] bg-[var(--surface-card)]"
+                }
+              >
+                <h2 className="flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-[var(--text-secondary)]">
+                  <span>{label}</span>
+                  <span>{people.length}</span>
                 </h2>
-                <ul className="space-y-2 overflow-y-auto p-2">
-                  {people.map((row) => (
-                    <PersonLink key={row.id} row={row} href={companyHref(`/farm/pipeline/people/${row.id}`)} />
-                  ))}
-                </ul>
+                {empty ? null : (
+                  <ul className="space-y-3 overflow-y-auto p-2">
+                    {people.map((row) => (
+                      <PersonLink key={row.id} row={row} href={companyHref(`/farm/pipeline/people/${row.id}`)} moving={movingIds.has(row.id)} />
+                    ))}
+                  </ul>
+                )}
               </section>
             );
           })}
         </div>
       ) : null}
-      {lane === "active" && !loading && !error ? (
+      {lane === "active" && !(loading && rows.length === 0) && !error ? (
         <div className="table-block mt-3">
           <DataTable
             flush
@@ -385,19 +434,53 @@ function dayLabel(value?: string | null) {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function PersonLink({ row, href }: { row: RecruitmentContact; href: string }) {
+const ROLE_DOT: Record<string, string> = {
+  sell: "bg-[var(--primary-color)]",
+  buy: "bg-[var(--status-info)]",
+  scout: "bg-[var(--text-muted)]",
+};
+
+function PersonLink({ row, href, moving }: { row: RecruitmentContact; href: string; moving?: boolean }) {
+  const badge = cardBadge(row);
+  const calls = row.stage === "contact" ? Number(row.callCount || 0) : 0;
+  const notes = [
+    row.stage === "kyc" || row.contractStatus ? contractBadgeLabel(row) : null,
+    calls > 0 ? (calls === 1 ? "1 call" : `${calls} calls`) : null,
+    row.detailsEditedAt ? "Edited" : null,
+    liveSellerWarning(row) ? "Live seller" : null,
+  ].filter((note): note is string => Boolean(note));
   return (
     <li>
-      <Link to={href} className="block rounded-lg border border-[var(--border-color)] bg-[var(--surface-elevated)] px-3 py-2 hover:border-[var(--primary-color)]">
-        <p className="flex flex-wrap items-center gap-2 font-semibold text-[var(--text-primary)]">
-          <span>{row.name || row.phone}</span>
-          {row.detailsEditedAt ? <StatusPill tone="warning">Edited</StatusPill> : null}
+      <Link
+        to={href}
+        aria-disabled={moving || undefined}
+        tabIndex={moving ? -1 : undefined}
+        onClick={moving ? (event) => event.preventDefault() : undefined}
+        className={`group block rounded-lg border border-[var(--border-color)] bg-[var(--surface-elevated)] px-3 py-2.5 hover:border-[var(--primary-color)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary-color)] focus-visible:ring-offset-2 ${moving ? "pointer-events-none opacity-60" : ""}`}
+      >
+        <p className="truncate font-semibold text-[var(--text-primary)]">{row.name || row.phone}</p>
+        <p className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${ROLE_DOT[row.want] || "bg-[var(--text-muted)]"}`} aria-hidden="true" />
+          <span className="truncate">{wantLabel(row.want)} · {row.district || "No district"}</span>
         </p>
-        <p className="text-sm text-[var(--text-secondary)]">
-          {[wantLabel(row.want), row.district || "No district", row.phone, stageLabel(row.stage)].filter(Boolean).join(" · ")}
-        </p>
-        {row.overdue ? <p className="text-xs font-semibold text-[var(--status-warning)]">Call is overdue</p> : null}
-        {kycWaiting(row) ? <p className="text-xs font-semibold text-[var(--status-warning)]">KYC waiting for review</p> : null}
+        {row.name && row.phone ? (
+          <p className="mt-0.5 truncate whitespace-nowrap text-xs text-[var(--text-secondary)]">{row.phone}</p>
+        ) : null}
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
+            {notes.map((note) => (
+              <span key={note} title={note} aria-label={note} className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--text-muted)]" />
+            ))}
+            {notes.length > 0 ? (
+              <span className="hidden truncate text-xs text-[var(--text-secondary)] group-hover:inline">{notes.join(" · ")}</span>
+            ) : null}
+          </div>
+          {badge ? (
+            <StatusPill sentence tone={badge.tone} className="shrink-0">
+              {badge.label}
+            </StatusPill>
+          ) : null}
+        </div>
       </Link>
     </li>
   );

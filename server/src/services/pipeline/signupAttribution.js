@@ -62,6 +62,9 @@ export function readSignupQueryish(req) {
     source: pick("source"),
     landingPath: pick("landingPath") || pick("landing_path"),
     visitorId: pick("visitorId") || pick("visitor_id"),
+    linkCode: pick("link") || pick("linkCode"),
+    scoutCode: pick("scout") || pick("scoutCode"),
+    selfReported: pick("hear") || pick("selfReported"),
   };
 }
 
@@ -118,6 +121,9 @@ export function attributionFieldsFromReq(req) {
     clickIdKind: resolveClickIdKind(req),
     landingPath: q.landingPath || null,
     visitorId: q.visitorId || null,
+    linkCode: q.linkCode || null,
+    scoutCode: q.scoutCode || null,
+    selfReported: q.selfReported || null,
   };
 }
 

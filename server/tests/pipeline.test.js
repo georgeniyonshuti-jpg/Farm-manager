@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   canAccessPipelineDesk,
+  canWorkRecruitment,
   canBrowseMarket,
   canOptInManagedFlock,
   canScoutPipeline,
@@ -62,13 +63,18 @@ describe("pipeline helpers", () => {
     assert.equal(canAccessPipelineDesk({ role: "sales_coordinator" }), true);
     assert.equal(canAccessPipelineDesk({ role: "manager" }), false);
     assert.equal(canAccessPipelineDesk({ role: "vet" }), false);
+    assert.equal(canAccessPipelineDesk({ role: "sales_officer" }), false);
     assert.equal(canAccessPipelineDesk(null), false);
+    assert.equal(canWorkRecruitment({ role: "sales_officer" }), true);
+    assert.equal(canWorkRecruitment({ role: "sales_coordinator" }), true);
+    assert.equal(canWorkRecruitment({ role: "manager" }), false);
   });
 
   it("market browse includes buyers and ops", () => {
     assert.equal(canBrowseMarket({ role: "buyer" }), true);
     assert.equal(canBrowseMarket({ role: "sales_coordinator" }), true);
     assert.equal(canBrowseMarket({ role: "manager" }), false);
+    assert.equal(canBrowseMarket({ role: "sales_officer" }), false);
     assert.equal(isBuyerRole({ role: "buyer" }), true);
   });
 

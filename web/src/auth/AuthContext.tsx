@@ -46,6 +46,7 @@ type AuthContextValue = {
   setActiveWorkspace: (w: ActiveWorkspace) => void;
   refreshMe: () => Promise<void>;
   establishSession: (token: string, user: SessionUser, farmBootstrap?: FarmBootstrap | null) => void;
+  clearMustChangePassword: () => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -288,6 +289,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [setTokenPersist, seedFieldHub]
   );
 
+  const clearMustChangePassword = useCallback(() => {
+    setUser((prev) => (prev ? { ...prev, mustChangePassword: false } : prev));
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
@@ -299,9 +304,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout,
       refreshMe,
       establishSession,
+      clearMustChangePassword,
       setActiveWorkspace,
     }),
-    [user, token, activeWorkspace, bootstrapped, farmBootstrap, login, logout, refreshMe, establishSession, setActiveWorkspace]
+    [user, token, activeWorkspace, bootstrapped, farmBootstrap, login, logout, refreshMe, establishSession, clearMustChangePassword, setActiveWorkspace]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

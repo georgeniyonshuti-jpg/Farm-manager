@@ -318,6 +318,8 @@ export type RecruitmentContact = {
   birdCount: number | null;
   want: "sell" | "buy" | "scout";
   stage: string;
+  deskStatus?: string | null;
+  callCount?: number | null;
   source: string;
   ownerUserId: string | null;
   ownerName: string | null;
@@ -332,12 +334,20 @@ export type RecruitmentContact = {
   birdType?: string | null;
   quantityMin?: number | null;
   quantityMax?: number | null;
+  flockSize?: number | null;
+  readyInWeeks?: number | null;
   canSlaughter?: boolean | null;
   canDeliver?: boolean | null;
+  buyerFor?: string | null;
+  birdForm?: string | null;
+  deliveryRequired?: boolean | null;
+  willVisit?: boolean | null;
+  farmsKnown?: number | null;
   challenges?: string | null;
   nextAction?: string | null;
   flockCount?: number | null;
   listedCount?: number | null;
+  alreadyLive?: boolean | null;
   kycContractStatus?: string | null;
   kycContractSnapshot?: string | null;
   kycSignatureUrl?: string | null;
@@ -350,6 +360,7 @@ export type RecruitmentContact = {
   kycIdNumber?: string | null;
   kycIdPhotoUrl?: string | null;
   contractText?: string | null;
+  contractStatus?: string | null;
   createdAt: string;
 };
 
@@ -395,6 +406,7 @@ export function fetchRecruitmentQueue(
     q?: string;
     district?: string;
     kyc?: string;
+    deskStatus?: string;
     sort?: string;
     lane?: "recruitment" | "active";
   }
@@ -409,6 +421,7 @@ export function fetchRecruitmentQueue(
   if (query.lane) params.set("lane", query.lane);
   if (query.district) params.set("district", query.district);
   if (query.kyc) params.set("kyc", query.kyc);
+  if (query.deskStatus) params.set("deskStatus", query.deskStatus);
   if (query.sort) params.set("sort", query.sort);
   return recruitmentSend(token, `/market/recruitment/contacts?${params.toString()}`);
 }
@@ -435,6 +448,10 @@ export function fetchRecruitmentContact(token: string | null, id: string) {
     token,
     `/market/recruitment/contacts/${id}`
   );
+}
+
+export function fetchRecruitmentArea(token: string | null, id: string) {
+  return recruitmentSend<{ sentence: string | null }>(token, `/market/recruitment/contacts/${id}/area`);
 }
 
 export function addRecruitmentTouch(

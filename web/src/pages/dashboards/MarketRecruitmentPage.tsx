@@ -3,8 +3,9 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { usePageActive } from "../../components/layout/PageActiveContext";
+import { useBoardRevision } from "../market/people/recruitmentBoard";
 import { Link, Navigate } from "react-router-dom";
-import { INSIGHTS_LANE, LaneNav } from "../../components/layout/LaneNav";
 import { useAuth } from "../../auth/AuthContext";
 import { canAccessPipelineDesk } from "../../auth/permissions";
 import { useCompanyNav } from "../../hooks/useCompanyNav";
@@ -82,6 +83,8 @@ export function MarketRecruitmentPage() {
   const { user, token } = useAuth();
   const { companyHref } = useCompanyNav();
   const allowed = canAccessPipelineDesk(user);
+  const pageActive = usePageActive();
+  const boardRevision = useBoardRevision();
 
   const [days, setDays] = useState("7");
   const [data, setData] = useState<RecruitmentSummary | null>(null);
@@ -117,8 +120,9 @@ export function MarketRecruitmentPage() {
   }, [token, days]);
 
   useEffect(() => {
+    if (!pageActive) return;
     void load();
-  }, [load, refreshKey]);
+  }, [load, refreshKey, pageActive, boardRevision]);
 
   async function saveTargets() {
     setSaving(true);
@@ -173,8 +177,7 @@ export function MarketRecruitmentPage() {
   return (
     <ManagerPage>
       <PageHeader
-        title="Insights"
-        tabs={<LaneNav chrome label="Insights" items={INSIGHTS_LANE} />}
+        title="Recruitment"
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <SegmentedControl label="Range" value={days} onChange={setDays} options={DAYS_OPTS} />
@@ -197,7 +200,7 @@ export function MarketRecruitmentPage() {
         <div className="flex flex-wrap gap-3">
           {sc.stuckSellers > 0 ? (
             <Link
-              to={companyHref("/admin/signups?tab=people&accountType=farmer&stage=contacted")}
+              to={companyHref("/farm/pipeline/people")}
               className="text-sm font-semibold text-[var(--primary-color)] hover:underline"
             >
               {sc.stuckSellers} sellers stuck early →
@@ -210,7 +213,7 @@ export function MarketRecruitmentPage() {
           ) : null}
           {worstChannel && worstChannel.deadRatePct >= 50 ? (
             <Link
-              to={companyHref("/admin/signups?tab=links")}
+              to={companyHref("/dashboard/market/recruitment?view=sources")}
               className="text-sm font-semibold text-[var(--primary-color)] hover:underline"
             >
               {sourceLabel(worstChannel.source)} dead rate {worstChannel.deadRatePct}% →

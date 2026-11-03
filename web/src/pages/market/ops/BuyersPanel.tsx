@@ -709,9 +709,9 @@ function VerifySubpanel() {
   return (
     <div className="space-y-stack">
       <p className="text-sm text-[var(--text-secondary)]">
-        For calls, stages, and ad sources see{" "}
-        <Link to={companyHref("/admin/signups?tab=people")} className="font-semibold text-[var(--primary-color)] hover:underline">
-          Signups
+        For calls and stages see{" "}
+        <Link to={companyHref("/farm/pipeline/people")} className="font-semibold text-[var(--primary-color)] hover:underline">
+          People
         </Link>
         .
       </p>

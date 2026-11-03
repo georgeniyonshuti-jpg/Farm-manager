@@ -10,8 +10,12 @@ export type CallDraft = {
   birdType: string;
   quantityMin: string;
   quantityMax: string;
+  flockSize: string;
+  readyInWeeks: string;
   canSlaughter: string;
   canDeliver: string;
+  deliveryRequired: string;
+  farmsKnown: string;
   note: string;
   understoodNext: string;
   buyerFor: string;
@@ -42,10 +46,11 @@ export function CallScript<T extends CallDraft>({
   const patch = (part: Partial<CallDraft>) => setCall({ ...call, ...part });
 
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-[var(--text-secondary)]">
+    <div>
+      <p className="pb-1 text-sm text-[var(--text-secondary)]">
         You are calling a {wantLabel(contact.want).toLowerCase()}. {roleBrief(contact.want)} Ask these in order, then write anything they added.
       </p>
+      <div className="divide-y divide-[var(--border-color)]">
       <Question
         prompt={`Are you speaking with ${name}?`}
         value={call.speakingWithThem}
@@ -54,7 +59,7 @@ export function CallScript<T extends CallDraft>({
         noLabel="Someone else"
       />
       {call.speakingWithThem === "no" ? (
-        <Field label="Who is on the phone?">
+        <Field className="py-3" label="Who is on the phone?">
           <Input value={call.whoAnswered} onChange={(e) => patch({ whoAnswered: e.target.value })} />
         </Field>
       ) : null}
@@ -65,19 +70,13 @@ export function CallScript<T extends CallDraft>({
         onChange={(locationConfirmed) => patch({ locationConfirmed })}
       />
       {call.locationConfirmed === "no" ? (
-        <Field label="Where should we put them?">
+        <Field className="py-3" label="Where should we put them?">
           <Input value={call.locationCorrected} onChange={(e) => patch({ locationCorrected: e.target.value })} />
         </Field>
       ) : null}
       {contact.want === "sell" ? <SellerQuestions call={call} patch={patch} /> : null}
       {contact.want === "buy" ? <BuyerQuestions call={call} patch={patch} /> : null}
-      {contact.want === "scout" ? (
-        <Question
-          prompt={`Will they visit farms around ${place}?`}
-          value={call.willVisit}
-          onChange={(willVisit) => patch({ willVisit })}
-        />
-      ) : null}
+      {contact.want === "scout" ? <ScoutQuestions call={call} patch={patch} place={place} /> : null}
       <Question
         prompt="Did you explain what happens next?"
         hint={nextStepHint(contact.want)}
@@ -86,9 +85,10 @@ export function CallScript<T extends CallDraft>({
         yesLabel="Yes, they understood"
         noLabel="Not yet"
       />
-      <Field label="Anything else they said">
+      <Field className="py-3" label="Anything else they said">
         <Textarea rows={3} value={call.note} onChange={(e) => patch({ note: e.target.value })} />
       </Field>
+      </div>
     </div>
   );
 }
@@ -109,7 +109,7 @@ function SellerQuestions<T extends CallDraft>({ call, patch }: { call: T; patch:
       />
       {call.ownsBroilers === "yes" ? (
         <>
-          <Field label="What kind of birds?">
+          <Field className="py-3" label="What kind of birds?">
             <Select value={call.birdType} onChange={(e) => patch({ birdType: e.target.value })}>
               <option value="broiler">Broiler</option>
               <option value="hybrid">Hybrid</option>
@@ -117,14 +117,20 @@ function SellerQuestions<T extends CallDraft>({ call, patch }: { call: T; patch:
               <option value="other">Other</option>
             </Select>
           </Field>
+          <Field className="py-3" label="Birds in the flock now" help="How many birds are on the farm today.">
+            <Input inputMode="numeric" value={call.flockSize} onChange={(e) => patch({ flockSize: e.target.value })} />
+          </Field>
           <div className="grid grid-cols-2 gap-2">
-            <Field label="Fewest birds">
+            <Field className="py-3" label="Fewest they will sell">
               <Input inputMode="numeric" value={call.quantityMin} onChange={(e) => patch({ quantityMin: e.target.value })} />
             </Field>
-            <Field label="Most birds">
+            <Field className="py-3" label="Most they will sell">
               <Input inputMode="numeric" value={call.quantityMax} onChange={(e) => patch({ quantityMax: e.target.value })} />
             </Field>
           </div>
+          <Field className="py-3" label="Weeks until they can sell" help="0 means the birds are ready now. 8 is the longest we record.">
+            <Input inputMode="numeric" value={call.readyInWeeks} onChange={(e) => patch({ readyInWeeks: e.target.value })} />
+          </Field>
         </>
       ) : null}
       <Question
@@ -145,7 +151,7 @@ function SellerQuestions<T extends CallDraft>({ call, patch }: { call: T; patch:
 function BuyerQuestions<T extends CallDraft>({ call, patch }: { call: T; patch: (part: Partial<CallDraft>) => void }) {
   return (
     <>
-      <Field label="Who are they buying for?">
+      <Field className="py-3" label="Who are they buying for?">
         <Select value={call.buyerFor} onChange={(e) => patch({ buyerFor: e.target.value })}>
           <option value="">Choose</option>
           {BUYER_FOR.map((item) => (
@@ -154,20 +160,48 @@ function BuyerQuestions<T extends CallDraft>({ call, patch }: { call: T; patch: 
         </Select>
       </Field>
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Fewest birds a week">
+        <Field className="py-3" label="Fewest birds a week">
           <Input inputMode="numeric" value={call.quantityMin} onChange={(e) => patch({ quantityMin: e.target.value })} />
         </Field>
-        <Field label="Most birds a week">
+        <Field className="py-3" label="Most birds a week">
           <Input inputMode="numeric" value={call.quantityMax} onChange={(e) => patch({ quantityMax: e.target.value })} />
         </Field>
       </div>
-      <Field label="How do they want the birds?">
+      <Field className="py-3" label="How do they want the birds?">
         <Select value={call.birdReady} onChange={(e) => patch({ birdReady: e.target.value })}>
           <option value="">Choose</option>
           {BIRD_READY.map(([value, label]) => (
             <option key={value} value={value}>{label}</option>
           ))}
         </Select>
+      </Field>
+      <Question
+        prompt="Do the birds have to be delivered to them?"
+        value={call.deliveryRequired}
+        onChange={(deliveryRequired) => patch({ deliveryRequired })}
+      />
+    </>
+  );
+}
+
+function ScoutQuestions<T extends CallDraft>({
+  call,
+  patch,
+  place,
+}: {
+  call: T;
+  patch: (part: Partial<CallDraft>) => void;
+  place: string;
+}) {
+  return (
+    <>
+      <Question
+        prompt={`Will they visit farms around ${place}?`}
+        value={call.willVisit}
+        onChange={(willVisit) => patch({ willVisit })}
+      />
+      <Field className="py-3" label="Farms they already know there" help="Optional. Leave blank if they are not sure.">
+        <Input inputMode="numeric" value={call.farmsKnown} onChange={(e) => patch({ farmsKnown: e.target.value })} />
       </Field>
     </>
   );
@@ -189,9 +223,11 @@ function Question({
   noLabel?: string;
 }) {
   return (
-    <div className="space-y-2 rounded-lg border border-[var(--border-color)] bg-[var(--surface-subtle)] px-3 py-3">
-      <p className="text-sm font-semibold text-[var(--text-primary)]">{prompt}</p>
-      {hint ? <p className="text-sm text-[var(--text-secondary)]">{hint}</p> : null}
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-[var(--text-primary)]">{prompt}</p>
+        {hint ? <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{hint}</p> : null}
+      </div>
       <SegmentedControl
         size="sm"
         value={value === "yes" || value === "no" ? value : ""}

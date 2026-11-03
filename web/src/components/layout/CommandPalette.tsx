@@ -19,6 +19,11 @@ const PAGES: Array<{ label: string; to: string; keywords: string }> = [
     to: "/dashboard/market/recruitment",
     keywords: "recruit sellers scouts buyers facebook instagram google channel targets",
   },
+  {
+    label: "Previous recruitment",
+    to: "/dashboard/market/recruitment-legacy",
+    keywords: "recruitment previous legacy old page",
+  },
   { label: "Flocks", to: "/farm/flocks", keywords: "birds flocks" },
   { label: "Vet logs", to: "/farm/vet-logs", keywords: "health visit" },
   { label: "Medicine", to: "/farm/treatments", keywords: "treatment rounds" },
@@ -42,7 +47,7 @@ const PAGES: Array<{ label: string; to: string; keywords: string }> = [
 export function CommandPalette({ open, onClose }: Props) {
   const navigate = useNavigate();
   const { companyHref } = useCompanyNav();
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { data } = useOpsBoardData(token);
   const [q, setQ] = useState("");
   const [hi, setHi] = useState(0);
@@ -50,10 +55,20 @@ export function CommandPalette({ open, onClose }: Props) {
 
   const items = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const pages = PAGES.filter(
-      (p) => !needle || p.label.toLowerCase().includes(needle) || p.keywords.includes(needle)
-    ).map((p) => ({ kind: "page" as const, label: p.label, to: p.to }));
-    const flocks = (data?.flocks ?? [])
+    const pages = PAGES.filter((p) => {
+      if (
+        user?.role === "sales_officer" &&
+        p.to !== "/farm/pipeline/people" &&
+        p.to !== "/farm/pipeline/flocks" &&
+        p.to !== "/dashboard/market/recruitment"
+      ) {
+        return false;
+      }
+      return !needle || p.label.toLowerCase().includes(needle) || p.keywords.includes(needle);
+    }).map((p) => ({ kind: "page" as const, label: p.label, to: p.to }));
+    const flocks = user?.role === "sales_officer"
+      ? []
+      : (data?.flocks ?? [])
       .filter((f) => !needle || f.label.toLowerCase().includes(needle) || f.flockId.toLowerCase().includes(needle))
       .slice(0, 8)
       .map((f) => ({
@@ -62,11 +77,13 @@ export function CommandPalette({ open, onClose }: Props) {
         to: `/farm/flocks/${encodeURIComponent(f.flockId)}`,
       }));
     const pending =
-      !needle || /pending|review/.test(needle)
-        ? [{ kind: "page" as const, label: "Pending reviews", to: "/farm/checkin-review" }]
-        : [];
+      user?.role === "sales_officer"
+        ? []
+        : !needle || /pending|review/.test(needle)
+          ? [{ kind: "page" as const, label: "Pending reviews", to: "/farm/checkin-review" }]
+          : [];
     return [...pages, ...pending, ...flocks];
-  }, [q, data?.flocks]);
+  }, [q, data?.flocks, user?.role]);
 
   useEffect(() => {
     if (!open) return;

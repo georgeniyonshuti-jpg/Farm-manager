@@ -67,7 +67,6 @@ describe("saas signup logging and instant scout access", () => {
     assert.ok(saas.includes("logSignupAttemptFromReq"));
     assert.ok(saas.includes("upsertPeopleOnboarding"));
     assert.ok(saas.includes("buildSignupDeskEmail"));
-    assert.ok(saas.includes("// Scouts get instant access"));
     assert.ok(saas.includes("const departmentKeys = [];"));
     assert.equal(saas.includes('accountType === "scout" ? ["scout_pending"]'), false);
   });

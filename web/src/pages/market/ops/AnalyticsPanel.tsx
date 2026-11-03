@@ -31,6 +31,7 @@ import {
 import type { InsightsPack } from "../../../api/insights.api";
 import { formatRwf } from "../../../lib/formatRwf";
 import { SupersetInsightsEmbed } from "../../../components/insights/SupersetInsightsEmbed";
+import { DistrictMap } from "../../../components/maps/DistrictMap";
 
 const DAYS_OPTS = [
   { value: "7", label: "7d" },
@@ -356,20 +357,46 @@ export function AnalyticsPanel({ mode = "glance" }: Props) {
                 </ChartFrame>
               </div>
 
-              <ChartFrame title="Liquidity by district">
-                <div className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={data.overview.byRegion.slice(0, 12)} layout="vertical" margin={{ left: 8 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
-                      <XAxis type="number" tick={{ fontSize: 11 }} />
-                      <YAxis type="category" dataKey="district" width={100} tick={{ fontSize: 11 }} />
-                      <Tooltip />
-                      <Bar dataKey="birdsListed" name="Birds listed" fill="var(--brand-primary)" radius={[0, 4, 4, 0]} />
-                      <Bar dataKey="buyers" name="Buyers" fill="#2a9d8f" radius={[0, 4, 4, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </ChartFrame>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <ChartFrame title="By district">
+                  <DistrictMap
+                    layers={[
+                      {
+                        id: "birds",
+                        label: "Birds listed",
+                        rows: data.overview.byRegion.map((row) => ({
+                          district: row.district,
+                          value: row.birdsListed,
+                          label: `${row.birdsListed} birds listed, ${row.buyers} buyers`,
+                        })),
+                      },
+                      {
+                        id: "buyers",
+                        label: "Buyers",
+                        rows: data.overview.byRegion.map((row) => ({
+                          district: row.district,
+                          value: row.buyers,
+                          label: `${row.buyers} buyers, ${row.birdsListed} birds listed`,
+                        })),
+                      },
+                    ]}
+                  />
+                </ChartFrame>
+                <ChartFrame title="Liquidity by district">
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={data.overview.byRegion.slice(0, 12)} layout="vertical" margin={{ left: 8 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
+                        <XAxis type="number" tick={{ fontSize: 11 }} />
+                        <YAxis type="category" dataKey="district" width={100} tick={{ fontSize: 11 }} />
+                        <Tooltip />
+                        <Bar dataKey="birdsListed" name="Birds listed" fill="var(--brand-primary)" radius={[0, 4, 4, 0]} />
+                        <Bar dataKey="buyers" name="Buyers" fill="#2a9d8f" radius={[0, 4, 4, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </ChartFrame>
+              </div>
             </>
           ) : null}
 

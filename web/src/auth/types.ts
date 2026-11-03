@@ -8,15 +8,16 @@ export type UserRole =
   | "laborer"
   | "procurement_officer"
   | "sales_coordinator"
+  | "sales_officer"
   | "buyer"
   | "investor"
   | "dispatcher";
 
 /** Which business units this identity may access */
-export type BusinessUnitAccess = "clevacredit" | "farm" | "both";
+export type BusinessUnitAccess = "clevacredit" | "farm" | "both" | "market";
 
 /** Currently focused workspace in the UI (Slack-style switcher) */
-export type ActiveWorkspace = "clevacredit" | "farm";
+export type ActiveWorkspace = "clevacredit" | "farm" | "market";
 
 export type SessionUser = {
   id: string;
@@ -42,6 +43,8 @@ export type SessionUser = {
   erpAppRole?: string;
   /** Preferred UI language from ERP farm_bootstrap ("rw" | "en"). */
   preferredLanguage?: "rw" | "en" | string;
+  /** Admin-created accounts must replace the emailed password before using the app. */
+  mustChangePassword?: boolean;
 };
 
 export type AuthState = {

@@ -2,7 +2,7 @@
  * Provision Market Command Center in Superset:
  *  - Farm Postgres database connection
  *  - Virtual datasets from production/superset/market/sql
- *  - Charts + 5 pack dashboards (Overview, Supply, Demand, Scouts, Sales)
+ *  - Charts + pack dashboards (Overview, Supply, Demand, Scouts, Sales, Acquisition, Recruitment)
  *  - Embedding enabled for farm.cleva.rw
  *
  * Usage (on Hetzner, with Superset attached to clevafarm network):
@@ -78,6 +78,19 @@ const DATASETS = [
   { key: "sales_channel", table_name: "Market — Sales Channel", file: "sales_channel.sql" },
   { key: "acquisition_weekly", table_name: "Market — Acquisition Weekly", file: "acquisition_weekly.sql" },
   { key: "acquisition_accounts", table_name: "Market — Acquisition Accounts", file: "acquisition_accounts.sql" },
+  { key: "recruitment_tiles", table_name: "Market — Recruitment Tiles", file: "recruitment_tiles.sql" },
+  { key: "recruitment_pipeline", table_name: "Market — Recruitment Pipeline", file: "recruitment_pipeline.sql" },
+  { key: "recruitment_sources", table_name: "Market — Recruitment Sources", file: "recruitment_sources.sql" },
+  { key: "recruitment_scouts", table_name: "Market — Recruitment Scouts", file: "recruitment_scouts.sql" },
+  { key: "recruitment_weekly", table_name: "Market — Recruitment Weekly", file: "recruitment_weekly.sql" },
+  { key: "recruitment_queue", table_name: "Market — Recruitment Queue", file: "recruitment_queue.sql" },
+  { key: "recruitment_stage_counts", table_name: "Market — Recruitment Stage Counts", file: "recruitment_stage_counts.sql" },
+  { key: "recruitment_wait", table_name: "Market — Recruitment Wait", file: "recruitment_wait.sql" },
+  { key: "recruitment_worklist", table_name: "Market — Recruitment Work List", file: "recruitment_worklist.sql" },
+  { key: "recruitment_interview_results", table_name: "Market — Recruitment Interview Results", file: "recruitment_interview_results.sql" },
+  { key: "recruitment_interviewers", table_name: "Market — Recruitment Interviewers", file: "recruitment_interviewers.sql" },
+  { key: "recruitment_birds", table_name: "Market — Recruitment Birds", file: "recruitment_birds.sql" },
+  { key: "recruitment_handoff", table_name: "Market — Recruitment Handoff", file: "recruitment_handoff.sql" },
 ];
 
 function trimBase(url) {
@@ -283,7 +296,7 @@ async function upsertChart(base, token, { slice_name, datasource_id, viz_type, p
       ...params,
       datasource: `${datasource_id}__table`,
       viz_type,
-      color_scheme: "clevaFarm",
+      color_scheme: params.color_scheme || "clevaFarm",
     }),
   };
   const existing = await findChartId(base, token, slice_name);
@@ -305,8 +318,12 @@ async function upsertChart(base, token, { slice_name, datasource_id, viz_type, p
   return id;
 }
 
-function heroMarkdown(title, subtitle) {
-  return `<div style="padding:12px 16px;border-radius:12px;background:linear-gradient(135deg,#14532d 0%,#1d9e75 55%,#86efac 100%);color:#fff;font-family:system-ui,sans-serif"><div style="font-size:16px;font-weight:700;letter-spacing:.02em">${title}</div><div style="opacity:.9;font-size:13px;margin-top:4px;font-weight:500">${subtitle}</div></div>`;
+function heroMarkdown(title, subtitle, gradient = "linear-gradient(135deg,#14532d 0%,#1d9e75 55%,#86efac 100%)") {
+  return `<div style="padding:12px 16px;border-radius:12px;background:${gradient};color:#fff;font-family:system-ui,sans-serif"><div style="font-size:16px;font-weight:700;letter-spacing:.02em">${title}</div><div style="opacity:.92;font-size:13px;margin-top:4px;font-weight:500">${subtitle}</div></div>`;
+}
+
+function bandMarkdown(title, detail, gradient) {
+  return `<div style="padding:10px 14px;border-radius:12px;background:${gradient};color:#fff;font-family:system-ui,sans-serif"><div style="font-size:14px;font-weight:700">${title}</div><div style="opacity:.92;font-size:12px;margin-top:2px">${detail}</div></div>`;
 }
 
 function buildPositions(slug, title, hero, chartRows) {
@@ -341,6 +358,18 @@ function buildPositions(slug, title, hero, chartRows) {
     const rowId = `${slug}-ROW-${ri + 1}`;
     const childIds = [];
     row.forEach((cell, ci) => {
+      if (cell.markdown) {
+        const mdId = `${slug}-MD-${ri + 1}-${ci}`;
+        pos[mdId] = {
+          type: "MARKDOWN",
+          id: mdId,
+          children: [],
+          parents: [rowId],
+          meta: { width: cell.width, height: cell.height, code: cell.markdown },
+        };
+        childIds.push(mdId);
+        return;
+      }
       const chartNodeId = `CHART-${cell.id}-${slug}-${ri}-${ci}`;
       pos[chartNodeId] = {
         type: "CHART",
@@ -944,7 +973,513 @@ async function main() {
     ),
   });
 
-  const packs = { overview, supply, demand, scouts, sales, acquisition };
+  const tileDs = dsIds.recruitment_tiles;
+  const pipeDs = dsIds.recruitment_pipeline;
+  const sourceDs = dsIds.recruitment_sources;
+  const recScoutDs = dsIds.recruitment_scouts;
+  const weekDs = dsIds.recruitment_weekly;
+  const cSellersLive = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment sellers live",
+    datasource_id: tileDs,
+    viz_type: "big_number_total",
+    params: {
+      metric: sqlMetric("Sellers live", "SUM(sellers_live)", "m_rec_sellers"),
+      subheader: "0 means none live yet",
+      y_axis_format: ",.0f",
+      header_font_size: 0.5,
+      subheader_font_size: 0.16,
+      show_trend_line: false,
+    },
+  });
+  const cBuyersActive = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment buyers active",
+    datasource_id: tileDs,
+    viz_type: "big_number_total",
+    params: {
+      metric: sqlMetric("Buyers active", "SUM(buyers_active)", "m_rec_buyers"),
+      subheader: "0 means none active yet",
+      y_axis_format: ",.0f",
+      header_font_size: 0.5,
+      subheader_font_size: 0.16,
+      show_trend_line: false,
+    },
+  });
+  const cScoutsProducing = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment scouts producing",
+    datasource_id: tileDs,
+    viz_type: "big_number_total",
+    params: {
+      metric: sqlMetric("Scouts producing", "SUM(scouts_producing)", "m_rec_scouts"),
+      subheader: "0 means none producing yet",
+      y_axis_format: ",.0f",
+      header_font_size: 0.5,
+      subheader_font_size: 0.16,
+      show_trend_line: false,
+    },
+  });
+  const cPassed = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment probation",
+    datasource_id: tileDs,
+    viz_type: "big_number_total",
+    params: {
+      metric: sqlMetric("Passed probation", "SUM(passed_probation)", "m_rec_probation"),
+      subheader: "0 means none passed yet",
+      y_axis_format: ",.0f",
+      header_font_size: 0.5,
+      subheader_font_size: 0.16,
+      show_trend_line: false,
+    },
+  });
+  const cPipeStages = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment pipeline stages",
+    datasource_id: pipeDs,
+    viz_type: "dist_bar",
+    params: {
+      metrics: [simpleMetric("people", "SUM", "People")],
+      timeseries_limit_metric: simpleMetric("stage_order", "MIN", "Stage order"),
+      groupby: ["stage"],
+      columns: [],
+      row_limit: 20,
+      order_desc: false,
+      show_legend: false,
+      y_axis_format: ",.0f",
+      color_scheme: "echarts4Colors",
+    },
+  });
+  const cPipeWait = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment waiting time",
+    datasource_id: pipeDs,
+    viz_type: "echarts_timeseries_bar",
+    params: {
+      metrics: [
+        simpleMetric("d0", "SUM", "0–2 days"),
+        simpleMetric("d3", "SUM", "3–5 days"),
+        simpleMetric("d6", "SUM", "6 days or more"),
+      ],
+      x_axis: "stage",
+      groupby: [],
+      row_limit: 20,
+      y_axis_format: ",.0f",
+      show_legend: true,
+      legendOrientation: "top",
+      rich_tooltip: true,
+      color_scheme: "d3Category10",
+    },
+  });
+  const cSourceBars = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment sources",
+    datasource_id: sourceDs,
+    viz_type: "dist_bar",
+    params: {
+      metrics: [simpleMetric("live_sellers", "SUM", "Live sellers")],
+      timeseries_limit_metric: simpleMetric("channel_order", "MIN", "Channel order"),
+      groupby: ["channel"],
+      columns: [],
+      row_limit: 20,
+      order_desc: false,
+      show_legend: false,
+      y_axis_format: ",.0f",
+      color_scheme: "googleCategory10c",
+    },
+  });
+  const cSourceTable = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment source table",
+    datasource_id: sourceDs,
+    viz_type: "table",
+    params: {
+      query_mode: "raw",
+      all_columns: ["channel", "live_sellers", "accounts", "opens"],
+      row_limit: 20,
+      show_cell_bars: true,
+    },
+  });
+  const cScoutStatus = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment scout status",
+    datasource_id: recScoutDs,
+    viz_type: "dist_bar",
+    params: {
+      metrics: [sqlMetric("Scouts", "COUNT(*)", "m_rec_scout_n")],
+      timeseries_limit_metric: simpleMetric("status_order", "MIN", "Status order"),
+      groupby: ["status"],
+      columns: [],
+      row_limit: 10,
+      order_desc: false,
+      show_legend: false,
+      y_axis_format: ",.0f",
+      color_scheme: "bnbColors",
+    },
+  });
+  const cRecScoutTable = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment scout table",
+    datasource_id: recScoutDs,
+    viz_type: "table",
+    params: {
+      query_mode: "raw",
+      all_columns: ["name", "district", "status", "lots", "birds", "unpaid_rwf"],
+      row_limit: 100,
+      page_length: "25",
+      show_cell_bars: true,
+      include_search: true,
+    },
+  });
+  const cRecWeekly = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment weekly",
+    datasource_id: weekDs,
+    viz_type: "echarts_timeseries_bar",
+    params: {
+      metrics: [
+        simpleMetric("sellers_live", "SUM", "Sellers live"),
+        simpleMetric("buyers_active", "SUM", "Buyers active"),
+        simpleMetric("scouts_producing", "SUM", "Scouts producing"),
+        simpleMetric("passed_probation", "SUM", "Passed probation"),
+      ],
+      x_axis: "week",
+      groupby: [],
+      row_limit: 12,
+      y_axis_format: ",.0f",
+      show_legend: true,
+      legendOrientation: "top",
+      rich_tooltip: true,
+      color_scheme: "supersetColors",
+    },
+  });
+  const queueDs = dsIds.recruitment_queue;
+  const stageDs = dsIds.recruitment_stage_counts;
+  const waitDs = dsIds.recruitment_wait;
+  const workDs = dsIds.recruitment_worklist;
+  const resultDs = dsIds.recruitment_interview_results;
+  const interviewerDs = dsIds.recruitment_interviewers;
+  const birdsDs = dsIds.recruitment_birds;
+  const handoffDs = dsIds.recruitment_handoff;
+  const cQueueStages = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment queue stages",
+    datasource_id: stageDs,
+    viz_type: "dist_bar",
+    params: {
+      metrics: [simpleMetric("people", "SUM", "People")],
+      timeseries_limit_metric: simpleMetric("stage_order", "MIN", "Stage order"),
+      groupby: ["desk_stage"],
+      columns: [],
+      row_limit: 20,
+      order_desc: false,
+      show_legend: false,
+      y_axis_format: ",.0f",
+      color_scheme: "echarts4Colors",
+    },
+  });
+  const cQueueWait = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment queue waiting",
+    datasource_id: waitDs,
+    viz_type: "echarts_timeseries_bar",
+    params: {
+      metrics: [
+        simpleMetric("d0", "SUM", "0–2 days"),
+        simpleMetric("d3", "SUM", "3–5 days"),
+        simpleMetric("d6", "SUM", "6 days or more"),
+      ],
+      x_axis: "desk_stage",
+      groupby: [],
+      row_limit: 20,
+      y_axis_format: ",.0f",
+      show_legend: true,
+      legendOrientation: "top",
+      rich_tooltip: true,
+      color_scheme: "d3Category10",
+    },
+  });
+  const cWorkList = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment queue work list",
+    datasource_id: workDs,
+    viz_type: "table",
+    params: {
+      query_mode: "raw",
+      all_columns: ["contact_name", "owner_name", "days_in_stage"],
+      row_limit: 100,
+      page_length: "25",
+      include_search: true,
+      order_desc: true,
+    },
+  });
+  const cResults = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment interview results",
+    datasource_id: resultDs,
+    viz_type: "dist_bar",
+    params: {
+      metrics: [simpleMetric("people", "SUM", "People")],
+      timeseries_limit_metric: simpleMetric("result_order", "MIN", "Result order"),
+      groupby: ["result_label"],
+      columns: [],
+      row_limit: 20,
+      order_desc: false,
+      show_legend: false,
+      y_axis_format: ",.0f",
+      color_scheme: "googleCategory10c",
+    },
+  });
+  const cInterviewsRecorded = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment interviews recorded",
+    datasource_id: resultDs,
+    viz_type: "big_number_total",
+    params: {
+      metric: sqlMetric("Result marks", "SUM(people)", "m_rec_interviews"),
+      subheader: "0 means no interview has been recorded yet. Bars can overlap.",
+      y_axis_format: ",.0f",
+      header_font_size: 0.4,
+      subheader_font_size: 0.14,
+      show_trend_line: false,
+    },
+  });
+  const cInterviewers = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment interviewers",
+    datasource_id: interviewerDs,
+    viz_type: "table",
+    params: {
+      query_mode: "raw",
+      all_columns: [
+        "owner_name",
+        "people_assigned",
+        "calls_made",
+        "reached",
+        "no_answer",
+        "overdue_next_calls",
+        "decisions_this_week",
+      ],
+      row_limit: 100,
+      page_length: "25",
+      include_search: true,
+      show_cell_bars: true,
+    },
+  });
+  const cStatedBirds = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment stated birds",
+    datasource_id: birdsDs,
+    viz_type: "dist_bar",
+    params: {
+      metrics: [simpleMetric("stated_birds", "SUM", "Birds stated")],
+      timeseries_limit_metric: simpleMetric("week_order", "MIN", "Week order"),
+      groupby: ["ready_label"],
+      columns: [],
+      row_limit: 20,
+      order_desc: false,
+      show_legend: false,
+      y_axis_format: ",.0f",
+      color_scheme: "bnbColors",
+    },
+  });
+  const cNotAsked = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment birds not asked",
+    datasource_id: queueDs,
+    viz_type: "big_number_total",
+    params: {
+      metric: sqlMetric(
+        "Not asked yet",
+        "SUM(CASE WHEN has_stated_birds THEN 0 ELSE 1 END)",
+        "m_rec_not_asked"
+      ),
+      subheader: "Blank is not asked, not zero birds",
+      y_axis_format: ",.0f",
+      header_font_size: 0.4,
+      subheader_font_size: 0.14,
+      show_trend_line: false,
+    },
+  });
+  const cHanded = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment handed to scout",
+    datasource_id: handoffDs,
+    viz_type: "big_number_total",
+    params: {
+      metric: sqlMetric("Handed to a scout", "SUM(handed)", "m_rec_handed"),
+      subheader: "0 means nobody has been handed to a scout yet",
+      y_axis_format: ",.0f",
+      header_font_size: 0.4,
+      subheader_font_size: 0.14,
+      show_trend_line: false,
+    },
+  });
+  const cNotHanded = await upsertChart(base, auth, {
+    slice_name: "Market — Recruitment not handed",
+    datasource_id: handoffDs,
+    viz_type: "big_number_total",
+    params: {
+      metric: sqlMetric("Not handed", "SUM(not_handed)", "m_rec_not_handed"),
+      subheader: "KYC or Active, and no flock names a scout",
+      y_axis_format: ",.0f",
+      header_font_size: 0.4,
+      subheader_font_size: 0.14,
+      show_trend_line: false,
+    },
+  });
+  const recruitment = await upsertDashboard(base, auth, {
+    title: "Cleva Market Command Center — Recruitment",
+    slug: "cleva-market-recruitment",
+    css: MARKET_CSS,
+    chartIds: [
+      cSellersLive,
+      cBuyersActive,
+      cScoutsProducing,
+      cPassed,
+      cQueueStages,
+      cQueueWait,
+      cWorkList,
+      cResults,
+      cInterviewsRecorded,
+      cInterviewers,
+      cStatedBirds,
+      cNotAsked,
+      cHanded,
+      cNotHanded,
+      cSourceBars,
+      cSourceTable,
+      cScoutStatus,
+      cRecScoutTable,
+      cRecWeekly,
+    ],
+    positions: buildPositions(
+      "mkt-rec",
+      "Cleva Market Command Center — Recruitment",
+      heroMarkdown(
+        "Recruitment queue",
+        "Where interviews stand, who is calling, and the birds people said they will have. Outcome charts fill in once people go live.",
+        "linear-gradient(120deg,#14532d 0%,#1d9e75 28%,#2563eb 62%,#f59e0b 100%)"
+      ),
+      [
+        [
+          {
+            markdown: bandMarkdown(
+              "This week",
+              "A zero means nobody has gone live, bought, produced, or passed probation yet.",
+              "linear-gradient(135deg,#14532d,#1d9e75)"
+            ),
+            width: 12,
+            height: 8,
+          },
+        ],
+        [
+          { id: cSellersLive, name: "Sellers live", width: 3, height: 16 },
+          { id: cBuyersActive, name: "Buyers active", width: 3, height: 16 },
+          { id: cScoutsProducing, name: "Scouts producing", width: 3, height: 16 },
+          { id: cPassed, name: "Passed probation", width: 3, height: 16 },
+        ],
+        [
+          {
+            markdown: bandMarkdown(
+              "Interview queue",
+              "Days use the latest call note, or the day the person was added when there is no note. There is no separate stage-change time.",
+              "linear-gradient(135deg,#0f766e,#2dd4bf)"
+            ),
+            width: 12,
+            height: 8,
+          },
+        ],
+        [
+          { id: cQueueStages, name: "Stages", width: 6, height: 50 },
+          { id: cQueueWait, name: "Waiting", width: 6, height: 50 },
+        ],
+        [
+          {
+            markdown: bandMarkdown(
+              "Needs a call",
+              "In Application for 3 or more days, and no call booked. An empty table means nobody is waiting that long.",
+              "linear-gradient(135deg,#9a3412,#f59e0b)"
+            ),
+            width: 12,
+            height: 8,
+          },
+        ],
+        [{ id: cWorkList, name: "Work list", width: 12, height: 40 }],
+        [
+          {
+            markdown: bandMarkdown(
+              "Interview results",
+              "Reached and no answer are call notes. Approved is a yes, or KYC, or Active. Categories can overlap. Zero on every bar means no interview has been recorded yet.",
+              "linear-gradient(135deg,#1d4ed8,#38bdf8)"
+            ),
+            width: 12,
+            height: 8,
+          },
+        ],
+        [
+          { id: cInterviewsRecorded, name: "Recorded", width: 3, height: 18 },
+          { id: cResults, name: "Results", width: 9, height: 48 },
+        ],
+        [{ id: cInterviewers, name: "Interviewers", width: 12, height: 44 }],
+        [
+          {
+            markdown: bandMarkdown(
+              "Birds they said they will have",
+              "Flock size when it was answered, otherwise the minimum. Blank answers are not zero. A week with no bar means nobody gave that timing.",
+              "linear-gradient(135deg,#6d28d9,#c4b5fd)"
+            ),
+            width: 12,
+            height: 8,
+          },
+        ],
+        [
+          { id: cStatedBirds, name: "Birds", width: 8, height: 44 },
+          { id: cNotAsked, name: "Not asked", width: 4, height: 18 },
+        ],
+        [
+          {
+            markdown: bandMarkdown(
+              "Handed to a scout",
+              "Only people in KYC or Active. Zero means no recruit has been handed to a scout yet.",
+              "linear-gradient(135deg,#9a3412,#fbbf24)"
+            ),
+            width: 12,
+            height: 8,
+          },
+        ],
+        [
+          { id: cHanded, name: "Handed", width: 6, height: 16 },
+          { id: cNotHanded, name: "Not handed", width: 6, height: 16 },
+        ],
+        [
+          {
+            markdown: bandMarkdown(
+              "Where live sellers came from",
+              "These charts fill in once people go live. Blank opens means that channel has no public-page opens.",
+              "linear-gradient(135deg,#1d4ed8,#38bdf8)"
+            ),
+            width: 12,
+            height: 8,
+          },
+        ],
+        [
+          { id: cSourceBars, name: "Sources", width: 6, height: 44 },
+          { id: cSourceTable, name: "Source table", width: 6, height: 44 },
+        ],
+        [
+          {
+            markdown: bandMarkdown(
+              "Eight weeks",
+              "The same four outcome numbers. They stay at zero until someone goes live.",
+              "linear-gradient(135deg,#6d28d9,#f472b6)"
+            ),
+            width: 12,
+            height: 8,
+          },
+        ],
+        [{ id: cRecWeekly, name: "Weekly", width: 12, height: 44 }],
+        [
+          {
+            markdown: bandMarkdown(
+              "Scouts this week",
+              "Status, lots, and birds. These fill in once a scout verifies a flock.",
+              "linear-gradient(135deg,#9a3412,#fbbf24)"
+            ),
+            width: 12,
+            height: 8,
+          },
+        ],
+        [
+          { id: cScoutStatus, name: "Status", width: 4, height: 44 },
+          { id: cRecScoutTable, name: "Scouts", width: 8, height: 44 },
+        ],
+      ]
+    ),
+  });
+
+  const packs = { overview, supply, demand, scouts, sales, acquisition, recruitment };
   const missing = Object.entries(packs).filter(([, d]) => !d.uuid);
   if (missing.length) {
     console.warn("\n⚠ Missing embed UUIDs for:", missing.map(([k]) => k).join(", "));
@@ -960,6 +1495,7 @@ async function main() {
   console.log(`MARKET_INSIGHTS_PACK_SCOUTS=${scouts.uuid || ""}`);
   console.log(`MARKET_INSIGHTS_PACK_SALES=${sales.uuid || ""}`);
   console.log(`MARKET_INSIGHTS_PACK_ACQUISITION=${acquisition.uuid || ""}`);
+  console.log(`MARKET_INSIGHTS_PACK_RECRUITMENT=${recruitment.uuid || ""}`);
   console.log(
     JSON.stringify(
       {

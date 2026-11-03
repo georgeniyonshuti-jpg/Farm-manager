@@ -1,0 +1,32 @@
+---
+description: Use when working on the recruitment command centre (Insights > Recruitment), metrics, pipeline, sources, scouts, weekly report.
+globs: docs/recruitment-analytics/**,web/src/pages/dashboards/recruitment/**,web/src/pages/dashboards/MarketRecruitmentPage.tsx,server/src/services/recruitmentAnalytics/**,server/src/services/pipeline/marketRecruitment.js,server/src/services/pipeline/recruitmentContacts.js
+alwaysApply: false
+---
+
+# Recruitment analytics: always-on essentials
+
+Spec: @docs/recruitment-analytics/SPEC.md (follow it). Audit: @docs/recruitment-analytics/AUDIT.md.
+
+## Non-negotiables
+- Never invent data, fields or numbers. If something is missing, say so.
+- All metric math lives in ONE module (analytics metrics). Widgets render slices of ONE snapshot; they never run their own queries.
+- Every metric shows a definition id and n. Rates are "x of n". Wilson interval for small samples.
+- Cohort mode vs Activity mode must be labelled; target cards = current calendar week (Africa/Kigali, Monday start).
+- Seller "live" is two numbers, never one: live verified, and live not verified. See AUDIT.md decision D1.
+- One person per normalised phone. Stage comes from recruitment_contacts. Signup time and channel come from people_onboarding and signup_attempts.
+- No rate over 100%, no negative duration, no hidden "Unattributed". Invalid rows are counted in Data Quality, not shown.
+- Store UTC; display Africa/Kigali. RWF formatted with no decimals.
+- Mask phone numbers by default; reveal is audited. No personal data in tests, logs, exports, PDFs, WhatsApp summaries.
+
+## Workflow
+- Plan first, then tests first (confirm they fail, never edit tests to pass), then implement.
+- Reuse the existing stack and theme; no second styling or chart system without asking.
+- After changes run typecheck, tests, and reconcile() when it exists. There is no ESLint or Prettier in this repo. List files changed.
+- The command centre is the Insights Recruitment route (`/dashboard/market/recruitment`). The previous page stays mounted at `/dashboard/market/recruitment-legacy`. Do not delete `MarketRecruitmentPage.tsx`.
+- One phase at a time. Migrations must be reversible and shown before they run.
+
+## Design
+- Colour never carries meaning alone (icon + text). Okabe-Ito palette for categories.
+- No pies, gauges, dual axes. Bars start at zero. At most two alerts on the Command Center.
+- Every chart/table has loading, empty, error states and a "view as table" option.

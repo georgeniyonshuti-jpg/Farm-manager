@@ -6,6 +6,8 @@ type Props = {
   tone?: StatusTone;
   children: ReactNode;
   className?: string;
+  /** Sentence case. The default pill stays in capitals. */
+  sentence?: boolean;
 };
 
 const TONE: Record<StatusTone, string> = {
@@ -17,10 +19,11 @@ const TONE: Record<StatusTone, string> = {
 };
 
 /** Normalized badge: 22px height, 8px horizontal padding, 6px radius (v2 spec §2.5). */
-export function StatusPill({ tone = "neutral", children, className = "" }: Props) {
+export function StatusPill({ tone = "neutral", children, className = "", sentence = false }: Props) {
+  const letter = sentence ? "normal-case tracking-normal" : "uppercase tracking-wide";
   return (
     <span
-      className={`inline-flex h-[22px] items-center rounded-md px-2 text-[11px] font-semibold uppercase tracking-wide ${TONE[tone]} ${className}`}
+      className={`inline-flex h-[22px] items-center rounded-md px-2 text-[11px] font-semibold ${letter} ${TONE[tone]} ${className}`}
     >
       {children}
     </span>

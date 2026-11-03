@@ -13,6 +13,7 @@ import { stripTenantPrefix, tenantPath } from "../lib/tenancy";
 import { AppLoadingScreen } from "../components/AppLoadingScreen";
 import { AccessDeniedRedirect } from "./AccessDeniedRedirect";
 import { mapErpRoleToPwaRole, readStoredFarmBootstrap } from "../auth/farmBootstrap";
+import { ChoosePasswordPage } from "../pages/ChoosePasswordPage";
 
 function SessionLoadingScreen() {
   return <AppLoadingScreen />;
@@ -42,6 +43,10 @@ export function ProtectedRoute({
 
   if (requireAuth && !user) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (user?.mustChangePassword) {
+    return <ChoosePasswordPage />;
   }
 
   const appPath = stripTenantPrefix(location.pathname);
@@ -109,6 +114,8 @@ export function defaultHomePathForRole(role: UserRole): string {
       return "/cleva/portfolio";
     case "sales_coordinator":
       return "/farm/pipeline";
+    case "sales_officer":
+      return "/farm/pipeline/people";
     case "buyer":
       return "/market";
     default:

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   cigErpDefaults,
+  isCigCompanyLink,
   resolveErpBaseFromInput,
 } from "../src/services/erpnext/erpBaseFromInput.js";
 import { normalizeCompanyList } from "../src/services/erpnext/erpnext.client.js";
@@ -33,6 +34,23 @@ describe("erpBaseFromInput", () => {
     assert.equal(cig.erpnextBaseUrl, "https://cig.cleva.rw");
     assert.equal(cig.erpnextCompany, "Cleva Investments Group");
     assert.equal(cig.subdomain, "cig");
+  });
+
+  it("treats CIG-linked companies as internal, not a free trial", () => {
+    const env = {
+      ERPNEXT_CIG_BASE_URL: "https://cig.cleva.rw",
+      ERPNEXT_CIG_COMPANY: "Cleva Investments Group",
+    };
+    assert.equal(
+      isCigCompanyLink({ erpnextCompany: "Cleva Investments Group", erpnextBaseUrl: "https://erp.clevacredit.com" }, env),
+      true
+    );
+    assert.equal(isCigCompanyLink({ erpnextBaseUrl: "https://cig.cleva.rw" }, env), true);
+    assert.equal(isCigCompanyLink({ slug: "default-farm" }, env), true);
+    assert.equal(
+      isCigCompanyLink({ erpnextCompany: "Another Farm", erpnextBaseUrl: "https://other.cleva.rw", slug: "green-hills" }, env),
+      false
+    );
   });
 });
 

@@ -2,15 +2,17 @@ import { useState, type ReactNode } from "react";
 import { Button, Field, Input, StatusPill } from "../../../components/ui";
 import { DistrictSelect } from "../../../components/DistrictSelect";
 import type { RecruitmentContact } from "../../../api/marketInsights.api";
-import { SignaturePad } from "./SignaturePad";
+import { ContractDesk } from "./ContractDesk";
 
 type Task = "contract" | "location" | "payment" | "identity";
 
 type Props = {
   contact: RecruitmentContact;
   desk: boolean;
+  canApprove?: boolean;
   busy?: boolean;
   onSubmit: (body: Record<string, unknown>) => Promise<void>;
+  onContract?: (contact: RecruitmentContact) => void;
 };
 
 const STATUS_TONE = {
@@ -49,8 +51,7 @@ async function fileToImageUrl(file: File) {
   }
 }
 
-export function KycPanel({ contact, desk, busy, onSubmit }: Props) {
-  const [signature, setSignature] = useState(contact.kycSignatureUrl || "");
+export function KycPanel({ contact, desk, canApprove = false, busy, onSubmit, onContract }: Props) {
   const [district, setDistrict] = useState(contact.district || "");
   const [sector, setSector] = useState(contact.sector || "");
   const [place, setPlace] = useState(contact.kycPlace || "");
@@ -58,10 +59,8 @@ export function KycPanel({ contact, desk, busy, onSubmit }: Props) {
   const [proof, setProof] = useState(contact.kycPaymentProofUrl || "");
   const [idNumber, setIdNumber] = useState(contact.kycIdNumber || "");
   const [idPhoto, setIdPhoto] = useState(contact.kycIdPhotoUrl || "");
-  const contract = contact.kycContractSnapshot || contact.contractText || "";
 
   async function send(task: Task, review?: "approved" | "rejected") {
-    if (task === "contract") await onSubmit({ task, signatureUrl: signature, review });
     if (task === "location") await onSubmit({ task, district, sector, place, review });
     if (task === "payment") await onSubmit({ task, momoPhone: momo, proofUrl: proof, review });
     if (task === "identity") await onSubmit({ task, idNumber, photoUrl: idPhoto, review });
@@ -75,27 +74,18 @@ export function KycPanel({ contact, desk, busy, onSubmit }: Props) {
   return (
     <div className="space-y-4">
       <TaskCard title="Contract" status={contractStatus}>
-        {contractStatus === "approved" ? (
-          <p className="text-sm text-[var(--text-secondary)]">The contract is signed and approved.</p>
+        {desk ? (
+          <ContractDesk
+            contact={contact}
+            canApprove={canApprove}
+            busy={busy}
+            onChanged={(next) => onContract?.(next)}
+          />
         ) : (
-          <pre className="whitespace-pre-wrap text-sm text-[var(--text-primary)]">{contract}</pre>
+          <p className="text-sm text-[var(--text-secondary)]">
+            Cleva will send you a link to read and sign this agreement on your phone. You do not sign it on this screen.
+          </p>
         )}
-        {contact.kycSignatureUrl ? (
-          <img src={contact.kycSignatureUrl} alt="Saved signature" className="mt-3 max-h-24 rounded border border-[var(--border-color)] bg-white" />
-        ) : null}
-        {contractStatus === "missing" || contractStatus === "rejected" ? (
-          <div className="mt-3">
-            <SignaturePad onChange={setSignature} />
-          </div>
-        ) : null}
-        <Actions
-          status={contractStatus}
-          desk={desk}
-          busy={busy}
-          saveLabel={desk ? "Save signature" : "Sign"}
-          onSave={() => send("contract")}
-          onReview={(review) => send("contract", review)}
-        />
       </TaskCard>
       <TaskCard title="Location" status={locationStatus}>
         {locationStatus === "approved" ? (

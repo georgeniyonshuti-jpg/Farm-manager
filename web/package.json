@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "npm run verify:design && tsc --noEmit && vite build",
     "verify:design": "node scripts/verify-design.mjs",
-    "test": "node --experimental-strip-types --test src/lib/activeFlockStorage.test.ts src/lib/publicMarketFilters.test.ts src/lib/marketSurface.test.ts src/lib/marketVisibility.test.ts src/lib/scoutDraft.test.ts src/lib/scoutInvite.test.ts src/lib/marketHost.test.ts src/lib/fulfillment.test.ts src/lib/marketQuote.test.ts src/lib/listingRankHint.test.ts src/lib/sellingWeek.test.ts src/lib/publicStoreCopy.test.ts src/lib/rwandaLocations.test.ts src/lib/rwandaPhone.test.ts src/components/field/fieldFlockTriage.test.ts src/i18n/laborerI18n.test.ts src/components/insights/supersetInsightsEmbed.test.ts src/auth/permissions.pipeline.test.ts src/pages/market/ops/deskWork.test.ts src/pages/market/people/peopleWork.test.ts src/pages/market/flockDesk.test.ts",
+    "test": "node --experimental-strip-types --test src/lib/activeFlockStorage.test.ts src/lib/publicMarketFilters.test.ts src/lib/marketSurface.test.ts src/lib/marketVisibility.test.ts src/lib/scoutDraft.test.ts src/lib/scoutInvite.test.ts src/lib/marketHost.test.ts src/lib/fulfillment.test.ts src/lib/marketQuote.test.ts src/lib/listingRankHint.test.ts src/lib/sellingWeek.test.ts src/lib/publicStoreCopy.test.ts src/lib/rwandaLocations.test.ts src/lib/rwandaPhone.test.ts src/components/field/fieldFlockTriage.test.ts src/i18n/laborerI18n.test.ts src/components/insights/supersetInsightsEmbed.test.ts src/auth/permissions.pipeline.test.ts src/pages/market/ops/deskWork.test.ts src/pages/market/people/peopleWork.test.ts src/pages/market/flockDesk.test.ts src/pages/dashboards/recruitment/format.test.ts src/components/maps/districtMap.test.ts",
     "preview": "vite preview",
     "gen:i18n:batch": "node scripts/batch-translate-rw.mjs",
     "gen:i18n:check": "node scripts/batch-translate-rw.mjs --check",
@@ -18,6 +18,7 @@
     "@fontsource/dm-mono": "^5.3.0",
     "@fontsource/dm-sans": "^5.3.0",
     "@tanstack/react-query": "^5.102.3",
+    "d3-geo": "^3.1.1",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.468.0",
@@ -28,6 +29,8 @@
     "recharts": "^2.15.0"
   },
   "devDependencies": {
+    "@types/d3-geo": "^3.1.1",
+    "@types/geojson": "^7946.0.16",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

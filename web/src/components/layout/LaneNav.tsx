@@ -61,6 +61,5 @@ export const STOCK_LANE: LaneItem[] = [
 
 export const INSIGHTS_LANE: LaneItem[] = [
   { to: "/dashboard/market", label: "Overview", end: true },
-  { to: "/dashboard/market/recruitment", label: "Recruitment" },
   { to: "/dashboard/market/trends", label: "Trends" },
 ];

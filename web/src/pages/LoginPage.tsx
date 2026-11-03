@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { captureIdpFromLocation, fetchClevaSsoStatus } from "../auth/ClevaOAuth";
 import { ContinueWithCleva } from "../components/ContinueWithCleva";
@@ -66,9 +66,16 @@ function LoginMorePaths({ locale }: { locale: LaborerLocale }) {
   );
 }
 
+function safeSignNext(value: string | null) {
+  if (!value || !value.startsWith("/sign/") || value.startsWith("//")) return "";
+  return value;
+}
+
 export function LoginPage() {
   const { login, user, bootstrapped } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const signNext = safeSignNext(searchParams.get("next"));
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -138,7 +145,7 @@ export function LoginPage() {
   }
 
   if (user) {
-    return <Navigate to={defaultHomeForUser(user.role, resolveUserCompanySlug(user), user.pageAccess)} replace />;
+    return <Navigate to={signNext || defaultHomeForUser(user.role, resolveUserCompanySlug(user), user.pageAccess)} replace />;
   }
 
   const signIn = async (credEmail: string, credPassword: string) => {
@@ -146,7 +153,7 @@ export function LoginPage() {
     setBusy(true);
     try {
       const u = await login({ email: credEmail.trim(), password: credPassword });
-      navigate(defaultHomeForUser(u.role, resolveUserCompanySlug(u), u.pageAccess), { replace: true });
+      navigate(signNext || defaultHomeForUser(u.role, resolveUserCompanySlug(u), u.pageAccess), { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : tSignInFailed);
     } finally {

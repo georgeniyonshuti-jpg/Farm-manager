@@ -1,6 +1,6 @@
 import { useAuth } from "../../auth/AuthContext";
 import type { ActiveWorkspace, UserRole } from "../../auth/types";
-import { canAccessWorkspace, accountKindLabel } from "../../auth/permissions";
+import { canAccessWorkspace, accountKindLabel, workspacesForUser } from "../../auth/permissions";
 import { isLaborerLocaleUser, useLaborerT } from "../../i18n/laborerI18n";
 import { LaborerLanguageToggle } from "../LaborerLanguageToggle";
 import { UserMenuChip } from "./UserMenuChip";
@@ -14,6 +14,7 @@ const ROLE_LABEL_EN: Record<UserRole, string> = {
   laborer: "Laborer",
   procurement_officer: "Procurement officer",
   sales_coordinator: "Sales coordinator",
+  sales_officer: "Sales officer",
   buyer: "Buyer",
   investor: "Investor",
   dispatcher: "Dispatcher",
@@ -27,20 +28,18 @@ type Props = {
 /** Trailing account controls shared by FieldGlobalHeader and FieldNavHeader. */
 export function FieldAccountCluster({ compact = false }: Props) {
   const { user, logout, activeWorkspace, setActiveWorkspace } = useAuth();
-  const farmWorkspace = useLaborerT("Farm / Poultry");
   const clevaWorkspace = useLaborerT("Clevafarm Finance");
   const switchWorkspaceAria = useLaborerT("Switch active business unit");
   const roleBadge = useLaborerT(user ? (accountKindLabel(user) ?? ROLE_LABEL_EN[user.role]) : "");
 
   if (!user) return null;
 
-  const showSwitcher = user.businessUnitAccess === "both";
+  const showSwitcher = workspacesForUser(user).length > 1;
   const showLang = isLaborerLocaleUser(user);
-
-  const workspaces: { id: ActiveWorkspace; label: string }[] = [
-    { id: "farm", label: farmWorkspace },
-    { id: "clevacredit", label: clevaWorkspace },
-  ];
+  const workspaces = workspacesForUser(user).map((id) => ({
+    id,
+    label: id === "farm" ? "Farm operations" : id === "market" ? "Market" : clevaWorkspace,
+  }));
 
   const workspaceSelect =
     showSwitcher ? (
@@ -70,6 +69,7 @@ export function FieldAccountCluster({ compact = false }: Props) {
         showRolePill={false}
         showChevron
         includeThemeToggle
+        showLegalFooter
       />
     </>
   );

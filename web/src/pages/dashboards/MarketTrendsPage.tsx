@@ -66,6 +66,8 @@ export function MarketTrendsPage() {
                 { id: "demand", label: "Demand", enabled: true },
                 { id: "scouts", label: "Scouts", enabled: true },
                 { id: "sales", label: "Sales", enabled: true },
+                { id: "acquisition", label: "Acquisition", enabled: true },
+                { id: "recruitment", label: "Recruitment", enabled: true },
               ];
       setPacks(next);
       setDraft(next);
@@ -117,6 +119,9 @@ export function MarketTrendsPage() {
     enabled: p.id === activePack,
   }));
 
+  const packUuid = meta?.packDashboards?.[activePack] || "";
+  const recruitmentUnlinked = activePack === "recruitment" && !packUuid;
+
   return (
     <ManagerPage>
       <div className="flex w-full flex-col gap-3 pb-4">
@@ -151,7 +156,7 @@ export function MarketTrendsPage() {
               </div>
               <p className="text-xs text-[var(--text-muted)]">
                 {note ||
-                  "Overview is liquidity and GMV. Supply / Demand are separate funnels. Scouts and Sales dig into field and money."}
+                  "Overview is liquidity and GMV. Supply / Demand are separate funnels. Scouts and Sales dig into field and money. Acquisition is channel reach. Recruitment is one scroll of the command centre."}
               </p>
               <div className="space-y-2">
                 {draft.map((p) => (
@@ -214,12 +219,20 @@ export function MarketTrendsPage() {
           />
         ) : null}
 
-        {embedReady ? (
+        {embedReady && recruitmentUnlinked ? (
+          <EmptyState
+            title="Recruitment analytics is not linked yet"
+            description="Set MARKET_INSIGHTS_PACK_RECRUITMENT on the API after the Superset dashboard is provisioned. The other packs stay available."
+          />
+        ) : null}
+
+        {embedReady && !recruitmentUnlinked ? (
           <SupersetInsightsEmbed
             refreshKey={refreshKey}
             onDataAsOf={onDataAsOf}
             packs={embedPacks}
             surface="market"
+            frame={activePack === "recruitment" ? "page" : "viewport"}
             metaOverride={{ ...meta!, packs: embedPacks }}
           />
         ) : null}

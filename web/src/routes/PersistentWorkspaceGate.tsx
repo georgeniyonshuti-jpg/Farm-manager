@@ -8,15 +8,20 @@ import type { ActiveWorkspace } from "../auth/types";
  */
 export function PersistentWorkspaceGate({
   workspace,
+  workspaces,
   children,
 }: {
-  workspace: ActiveWorkspace;
+  workspace?: ActiveWorkspace;
+  workspaces?: ActiveWorkspace[];
   children: React.ReactNode;
 }) {
   const { user, bootstrapped } = useAuth();
+  const allowed = workspaces ?? (workspace ? [workspace] : []);
 
   if (!bootstrapped || !user) return null;
-  if (!canAccessWorkspace(user, workspace) && !isSuperuser(user)) return null;
+  if (isSuperuser(user) || allowed.some((item) => canAccessWorkspace(user, item))) {
+    return <>{children}</>;
+  }
 
-  return <>{children}</>;
+  return null;
 }

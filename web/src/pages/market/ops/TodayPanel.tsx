@@ -310,10 +310,10 @@ function LinkOpens({
           </p>
         </div>
         <Link
-          to={companyHref("/admin/signups?tab=funnel")}
+          to={companyHref("/dashboard/market/recruitment?view=sources")}
           className="text-sm font-semibold text-[var(--primary-color)] hover:underline"
         >
-          Open Signups
+          Open Sources
         </Link>
       </div>
       <p className="mt-2 text-sm text-[var(--text-primary)]">
@@ -321,7 +321,7 @@ function LinkOpens({
       </p>
       {sourceLine ? <p className="mt-1 text-sm text-[var(--text-secondary)]">{sourceLine}</p> : null}
       <p className="mt-2 text-xs text-[var(--text-muted)]">
-        People, failed attempts, and ad links live in Signups.
+        Failed signups and ad links are on Recruitment, under Sources.
       </p>
     </section>
   );

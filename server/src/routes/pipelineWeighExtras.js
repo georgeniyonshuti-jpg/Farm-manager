@@ -6,6 +6,7 @@ import {
   LOT_SELECT,
   canAccessPipelineDesk,
   canScoutPipeline,
+  canWorkRecruitment,
   mapLotRow,
   remainingBirds,
 } from "../services/pipeline/pipeline.js";
@@ -23,6 +24,13 @@ import { buyerPlaceGroup } from "../services/pipeline/rwandaLocations.js";
 export function registerPipelineWeighRoutes(router, ctx) {
   const { dbQuery, hasDb, audit, helpers } = ctx;
   const { requireDb, str, numOrNull } = helpers;
+
+  function omitFlockPrice(row) {
+    if (!row) return row;
+    const next = { ...row };
+    delete next.askPricePerKg;
+    return next;
+  }
 
   async function getVisitFeeRwf() {
     try {
@@ -234,7 +242,8 @@ export function registerPipelineWeighRoutes(router, ctx) {
 
   router.get("/flock-book", async (req, res) => {
     if (!requireDb(res)) return;
-    if (!canAccessPipelineDesk(req.authUser)) return res.status(403).json({ error: "Not allowed." });
+    if (!canWorkRecruitment(req.authUser)) return res.status(403).json({ error: "Not allowed." });
+    const officer = req.authUser?.role === "sales_officer";
     try {
       const r = await dbQuery(
         `SELECT l.id::text AS id,
@@ -259,18 +268,20 @@ export function registerPipelineWeighRoutes(router, ctx) {
           ORDER BY l.created_at DESC
           LIMIT 200`
       );
-      const scouts = await dbQuery(
-        `SELECT u.id::text AS id, COALESCE(NULLIF(u.full_name, ''), u.email) AS name
-           FROM users u
-          WHERE u.role IN ('vet', 'vet_manager')
-            AND u.is_active = true
-            AND EXISTS (
-              SELECT 1 FROM scout_applications sa
-               WHERE sa.user_id = u.id AND sa.status = 'approved'
-            )
-          ORDER BY 2`
-      );
-      const flocks = r.rows.filter((row) => listingPhase(row) !== "live");
+      const scouts = officer
+        ? { rows: [] }
+        : await dbQuery(
+            `SELECT u.id::text AS id, COALESCE(NULLIF(u.full_name, ''), u.email) AS name
+               FROM users u
+              WHERE u.role IN ('vet', 'vet_manager')
+                AND u.is_active = true
+                AND EXISTS (
+                  SELECT 1 FROM scout_applications sa
+                   WHERE sa.user_id = u.id AND sa.status = 'approved'
+                )
+              ORDER BY 2`
+          );
+      const flocks = r.rows.filter((row) => listingPhase(row) !== "live").map((row) => (officer ? omitFlockPrice(row) : row));
       res.json({ flocks, scouts: scouts.rows });
     } catch (e) {
       res.status(503).json({ error: e instanceof Error ? e.message : "Could not load flocks." });
@@ -279,7 +290,8 @@ export function registerPipelineWeighRoutes(router, ctx) {
 
   router.get("/flock-book/:id", async (req, res) => {
     if (!requireDb(res)) return;
-    if (!canAccessPipelineDesk(req.authUser)) return res.status(403).json({ error: "Not allowed." });
+    if (!canWorkRecruitment(req.authUser)) return res.status(403).json({ error: "Not allowed." });
+    const officer = req.authUser?.role === "sales_officer";
     try {
       const r = await dbQuery(
         `SELECT l.id::text AS id,
@@ -305,6 +317,14 @@ export function registerPipelineWeighRoutes(router, ctx) {
       );
       const flock = r.rows[0];
       if (!flock) return res.status(404).json({ error: "Flock not found." });
+      if (officer) {
+        res.json({
+          flock: omitFlockPrice(flock),
+          scouts: [],
+          buyers: { sameSector: [], sameDistrict: [], sameProvince: [] },
+        });
+        return;
+      }
       const scouts = await dbQuery(
         `SELECT u.id::text AS id, COALESCE(NULLIF(u.full_name, ''), u.email) AS name
            FROM users u

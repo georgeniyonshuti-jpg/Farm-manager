@@ -28,28 +28,38 @@ const ROLE_LABEL_EN: Record<UserRole, string> = {
   laborer: "Laborer",
   procurement_officer: "Procurement officer",
   sales_coordinator: "Sales coordinator",
+  sales_officer: "Sales officer",
   buyer: "Buyer",
   investor: "Investor",
   dispatcher: "Dispatcher",
 };
 
 type AppTopBarProps = {
+  /** Logo, app name, and the green chrome line. Desk shell only. */
+  showBrand?: boolean;
   showDesktopSidebarToggle?: boolean;
-  desktopSidebarCollapsed?: boolean;
   onToggleDesktopSidebar?: () => void;
   showMobileSidebarToggle?: boolean;
   onToggleMobileSidebar?: () => void;
   onOpenCommandPalette?: () => void;
 };
 
+function MenuIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+      <path d="M4 7h16M4 12h16M4 17h16" />
+    </svg>
+  );
+}
+
 /**
- * Dense desktop top bar.
- * Row 1 (48px): sidebar toggle · page title · actions · search · avatar.
- * Row 2 (36px): tabs + tab actions — only when PageFrame publishes tabs.
+ * Full-width brand bar.
+ * The menu button stays at the left edge (hamburger, never a chevron).
+ * Tabs render separately via AppChromeTabs so they sit over the page, not the sidebar.
  */
 export function AppTopBar({
+  showBrand = false,
   showDesktopSidebarToggle = false,
-  desktopSidebarCollapsed = false,
   onToggleDesktopSidebar,
   showMobileSidebarToggle = false,
   onToggleMobileSidebar,
@@ -91,48 +101,59 @@ export function AppTopBar({
   const appPath = stripTenantPrefix(location.pathname);
   const showVetHubActions = user.role === "vet_manager" && appPath === "/dashboard/vet";
   const hasTabs = chrome.tabs != null;
+  const showMenuButton = Boolean(
+    (showDesktopSidebarToggle && onToggleDesktopSidebar) ||
+      (showMobileSidebarToggle && onToggleMobileSidebar),
+  );
 
   return (
-    <header className="sticky top-0 z-20 border-b border-[var(--border-color)] bg-[var(--farm-header)] backdrop-blur">
-      <div className="flex h-12 items-center gap-2 px-shell-x pt-[max(0px,env(safe-area-inset-top))] md:gap-3">
-        <Link
-          to={user.companySlug ? companyHref("") : "/"}
-          className="flex shrink-0 items-center md:hidden"
-          aria-label={appName}
-        >
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-control bg-[var(--primary-color-soft)]">
-            <BrandLogo size={24} />
-          </span>
-        </Link>
-
-        {showMobileSidebarToggle ? (
-          <button
-            type="button"
-            onClick={onToggleMobileSidebar}
-            className="inline-flex h-control-md w-control-md items-center justify-center rounded-control border border-[var(--border-color)] bg-[var(--surface-color)] text-[var(--primary-color-dark)] font-bold md:hidden"
-            aria-label="Open menu"
-          >
-            ☰
-          </button>
-        ) : null}
-
-        {showDesktopSidebarToggle ? (
+    <header
+      className={`z-30 shrink-0 border-b border-[var(--border-color)] bg-[var(--farm-header)] backdrop-blur ${
+        showBrand ? "mgr-brand-bar" : ""
+      }`}
+    >
+      <div className="flex h-12 items-center gap-2 pl-2 pr-3 pt-[max(0px,env(safe-area-inset-top))] sm:pr-shell-x md:gap-3">
+        {showMenuButton ? (
           <IconButton
             size="md"
-            label={desktopSidebarCollapsed ? "Show side menu" : "Hide side menu"}
-            onClick={onToggleDesktopSidebar}
-            className="hidden md:inline-flex"
+            label="Menu"
+            onClick={() => {
+              const mobile = window.matchMedia("(max-width: 767px)").matches;
+              if (mobile && onToggleMobileSidebar) onToggleMobileSidebar();
+              else onToggleDesktopSidebar?.();
+            }}
           >
-            {desktopSidebarCollapsed ? (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M4 7h16M4 12h16M4 17h16" />
-              </svg>
-            ) : (
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="m15 6-6 6 6 6" />
-              </svg>
-            )}
+            <MenuIcon />
           </IconButton>
+        ) : null}
+
+        {showBrand ? (
+          <Link
+            to={user.companySlug ? companyHref("") : "/"}
+            className="flex min-w-0 shrink-0 items-center gap-2"
+            aria-label={appName}
+          >
+            <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-control bg-[var(--primary-color-soft)]">
+              <BrandLogo size={22} />
+            </span>
+            <span className="hidden truncate font-[var(--font-display)] text-[15px] font-bold tracking-tight text-[var(--text-primary)] sm:inline">
+              {appName}
+            </span>
+          </Link>
+        ) : (
+          <Link
+            to={user.companySlug ? companyHref("") : "/"}
+            className="flex shrink-0 items-center md:hidden"
+            aria-label={appName}
+          >
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-control bg-[var(--primary-color-soft)]">
+              <BrandLogo size={24} />
+            </span>
+          </Link>
+        )}
+
+        {showBrand ? (
+          <span className="hidden h-5 w-px shrink-0 bg-[var(--border-color)] sm:block" aria-hidden />
         ) : null}
 
         <div className="min-w-0 flex-1">
@@ -187,19 +208,9 @@ export function AppTopBar({
           includeDensityToggle
           showRolePill={false}
           menuLinks={settingsLinks}
+          showLegalFooter={!showBrand}
         />
       </div>
-
-      {hasTabs ? (
-        <div className="flex h-9 items-center gap-2 border-t border-[var(--border-color)]/50 bg-[var(--surface-subtle)]/60 px-shell-x">
-          <div className="min-w-0 flex-1 overflow-x-auto">{chrome.tabs}</div>
-          {(chrome.tabsActions ?? chrome.actions) != null ? (
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              {chrome.tabsActions ?? chrome.actions}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
 
       {/* Mobile: actions under title when no tabs */}
       {chrome.actions != null && !hasTabs ? (
@@ -208,6 +219,22 @@ export function AppTopBar({
         </div>
       ) : null}
     </header>
+  );
+}
+
+/** Tab row over the page column, not the sidebar. */
+export function AppChromeTabs() {
+  const chrome = usePageChrome();
+  if (chrome.tabs == null) return null;
+  return (
+    <div className="flex h-9 shrink-0 items-center gap-2 border-b border-[var(--border-color)] bg-[var(--surface-subtle)]/60 px-shell-x">
+      <div className="min-w-0 flex-1 overflow-x-auto">{chrome.tabs}</div>
+      {(chrome.tabsActions ?? chrome.actions) != null ? (
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {chrome.tabsActions ?? chrome.actions}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -31,6 +31,7 @@ export function dashboardMapFromEnv() {
     scouts: process.env.MARKET_INSIGHTS_PACK_SCOUTS || "",
     sales: process.env.MARKET_INSIGHTS_PACK_SALES || "",
     acquisition: process.env.MARKET_INSIGHTS_PACK_ACQUISITION || "",
+    recruitment: process.env.MARKET_INSIGHTS_PACK_RECRUITMENT || "",
   });
 }
 

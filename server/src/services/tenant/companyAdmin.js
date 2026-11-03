@@ -12,6 +12,7 @@ export const ALL_ASSIGNABLE_ROLES = [
   "dispatcher",
   "procurement_officer",
   "sales_coordinator",
+  "sales_officer",
   "vet",
   "vet_manager",
   "investor",

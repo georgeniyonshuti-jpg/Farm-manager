@@ -1,6 +1,6 @@
 # Market Command Center (Superset)
 
-Barn Trends use ERPNext → Superset. **Market Analytics** reads **Farm Postgres** (`pipeline_*`, `market_*`, `people_onboarding`, `signup_attempts`, `market_reach`).
+Barn Trends use ERPNext → Superset. **Market Analytics** reads **Farm Postgres** (`pipeline_*`, `market_*`, `people_onboarding`, `signup_attempts`, `market_reach`). The Recruitment pack reads `analytics.person_facts` with the same weekly rules as the Recruitment page.
 
 ## 1. Connect Farm Postgres
 
@@ -26,7 +26,7 @@ SUPERSET_FARM_SQLALCHEMY_URI='postgresql+psycopg2://clevafarm:PASS@farm-postgres
 node scripts/provisionMarketSuperset.js
 ```
 
-This creates the Farm Postgres connection (if missing), virtual datasets from SQL in this folder, charts, five embedded pack dashboards, and prints `MARKET_INSIGHTS_PACK_*` UUIDs:
+This creates the Farm Postgres connection (if missing), virtual datasets from SQL in this folder, charts, the pack dashboards, and prints `MARKET_INSIGHTS_PACK_*` UUIDs:
 
 | Pack | Slug |
 |------|------|
@@ -36,6 +36,7 @@ This creates the Farm Postgres connection (if missing), virtual datasets from SQ
 | Scouts | `cleva-market-scouts` |
 | Sales | `cleva-market-sales` |
 | Acquisition | `cleva-market-acquisition` |
+| Recruitment | `cleva-market-recruitment` |
 
 **PWA wiring:** Market overview (`/dashboard/market`) stays native KPIs. Market trends (`/dashboard/market/trends`) embeds these packs via `/api/insights/market/*` (same pattern as farm Today → Trends).
 
@@ -55,6 +56,7 @@ MARKET_INSIGHTS_PACK_DEMAND=…
 MARKET_INSIGHTS_PACK_SCOUTS=…
 MARKET_INSIGHTS_PACK_SALES=…
 MARKET_INSIGHTS_PACK_ACQUISITION=…
+MARKET_INSIGHTS_PACK_RECRUITMENT=…
 ```
 
 Until these are set, Market → Analytics uses the **native** Command Center (same KPIs from `/api/insights/market/summary`).

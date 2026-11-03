@@ -10,6 +10,7 @@ import { useReferenceOptions } from "../../hooks/useReferenceOptions";
 export type AddUserPayload = {
   email: string;
   displayName: string;
+  /** Sent for the live API, which still requires a password. A newer API ignores this and issues its own. */
   password: string;
   role: UserRole;
   businessUnitAccess: BusinessUnitAccess;
@@ -17,11 +18,19 @@ export type AddUserPayload = {
   departmentKeys: string[];
 };
 
+function makeTemporaryPassword(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
+}
+
 const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: "laborer", label: "Laborer" },
   { value: "dispatcher", label: "Dispatcher" },
   { value: "procurement_officer", label: "Procurement officer" },
   { value: "sales_coordinator", label: "Sales coordinator" },
+  { value: "sales_officer", label: "Sales officer" },
   { value: "buyer", label: "Buyer (market)" },
   { value: "vet", label: "Veterinarian" },
   { value: "vet_manager", label: "Vet manager" },
@@ -37,6 +46,15 @@ const DEPARTMENT_OPTIONS = [
   { key: "dispatch", label: "Dispatch / logistics" },
 ];
 
+function insertRoleOption(
+  options: { value: string; label: string }[],
+  option: { value: string; label: string }
+) {
+  const after = options.findIndex((item) => item.value === "sales_coordinator");
+  if (after < 0) return [...options, option];
+  return [...options.slice(0, after + 1), option, ...options.slice(after + 1)];
+}
+
 type Props = {
   onCreated?: () => void;
 };
@@ -48,11 +66,14 @@ type Props = {
 export function AddUserForm({ onCreated }: Props) {
   const { token, user } = useAuth();
   const { showToast } = useToast();
-  const roleLabelOptions = useReferenceOptions(
+  const loadedRoleLabels = useReferenceOptions(
     "role_label",
     token,
     ROLE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
   ).filter((o) => isSuperuser(user) || o.value !== "superuser");
+  const roleLabelOptions = loadedRoleLabels.some((o) => o.value === "sales_officer")
+    ? loadedRoleLabels
+    : insertRoleOption(loadedRoleLabels, { value: "sales_officer", label: "Sales officer" });
   const departmentRefOptions = useReferenceOptions(
     "department_key",
     token,
@@ -61,13 +82,13 @@ export function AddUserForm({ onCreated }: Props) {
   const apiFetch = useApiFetch();
   const [email, setEmail] = useState("");
   const [displayName, setDisplayName] = useState("");
-  const [password, setPassword] = useState("");
   const [role, setRole] = useState<UserRole>("laborer");
   const [businessUnitAccess, setBusinessUnitAccess] = useState<BusinessUnitAccess>("farm");
   const [canViewSensitiveFinancial, setCanViewSensitiveFinancial] = useState(false);
   const [departmentKeys, setDepartmentKeys] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [handedPassword, setHandedPassword] = useState<string | null>(null);
 
   function toggleDept(key: string) {
     setDepartmentKeys((prev) =>
@@ -77,19 +98,25 @@ export function AddUserForm({ onCreated }: Props) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (handedPassword) {
+      onCreated?.();
+      return;
+    }
     setError(null);
+    setHandedPassword(null);
     setBusy(true);
+    const generatedPassword = makeTemporaryPassword();
     try {
       const payload: AddUserPayload = {
         email: email.trim().toLowerCase(),
         displayName: displayName.trim(),
-        password,
+        password: generatedPassword,
         role,
         businessUnitAccess,
         canViewSensitiveFinancial,
         departmentKeys,
       };
-      const data = await apiFetch<{ user: { email: string } }>(
+      const data = await apiFetch<{ user: { email: string }; emailSent?: boolean; temporaryPassword?: string }>(
         "/api/users",
         {
           method: "POST",
@@ -101,16 +128,21 @@ export function AddUserForm({ onCreated }: Props) {
         },
         "Create user failed"
       );
-      const emailOk = (data as { user: { email: string } }).user.email;
-      showToast("success", `User created: ${emailOk}`);
+      const emailOk = data.user.email;
       setEmail("");
       setDisplayName("");
-      setPassword("");
       setRole("laborer");
       setBusinessUnitAccess("farm");
       setCanViewSensitiveFinancial(false);
       setDepartmentKeys([]);
-      onCreated?.();
+      if (data.emailSent) {
+        showToast("success", `User created: ${emailOk}. A temporary password was emailed.`);
+        onCreated?.();
+      } else {
+        const handed = data.temporaryPassword || generatedPassword;
+        setHandedPassword(handed);
+        showToast("success", `User created: ${emailOk}. Copy the temporary password before you close this.`);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Could not create user";
       setError(msg);
@@ -157,23 +189,13 @@ export function AddUserForm({ onCreated }: Props) {
             className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-neutral-900 shadow-sm focus:border-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-700/30"
           />
         </div>
-        <div>
-          <label
-            className="mb-1 block text-sm font-medium text-neutral-700"
-            htmlFor="add-password"
-          >
-            Initial password
-          </label>
-          <input
-            id="add-password"
-            type="password"
-            required
-            autoComplete="new-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-neutral-900 shadow-sm focus:border-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-700/30"
-          />
-        </div>
+        {handedPassword ? (
+          <div className="sm:col-span-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            <p className="font-medium">Temporary password (shown once)</p>
+            <p className="mt-1 font-mono">{handedPassword}</p>
+            <p className="mt-1">Pass this to them. They must choose a new password after signing in.</p>
+          </div>
+        ) : null}
         <div>
           <label className="mb-1 block text-sm font-medium text-neutral-700" htmlFor="add-role">
             Role
@@ -181,7 +203,13 @@ export function AddUserForm({ onCreated }: Props) {
           <select
             id="add-role"
             value={role}
-            onChange={(e) => setRole(e.target.value as UserRole)}
+            onChange={(e) => {
+              const next = e.target.value as UserRole;
+              setRole(next);
+              if (next === "sales_officer" || next === "sales_coordinator" || next === "buyer") {
+                setBusinessUnitAccess("market");
+              }
+            }}
             className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-neutral-900 shadow-sm focus:border-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-700/30"
           >
             {roleLabelOptions.map((o) => (
@@ -201,9 +229,10 @@ export function AddUserForm({ onCreated }: Props) {
             onChange={(e) => setBusinessUnitAccess(e.target.value as BusinessUnitAccess)}
             className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-neutral-900 shadow-sm focus:border-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-700/30"
           >
-            <option value="farm">Farm / Poultry only</option>
-            <option value="clevacredit">Clevafarm Finance only</option>
-            <option value="both">Both (workspace switcher)</option>
+            <option value="farm">Farm operations</option>
+            <option value="market">Market</option>
+            <option value="clevacredit">Finance</option>
+            <option value="both">Farm and Finance</option>
           </select>
         </div>
       </div>
@@ -253,9 +282,15 @@ export function AddUserForm({ onCreated }: Props) {
         </p>
       )}
 
-      <Button type="submit" size="lg" disabled={busy} loading={busy} className="mt-6 w-full sm:w-auto">
-        {busy ? "Saving…" : "Create user"}
-      </Button>
+      {handedPassword ? (
+        <Button type="button" size="lg" className="mt-6 w-full sm:w-auto" onClick={() => onCreated?.()}>
+          Done
+        </Button>
+      ) : (
+        <Button type="submit" size="lg" disabled={busy} loading={busy} className="mt-6 w-full sm:w-auto">
+          {busy ? "Saving…" : "Create user"}
+        </Button>
+      )}
     </form>
   );
 }

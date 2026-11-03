@@ -1758,6 +1758,13 @@ export function registerPipelineMarketRoutes(router, ctx) {
       );
       audit(req.authUser, "pipeline.verify.lot", "pipeline_lot", req.params.id, { status, reason: reason || null });
       if (status === "verified") {
+        const ownerUserId = lotBefore.rows[0]?.ownerUserId || lotBefore.rows[0]?.listedBy;
+        const { noteLiveVerifiedLot } = await import("../services/recruitmentAnalytics/capture.js");
+        void noteLiveVerifiedLot(dbQuery, {
+          ownerUserId,
+          actorId: req.authUser.id,
+          lotId: req.params.id,
+        }).catch(() => {});
         const { emitCrmMilestone } = await import("../services/pipeline/crmBridge.js");
         void emitCrmMilestone({
           eventType: "listing.first_published",

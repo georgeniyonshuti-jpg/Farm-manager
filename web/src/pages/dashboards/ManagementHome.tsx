@@ -15,7 +15,7 @@ import {
 } from "../../api/insights.api";
 import { ManagementToday, fcrKpiLabel } from "./ManagementToday";
 import { PageHeader } from "../../components/PageHeader";
-import { PageTabs, TableToolbar, FacetFilter } from "../../components/ui";
+import { PageTabs, Select } from "../../components/ui";
 import { Button } from "../../components/ui/Button";
 import { IconButton } from "../../components/ui/IconButton";
 import {
@@ -154,6 +154,53 @@ export function ManagementHome() {
         }
         action={
           <div className="flex items-center gap-2 flex-wrap justify-end">
+            {homeTab === "trends" ? (
+              <>
+                <label className="rec-filter">
+                  <span className="rec-filter-name">Barn</span>
+                  <Select
+                    className="scope-select"
+                    aria-label="Barn"
+                    value={scopeBarn}
+                    onChange={(event) => {
+                      setScopeBarn(event.target.value);
+                      setScopeFlock("");
+                    }}
+                  >
+                    <option value="">All barns</option>
+                    {barns.map((barn) => (
+                      <option key={barn} value={barn}>{barn}</option>
+                    ))}
+                  </Select>
+                </label>
+                <label className="rec-filter">
+                  <span className="rec-filter-name">Flock</span>
+                  <Select
+                    className="scope-select"
+                    aria-label="Flock"
+                    value={scopeFlock}
+                    onChange={(event) => setScopeFlock(event.target.value)}
+                  >
+                    <option value="">All flocks</option>
+                    {flockOptions.map((label) => (
+                      <option key={label} value={label}>{label}</option>
+                    ))}
+                  </Select>
+                </label>
+                {scopeBarn || scopeFlock ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setScopeBarn("");
+                      setScopeFlock("");
+                    }}
+                  >
+                    Clear scope
+                  </Button>
+                ) : null}
+              </>
+            ) : null}
             {homeTab === "trends" && dataAsOf ? (
               <span className="type-caption text-[var(--text-muted)]">Data as of {dataAsOf}</span>
             ) : null}
@@ -225,46 +272,6 @@ export function ManagementHome() {
               </div>
             </div>
           ) : null}
-
-          <TableToolbar
-            filters={
-              <>
-                <FacetFilter
-                  label="Barn"
-                  value={scopeBarn || "all"}
-                  allValue="all"
-                  allLabel="All barns"
-                  onChange={(v) => {
-                    setScopeBarn(v === "all" ? "" : v);
-                    setScopeFlock("");
-                  }}
-                  options={barns.map((b) => ({ value: b, label: b }))}
-                />
-                <FacetFilter
-                  label="Flock"
-                  value={scopeFlock || "all"}
-                  allValue="all"
-                  allLabel="All flocks"
-                  onChange={(v) => setScopeFlock(v === "all" ? "" : v)}
-                  options={flockOptions.map((label) => ({ value: label, label }))}
-                />
-              </>
-            }
-            actions={
-              scopeBarn || scopeFlock ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setScopeBarn("");
-                    setScopeFlock("");
-                  }}
-                >
-                  Clear scope
-                </Button>
-              ) : null
-            }
-          />
 
           <SupersetInsightsEmbed
             refreshKey={refreshKey}

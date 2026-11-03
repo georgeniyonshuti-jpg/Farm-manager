@@ -63,6 +63,7 @@ export function MarketAppHeader() {
               includeThemeToggle={false}
               avatarTone="store"
               detailLines={detailLines}
+              showLegalFooter
             />
           </div>
         </div>

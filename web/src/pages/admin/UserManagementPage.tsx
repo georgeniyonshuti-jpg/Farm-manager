@@ -32,6 +32,7 @@ const ROLE_CAPABILITY_BLURBS: Record<string, string[]> = {
   superuser: ["All companies and system configuration"],
   procurement_officer: ["Feed inventory"],
   sales_coordinator: ["Market ops: verify, desk, commissions"],
+  sales_officer: ["People recruitment, a read-only flock map, and the recruitment overview"],
   buyer: ["Browse market and book lots"],
   investor: ["Portfolio views"],
 };
@@ -73,12 +74,13 @@ const USER_ROLE_OPTIONS: SessionUser["role"][] = [
   "laborer",
   "procurement_officer",
   "sales_coordinator",
+  "sales_officer",
   "buyer",
   "investor",
   "dispatcher",
 ];
 
-const BU_OPTIONS: SessionUser["businessUnitAccess"][] = ["farm", "clevacredit", "both"];
+const BU_OPTIONS: SessionUser["businessUnitAccess"][] = ["farm", "market", "clevacredit", "both"];
 
 const ROLE_LABELS: Record<string, string> = {
   superuser: "Superuser",
@@ -89,6 +91,7 @@ const ROLE_LABELS: Record<string, string> = {
   laborer: "Field Worker",
   procurement_officer: "Procurement Officer",
   sales_coordinator: "Sales Coordinator",
+  sales_officer: "Sales officer",
   buyer: "Buyer",
   investor: "Investor",
   dispatcher: "Dispatcher",
@@ -101,7 +104,12 @@ function userLabel(u: SessionUser): string {
   return accountKindLabel(u) ?? humanRole(u.role);
 }
 
-const BU_LABELS: Record<string, string> = { farm: "Farm", clevacredit: "ClevaCredit", both: "Farm + ClevaCredit" };
+const BU_LABELS: Record<string, string> = {
+  farm: "Farm",
+  market: "Market",
+  clevacredit: "Finance",
+  both: "Farm + Finance",
+};
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -434,7 +442,15 @@ export function UserManagementPage() {
         }
       />
 
-      <Modal open={showCreateUser} title="Create user" onClose={() => setShowCreateUser(false)} wide>
+      <Modal
+        open={showCreateUser}
+        title="Create user"
+        onClose={() => {
+          setShowCreateUser(false);
+          void loadUsers();
+        }}
+        wide
+      >
         <AddUserForm
           onCreated={() => {
             setShowCreateUser(false);
@@ -535,7 +551,16 @@ export function UserManagementPage() {
               <select
                 className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2"
                 value={editForm.role}
-                onChange={(e) => setEditForm((f) => ({ ...f, role: e.target.value as SessionUser["role"] }))}
+                onChange={(e) => {
+                  const next = e.target.value as SessionUser["role"];
+                  setEditForm((f) => ({
+                    ...f,
+                    role: next,
+                    ...(next === "sales_officer" || next === "sales_coordinator" || next === "buyer"
+                      ? { businessUnitAccess: "market" as const }
+                      : {}),
+                  }));
+                }}
               >
                 {editableRoleOptions.map((r) => (
                   <option key={r} value={r}>

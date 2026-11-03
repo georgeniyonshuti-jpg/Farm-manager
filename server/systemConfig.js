@@ -73,6 +73,7 @@ export const DEFAULT_REFERENCE_ROWS = [
   { category: "role_label", value: "dispatcher", label: "Dispatcher", sortOrder: 1, active: true },
   { category: "role_label", value: "procurement_officer", label: "Procurement officer", sortOrder: 2, active: true },
   { category: "role_label", value: "sales_coordinator", label: "Sales coordinator", sortOrder: 3, active: true },
+  { category: "role_label", value: "sales_officer", label: "Sales officer", sortOrder: 3, active: true },
   { category: "role_label", value: "vet", label: "Veterinarian", sortOrder: 4, active: true },
   { category: "role_label", value: "vet_manager", label: "Vet manager", sortOrder: 5, active: true },
   { category: "role_label", value: "investor", label: "Investor (read-oriented)", sortOrder: 6, active: true },
@@ -423,8 +424,37 @@ export async function refreshSystemConfigFromDatabase(dbQuery, hasDbFn) {
     if (rOpts.rows.length > 0) {
       memReferenceRows = rOpts.rows.map((row) => rowToClient(row));
       const categoriesPresent = new Set(memReferenceRows.map((r) => r.category));
+      const missingRoleLabels = [];
       for (const def of DEFAULT_REFERENCE_ROWS) {
-        if (categoriesPresent.has(def.category)) continue;
+        if (!categoriesPresent.has(def.category)) {
+          memReferenceRows.push({
+            category: def.category,
+            value: def.value,
+            label: def.label,
+            sortOrder: def.sortOrder,
+            active: def.active,
+            metadata: {},
+          });
+          continue;
+        }
+        if (
+          def.category === "role_label" &&
+          !memReferenceRows.some((row) => row.category === "role_label" && row.value === def.value)
+        ) {
+          missingRoleLabels.push(def);
+        }
+      }
+      for (const def of missingRoleLabels) {
+        try {
+          await dbQuery(
+            `INSERT INTO reference_options (category, value, label, sort_order, active, metadata)
+             VALUES ($1, $2, $3, $4, $5, '{}'::jsonb)
+             ON CONFLICT (category, value) DO NOTHING`,
+            [def.category, def.value, def.label, def.sortOrder, def.active !== false]
+          );
+        } catch (e) {
+          console.error("[ERROR]", "[systemConfig] role label:", e instanceof Error ? e.message : e);
+        }
         memReferenceRows.push({
           category: def.category,
           value: def.value,

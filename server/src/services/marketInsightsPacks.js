@@ -10,6 +10,7 @@ export const DEFAULT_MARKET_INSIGHTS_PACKS = [
   { id: "scouts", label: "Scouts", enabled: true },
   { id: "sales", label: "Sales", enabled: true },
   { id: "acquisition", label: "Acquisition", enabled: true },
+  { id: "recruitment", label: "Recruitment", enabled: true },
 ];
 
 export const ALLOWED_MARKET_PACK_IDS = new Set(
@@ -36,7 +37,7 @@ export function mergeMarketPackPreferences(prefs) {
   }));
   return {
     packs,
-    note: "Overview is liquidity and GMV. Supply / Demand are separate funnels. Scouts and Sales dig into field and money. Acquisition is channel reach and signups over time.",
+    note: "Overview is liquidity and GMV. Supply / Demand are separate funnels. Scouts and Sales dig into field and money. Acquisition is channel reach and signups over time. Recruitment is the command centre as one scroll.",
   };
 }
 

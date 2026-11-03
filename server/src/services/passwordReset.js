@@ -171,6 +171,7 @@ export function createPasswordResetService(deps) {
     }
 
     user.passwordHash = deps.hashPassword(newPassword);
+    user.mustChangePassword = false;
     await deps.upsertUser(user);
     await dropToken(tokenHash, user.id);
     return { ok: true };

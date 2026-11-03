@@ -156,9 +156,37 @@ export async function getErpnextCompanyLinks() {
   return r.rows;
 }
 
+/** Internal CIG companies are not on a free trial. */
+export async function liftCompanyOffTrialIfCig(companyId, link) {
+  const { isCigCompanyLink } = await import("./erpBaseFromInput.js");
+  if (!_dbQuery || !companyId || !isCigCompanyLink(link)) return false;
+  await _dbQuery(
+    `UPDATE companies
+     SET plan = CASE WHEN plan = 'trial' THEN 'enterprise' ELSE plan END,
+         trial_ends_at = NULL,
+         payment_overdue = false,
+         updated_at = now()
+     WHERE id = $1::uuid
+       AND (plan = 'trial' OR trial_ends_at IS NOT NULL OR payment_overdue = true)`,
+    [companyId]
+  );
+  await _dbQuery(
+    `UPDATE billing_subscriptions
+     SET status = 'active',
+         plan = CASE WHEN plan = 'trial' THEN 'enterprise' ELSE plan END,
+         trial_ends_at = NULL,
+         updated_at = now()
+     WHERE company_id = $1::uuid
+       AND (plan = 'trial' OR status = 'trialing' OR trial_ends_at IS NOT NULL)`,
+    [companyId]
+  );
+  return true;
+}
+
 /**
  * Ensure a Farm company exists for an ERPNext company on a given IdP origin.
  * Keys on (erpnext_company, erpnext_base_url).
+ * CIG companies are created without a trial.
  */
 export async function ensureFarmCompanyForErp(erpnextCompany, opts = {}) {
   if (!_dbQuery) {
@@ -183,6 +211,11 @@ export async function ensureFarmCompanyForErp(erpnextCompany, opts = {}) {
     [name, idpUrl]
   );
   if (existing.rows[0]) {
+    await liftCompanyOffTrialIfCig(existing.rows[0].id, {
+      erpnextCompany: name,
+      erpnextBaseUrl: idpUrl,
+      slug: existing.rows[0].slug,
+    });
     return {
       companyId: existing.rows[0].id,
       erpnextCompany: name,
@@ -204,10 +237,12 @@ export async function ensureFarmCompanyForErp(erpnextCompany, opts = {}) {
     }
   }
 
+  const { isCigCompanyLink } = await import("./erpBaseFromInput.js");
+  const cig = isCigCompanyLink({ erpnextCompany: name, erpnextBaseUrl: idpUrl, slug });
   await _dbQuery(
     `INSERT INTO companies (id, name, slug, plan, trial_ends_at, is_active)
-     VALUES ($1::uuid, $2, $3, 'trial', now() + interval '30 days', true)`,
-    [companyId, name, slug]
+     VALUES ($1::uuid, $2, $3, $4, CASE WHEN $4 = 'enterprise' THEN NULL ELSE now() + interval '30 days' END, true)`,
+    [companyId, name, slug, cig ? "enterprise" : "trial"]
   );
   await setErpnextCompanyLink(companyId, name, idpUrl);
   try {

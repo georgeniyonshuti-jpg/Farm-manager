@@ -19,25 +19,27 @@ describe("kyc", () => {
   it("keeps a new approval in KYC until every check is approved", () => {
     const open = { kycContractStatus: "submitted", kycLocationStatus: "approved", kycPaymentStatus: "missing", kycIdentityStatus: "missing" };
     assert.equal(kycClear(open), false);
-    assert.equal(stageAfterDecision("approved", open), "kyc");
+    assert.deepEqual(stageAfterDecision("approved", open), { stage: "kyc", deskStatus: null });
     const done = {
       kycContractStatus: "approved",
       kycLocationStatus: "approved",
       kycPaymentStatus: "approved",
       kycIdentityStatus: "approved",
     };
-    assert.equal(stageAfterDecision("approved", done), "active");
+    assert.deepEqual(stageAfterDecision("approved", done), { stage: "onboarded", deskStatus: null });
+    assert.deepEqual(stageAfterDecision("not_a_fit", open), { stage: "closed", deskStatus: "not_a_fit" });
+    assert.deepEqual(stageAfterDecision("unreachable", open), { stage: "contact", deskStatus: "unreachable" });
+    assert.equal(tradingAllowed({ stage: "onboarded" }).allow, true);
     assert.equal(tradingAllowed({ stage: "active" }).allow, true);
     assert.equal(tradingAllowed({ stage: "kyc" }).allow, false);
     assert.equal(tradingAllowed({ stage: "kyc" }).code, "kyc_required");
     assert.equal(tradingAllowed(null).allow, true);
   });
 
-  it("accepts a signature, a place, and a mobile-money screenshot", () => {
+  it("rejects the old short signature and accepts a place and a mobile-money screenshot", () => {
     const signed = validateKycTask({ task: "contract", signatureUrl: "data:image/png;base64,abc" }, { want: "sell" });
-    assert.equal(signed.ok, true);
-    assert.equal(signed.status, "submitted");
-    assert.match(signed.snapshot, /Seller agreement/);
+    assert.equal(signed.ok, false);
+    assert.match(signed.error, /link sent to their phone/);
     const reviewed = validateKycTask(
       { task: "location", district: "Gasabo", sector: "Kacyiru", place: "Near the market", review: "approved" },
       { want: "sell" }

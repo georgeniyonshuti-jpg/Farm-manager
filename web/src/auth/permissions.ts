@@ -134,6 +134,12 @@ export function canAccessPipelineDesk(user: SessionUser | null): boolean {
   return user.role === "superuser" || user.role === "sales_coordinator";
 }
 
+/** Recruitment calls: desk, plus a sales officer on the People list only. */
+export function canWorkRecruitment(user: SessionUser | null): boolean {
+  if (!user) return false;
+  return canAccessPipelineDesk(user) || user.role === "sales_officer";
+}
+
 /** Verified farmer tenant operators who can self-list lots. */
 export function canListFarmerMarketLots(user: SessionUser | null): boolean {
   if (!user) return false;
@@ -211,11 +217,37 @@ export function roleInAllowList(role: UserRole, roles: UserRole[]): boolean {
   return false;
 }
 
+const MARKET_ONLY_ROLES = new Set<UserRole>(["sales_officer", "sales_coordinator", "buyer"]);
+const WORKSPACE_ORDER: ActiveWorkspace[] = ["farm", "market", "clevacredit"];
+
+/** Categories this person can switch between. Market roles stay in Market. */
+export function workspacesForUser(user: SessionUser | null): ActiveWorkspace[] {
+  if (!user) return [];
+  if (MARKET_ONLY_ROLES.has(user.role)) return ["market"];
+  const found = new Set<ActiveWorkspace>();
+  if (user.businessUnitAccess === "market") found.add("market");
+  else if (user.businessUnitAccess === "clevacredit") found.add("clevacredit");
+  else if (user.businessUnitAccess === "both") {
+    found.add("farm");
+    found.add("clevacredit");
+  } else {
+    found.add("farm");
+  }
+  if (user.role === "superuser" || user.role === "company_admin") found.add("market");
+  return WORKSPACE_ORDER.filter((workspace) => found.has(workspace));
+}
+
 export function canAccessWorkspace(user: SessionUser | null, workspace: ActiveWorkspace): boolean {
-  if (!user) return false;
-  const a = user.businessUnitAccess;
-  if (a === "both") return true;
-  return a === workspace;
+  return workspacesForUser(user).includes(workspace);
+}
+
+/** Desk routes that live under /farm but belong to the Market workspace. */
+export function isMarketDeskPath(path: string): boolean {
+  const appPath = path.replace(/^\/app\/[^/]+/, "") || "/";
+  if (appPath === "/farm/pipeline") return true;
+  return ["/farm/pipeline/people", "/farm/pipeline/flocks", "/farm/pipeline/messages", "/farm/pipeline/buyers"].some(
+    (prefix) => appPath === prefix || appPath.startsWith(`${prefix}/`)
+  );
 }
 
 /** Roles that may use field-ops farm routes (check-in, mortality log, daily log, mortality table). */
@@ -285,10 +317,7 @@ export function farmCoreNavItems(
 
 /** Effective workspace: null if user has no access */
 export function defaultWorkspaceForUser(user: SessionUser | null): ActiveWorkspace | null {
-  if (!user) return null;
-  if (user.businessUnitAccess === "farm") return "farm";
-  if (user.businessUnitAccess === "clevacredit") return "clevacredit";
-  return "farm";
+  return workspacesForUser(user)[0] ?? null;
 }
 
 export function canViewClevaSensitive(user: SessionUser | null): boolean {
@@ -366,6 +395,7 @@ export function canAccessPageByKey(user: SessionUser | null, key: string): boole
   if (isSuperuser(user)) return true;
   // Company admin is the tenant sovereign for company-scoped pages (incl. Reports).
   if (isCompanyAdmin(user)) return true;
+  if (user.role === "sales_officer") return key === "farm_pipeline";
   if (!PAGE_KEYS.has(key)) return true;
   const access = Array.isArray(user.pageAccess) ? user.pageAccess : [];
   if (access.length === 0) return true;
@@ -389,6 +419,13 @@ export function canAccessPathByPageVisibility(user: SessionUser | null, path: st
   if (!user) return false;
   if (isSuperuser(user)) return true;
   const appPath = path.replace(/^\/app\/[^/]+/, "") || "/";
+  // Recruitment overview sits under the market prefix. The rest of that prefix stays closed.
+  if (
+    user.role === "sales_officer" &&
+    (appPath === "/dashboard/market/recruitment" || appPath.startsWith("/dashboard/market/recruitment/"))
+  ) {
+    return true;
+  }
   const match = PAGE_ACCESS_DEFS.find((d) => d.prefixes.some((p) => appPath.startsWith(p)));
   if (!match) return true;
   return canAccessPageByKey(user, match.key);

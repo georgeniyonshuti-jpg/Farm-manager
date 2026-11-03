@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
-import { canAccessPipelineDesk } from "../../auth/permissions";
+import { canAccessPipelineDesk, canWorkRecruitment } from "../../auth/permissions";
 import { PageHeader } from "../../components/PageHeader";
 import { ManagerPage } from "../../components/layout/ManagerPage";
 import { DataTable, FacetFilter, PageTabs, StatusPill, TableToolbar, ToolbarSearch, type DataColumn } from "../../components/ui";
@@ -27,7 +27,8 @@ const STATUS_TONE = {
 export function FlockBook() {
   const { token, user } = useAuth();
   const { navTo } = useCompanyNav();
-  const allowed = canAccessPipelineDesk(user);
+  const allowed = canWorkRecruitment(user);
+  const canEdit = canAccessPipelineDesk(user);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<FlockBookRow[]>([]);
@@ -115,20 +116,24 @@ export function FlockBook() {
           return <StatusPill tone={STATUS_TONE[mark]}>{flockStatusLabel(mark)}</StatusPill>;
         },
       },
-      {
-        key: "scout",
-        header: "Scout",
-        render: (row) => row.assignedScoutName || "—",
-      },
+      ...(canEdit
+        ? [
+            {
+              key: "scout",
+              header: "Scout",
+              render: (row: FlockBookRow) => row.assignedScoutName || "—",
+            },
+          ]
+        : []),
     ],
-    []
+    [canEdit]
   );
 
   if (!allowed) {
     return (
       <ManagerPage>
         <PageHeader title="Flocks" />
-        <p className="text-sm text-[var(--text-muted)]">Sales coordinator or superuser access required.</p>
+        <p className="text-sm text-[var(--text-muted)]">Sales officer, sales coordinator, or superuser access required.</p>
       </ManagerPage>
     );
   }
@@ -137,10 +142,14 @@ export function FlockBook() {
     <ManagerPage>
       <PageHeader
         title="Flocks"
-        secondaryAction={{
-          label: showPrice ? "Close price board" : "Price board",
-          onClick: () => setShowPrice((open) => !open),
-        }}
+        secondaryAction={
+          canEdit
+            ? {
+                label: showPrice ? "Close price board" : "Price board",
+                onClick: () => setShowPrice((open) => !open),
+              }
+            : undefined
+        }
         tabs={
           <PageTabs
             aria-label="Flock status"
@@ -221,7 +230,7 @@ export function FlockBook() {
           />
         </div>
       ) : null}
-      {showPrice ? (
+      {canEdit && showPrice ? (
         <section className="mt-6">
           <PricingPanel />
         </section>

@@ -122,6 +122,8 @@ export async function upsertPeopleOnboarding(dbQuery, input) {
         stage,
       ]
     );
+    const { applyFirstTouch } = await import("../recruitmentAnalytics/capture.js");
+    await applyFirstTouch(dbQuery, userId, attr);
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "onboarding upsert failed" };

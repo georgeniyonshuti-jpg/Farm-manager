@@ -5,6 +5,7 @@ import type { SessionUser, UserRole } from "../../auth/types";
 import { useLaborerT } from "../../i18n/laborerI18n";
 import { useTheme } from "../../context/ThemeContext";
 import { readDensity, writeDensity, type AppDensity } from "../../lib/density";
+import { AppLegalBlock } from "../AppLegalBlock";
 
 export function initialsFromDisplayName(name: string): string {
   const parts = name
@@ -71,6 +72,8 @@ type UserMenuChipProps = {
   detailLines?: string[];
   avatarTone?: "role" | "store";
   menuLinks?: { href: string; label: string }[];
+  /** Version, copyright, and API status. Desk shell shows these in the sidebar instead. */
+  showLegalFooter?: boolean;
 };
 
 export function UserMenuChip({
@@ -85,6 +88,7 @@ export function UserMenuChip({
   detailLines = [],
   avatarTone = "role",
   menuLinks = [],
+  showLegalFooter = false,
 }: UserMenuChipProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -156,7 +160,7 @@ export function UserMenuChip({
       </button>
       {open ? (
         <div
-          className="absolute right-0 top-full z-50 mt-1 min-w-[12.5rem] rounded-lg border border-[var(--border-color)] bg-[var(--surface-color)] py-1 shadow-elevated"
+          className="absolute right-0 top-full z-50 mt-1 w-[min(18rem,calc(100vw-1rem))] rounded-lg border border-[var(--border-color)] bg-[var(--surface-color)] py-1 shadow-elevated"
           role="menu"
         >
           <div className="border-b border-[var(--border-color)] px-3 py-2">
@@ -225,6 +229,11 @@ export function UserMenuChip({
           >
             {signOut}
           </button>
+          {showLegalFooter ? (
+            <div className="border-t border-[var(--border-color)] px-3 py-2">
+              <AppLegalBlock />
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>

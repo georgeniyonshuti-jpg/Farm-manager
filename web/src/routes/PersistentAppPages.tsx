@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
-import { useLocation } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { FARM_FIELD_OPS_ROLES } from "../auth/permissions";
 import { PersistentPageSlot } from "../components/layout/PersistentPageSlot";
@@ -7,6 +7,7 @@ import { PersistentRouteGuard } from "./PersistentRouteGuard";
 import { PersistentWorkspaceGate } from "./PersistentWorkspaceGate";
 import { pathExact } from "./persistentPaths";
 import { stripTenantPrefix } from "../lib/tenancy";
+import { useCompanyNav } from "../hooks/useCompanyNav";
 import { ErpnextAccessGate } from "../components/guards/ErpnextAccessGate";
 import { LaborerHome } from "../pages/dashboards/LaborerHome";
 import { VetHome } from "../pages/dashboards/VetHome";
@@ -48,6 +49,10 @@ const MarketTrendsPage = lazyNamed(
 const MarketRecruitmentPage = lazyNamed(
   () => import("../pages/dashboards/MarketRecruitmentPage"),
   "MarketRecruitmentPage"
+);
+const RecruitmentAnalyticsPage = lazyNamed(
+  () => import("../pages/dashboards/recruitment/RecruitmentAnalyticsPage"),
+  "RecruitmentAnalyticsPage"
 );
 const LaborerEarningsPage = lazyNamed(() => import("../pages/laborer/LaborerEarningsPage"), "LaborerEarningsPage");
 const FlockListPage = lazyNamed(() => import("../pages/farm/FlockListPage"), "FlockListPage");
@@ -107,7 +112,10 @@ const GeneralLendingPage = lazyNamed(() => import("../pages/cleva/GeneralLending
 const InvestorMemosPage = lazyNamed(() => import("../pages/cleva/InvestorMemosPage"), "InvestorMemosPage");
 const CreditScoringPage = lazyNamed(() => import("../pages/cleva/CreditScoringPage"), "CreditScoringPage");
 const UserManagementPage = lazyNamed(() => import("../pages/admin/UserManagementPage"), "UserManagementPage");
-const SignupsPage = lazyNamed(() => import("../pages/admin/SignupsPage"), "SignupsPage");
+function SignupsRedirect() {
+  const { companyHref } = useCompanyNav();
+  return <Navigate to={companyHref("/dashboard/market/recruitment?view=sources")} replace />;
+}
 const SystemConfigPage = lazyNamed(() => import("../pages/admin/SystemConfigPage"), "SystemConfigPage");
 const SuperAdminPanelPage = lazyNamed(() => import("../pages/admin/SuperAdminPanelPage"), "SuperAdminPanelPage");
 const SuperAdminCompanyDetailPage = lazyNamed(
@@ -120,6 +128,7 @@ const SuperAdminAnnouncePage = lazyNamed(
   "SuperAdminAnnouncePage"
 );
 const SuperAdminRepairPage = lazyNamed(() => import("../pages/admin/SuperAdminRepairPage"), "SuperAdminRepairPage");
+const ContractSettingsPage = lazyNamed(() => import("../pages/admin/ContractSettingsPage"), "ContractSettingsPage");
 function PageFallback() {
   return (
     <div className="mx-auto w-full max-w-[960px] animate-pulse space-y-3 p-4" aria-busy="true">
@@ -188,6 +197,14 @@ export function PersistentAppPages() {
       </PersistentPageSlot>
 
       <PersistentPageSlot active={pathExact(p, "/dashboard/market/recruitment")} mountDelayMs={0}>
+        <LazyPage>
+          <PersistentRouteGuard roles={["superuser", "sales_coordinator", "sales_officer"]}>
+            <RecruitmentAnalyticsPage />
+          </PersistentRouteGuard>
+        </LazyPage>
+      </PersistentPageSlot>
+
+      <PersistentPageSlot active={pathExact(p, "/dashboard/market/recruitment-legacy")} mountDelayMs={0}>
         <LazyPage>
           <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
             <MarketRecruitmentPage />
@@ -281,7 +298,9 @@ export function PersistentAppPages() {
             </PersistentRouteGuard>
           </LazyPage>
         </PersistentPageSlot>
+      </PersistentWorkspaceGate>
 
+      <PersistentWorkspaceGate workspace="market">
         <PersistentPageSlot active={pathExact(p, "/farm/pipeline")} mountDelayMs={0}>
           <LazyPage>
             <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
@@ -292,7 +311,7 @@ export function PersistentAppPages() {
 
         <PersistentPageSlot active={pathExact(p, "/farm/pipeline/people")} mountDelayMs={0}>
           <LazyPage>
-            <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
+            <PersistentRouteGuard roles={["superuser", "sales_coordinator", "sales_officer"]}>
               <PeopleBook />
             </PersistentRouteGuard>
           </LazyPage>
@@ -303,7 +322,7 @@ export function PersistentAppPages() {
           mountDelayMs={0}
         >
           <LazyPage>
-            <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
+            <PersistentRouteGuard roles={["superuser", "sales_coordinator", "sales_officer"]}>
               <PersonPage />
             </PersistentRouteGuard>
           </LazyPage>
@@ -311,7 +330,7 @@ export function PersistentAppPages() {
 
         <PersistentPageSlot active={pathExact(p, "/farm/pipeline/flocks")} mountDelayMs={0}>
           <LazyPage>
-            <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
+            <PersistentRouteGuard roles={["superuser", "sales_coordinator", "sales_officer"]}>
               <FlockBook />
             </PersistentRouteGuard>
           </LazyPage>
@@ -322,7 +341,7 @@ export function PersistentAppPages() {
           mountDelayMs={0}
         >
           <LazyPage>
-            <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
+            <PersistentRouteGuard roles={["superuser", "sales_coordinator", "sales_officer"]}>
               <FlockPage />
             </PersistentRouteGuard>
           </LazyPage>
@@ -335,7 +354,9 @@ export function PersistentAppPages() {
             </PersistentRouteGuard>
           </LazyPage>
         </PersistentPageSlot>
+      </PersistentWorkspaceGate>
 
+      <PersistentWorkspaceGate workspace="farm">
         <PersistentPageSlot active={pathExact(p, "/farm/pipeline/home")} mountDelayMs={0}>
           <LazyPage>
             <PersistentRouteGuard
@@ -385,7 +406,9 @@ export function PersistentAppPages() {
             </PersistentRouteGuard>
           </LazyPage>
         </PersistentPageSlot>
+      </PersistentWorkspaceGate>
 
+      <PersistentWorkspaceGate workspace="market">
         <PersistentPageSlot active={pathExact(p, "/farm/pipeline/messages")} mountDelayMs={0}>
           <LazyPage>
             <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
@@ -393,7 +416,9 @@ export function PersistentAppPages() {
             </PersistentRouteGuard>
           </LazyPage>
         </PersistentPageSlot>
+      </PersistentWorkspaceGate>
 
+      <PersistentWorkspaceGate workspace="farm">
         <PersistentPageSlot active={pathExact(p, "/farm/pipeline/sellers")} mountDelayMs={0}>
           <LazyPage>
             <PersistentRouteGuard
@@ -429,7 +454,9 @@ export function PersistentAppPages() {
             </PersistentRouteGuard>
           </LazyPage>
         </PersistentPageSlot>
+      </PersistentWorkspaceGate>
 
+      <PersistentWorkspaceGate workspaces={["farm", "market"]}>
         <PersistentPageSlot active={pathExact(p, "/market")} mountDelayMs={0}>
           <LazyPage>
             <PersistentRouteGuard roles={["buyer", "superuser", "sales_coordinator"]}>
@@ -503,7 +530,9 @@ export function PersistentAppPages() {
             </PersistentRouteGuard>
           </LazyPage>
         </PersistentPageSlot>
+      </PersistentWorkspaceGate>
 
+      <PersistentWorkspaceGate workspace="farm">
         <PersistentPageSlot active={pathExact(p, "/farm/batch-schedule")} mountDelayMs={0}>
           <LazyPage>
             <PersistentRouteGuard roles={["superuser", "manager", "vet_manager", "vet"]}>
@@ -606,11 +635,7 @@ export function PersistentAppPages() {
       </PersistentPageSlot>
 
       <PersistentPageSlot active={pathExact(p, "/admin/signups")} mountDelayMs={0}>
-        <LazyPage>
-          <PersistentRouteGuard roles={["superuser", "sales_coordinator"]}>
-            <SignupsPage />
-          </PersistentRouteGuard>
-        </LazyPage>
+        <SignupsRedirect />
       </PersistentPageSlot>
 
       <PersistentPageSlot active={pathExact(p, "/admin/system-config")} mountDelayMs={0}>
@@ -660,6 +685,14 @@ export function PersistentAppPages() {
         <LazyPage>
           <PersistentRouteGuard superuserOnly>
             <SuperAdminRepairPage />
+          </PersistentRouteGuard>
+        </LazyPage>
+      </PersistentPageSlot>
+
+      <PersistentPageSlot active={pathExact(p, "/admin/super/contracts")} mountDelayMs={0}>
+        <LazyPage>
+          <PersistentRouteGuard superuserOnly>
+            <ContractSettingsPage />
           </PersistentRouteGuard>
         </LazyPage>
       </PersistentPageSlot>

@@ -37,6 +37,8 @@ import {
   getRecruitmentContact,
   listRecruitmentQueue,
   patchRecruitmentContact,
+  salesOfficerActionAllowed,
+  recruitmentAreaContext,
   submitRecruitmentKyc,
   upsertRecruitmentContact,
 } from "../services/pipeline/recruitmentContacts.js";
@@ -46,6 +48,7 @@ import {
   isMarketSupersetEmbedReady,
 } from "../services/superset/marketDashboardMap.js";
 import { getSupersetPublicUrl, mintSupersetGuestToken } from "../services/superset/guestToken.js";
+import { registerSellerContractStaffRoutes } from "./sellerContract.routes.js";
 
 const router = express.Router();
 
@@ -68,6 +71,10 @@ function isManagerOrAbove(user) {
 
 function isPipelineDesk(user) {
   return user?.role === "superuser" || user?.role === "sales_coordinator";
+}
+
+function canWorkRecruitment(user) {
+  return isPipelineDesk(user) || user?.role === "sales_officer";
 }
 
 /**
@@ -437,7 +444,7 @@ export function createInsightsRouter(deps) {
 
   router.get("/market/recruitment/contacts", async (req, res) => {
     try {
-      if (!isPipelineDesk(req.authUser)) {
+      if (!canWorkRecruitment(req.authUser)) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
@@ -445,15 +452,23 @@ export function createInsightsRouter(deps) {
         res.status(503).json({ error: "Database unavailable." });
         return;
       }
+      if (
+        req.authUser.role === "sales_officer" &&
+        (req.query.lane === "active" || req.query.stage === "active" || req.query.stage === "onboarded")
+      ) {
+        res.status(403).json({ error: "Active people stay with the coordinator." });
+        return;
+      }
       const data = await listRecruitmentQueue(dbQuery, {
         stage: req.query.stage,
         want: req.query.want,
-        lane: req.query.lane,
+        lane: req.authUser.role === "sales_officer" ? "recruitment" : req.query.lane,
         owner: req.query.owner === "mine" ? req.authUser.id : req.query.owner,
         overdue: req.query.overdue === "1" || req.query.overdue === "true",
         q: req.query.q,
         district: req.query.district,
         kyc: req.query.kyc,
+        deskStatus: req.query.deskStatus,
         sort: req.query.sort,
         days: req.query.days,
       });
@@ -469,7 +484,7 @@ export function createInsightsRouter(deps) {
 
   router.post("/market/recruitment/contacts", async (req, res) => {
     try {
-      if (!isPipelineDesk(req.authUser)) {
+      if (!canWorkRecruitment(req.authUser)) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
@@ -481,9 +496,9 @@ export function createInsightsRouter(deps) {
         ...(req.body || {}),
         source: "whatsapp",
         userId: null,
-      });
+      }, { role: req.authUser.role });
       if (!saved.ok) {
-        res.status(saved.missing ? 503 : 400).json({ error: saved.error });
+        res.status(saved.missing ? 503 : saved.status || 400).json({ error: saved.error });
         return;
       }
       const full = await getRecruitmentContact(dbQuery, saved.id);
@@ -495,7 +510,7 @@ export function createInsightsRouter(deps) {
 
   router.get("/market/recruitment/contacts/:id", async (req, res) => {
     try {
-      if (!isPipelineDesk(req.authUser)) {
+      if (!canWorkRecruitment(req.authUser)) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
@@ -508,15 +523,46 @@ export function createInsightsRouter(deps) {
         res.status(data.status || 404).json({ error: data.error });
         return;
       }
+      const held = salesOfficerActionAllowed(req.authUser.role, { contact: data.contact });
+      if (!held.ok) {
+        res.status(held.status).json({ error: held.error });
+        return;
+      }
       res.json(data);
     } catch (e) {
       res.status(500).json({ error: e instanceof Error ? e.message : "Could not load the person." });
     }
   });
 
+  router.get("/market/recruitment/contacts/:id/area", async (req, res) => {
+    try {
+      if (!canWorkRecruitment(req.authUser)) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+      if (!hasDb() || !dbQuery) {
+        res.status(503).json({ error: "Database unavailable." });
+        return;
+      }
+      const data = await getRecruitmentContact(dbQuery, req.params.id);
+      if (!data.ok) {
+        res.status(data.status || 404).json({ error: data.error });
+        return;
+      }
+      const held = salesOfficerActionAllowed(req.authUser.role, { contact: data.contact });
+      if (!held.ok) {
+        res.status(held.status).json({ error: held.error });
+        return;
+      }
+      res.json(await recruitmentAreaContext(dbQuery, data.contact));
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : "Could not load this area." });
+    }
+  });
+
   router.patch("/market/recruitment/contacts/:id", async (req, res) => {
     try {
-      if (!isPipelineDesk(req.authUser)) {
+      if (!canWorkRecruitment(req.authUser)) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
@@ -537,7 +583,7 @@ export function createInsightsRouter(deps) {
 
   router.post("/market/recruitment/contacts/:id/touches", async (req, res) => {
     try {
-      if (!isPipelineDesk(req.authUser)) {
+      if (!canWorkRecruitment(req.authUser)) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
@@ -548,6 +594,7 @@ export function createInsightsRouter(deps) {
       const data = await addRecruitmentTouch(dbQuery, req.params.id, {
         ...(req.body || {}),
         byUserId: req.authUser.id,
+        role: req.authUser.role,
       });
       if (!data.ok) {
         res.status(data.status || 400).json({ error: data.error });
@@ -631,7 +678,7 @@ export function createInsightsRouter(deps) {
 
   router.post("/market/recruitment/contacts/:id/decision", async (req, res) => {
     try {
-      if (!isPipelineDesk(req.authUser)) {
+      if (!canWorkRecruitment(req.authUser)) {
         res.status(403).json({ error: "Forbidden" });
         return;
       }
@@ -713,6 +760,7 @@ export function createInsightsRouter(deps) {
     }
   });
 
+  registerSellerContractStaffRoutes(router, deps);
   return router;
 }
 

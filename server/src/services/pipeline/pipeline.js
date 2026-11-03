@@ -123,6 +123,12 @@ export function canAccessPipelineDesk(user) {
   return role === "superuser" || role === "sales_coordinator";
 }
 
+/** People recruitment calls. Does not open invites, KYC approval, spend, or farm flocks. */
+export function canWorkRecruitment(user) {
+  const role = user?.role;
+  return role === "superuser" || role === "sales_coordinator" || role === "sales_officer";
+}
+
 export const SCOUT_PENDING_KEY = "scout_pending";
 
 export function isScoutApplicant(user) {

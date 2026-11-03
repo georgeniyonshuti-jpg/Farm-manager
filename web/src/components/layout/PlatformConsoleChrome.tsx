@@ -2,13 +2,14 @@ import { Link, NavLink, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { useCompanyNav } from "../../hooks/useCompanyNav";
 import { platformConsoleSection } from "../../lib/platformConsole";
-import { AppTopBar } from "./AppTopBar";
+import { AppChromeTabs, AppTopBar } from "./AppTopBar";
 
 const SECTIONS: { id: string; label: string; to: string }[] = [
   { id: "companies", label: "Companies", to: "/admin/super" },
   { id: "plans", label: "Plans", to: "/admin/super/plans" },
   { id: "announce", label: "Announce", to: "/admin/super/announce" },
   { id: "repair", label: "Repair", to: "/admin/super/repair" },
+  { id: "contracts", label: "Contracts", to: "/admin/super/contracts" },
 ];
 
 type Props = {
@@ -66,6 +67,7 @@ export function PlatformConsoleChrome({ children }: Props) {
       </div>
 
       <AppTopBar />
+      <AppChromeTabs />
 
       <main className="app-page-enter animate-fade-up flex-1 overflow-auto px-shell-x pt-stack pb-section">
         <div className="w-full max-w-none">{children}</div>

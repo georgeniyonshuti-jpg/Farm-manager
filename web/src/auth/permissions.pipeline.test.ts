@@ -4,15 +4,20 @@ import {
   canAccessPageByKey,
   canAccessPathByPageVisibility,
   canAccessPipelineDesk,
+  canAccessWorkspace,
+  canWorkRecruitment,
   canBrowseMarket,
   canFlockAction,
   canScoutPipeline,
   isBuyerRole,
+  isMarketDeskPath,
   isMarketOnlySeller,
   isMarketScout,
   accountKindLabel,
   isPipelineSalesRole,
+  defaultWorkspaceForUser,
   usesMarketPartnerShell,
+  workspacesForUser,
 } from "./permissions.ts";
 import type { SessionUser } from "./types.ts";
 
@@ -28,6 +33,40 @@ function user(role: SessionUser["role"], pageAccess?: string[]): SessionUser {
     pageAccess,
   };
 }
+
+describe("sales officer", () => {
+  it("can work People and cannot open the rest of the desk", () => {
+    const officer = user("sales_officer");
+    assert.equal(canWorkRecruitment(officer), true);
+    assert.equal(canAccessPipelineDesk(officer), false);
+    assert.equal(isPipelineSalesRole(officer), false);
+    assert.equal(canBrowseMarket(officer), false);
+    assert.equal(canAccessPageByKey(officer, "farm_pipeline"), true);
+    assert.equal(canAccessPageByKey(officer, "dashboard_market"), false);
+    assert.equal(canAccessPageByKey(officer, "admin_users"), false);
+    assert.equal(canAccessPageByKey(user("sales_officer", []), "farm_pipeline"), true);
+    assert.equal(canAccessPageByKey(user("sales_officer", []), "dashboard_management"), false);
+    assert.equal(canAccessPathByPageVisibility(officer, "/dashboard/market/recruitment"), true);
+    assert.equal(canAccessPathByPageVisibility(officer, "/farm/pipeline/flocks"), true);
+    assert.equal(canAccessPathByPageVisibility(officer, "/farm/pipeline/people"), true);
+    assert.equal(canAccessPathByPageVisibility(officer, "/dashboard/market"), false);
+    assert.equal(canAccessPathByPageVisibility(officer, "/dashboard/market/trends"), false);
+    assert.equal(canAccessPathByPageVisibility(officer, "/dashboard/market/recruitment-legacy"), false);
+    assert.equal(canAccessPathByPageVisibility(officer, "/farm/flocks"), false);
+    assert.equal(canAccessWorkspace(officer, "market"), true);
+    assert.equal(canAccessWorkspace(officer, "farm"), false);
+    assert.equal(canAccessWorkspace(officer, "clevacredit"), false);
+    assert.deepEqual(workspacesForUser(officer), ["market"]);
+    assert.equal(defaultWorkspaceForUser(officer), "market");
+    assert.deepEqual(workspacesForUser(user("superuser", undefined)), ["farm", "market"]);
+    assert.deepEqual(workspacesForUser(user("company_admin")), ["farm", "market"]);
+    assert.deepEqual(workspacesForUser(user("laborer")), ["farm"]);
+    assert.deepEqual(workspacesForUser(user("investor")), ["farm"]);
+    assert.equal(isMarketDeskPath("/farm/pipeline/people/abc"), true);
+    assert.equal(isMarketDeskPath("/farm/pipeline/home"), false);
+    assert.equal(isMarketDeskPath("/farm/flocks"), false);
+  });
+});
 
 describe("isPipelineSalesRole", () => {
   it("is true only for sales_coordinator", () => {

@@ -1,9 +1,8 @@
-import { Outlet } from "react-router-dom";
-import { useLocation } from "react-router-dom";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../../auth/AuthContext";
 import { ERPNextConnectionProvider } from "../../context/ERPNextConnectionContext";
-import { AppTopBar } from "./AppTopBar";
+import { AppChromeTabs, AppTopBar } from "./AppTopBar";
 import { FieldGlobalHeader } from "./FieldGlobalHeader";
 import { MarketAppHeader } from "./MarketAppHeader";
 import { resolveFieldChromeMode } from "../../lib/fieldChrome";
@@ -12,12 +11,14 @@ import { FieldShellBottomNav } from "./FieldShellBottomNav";
 import { MarketLocaleProvider } from "../../context/MarketLocaleContext";
 import { SidebarNav } from "./SidebarNav";
 import { AnnouncementBanner } from "../AnnouncementBanner";
+import { AppLegalBlock } from "../AppLegalBlock";
 import { TrialBanner } from "../TrialBanner";
 import { ErpnextAccessBanner } from "../farm/ErpnextAccessBanner";
 import { useOnboardingStatus } from "../../hooks/useOnboardingStatus";
 import { PersistentAppPages } from "../../routes/PersistentAppPages";
 import { isAppShellPersistentPath } from "../../routes/persistentPaths";
 import { stripTenantPrefix } from "../../lib/tenancy";
+import { useCompanyNav } from "../../hooks/useCompanyNav";
 import { roleAtLeast, usesMarketPartnerShell } from "../../auth/permissions";
 import { CommandPalette } from "./CommandPalette";
 import { readDensity, writeDensity } from "../../lib/density";
@@ -38,11 +39,14 @@ function readSidebarCollapsed(): boolean {
 export function AppShell() {
   const location = useLocation();
   const { user } = useAuth();
+  const { companyHref } = useCompanyNav();
   const { company, trialDaysRemaining } = useOnboardingStatus();
   const appPath = stripTenantPrefix(location.pathname);
+  const salesOfficerDesk = user?.role === "sales_officer";
   const laborerLikeView =
-    appPath.startsWith("/dashboard/laborer") ||
-    (appPath.startsWith("/dashboard/vet") && user?.role === "vet");
+    !salesOfficerDesk &&
+    (appPath.startsWith("/dashboard/laborer") ||
+      (appPath.startsWith("/dashboard/vet") && user?.role === "vet"));
   const fieldVetMode = user?.role === "vet";
   const fieldOpsMode = user?.role === "laborer" || user?.role === "dispatcher";
   const salesCoordinatorMode = user?.role === "sales_coordinator";
@@ -63,7 +67,7 @@ export function AppShell() {
       ? "hidden"
       : resolveFieldChromeMode(appPath, location.search)
     : null;
-  const desktopSidebarWidthClass = desktopSidebarCollapsed ? "md:w-[84px]" : "md:w-[210px]";
+  const desktopSidebarWidthClass = desktopSidebarCollapsed ? "md:w-[52px]" : "md:w-[210px]";
 
   const toggleDesktopSidebar = useCallback(() => {
     setDesktopSidebarCollapsed((v) => {
@@ -127,6 +131,13 @@ export function AppShell() {
   );
 
   /* Field roles keep the existing mobile-simplified shell (bottom nav, no mgr sidebar). */
+  if (
+    salesOfficerDesk &&
+    (appPath.startsWith("/dashboard/laborer") || appPath.startsWith("/dashboard/vet"))
+  ) {
+    return <Navigate to={companyHref("/farm/pipeline/people")} replace />;
+  }
+
   if (compactFieldView) {
     if (marketPartnerShell) {
       return (
@@ -180,9 +191,17 @@ export function AppShell() {
     <ERPNextConnectionProvider>
       <PageChromeProvider>
         <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[var(--background-color)]">
+          <AppTopBar
+            showBrand
+            showDesktopSidebarToggle
+            onToggleDesktopSidebar={toggleDesktopSidebar}
+            showMobileSidebarToggle
+            onToggleMobileSidebar={() => setSidebarOpen((open) => !open)}
+            onOpenCommandPalette={() => setCommandOpen(true)}
+          />
           <div className="flex min-h-0 flex-1 flex-col md:flex-row md:overflow-hidden">
             <aside
-              className={`mgr-sidebar hidden shrink-0 flex-col shadow-[1px_0_0_rgba(15,23,42,0.08)] md:flex md:sticky md:top-0 md:h-dvh ${desktopSidebarWidthClass}`}
+              className={`mgr-sidebar hidden min-h-0 shrink-0 flex-col overflow-hidden shadow-[1px_0_0_rgba(15,23,42,0.08)] md:flex ${desktopSidebarWidthClass}`}
             >
               <SidebarNav
                 collapsed={desktopSidebarCollapsed}
@@ -191,24 +210,20 @@ export function AppShell() {
             </aside>
 
             <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--background-color)] md:overflow-hidden">
-              <AppTopBar
-                showDesktopSidebarToggle
-                desktopSidebarCollapsed={desktopSidebarCollapsed}
-                onToggleDesktopSidebar={toggleDesktopSidebar}
-                showMobileSidebarToggle
-                onToggleMobileSidebar={() => setSidebarOpen(true)}
-                onOpenCommandPalette={() => setCommandOpen(true)}
-              />
+              <AppChromeTabs />
               {managerBanners}
               {user && !user.canViewSensitiveFinancial ? <FinancialRestrictedBanner /> : null}
               <main className="app-page-enter animate-fade-up flex-1 overflow-auto px-shell-x pt-stack pb-section md:overflow-y-auto">
                 <div className="w-full max-w-none">{pageBody}</div>
               </main>
+              <footer className="app-legal-bar">
+                <AppLegalBlock />
+              </footer>
             </div>
           </div>
 
           {sidebarOpen ? (
-            <div className="fixed inset-0 z-40 md:hidden">
+            <div className="fixed inset-x-0 top-[var(--app-header-h)] bottom-[calc(1.85rem+env(safe-area-inset-bottom))] z-40 md:hidden">
               <button
                 type="button"
                 className="absolute inset-0 bg-[var(--farm-overlay)] backdrop-blur-[2px]"

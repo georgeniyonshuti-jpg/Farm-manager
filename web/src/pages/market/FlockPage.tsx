@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
-import { canAccessPipelineDesk } from "../../auth/permissions";
+import { canAccessPipelineDesk, canWorkRecruitment } from "../../auth/permissions";
 import { DistrictSelect } from "../../components/DistrictSelect";
 import { PageHeader } from "../../components/PageHeader";
 import { ManagerPage } from "../../components/layout/ManagerPage";
@@ -64,7 +64,8 @@ export function FlockPage() {
   const { token, user } = useAuth();
   const { companyHref } = useCompanyNav();
   const { showToast } = useToast();
-  const allowed = canAccessPipelineDesk(user);
+  const allowed = canWorkRecruitment(user);
+  const canEdit = canAccessPipelineDesk(user);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [flock, setFlock] = useState<FlockBookRow | null>(null);
@@ -130,7 +131,7 @@ export function FlockPage() {
     return (
       <ManagerPage>
         <PageHeader title="Flock" />
-        <p className="text-sm text-[var(--text-muted)]">Sales coordinator or superuser access required.</p>
+        <p className="text-sm text-[var(--text-muted)]">Sales officer, sales coordinator, or superuser access required.</p>
       </ManagerPage>
     );
   }
@@ -175,12 +176,15 @@ export function FlockPage() {
             {flock.registeredByName ? (
               <p className="text-sm text-[var(--text-secondary)]">Registered by {flock.registeredByName}</p>
             ) : null}
-            <div className="ml-auto">
-              <Button type="button" size="sm" variant="dangerGhost" disabled={busy} onClick={() => setConfirmRemove(true)}>
-                Remove
-              </Button>
-            </div>
+            {canEdit ? (
+              <div className="ml-auto">
+                <Button type="button" size="sm" variant="dangerGhost" disabled={busy} onClick={() => setConfirmRemove(true)}>
+                  Remove
+                </Button>
+              </div>
+            ) : null}
           </div>
+          {canEdit ? (
           <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(16rem,20rem)]">
             <SectionCard title="Details">
               <form className="space-y-4" onSubmit={save}>
@@ -274,6 +278,21 @@ export function FlockPage() {
               )}
             </SectionCard>
           </div>
+          ) : (
+            <SectionCard title="This flock">
+              <dl className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <dt className="text-xs font-semibold text-[var(--text-secondary)]">Birds</dt>
+                  <dd className="text-sm text-[var(--text-primary)]">{flock.birdCount.toLocaleString()}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-semibold text-[var(--text-secondary)]">Place</dt>
+                  <dd className="text-sm text-[var(--text-primary)]">{placeLabel(flock)}</dd>
+                </div>
+              </dl>
+            </SectionCard>
+          )}
+          {canEdit ? (
           <ConfirmDialog
             open={confirmRemove}
             title="Remove this flock?"
@@ -294,6 +313,7 @@ export function FlockPage() {
                 });
             }}
           />
+          ) : null}
         </div>
       ) : null}
     </ManagerPage>

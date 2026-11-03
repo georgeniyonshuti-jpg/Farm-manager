@@ -131,6 +131,8 @@ type Props = {
   scope?: InsightsScope;
   /** Farm Trends (default) vs Market Analytics embed token routes. */
   surface?: "farm" | "market";
+  /** viewport locks the iframe to the screen. page lets a long dashboard scroll with the app. */
+  frame?: "viewport" | "page";
   /** Skip meta fetch when the parent already loaded market/farm meta. */
   metaOverride?: InsightsMeta | null;
 };
@@ -192,6 +194,7 @@ export function SupersetInsightsEmbed({
   packs,
   scope,
   surface = "farm",
+  frame = "viewport",
   metaOverride = null,
 }: Props) {
   const { token } = useAuth();
@@ -287,8 +290,11 @@ export function SupersetInsightsEmbed({
         };
 
         const supersetUrl = nextMeta.supersetUrl;
+        // Recruitment stacks about 272 grid rows. At 8–12px a row, 3400px lets the page scroll.
         const iframeClass =
-          "cf-superset-iframe w-full border-0 [&_iframe]:block [&_iframe]:h-[calc(100dvh-12rem)] [&_iframe]:min-h-[70vh] [&_iframe]:w-full [&_iframe]:border-0";
+          frame === "page"
+            ? "cf-superset-iframe cf-superset-iframe--page w-full border-0 [&_iframe]:block [&_iframe]:h-[3400px] [&_iframe]:min-h-[3400px] [&_iframe]:w-full [&_iframe]:border-0"
+            : "cf-superset-iframe w-full border-0 [&_iframe]:block [&_iframe]:h-[calc(100dvh-12rem)] [&_iframe]:min-h-[70vh] [&_iframe]:w-full [&_iframe]:border-0";
 
         if (resolved.mode === "mega" || resolved.ids.length === 1) {
           const mountPoint = document.createElement("div");
@@ -344,7 +350,7 @@ export function SupersetInsightsEmbed({
     };
     // metaKey / packsKey stand in for object identity of metaOverride + packs
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional stable keys
-  }, [token, refreshKey, onDataAsOf, packsKey, scopeKey, scope, surface, metaKey]);
+  }, [token, refreshKey, onDataAsOf, packsKey, scopeKey, scope, surface, frame, metaKey]);
 
   if (phase === "empty" || phase === "error") {
     return (

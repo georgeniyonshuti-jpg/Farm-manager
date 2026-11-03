@@ -15,12 +15,11 @@ import { PricingPage } from "./pages/PricingPage";
 import { TrialExpiredPage } from "./pages/TrialExpiredPage";
 import { BillingCancelledPage, BillingSuccessPage } from "./pages/BillingResultPages";
 import { SuperAdminRoute } from "./routes/SuperAdminRoute";
+import { SignContractPage } from "./pages/public/SignContractPage";
 import { FlockDetailPage } from "./pages/farm/FlockDetailPage";
 import { AccessDeniedRedirect } from "./routes/AccessDeniedRedirect";
 import { ToastProvider } from "./components/Toast";
 import { LocaleToastBridge } from "./components/LocaleToastBridge";
-import { VersionBadge } from "./components/VersionBadge";
-import { SystemStatus } from "./components/SystemStatus";
 import { InstallPromptBanner } from "./components/pwa/InstallPromptBanner";
 import { useAuth } from "./auth/AuthContext";
 import { AppLoadingScreen } from "./components/AppLoadingScreen";
@@ -57,6 +56,14 @@ const SignupPersonPreview = import.meta.env.DEV
     )
   : null;
 
+const RecruitmentPreview = import.meta.env.DEV
+  ? lazy(() =>
+      import("./pages/dashboards/recruitment/RecruitmentAnalyticsPage").then((m) => ({
+        default: m.RecruitmentAnalyticsPage,
+      }))
+    )
+  : null;
+
 function AppRoutes() {
   const { bootstrapped } = useAuth();
   const { pathname, search } = useLocation();
@@ -70,9 +77,10 @@ function AppRoutes() {
     pathname.startsWith("/market") ||
     pathname === "/privacy" ||
     (onMarketSite && (pathname === "/" || pathname === ""));
-  const apiStatus = useApiHealthStatus(!bootstrapped && !isPublicStore);
+  const isDevPreview = import.meta.env.DEV && pathname.startsWith("/dev/recruitment-preview");
+  const apiStatus = useApiHealthStatus(!bootstrapped && !isPublicStore && !isDevPreview);
   if (hostTarget) return null;
-  if (!bootstrapped && !isPublicStore) return <AppLoadingScreen apiStatus={apiStatus} />;
+  if (!bootstrapped && !isPublicStore && !isDevPreview) return <AppLoadingScreen apiStatus={apiStatus} />;
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
@@ -85,6 +93,16 @@ function AppRoutes() {
           element={
             <Suspense fallback={null}>
               <SignupPersonPreview />
+            </Suspense>
+          }
+        />
+      ) : null}
+      {RecruitmentPreview ? (
+        <Route
+          path="/dev/recruitment-preview"
+          element={
+            <Suspense fallback={null}>
+              <RecruitmentPreview standalone />
             </Suspense>
           }
         />
@@ -106,6 +124,8 @@ function AppRoutes() {
         <Route path="/market/sell" element={<SellYourBirdsPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
       </Route>
+
+      <Route path="/sign/:token" element={<SignContractPage />} />
 
       <Route element={<ProtectedRoute />}>
         <Route path="/" element={<RootRedirect />} />
@@ -141,6 +161,8 @@ function AppRoutes() {
           <Route path="dashboard/market" element={null} />
           <Route path="dashboard/market/trends" element={null} />
           <Route path="dashboard/market/recruitment" element={null} />
+          <Route path="dashboard/market/recruitment-legacy" element={null} />
+          <Route path="dashboard/market/recruitment-v2" element={<Navigate to="../recruitment" replace />} />
           <Route path="laborer/earnings" element={null} />
 
           <Route path="farm" element={<FarmSection />}>
@@ -218,6 +240,7 @@ function AppRoutes() {
             <Route path="admin/super/plans" element={null} />
             <Route path="admin/super/announce" element={null} />
             <Route path="admin/super/repair" element={null} />
+            <Route path="admin/super/contracts" element={null} />
           </Route>
 
           {contractRouteAliasRoutes()}
@@ -240,8 +263,6 @@ export default function App() {
             <ToastProvider>
               <LocaleToastBridge />
               <AppRoutes />
-              <VersionBadge />
-              <SystemStatus />
               <InstallPromptBanner />
             </ToastProvider>
           </LaborerI18nProvider>

@@ -130,8 +130,11 @@ export function createSaasRouter(deps) {
 
   async function getCompanyById(companyId) {
     const r = await dbQuery(
-      `SELECT id::text, name, slug, plan, trial_ends_at, is_active, payment_overdue
-       FROM companies WHERE id = $1::uuid`,
+      `SELECT c.id::text, c.name, c.slug, c.plan, c.trial_ends_at, c.is_active, c.payment_overdue,
+              e.erpnext_company, e.erpnext_base_url
+       FROM companies c
+       LEFT JOIN erpnext_config e ON e.company_id = c.id
+       WHERE c.id = $1::uuid`,
       [companyId]
     );
     return r.rows[0] ?? null;
@@ -660,6 +663,15 @@ export function createSaasRouter(deps) {
         return;
       }
       const company = await getCompanyById(companyId);
+      const { isCigCompanyLink } = await import("../services/erpnext/erpBaseFromInput.js");
+      const cig = isCigCompanyLink(company);
+      if (cig && company && (company.plan === "trial" || company.trial_ends_at)) {
+        const { liftCompanyOffTrialIfCig } = await import("../services/erpnext/erpnext.config.js");
+        await liftCompanyOffTrialIfCig(companyId, company);
+        company.plan = company.plan === "trial" ? "enterprise" : company.plan;
+        company.trial_ends_at = null;
+        company.payment_overdue = false;
+      }
       const flocks = await dbQuery(
         `SELECT COUNT(*)::int AS c FROM poultry_flocks
          WHERE status <> 'archived' AND company_id = $1::uuid`,
@@ -669,15 +681,20 @@ export function createSaasRouter(deps) {
         `SELECT COUNT(*)::int AS c FROM users WHERE company_id = $1::uuid`,
         [companyId]
       );
-      const trialExpired =
-        company?.plan === "trial" &&
-        company?.trial_ends_at &&
-        new Date(company.trial_ends_at).getTime() < Date.now();
+      const trialExpired = cig
+        ? false
+        : company?.plan === "trial" &&
+          company?.trial_ends_at &&
+          new Date(company.trial_ends_at).getTime() < Date.now();
       let trialDaysRemaining = null;
-      let trialEndsAt = company?.trial_ends_at ?? null;
-      if (company?.plan === "trial" && company?.trial_ends_at) {
+      let trialEndsAt = cig ? null : (company?.trial_ends_at ?? null);
+      if (!cig && company?.plan === "trial" && company?.trial_ends_at) {
         const ms = new Date(company.trial_ends_at).getTime() - Date.now();
         trialDaysRemaining = Math.max(0, Math.ceil(ms / (24 * 60 * 60 * 1000)));
+      }
+      if (company) {
+        delete company.erpnext_company;
+        delete company.erpnext_base_url;
       }
       res.json({
         company,
@@ -1039,6 +1056,11 @@ export function createSaasRouter(deps) {
         return;
       }
       const link = await setErpnextCompanyLink(id, erpnextCompany, resolved.erpnextBaseUrl);
+      const { liftCompanyOffTrialIfCig } = await import("../services/erpnext/erpnext.config.js");
+      await liftCompanyOffTrialIfCig(id, {
+        erpnextCompany,
+        erpnextBaseUrl: resolved.erpnextBaseUrl,
+      });
       try {
         const { bootstrapFarmInsightsPacks } = await import("../services/insightsBootstrap.js");
         await bootstrapFarmInsightsPacks(id, dbQuery);

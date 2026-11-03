@@ -19,9 +19,9 @@ describe("marketInsightsPacks", () => {
     assert.equal(marketDashboardMapKey("abc"), "market_insights_dashboards:abc");
   });
 
-  it("defaults enable all five packs", () => {
+  it("defaults enable every pack", () => {
     const { packs } = mergeMarketPackPreferences(null);
-    assert.equal(packs.length, 5);
+    assert.equal(packs.length, DEFAULT_MARKET_INSIGHTS_PACKS.length);
     assert.ok(packs.every((p) => p.enabled));
     assert.deepEqual(
       packs.map((p) => p.id),
