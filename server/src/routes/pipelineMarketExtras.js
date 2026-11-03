@@ -21,6 +21,7 @@ import {
 } from "../services/pipeline/pipeline.js";
 import { isSellLead, normalizeWhatsapp } from "../services/pipeline/publicMarket.js";
 import { loadMarketReach } from "../services/pipeline/marketReach.js";
+import { withSavepoint } from "../services/db/transaction.js";
 import {
   patchPeopleOnboarding,
   scoutPayoutAllowed,
@@ -104,8 +105,16 @@ import {
  */
 export function registerPipelineMarketRoutes(router, ctx) {
   const { dbQuery, hasDb, audit, helpers } = ctx;
-  const { requireDb, requireDesk, str, numOrNull, bool, matchedBirdsForLot, refreshLotStatus } =
-    helpers;
+  const {
+    requireDb,
+    requireDesk,
+    str,
+    numOrNull,
+    bool,
+    matchedBirdsForLot,
+    refreshLotStatus,
+    withDbTransaction,
+  } = helpers;
 
   async function getCommissionRatePct() {
     try {
@@ -572,9 +581,10 @@ export function registerPipelineMarketRoutes(router, ctx) {
         return res.status(400).json({ error: "buyerId is required for ops bookings." });
       }
 
-      await dbQuery("BEGIN");
-      try {
-        const lotR = await dbQuery(
+      // Every write waits until all checks pass, so an early refusal leaves the lot untouched.
+      const refuse = (status, body) => ({ refused: { status, body } });
+      const booked = await withDbTransaction(async (q) => {
+        const lotR = await q(
           `SELECT l.id::text AS id, l.bird_count AS "birdCount", l.status,
                   COALESCE(l.verification_status, 'verified') AS "verificationStatus",
                   l.ask_price_per_kg AS "askPricePerKg",
@@ -602,22 +612,18 @@ export function registerPipelineMarketRoutes(router, ctx) {
         );
         const lot = lotR.rows[0];
         if (!lot) {
-          await dbQuery("ROLLBACK");
-          return res.status(404).json({ error: "Lot not found." });
+          return refuse(404, { error: "Lot not found." });
         }
         if (lot.verificationStatus !== "verified" || !["open", "partial"].includes(lot.status)) {
-          await dbQuery("ROLLBACK");
-          return res.status(400).json({ error: "Lot is not available on the market." });
+          return refuse(400, { error: "Lot is not available on the market." });
         }
-        const matched = await matchedBirdsForLot(lotId);
+        const matched = await matchedBirdsForLot(lotId, q);
         const left = remainingBirds(lot.birdCount, matched);
         if (!isScoutConfirmed(lot) || !canAppearOnPublicShop({ ...lot, remainingBirds: left })) {
-          await dbQuery("ROLLBACK");
-          return res.status(400).json({ error: "Lot is not confirmed for this selling week." });
+          return refuse(400, { error: "Lot is not confirmed for this selling week." });
         }
         if (birds > left) {
-          await dbQuery("ROLLBACK");
-          return res.status(400).json({ error: `Only ${left} birds remaining on this lot.` });
+          return refuse(400, { error: `Only ${left} birds remaining on this lot.` });
         }
         const lotMin =
           lot.minOrderBirds != null && Number(lot.minOrderBirds) > 0
@@ -625,8 +631,7 @@ export function registerPipelineMarketRoutes(router, ctx) {
             : null;
         const floor = Math.max(FOODSERVICE_MIN_BIRDS, lotMin || 0);
         if (birds < floor) {
-          await dbQuery("ROLLBACK");
-          return res.status(400).json({
+          return refuse(400, {
             error: `Minimum order is ${floor} birds (foodservice).`,
             code: "min_order",
             minOrderBirds: floor,
@@ -634,14 +639,13 @@ export function registerPipelineMarketRoutes(router, ctx) {
         }
         const collect = normalizeCollectOrDelivery(body.collectOrDelivery);
         if (collect === "delivery" && !lot.deliveryAvailable) {
-          await dbQuery("ROLLBACK");
-          return res.status(400).json({ error: "This lot does not offer farm delivery. Choose collect." });
+          return refuse(400, { error: "This lot does not offer farm delivery. Choose collect." });
         }
         const deliveryActor = resolveDeliveryActor(collect, body.deliveryActor, {
           allowCleva: canAccessPipelineDesk(req.authUser),
         });
 
-        const card = await loadPublishedCard(dbQuery).catch(() => null);
+        const card = await withSavepoint(q, () => loadPublishedCard(q)).catch(() => null);
         const trip = {
           birds,
           avgKg: lot.avgWeightKg || lot.expectedWeightKg,
@@ -654,15 +658,14 @@ export function registerPipelineMarketRoutes(router, ctx) {
           opsOverride: canAccessPipelineDesk(req.authUser) ? numOrNull(body.agreedPricePerKg) : null,
         });
         if (!locked.ok) {
-          await dbQuery("ROLLBACK");
-          return res.status(400).json({ error: locked.error });
+          return refuse(400, { error: locked.error });
         }
         const buyerKg = locked.buyerKg;
         const farmGateKg = locked.farmGateKg;
         let visitFeeRwf = 0;
         try {
-          const vf = await dbQuery(
-            `SELECT setting_value FROM app_settings WHERE setting_key = 'pipeline_scout_visit_fee_rwf' LIMIT 1`
+          const vf = await withSavepoint(q, () =>
+            q(`SELECT setting_value FROM app_settings WHERE setting_key = 'pipeline_scout_visit_fee_rwf' LIMIT 1`)
           );
           visitFeeRwf = Math.max(0, Math.round(Number(vf.rows[0]?.setting_value) || DEFAULT_VISIT_FEE_RWF || 0));
         } catch {
@@ -673,7 +676,7 @@ export function registerPipelineMarketRoutes(router, ctx) {
 
         let ins;
         try {
-          ins = await dbQuery(
+          ins = await withSavepoint(q, () => q(
             `INSERT INTO pipeline_matches
                (lot_id, demand_id, buyer_id, birds, agreed_price_per_kg, ready_date, status,
                 learning_notes, commission_vet_user_id, matched_by, commission_status,
@@ -702,12 +705,12 @@ export function registerPipelineMarketRoutes(router, ctx) {
               money?.youPayRwf ?? null,
               payRef,
             ]
-          );
+          ));
         } catch (schemaErr) {
           if (!/farm_gate_per_kg|buyer_price_per_kg|rate_card_id|quantity_tier|quote_json|buyer_payment|does not exist/i.test(String(schemaErr?.message || ""))) {
             throw schemaErr;
           }
-          ins = await dbQuery(
+          ins = await q(
             `INSERT INTO pipeline_matches
                (lot_id, demand_id, buyer_id, birds, agreed_price_per_kg, ready_date, status,
                 learning_notes, commission_vet_user_id, matched_by, commission_status)
@@ -730,15 +733,17 @@ export function registerPipelineMarketRoutes(router, ctx) {
 
         const nextMatched = matched + birds;
         const nextStatus = deriveLotStatusAfterMatch(lot.birdCount, nextMatched, lot.status);
-        await dbQuery(`UPDATE pipeline_lots SET status = $2, updated_at = now() WHERE id = $1::uuid`, [
+        await q(`UPDATE pipeline_lots SET status = $2, updated_at = now() WHERE id = $1::uuid`, [
           lotId,
           nextStatus,
         ]);
         try {
-          await dbQuery(
-            `INSERT INTO market_settlements (match_id, side, status, amount_rwf, method, reference, created_by)
-             VALUES ($1::uuid, 'buyer_in', 'pending', $2, 'momo', $3, $4::uuid)`,
-            [ins.rows[0].id, money?.youPayRwf ?? 0, payRef, req.authUser.id]
+          await withSavepoint(q, () =>
+            q(
+              `INSERT INTO market_settlements (match_id, side, status, amount_rwf, method, reference, created_by)
+               VALUES ($1::uuid, 'buyer_in', 'pending', $2, 'momo', $3, $4::uuid)`,
+              [ins.rows[0].id, money?.youPayRwf ?? 0, payRef, req.authUser.id]
+            )
           );
         } catch {
           /* 073 not applied yet */
@@ -747,7 +752,7 @@ export function registerPipelineMarketRoutes(router, ctx) {
         const slaughter = normalizeSlaughterMode(body.slaughterMode);
         if (collect || slaughter || body.fulfillWindowStart || body.logisticsNotes || deliveryActor) {
           try {
-            await dbQuery(
+            await withSavepoint(q, () => q(
               `UPDATE pipeline_matches SET
                   collect_or_delivery = COALESCE($2, collect_or_delivery),
                   slaughter_mode = COALESCE($3, slaughter_mode),
@@ -769,11 +774,11 @@ export function registerPipelineMarketRoutes(router, ctx) {
                 str(body.logisticsNotes, 2000),
                 req.authUser.id,
               ]
-            );
+            ));
           } catch (logErr) {
             if (!isMissingFulfillmentColumn(logErr)) throw logErr;
             try {
-              await dbQuery(
+              await withSavepoint(q, () => q(
                 `UPDATE pipeline_matches SET
                     collect_or_delivery = COALESCE($2, collect_or_delivery),
                     slaughter_mode = COALESCE($3, slaughter_mode),
@@ -793,73 +798,72 @@ export function registerPipelineMarketRoutes(router, ctx) {
                   str(body.logisticsNotes, 2000),
                   req.authUser.id,
                 ]
-              );
+              ));
             } catch (legacyErr) {
               if (!isMissingFulfillmentColumn(legacyErr)) throw legacyErr;
             }
           }
         }
 
-        await dbQuery("COMMIT");
+        return { lot, ins, money, payRef, collect, deliveryActor };
+      });
+      if (booked.refused) return res.status(booked.refused.status).json(booked.refused.body);
+      const { lot, ins, money, payRef, collect, deliveryActor } = booked;
 
-        audit(req.authUser, "pipeline.market.book", "pipeline_match", ins.rows[0].id, {
-          lotId,
-          buyerId,
-          birds,
-          deliveryActor,
-        });
-        void recordMarketEvent(dbQuery, {
-          eventType: "reservation",
-          lotId,
-          farmProfileId: lot.farmProfileId,
-        }).catch(() => {});
-        let payTo = process.env.MARKET_CLEVA_MOMO || "";
-        try {
-          const momo = await dbQuery(
-            `SELECT setting_value FROM app_settings WHERE setting_key = 'market_cleva_momo' LIMIT 1`
-          );
-          payTo = String(momo.rows[0]?.setting_value || payTo || "").trim();
-        } catch {
-          /* ignore */
-        }
-        res.status(201).json({
-          match: {
-            ...ins.rows[0],
-            buyerPaymentStatus: "unpaid",
-            buyerPaymentRef: payRef,
-            deliveryActor,
-            collectOrDelivery: collect,
-          },
-          payment: {
-            status: "unpaid",
-            amountRwf: money?.youPayRwf ?? null,
-            reference: payRef,
-            payToPhone: payTo || null,
-            method: "momo",
-            split: publicBuyerMoneySplit(money, { deliveryActor }),
-            farmerSplit: canAccessPipelineDesk(req.authUser) ? farmerMoneySplitView(money) : undefined,
-          },
-        });
-
-        void emailsForLotOwners(dbQuery, {
-          listedBy: lot.listedBy,
-          companyId: lot.companyId,
-        })
-          .then((owners) =>
-            notifyMany(owners, (u) =>
-              buildBookingEmail({
-                name: u.fullName,
-                birds,
-                district: lot.district,
-                farmLabel: lot.farmLabel,
-              })
-            )
-          )
-          .catch(() => {});
-      } catch (inner) {
-        await dbQuery("ROLLBACK").catch(() => {});
-        throw inner;
+      audit(req.authUser, "pipeline.market.book", "pipeline_match", ins.rows[0].id, {
+        lotId,
+        buyerId,
+        birds,
+        deliveryActor,
+      });
+      void recordMarketEvent(dbQuery, {
+        eventType: "reservation",
+        lotId,
+        farmProfileId: lot.farmProfileId,
+      }).catch(() => {});
+      let payTo = process.env.MARKET_CLEVA_MOMO || "";
+      try {
+        const momo = await dbQuery(
+          `SELECT setting_value FROM app_settings WHERE setting_key = 'market_cleva_momo' LIMIT 1`
+        );
+        payTo = String(momo.rows[0]?.setting_value || payTo || "").trim();
+      } catch {
+        /* ignore */
       }
+      res.status(201).json({
+        match: {
+          ...ins.rows[0],
+          buyerPaymentStatus: "unpaid",
+          buyerPaymentRef: payRef,
+          deliveryActor,
+          collectOrDelivery: collect,
+        },
+        payment: {
+          status: "unpaid",
+          amountRwf: money?.youPayRwf ?? null,
+          reference: payRef,
+          payToPhone: payTo || null,
+          method: "momo",
+          split: publicBuyerMoneySplit(money, { deliveryActor }),
+          farmerSplit: canAccessPipelineDesk(req.authUser) ? farmerMoneySplitView(money) : undefined,
+        },
+      });
+
+      void emailsForLotOwners(dbQuery, {
+        listedBy: lot.listedBy,
+        companyId: lot.companyId,
+      })
+        .then((owners) =>
+          notifyMany(owners, (u) =>
+            buildBookingEmail({
+              name: u.fullName,
+              birds,
+              district: lot.district,
+              farmLabel: lot.farmLabel,
+            })
+          )
+        )
+        .catch(() => {});
     } catch (e) {
       res.status(503).json({ error: e instanceof Error ? e.message : "Could not book lot." });
     }

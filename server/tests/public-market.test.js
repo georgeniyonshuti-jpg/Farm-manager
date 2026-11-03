@@ -346,7 +346,8 @@ describe("publicMarket route correctness", () => {
       "utf8"
     );
     assert.ok(src.includes("FOR UPDATE"));
-    assert.ok(src.includes('await dbQuery("BEGIN")'));
+    assert.ok(src.includes("withDbTransaction(async (q)"));
+    assert.ok(!src.includes('await dbQuery("BEGIN")'));
     const extras = readFileSync(
       fileURLToPath(new URL("../src/routes/pipelineMarketExtras.js", import.meta.url)),
       "utf8"

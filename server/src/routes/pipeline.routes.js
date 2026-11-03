@@ -48,16 +48,24 @@ const router = express.Router();
 let _dbQuery = null;
 let _hasDb = null;
 let _appendAudit = null;
+let _withDbTransaction = null;
 
-export function initPipelineRouter(dbQueryFn, hasDbFn, appendAuditFn) {
+export function initPipelineRouter(dbQueryFn, hasDbFn, appendAuditFn, withDbTransactionFn) {
   _dbQuery = dbQueryFn;
   _hasDb = hasDbFn;
   _appendAudit = appendAuditFn ?? null;
+  _withDbTransaction = withDbTransactionFn ?? null;
 }
 
 function dbQuery(...args) {
   if (!_dbQuery) throw new Error("pipeline: dbQuery not initialized.");
   return _dbQuery(...args);
+}
+
+/** BEGIN/COMMIT on one pooled client; `fn` gets `q` bound to it. Never dbQuery("BEGIN"). */
+function withDbTransaction(fn) {
+  if (!_withDbTransaction) throw new Error("pipeline: withDbTransaction not initialized.");
+  return _withDbTransaction(fn);
 }
 
 function hasDb() {
@@ -106,8 +114,8 @@ function bool(v, fallback = false) {
   return fallback;
 }
 
-async function matchedBirdsForLot(lotId) {
-  const r = await dbQuery(
+async function matchedBirdsForLot(lotId, q = dbQuery) {
+  const r = await q(
     `SELECT COALESCE(SUM(birds), 0)::int AS matched
        FROM pipeline_matches
       WHERE lot_id = $1::uuid
@@ -117,9 +125,9 @@ async function matchedBirdsForLot(lotId) {
   return Number(r.rows[0]?.matched ?? 0);
 }
 
-async function filledBirdsForDemand(demandId) {
+async function filledBirdsForDemand(demandId, q = dbQuery) {
   if (!demandId) return 0;
-  const r = await dbQuery(
+  const r = await q(
     `SELECT COALESCE(SUM(birds), 0)::int AS filled
        FROM pipeline_matches
       WHERE demand_id = $1::uuid
@@ -129,17 +137,17 @@ async function filledBirdsForDemand(demandId) {
   return Number(r.rows[0]?.filled ?? 0);
 }
 
-async function refreshLotStatus(lotId) {
-  const lotR = await dbQuery(
+async function refreshLotStatus(lotId, q = dbQuery) {
+  const lotR = await q(
     `SELECT id::text AS id, bird_count AS "birdCount", status FROM pipeline_lots WHERE id = $1::uuid`,
     [lotId]
   );
   const lot = lotR.rows[0];
   if (!lot) return null;
-  const matched = await matchedBirdsForLot(lotId);
+  const matched = await matchedBirdsForLot(lotId, q);
   const next = deriveLotStatusAfterMatch(lot.birdCount, matched, lot.status);
   if (next !== lot.status) {
-    await dbQuery(`UPDATE pipeline_lots SET status = $2, updated_at = now() WHERE id = $1::uuid`, [
+    await q(`UPDATE pipeline_lots SET status = $2, updated_at = now() WHERE id = $1::uuid`, [
       lotId,
       next,
     ]);
@@ -147,18 +155,18 @@ async function refreshLotStatus(lotId) {
   return next;
 }
 
-async function refreshDemandStatus(demandId) {
+async function refreshDemandStatus(demandId, q = dbQuery) {
   if (!demandId) return null;
-  const dR = await dbQuery(
+  const dR = await q(
     `SELECT id::text AS id, birds_needed AS "birdsNeeded", status FROM pipeline_demands WHERE id = $1::uuid`,
     [demandId]
   );
   const d = dR.rows[0];
   if (!d) return null;
-  const filled = await filledBirdsForDemand(demandId);
+  const filled = await filledBirdsForDemand(demandId, q);
   const next = deriveDemandStatusAfterMatch(d.birdsNeeded, filled, d.status);
   if (next !== d.status) {
-    await dbQuery(`UPDATE pipeline_demands SET status = $2, updated_at = now() WHERE id = $1::uuid`, [
+    await q(`UPDATE pipeline_demands SET status = $2, updated_at = now() WHERE id = $1::uuid`, [
       demandId,
       next,
     ]);
@@ -968,87 +976,76 @@ router.post("/matches", async (req, res) => {
   if (!birds || birds <= 0) return res.status(400).json({ error: "birds must be > 0." });
 
   try {
-    await dbQuery("BEGIN");
-    const lotR = await dbQuery(
-      `SELECT id::text AS id, bird_count AS "birdCount", status, ask_price_per_kg AS "askPricePerKg",
-              scouted_by::text AS "scoutedBy"
-         FROM pipeline_lots WHERE id = $1::uuid
-         FOR UPDATE`,
-      [lotId]
-    );
-    const lot = lotR.rows[0];
-    if (!lot) {
-      await dbQuery("ROLLBACK");
-      return res.status(404).json({ error: "Lot not found." });
-    }
-    if (!["open", "partial", "draft"].includes(lot.status)) {
-      await dbQuery("ROLLBACK");
-      return res.status(400).json({ error: `Lot status ${lot.status} cannot be matched.` });
-    }
-    const matched = await matchedBirdsForLot(lotId);
-    const left = remainingBirds(lot.birdCount, matched);
-    if (birds > left) {
-      await dbQuery("ROLLBACK");
-      return res.status(400).json({ error: `Only ${left} birds remaining on this lot.` });
-    }
-
-    const demandId = str(body.demandId, 64);
-    if (demandId) {
-      const dR = await dbQuery(
-        `SELECT id::text AS id, birds_needed AS "birdsNeeded", status FROM pipeline_demands WHERE id = $1::uuid FOR UPDATE`,
-        [demandId]
+    // Nothing is written before the last check, so an early refusal leaves the lot untouched.
+    const out = await withDbTransaction(async (q) => {
+      const lotR = await q(
+        `SELECT id::text AS id, bird_count AS "birdCount", status, ask_price_per_kg AS "askPricePerKg",
+                scouted_by::text AS "scoutedBy"
+           FROM pipeline_lots WHERE id = $1::uuid
+           FOR UPDATE`,
+        [lotId]
       );
-      const d = dR.rows[0];
-      if (!d) {
-        await dbQuery("ROLLBACK");
-        return res.status(404).json({ error: "Demand not found." });
+      const lot = lotR.rows[0];
+      if (!lot) return { status: 404, body: { error: "Lot not found." } };
+      if (!["open", "partial", "draft"].includes(lot.status)) {
+        return { status: 400, body: { error: `Lot status ${lot.status} cannot be matched.` } };
       }
-      const filled = await filledBirdsForDemand(demandId);
-      const dLeft = Math.max(0, Number(d.birdsNeeded) - filled);
-      if (birds > dLeft) {
-        await dbQuery("ROLLBACK");
-        return res.status(400).json({ error: `Demand only needs ${dLeft} more birds.` });
+      const matched = await matchedBirdsForLot(lotId, q);
+      const left = remainingBirds(lot.birdCount, matched);
+      if (birds > left) {
+        return { status: 400, body: { error: `Only ${left} birds remaining on this lot.` } };
       }
-    }
 
-    const r = await dbQuery(
-      `INSERT INTO pipeline_matches
-         (lot_id, demand_id, buyer_id, birds, agreed_price_per_kg, ready_date, status,
-          transport_notes, slaughter_notes, learning_notes, commission_vet_user_id, matched_by)
-       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::date, 'committed', $7, $8, $9, $10::uuid, $11::uuid)
-       RETURNING id::text AS id, lot_id::text AS "lotId", demand_id::text AS "demandId",
-                 buyer_id::text AS "buyerId", birds, agreed_price_per_kg AS "agreedPricePerKg",
-                 ready_date AS "readyDate", status, created_at AS "createdAt"`,
-      [
-        lotId,
-        demandId,
-        buyerId,
-        birds,
-        numOrNull(body.agreedPricePerKg) ?? lot.askPricePerKg,
-        str(body.readyDate, 10),
-        str(body.transportNotes, 2000),
-        str(body.slaughterNotes, 2000),
-        str(body.learningNotes, 2000),
-        str(body.commissionVetUserId, 64) || lot.scoutedBy,
-        req.authUser.id,
-      ]
-    );
+      const demandId = str(body.demandId, 64);
+      if (demandId) {
+        const dR = await q(
+          `SELECT id::text AS id, birds_needed AS "birdsNeeded", status FROM pipeline_demands WHERE id = $1::uuid FOR UPDATE`,
+          [demandId]
+        );
+        const d = dR.rows[0];
+        if (!d) return { status: 404, body: { error: "Demand not found." } };
+        const filled = await filledBirdsForDemand(demandId, q);
+        const dLeft = Math.max(0, Number(d.birdsNeeded) - filled);
+        if (birds > dLeft) {
+          return { status: 400, body: { error: `Demand only needs ${dLeft} more birds.` } };
+        }
+      }
 
-    await refreshLotStatus(lotId);
-    await refreshDemandStatus(demandId);
-    await dbQuery("COMMIT");
-    audit(req.authUser, "pipeline.match.create", "pipeline_match", r.rows[0].id, {
+      const r = await q(
+        `INSERT INTO pipeline_matches
+           (lot_id, demand_id, buyer_id, birds, agreed_price_per_kg, ready_date, status,
+            transport_notes, slaughter_notes, learning_notes, commission_vet_user_id, matched_by)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::date, 'committed', $7, $8, $9, $10::uuid, $11::uuid)
+         RETURNING id::text AS id, lot_id::text AS "lotId", demand_id::text AS "demandId",
+                   buyer_id::text AS "buyerId", birds, agreed_price_per_kg AS "agreedPricePerKg",
+                   ready_date AS "readyDate", status, created_at AS "createdAt"`,
+        [
+          lotId,
+          demandId,
+          buyerId,
+          birds,
+          numOrNull(body.agreedPricePerKg) ?? lot.askPricePerKg,
+          str(body.readyDate, 10),
+          str(body.transportNotes, 2000),
+          str(body.slaughterNotes, 2000),
+          str(body.learningNotes, 2000),
+          str(body.commissionVetUserId, 64) || lot.scoutedBy,
+          req.authUser.id,
+        ]
+      );
+
+      await refreshLotStatus(lotId, q);
+      await refreshDemandStatus(demandId, q);
+      return { match: r.rows[0] };
+    });
+    if (!out.match) return res.status(out.status).json(out.body);
+    audit(req.authUser, "pipeline.match.create", "pipeline_match", out.match.id, {
       lotId,
       buyerId,
       birds,
     });
-    res.status(201).json({ match: r.rows[0] });
+    res.status(201).json({ match: out.match });
   } catch (e) {
-    try {
-      await dbQuery("ROLLBACK");
-    } catch {
-      /* ignore */
-    }
     res.status(503).json({ error: e instanceof Error ? e.message : "Could not create match." });
   }
 });
@@ -1338,6 +1335,7 @@ const marketRouteCtx = {
     bool,
     matchedBirdsForLot,
     refreshLotStatus,
+    withDbTransaction,
   },
 };
 registerPipelineMarketRoutes(router, marketRouteCtx);

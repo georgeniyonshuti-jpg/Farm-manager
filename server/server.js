@@ -138,6 +138,7 @@ import {
   resolveAssignCompanyId,
 } from "./src/services/tenant/companyAdmin.js";
 import { createSaasRouter } from "./src/routes/saasRoutes.js";
+import { createWithDbTransaction } from "./src/services/db/transaction.js";
 import { createSignupsRouter } from "./src/routes/signupsRoutes.js";
 import { createClevaAuthRouter } from "./src/routes/clevaAuth.routes.js";
 import { createPublicMarketRouter } from "./src/routes/publicMarket.routes.js";
@@ -1918,6 +1919,9 @@ async function dbQuery(sql, params = []) {
   if (!dbPool) throw new Error("Database pool not configured");
   return dbPool.query(sql, params);
 }
+
+/** One client for the whole callback: BEGIN, fn(q), COMMIT or ROLLBACK. Use this, never dbQuery("BEGIN"). */
+const withDbTransaction = createWithDbTransaction(() => dbPool);
 
 if (dbPool) {
   initErpnextDb(dbQuery);
@@ -11831,7 +11835,7 @@ app.use((err, _req, res, _next) => {
 
   initIas41Service(dbQuery, hasDb);
   initFarmSalesRouter(dbQuery, hasDb);
-  initPipelineRouter(dbQuery, hasDb, appendAudit);
+  initPipelineRouter(dbQuery, hasDb, appendAudit, withDbTransaction);
   initCrmBridge(dbQuery);
   initFarmPayrollClosuresRouter(dbQuery, hasDb);
   const runAutoDraftLots = () => {
