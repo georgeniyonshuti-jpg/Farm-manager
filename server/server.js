@@ -145,6 +145,7 @@ import {
   createSellerContractAdminRouter,
   createSellerContractPublicRouter,
 } from "./src/routes/sellerContract.routes.js";
+import { createShopDeskRouter } from "./src/routes/shop.routes.js";
 import { autoDraftReadyLots, syncManagedLotFromFlock } from "./src/services/pipeline/autoDraftLots.js";
 import { fetchClevaUserExists } from "./src/services/clevaSso.js";
 import { createPasswordResetService } from "./src/services/passwordReset.js";
@@ -11678,6 +11679,7 @@ app.use(
   requireSuperuser,
   createSellerContractAdminRouter({ dbQuery, hasDb, appendAudit })
 );
+app.use("/api/shop/desk", requireAuth, createShopDeskRouter({ dbQuery, hasDb, appendAudit }));
 app.use(
   "/api/public/contracts",
   requireAuth,

@@ -193,6 +193,7 @@ function AppRoutes() {
             <Route path="pipeline/people/:contactId" element={null} />
             <Route path="pipeline/flocks" element={null} />
             <Route path="pipeline/flocks/:lotId" element={null} />
+            <Route path="pipeline/shop" element={null} />
             <Route path="pipeline/buyers" element={null} />
             <Route path="pipeline/home" element={null} />
             <Route path="pipeline/how-it-works" element={null} />

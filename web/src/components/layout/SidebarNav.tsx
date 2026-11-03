@@ -32,6 +32,7 @@ import {
   Truck,
   TrendingUp,
   ChevronDown,
+  Store,
 } from "lucide-react";
 import { useAuth } from "../../auth/AuthContext";
 import type { ActiveWorkspace, SessionUser } from "../../auth/types";
@@ -88,6 +89,7 @@ const PATH_ICONS: Record<string, ReactNode> = {
   "/farm/pipeline": <Truck className={ICON_CLS} aria-hidden />,
   "/farm/pipeline/people": <Users className={ICON_CLS} aria-hidden />,
   "/farm/pipeline/flocks": <Bird className={ICON_CLS} aria-hidden />,
+  "/farm/pipeline/shop": <Store className={ICON_CLS} aria-hidden />,
   "/farm/pipeline/buyers": <Users className={ICON_CLS} aria-hidden />,
   "/farm/pipeline/scout": <Truck className={ICON_CLS} aria-hidden />,
   "/farm/pipeline/sellers": <Users className={ICON_CLS} aria-hidden />,
@@ -274,6 +276,10 @@ function SidebarNavBody({
     hasMarket && canWorkRecruitment(user) && canSee("farm_pipeline")
       ? { to: "/farm/pipeline/flocks", label: "Flocks" }
       : null;
+  const shopNavItem: NavItem | null =
+    hasMarket && canAccessPipelineDesk(user) && canSee("farm_pipeline")
+      ? { to: "/farm/pipeline/shop", label: "Shop" }
+      : null;
   const marketOverviewNavItem: NavItem | null =
     hasMarket && canAccessPipelineDesk(user) && canSee("dashboard_market")
       ? { to: "/dashboard/market", label: "Market overview", end: true }
@@ -435,6 +441,7 @@ function SidebarNavBody({
       ? ([
           peopleNavItem,
           flocksNavItem,
+          shopNavItem,
           messagesLink,
           marketOverviewNavItem ? { ...marketOverviewNavItem, label: "Insights" } : null,
           marketRecruitmentNavItem,
