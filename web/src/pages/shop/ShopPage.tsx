@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, MapPin, Minus, Plus, ShieldCheck, Smartphone, Truck } from "lucide-react";
 import { Link, useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { ShopComingSoon } from "./ShopComingSoon";
-import { SHOP_CATEGORIES, categoryFromSlug, categoryPath, type ShopCategory } from "../../lib/marketSections";
+import { SHOP_CATEGORIES, categoryFromSlug, categoryPath, shopPath, type ShopCategory } from "../../lib/marketSections";
 import { type PublicOutletCtx } from "../../components/public/PublicLayout";
 import { usePublicMeta } from "../../hooks/usePublicMeta";
 import { formatRwf } from "../../lib/formatRwf";
@@ -72,7 +73,7 @@ function catOf(p: ShopItem): ShopCategory {
 export function ShopPage() {
   const { locale } = useOutletContext<PublicOutletCtx>();
   const t = (k: ShopCopyKey, v?: Record<string, string | number>) => shopT(locale, k, v);
-  usePublicMeta(t("title"), t("lead"));
+  usePublicMeta(t("heroTitle"), t("heroLead"));
   const navigate = useNavigate();
   const [catalog, setCatalog] = useState<ShopCatalog | null>(null);
   const [error, setError] = useState("");
@@ -117,8 +118,8 @@ export function ShopPage() {
     ...c,
     items: products.filter((p) => catOf(p) === c.id),
   }));
-  const heroCooked = !category && cooked.length > 0;
-  const heroPhoto = shopPhotoSrc((heroCooked ? cooked : products).find((p) => p.photoUrl)?.photoUrl);
+  const heroPhoto = shopPhotoSrc((cooked.find((p) => p.photoUrl) ?? products.find((p) => p.photoUrl))?.photoUrl);
+  const freshShelf = shelves.find((c) => c.id !== "cooked")?.id ?? null;
 
   const extraClosedMessage =
     catalog?.closedMessage && !/^The shop is (closed for now|not open yet)\.?$/i.test(catalog.closedMessage.trim())
@@ -126,7 +127,7 @@ export function ShopPage() {
       : "";
 
   function checkout() {
-    if (canContinue) navigate("/shop/checkout");
+    if (canContinue) navigate(shopPath("checkout"));
     else document.getElementById("your-order")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
@@ -136,43 +137,41 @@ export function ShopPage() {
     const description = locale === "rw" && p.descriptionRw ? p.descriptionRw : p.description;
     const size = sizeLabel(p.weightMinKg, p.weightMaxKg, locale);
     const photo = shopPhotoSrc(p.photoUrl);
+    const cat = catOf(p);
     return (
-      <li key={p.sku} className="grill-card">
-        {photo ? (
-          <img src={photo} alt="" className="grill-card-photo" loading="lazy" />
-        ) : (
-          <span className="grill-card-photo grill-card-photo--empty" aria-hidden="true">
-            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M15.5 3.5a5 5 0 0 1 5 5c0 3.5-3.6 6.2-7.2 6.9l-2.7 2.7a2 2 0 1 1-2.8 2.8 2 2 0 1 1-2.8-2.8 2 2 0 1 1 2.8-2.8l2.7-2.7c.7-3.6 3.4-7.1 7-7.1z" />
-            </svg>
-          </span>
-        )}
-        <div className="grill-card-body">
-          <p className="font-bold leading-snug text-[var(--store-ink)]">{name}</p>
-          {size ? <p className="text-xs text-[var(--store-muted)]">{size}</p> : null}
-          {description ? <p className="text-xs leading-snug text-[var(--store-muted)]">{description}</p> : null}
-          <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-2">
-            <span className="grill-price">{formatRwf(p.priceRwf)}</span>
+      <li key={p.sku} className="sh-card">
+        <div className="sh-card-media">
+          {photo ? (
+            <img src={photo} alt="" loading="lazy" />
+          ) : (
+            <span className={`sh-art sh-art--${cat}`} aria-hidden="true">
+              <span className="grill-display">{t(CAT_LABEL[cat])}</span>
+            </span>
+          )}
+        </div>
+        <div className="sh-card-body">
+          <p className="sh-card-name">{name}</p>
+          {size || description ? <p className="sh-card-meta">{size || description}</p> : null}
+          <div className="sh-card-foot">
+            <span className="sh-price">{formatRwf(p.priceRwf)}</span>
             {qty === 0 ? (
               <button
                 type="button"
-                className="grill-add"
+                className="sh-add"
                 aria-label={`${t("add")}: ${name}`}
                 disabled={!catalog?.open}
                 onClick={() => setCart((prev) => setQty(prev, p.sku, 1))}
               >
-                +
+                <Plus size={20} strokeWidth={2.6} aria-hidden />
               </button>
             ) : (
-              <span className="grill-qty">
+              <span className="sh-qty">
                 <button type="button" aria-label={t("less")} onClick={() => setCart((prev) => setQty(prev, p.sku, qty - 1))}>
-                  −
+                  <Minus size={16} strokeWidth={2.6} aria-hidden />
                 </button>
-                <span className="min-w-5 text-center font-bold" aria-live="polite">
-                  {qty}
-                </span>
+                <span aria-live="polite">{qty}</span>
                 <button type="button" aria-label={t("more")} onClick={() => setCart((prev) => setQty(prev, p.sku, qty + 1))}>
-                  +
+                  <Plus size={16} strokeWidth={2.6} aria-hidden />
                 </button>
               </span>
             )}
@@ -187,9 +186,10 @@ export function ShopPage() {
   }
 
   return (
-    <div className="store-wrap store-body pt-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="grill-place">
+    <div className="store-wrap store-body sh-page">
+      <div className="sh-where">
+        <MapPin size={16} aria-hidden />
+        <label className="sh-where-label">
           <span>{t("deliverTo")}</span>
           <select
             value={placeValue}
@@ -204,15 +204,15 @@ export function ShopPage() {
                 {p.sector} ({p.district})
               </option>
             ))}
+            {places.length > 0 ? <option disabled>{t("notServedHint")}</option> : null}
           </select>
         </label>
         {lastOrder ? (
-          <Link className="text-sm font-semibold text-[var(--grill-yellow)] underline" to={orderPath(lastOrder.ref, lastOrder.token)}>
+          <Link className="sh-last" to={orderPath(lastOrder.ref, lastOrder.token)}>
             {t("lastOrder", { ref: lastOrder.ref })}
           </Link>
         ) : null}
       </div>
-      {catalog && !cart.sector ? <p className="mt-2 text-xs text-[var(--store-muted)]">{t("notServedHint")}</p> : null}
 
       {error ? (
         <p className="mt-4 text-sm text-[var(--store-danger)]" role="alert">
@@ -221,7 +221,7 @@ export function ShopPage() {
       ) : null}
 
       {catalog && !catalog.open ? (
-        <div className="mt-4 rounded-2xl border border-[var(--store-line)] bg-[var(--store-card)] p-4">
+        <div className="sh-note">
           <p className="font-semibold">
             {preview && catalog.closedReason !== "hours" ? t("previewNote") : t("hoursClosed", { time: catalog.openTime ?? "08:00" })}
           </p>
@@ -230,70 +230,85 @@ export function ShopPage() {
       ) : null}
 
       {!category ? (
-        <Link
-          to={heroCooked ? categoryPath("cooked") : categoryPath(shelves[0]?.id ?? null)}
-          className={heroPhoto ? "grill-hero grill-hero--photo mt-4" : "grill-hero mt-4"}
-        >
-          {heroPhoto ? <img src={heroPhoto} alt="" className="grill-hero-photo" /> : null}
-          <span className="grill-hero-body block">
-            <span className="grill-kicker block">{t(heroCooked ? "heroHotKicker" : "heroFreshKicker")}</span>
-            <span className="grill-display grill-hero-title block">{t(heroCooked ? "heroHotTitle" : "title")}</span>
-            <span className="mt-2 block text-sm text-[var(--store-ink-soft)]">{t(heroCooked ? "heroHotLead" : "lead")}</span>
-            <span className="grill-cta">{t(heroCooked ? "heroHotCta" : "heroFreshCta")} →</span>
-          </span>
-        </Link>
-      ) : (
-        <p className="mt-5">
-          <Link to={categoryPath(null)} className="text-sm font-semibold text-[var(--store-muted)] underline">
-            ← {t("catAll")}
-          </Link>
-        </p>
-      )}
+        <>
+          <section className="sh-hero">
+            {heroPhoto ? <img src={heroPhoto} alt="" className="sh-hero-img" /> : <span className="sh-hero-art" aria-hidden="true" />}
+            <span className="sh-hero-shade" aria-hidden="true" />
+            <div className="sh-hero-body">
+              <span className="sh-kicker">{t("heroKicker")}</span>
+              <h1 className="grill-display sh-hero-title">{t("heroTitle")}</h1>
+              <p className="sh-hero-lead">{t("heroLead")}</p>
+              <div className="sh-hero-actions">
+                {cooked.length > 0 ? (
+                  <Link to={categoryPath("cooked")} className="sh-cta">
+                    {t("heroHotCta")}
+                    <ArrowRight size={18} strokeWidth={2.4} aria-hidden />
+                  </Link>
+                ) : null}
+                {freshShelf ? (
+                  <Link to={categoryPath(freshShelf)} className={cooked.length > 0 ? "sh-cta sh-cta--light" : "sh-cta"}>
+                    {t("heroFreshCta")}
+                    <ArrowRight size={18} strokeWidth={2.4} aria-hidden />
+                  </Link>
+                ) : null}
+              </div>
+            </div>
+          </section>
+          <ul className="sh-promises">
+            <li>
+              <Truck size={18} aria-hidden />
+              {t("trustDoor")}
+            </li>
+            <li>
+              <ShieldCheck size={18} aria-hidden />
+              {t("trustButchers")}
+            </li>
+            <li>
+              <Smartphone size={18} aria-hidden />
+              {t("trustMomo")}
+            </li>
+          </ul>
+        </>
+      ) : null}
 
       {shelves.length > 1 ? (
-        <nav className="mt-6" aria-label={t("categoriesLabel")}>
-          <h2 className="grill-display text-2xl">{t("shopChicken")}</h2>
-          <div className="grill-tiles mt-3">
-            {shelves.map((c) => {
-              const from = Math.min(...products.filter((p) => catOf(p) === c.id).map((p) => p.priceRwf));
-              return (
-                <Link
-                  key={c.id}
-                  to={categoryPath(c.id)}
-                  className={`grill-tile grill-tile--${c.id}`}
-                  aria-current={category === c.id ? "page" : undefined}
-                >
-                  <span className="grill-display grill-tile-name">{t(CAT_LABEL[c.id])}</span>
-                  <span className="grill-tile-sub">{c.id === "cooked" ? t(CAT_SUB[c.id]) : t("fromPrice", { amount: formatRwf(from) })}</span>
-                </Link>
-              );
-            })}
-          </div>
+        <nav className="sh-cats" aria-label={t("categoriesLabel")}>
+          <Link to={categoryPath(null)} className="sh-chip" aria-current={!category ? "page" : undefined}>
+            {t("catAll")}
+          </Link>
+          {shelves.map((c) => (
+            <Link key={c.id} to={categoryPath(c.id)} className="sh-chip" aria-current={category === c.id ? "page" : undefined}>
+              {t(CAT_LABEL[c.id])}
+            </Link>
+          ))}
         </nav>
       ) : null}
 
       {catalog ? (
-        <div className={itemCount > 0 ? "mt-6 grid gap-6 lg:grid-cols-[1fr_22rem]" : "mt-6"}>
-          <div className="space-y-7">
+        <div className={itemCount > 0 ? "mt-5 grid gap-6 lg:grid-cols-[1fr_22rem]" : "mt-5"}>
+          <div className="space-y-9">
             {category && groups.length === 0 ? (
               <p className="text-sm text-[var(--store-muted)]">
-                <Link className="font-semibold text-[var(--grill-yellow)] underline" to={categoryPath(null)}>
+                <Link className="sh-last" to={categoryPath(null)}>
                   {t("emptyCategory")}
                 </Link>
               </p>
             ) : null}
             {groups.map((g) => (
               <section key={g.id} aria-labelledby={`shelf-${g.id}`}>
-                <h2 id={`shelf-${g.id}`} className="grill-display text-2xl">
-                  {t(CAT_LABEL[g.id])}
-                </h2>
-                <ul className="grill-products mt-3">{g.items.map(card)}</ul>
+                <div className="sh-shelf-head">
+                  <h2 id={`shelf-${g.id}`} className="grill-display sh-shelf-title">
+                    {t(CAT_LABEL[g.id])}
+                  </h2>
+                  <span className="sh-shelf-sub">{t(CAT_SUB[g.id])}</span>
+                </div>
+                <ul className="sh-grid">{g.items.map(card)}</ul>
               </section>
             ))}
           </div>
 
           {itemCount > 0 ? (
-          <aside id="your-order" className="h-fit rounded-3xl border border-[var(--store-line)] bg-[var(--store-card)] p-5 lg:sticky lg:top-24">
+          <aside id="your-order" className="sh-order h-fit lg:sticky lg:top-24">
             <p className="store-request-title">{t("yourOrder")}</p>
             <ShopSummary locale={locale} catalog={catalog} cart={cart} quote={quote} loading={loading} />
             <button type="button" className="store-btn store-btn-ember mt-4 w-full" disabled={!canContinue} onClick={checkout}>

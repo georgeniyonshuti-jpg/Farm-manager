@@ -6,6 +6,8 @@ import {
   triggerNativeInstallPrompt,
 } from "../../pwa/installPrompt";
 import { useLaborerT } from "../../i18n/laborerI18n";
+import { isMarketHostname } from "../../lib/marketHost";
+import { isShopHostname } from "../../lib/marketSections";
 
 type PromptState = {
   canPromptNatively: boolean;
@@ -47,7 +49,12 @@ export function InstallPromptBanner() {
   const tNotNow = useLaborerT("Not now");
   const fallbackText = useInstallFallbackText();
 
+  const host = window.location.hostname;
+  // Shoppers and business visitors on the public sites never see the farm app prompt.
   const hideOnAuth =
+    isShopHostname(host) ||
+    isMarketHostname(host) ||
+    pathname.startsWith("/shop") ||
     pathname.startsWith("/market") ||
     pathname.startsWith("/signup") ||
     pathname.startsWith("/login") ||

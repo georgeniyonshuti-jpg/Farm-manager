@@ -1,5 +1,5 @@
 import { isAdOrMarketSignupSearch } from "./signupAttribution.ts";
-import { isSectionPath } from "./marketSections.ts";
+import { SHOP_HOST, isSectionPath, shopHostPath } from "./marketSections.ts";
 
 /** Public market site. Farm superuser controls stay on farm.cleva.rw. */
 export const MARKET_HOST = "market.cleva.rw";
@@ -83,9 +83,27 @@ export function isFarmControlPath(pathname: string): boolean {
   return false;
 }
 
-/** Full URL when this request belongs on the other host. Null means stay. */
+/** Business and account pages that do not belong on the food shop. */
+function isBusinessPath(pathname: string): boolean {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  if (["/login", "/signup", "/forgot-password", "/reset-password"].includes(path)) return true;
+  if (path === "/wholesale" || path === "/live") return true;
+  return starts(path, "/market") || starts(path, "/app") || starts(path, "/sign");
+}
+
+/** Full URL when this request belongs on another host. Null means stay. */
 export function hostRedirectTarget(hostname: string, pathname: string, search = ""): string | null {
   const query = search ? (search.startsWith("?") ? search : `?${search}`) : "";
+  // The food shop lives on shop.cleva.rw with short addresses.
+  if (isMarketHostname(hostname) || isFarmHostname(hostname)) {
+    const shopPage = shopHostPath(pathname, query);
+    if (shopPage) return `https://${SHOP_HOST}${shopPage}`;
+  }
+  if (hostname === SHOP_HOST && shopHostPath(pathname) === null && isBusinessPath(pathname)) {
+    const old = pathname.replace(/\/+$/, "");
+    const path = old === "/wholesale" || old === "/live" ? "/" : pathname;
+    return `https://${MARKET_HOST}${path}${query}`;
+  }
   if (isFarmHostname(hostname) && pathname === "/privacy") {
     return `https://${MARKET_HOST}/privacy${query}`;
   }

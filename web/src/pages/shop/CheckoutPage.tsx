@@ -1,3 +1,4 @@
+import { shopPath } from "../../lib/marketSections";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate, useOutletContext } from "react-router-dom";
 import { type PublicOutletCtx } from "../../components/public/PublicLayout";
@@ -30,7 +31,7 @@ export function CheckoutPage() {
       .catch((e) => setError(e instanceof Error ? e.message : "Could not load the shop."));
   }, []);
 
-  if (cart.items.length === 0 || !cart.sector) return <Navigate to="/shop" replace />;
+  if (cart.items.length === 0 || !cart.sector) return <Navigate to={shopPath()} replace />;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -59,7 +60,7 @@ export function CheckoutPage() {
   return (
     <div className="store-wrap store-body">
       <p className="mb-4 text-sm">
-        <Link className="text-[var(--store-muted)] underline" to="/shop">
+        <Link className="text-[var(--store-muted)] underline" to={shopPath()}>
           ← {t("back")}
         </Link>
       </p>

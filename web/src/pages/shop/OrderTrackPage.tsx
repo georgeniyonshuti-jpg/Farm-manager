@@ -1,3 +1,4 @@
+import { shopPath } from "../../lib/marketSections";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { Link, useOutletContext, useParams, useSearchParams } from "react-router-dom";
 import { type PublicOutletCtx } from "../../components/public/PublicLayout";
@@ -72,7 +73,7 @@ export function OrderTrackPage() {
         <p className="text-sm text-[var(--store-danger)]" role="alert">
           {error}
         </p>
-        <Link className="store-btn store-btn-ember mt-4 inline-flex" to="/shop">
+        <Link className="store-btn store-btn-ember mt-4 inline-flex" to={shopPath()}>
           {t("newOrder")}
         </Link>
       </div>
@@ -168,7 +169,7 @@ export function OrderTrackPage() {
         </div>
 
         {FINAL.includes(order.status) ? (
-          <Link className="store-btn store-btn-ghost inline-flex" to="/shop">
+          <Link className="store-btn store-btn-ghost inline-flex" to={shopPath()}>
             {t("newOrder")}
           </Link>
         ) : null}

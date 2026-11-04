@@ -1,11 +1,13 @@
 import { useEffect } from "react";
+import { isShopHostname } from "../lib/marketSections";
 
 /**
  * Set document title + description + Open Graph tags for public market pages.
  */
 export function usePublicMeta(title: string, description: string) {
   useEffect(() => {
-    const brand = "Cleva Market";
+    const shop = isShopHostname(window.location.hostname) || window.location.pathname.startsWith("/shop");
+    const brand = shop ? "BigChix" : "Cleva Market";
     const fullTitle = title === brand || title.endsWith(` · ${brand}`) ? title : `${title} · ${brand}`;
     document.title = fullTitle;
 
@@ -26,7 +28,7 @@ export function usePublicMeta(title: string, description: string) {
     ensureMeta("name", "twitter:card", "summary_large_image");
     ensureMeta("name", "twitter:title", fullTitle);
     ensureMeta("name", "twitter:description", description);
-    ensureMeta("name", "theme-color", "#f4ecdf");
+    ensureMeta("name", "theme-color", shop ? "#131110" : "#f4ecdf");
 
     return () => {
       document.title = "Clevafarm";

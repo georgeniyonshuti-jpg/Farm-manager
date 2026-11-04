@@ -5,6 +5,7 @@
  */
 
 import type { CartItem, ShopCatalog } from "../../api/shop.api";
+import { shopPath } from "../../lib/marketSections.ts";
 
 const CART_KEY = "cleva_shop_cart_v1";
 const LAST_ORDER_KEY = "cleva_shop_last_order_v1";
@@ -118,7 +119,7 @@ export function saveLastOrder(order: LastOrder | null) {
 }
 
 export function orderPath(ref: string, token: string): string {
-  return `/shop/order/${encodeURIComponent(ref)}?t=${encodeURIComponent(token)}`;
+  return `${shopPath(`order/${encodeURIComponent(ref)}`)}?t=${encodeURIComponent(token)}`;
 }
 
 /** The WhatsApp message for customers who would rather order by chat. */

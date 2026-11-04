@@ -16,14 +16,20 @@ function WhatsAppMark() {
 export function StoreWhatsAppFab({
   locale: localeProp,
   liftForNav,
+  text,
+  label,
 }: {
   locale?: StoreLocale;
   liftForNav?: boolean;
+  /** Opening message; defaults to the market one. */
+  text?: string;
+  /** Screen-reader name; defaults to the market one. */
+  label?: string;
 }) {
   const ctx = useOptionalMarketLocale();
   const locale = ctx?.locale ?? localeProp ?? "en";
   const t = (k: Parameters<typeof storeT>[1]) => storeT(locale, k);
-  const href = waMeHref(clevaMarketWhatsapp(), t("waPrefill"));
+  const href = waMeHref(clevaMarketWhatsapp(), text ?? t("waPrefill"));
   if (!href) return null;
 
   return (
@@ -32,7 +38,7 @@ export function StoreWhatsAppFab({
       href={href}
       target="_blank"
       rel="noreferrer"
-      aria-label={t("waCleva")}
+      aria-label={label ?? t("waCleva")}
     >
       <WhatsAppMark />
       <span>{t("waFab")}</span>

@@ -24,18 +24,14 @@ import { InstallPromptBanner } from "./components/pwa/InstallPromptBanner";
 import { useAuth } from "./auth/AuthContext";
 import { AppLoadingScreen } from "./components/AppLoadingScreen";
 import { PublicLayout } from "./components/public/PublicLayout";
-import { PublicMarketPage } from "./pages/public/PublicMarketPage";
 import { PublicLotDetailPage } from "./pages/public/PublicLotDetailPage";
 import { PublicFarmPage } from "./pages/public/PublicFarmPage";
 import { PublicFarmsPage } from "./pages/public/PublicFarmsPage";
 import { HowItWorksPage } from "./pages/public/HowItWorksPage";
 import { SellYourBirdsPage } from "./pages/public/SellYourBirdsPage";
-import { ShopPage } from "./pages/shop/ShopPage";
-import { CheckoutPage } from "./pages/shop/CheckoutPage";
-import { OrderTrackPage } from "./pages/shop/OrderTrackPage";
-import { ShopRedirect } from "./pages/shop/ShopRedirect";
-import { MarketHomePage } from "./pages/public/MarketHomePage";
-import { isSectionPath } from "./lib/marketSections";
+import { OldShopAddress, ShopRoutes, shopRoutesUnderPrefix } from "./pages/shop/ShopRoutes";
+import { BusinessHome, BusinessOnly } from "./pages/public/BusinessHome";
+import { isSectionPath, isShopHostname } from "./lib/marketSections";
 import { PrivacyPage } from "./pages/public/PrivacyPage";
 
 function FlockFcrLegacyRedirect() {
@@ -79,7 +75,9 @@ function AppRoutes() {
     if (hostTarget) window.location.replace(hostTarget);
   }, [hostTarget]);
   const onMarketSite = isMarketHostname(host);
+  const onShopSite = isShopHostname(host);
   const isPublicStore =
+    onShopSite ||
     pathname.startsWith("/market") ||
     isSectionPath(pathname) ||
     pathname === "/privacy" ||
@@ -87,6 +85,7 @@ function AppRoutes() {
   const isDevPreview = import.meta.env.DEV && pathname.startsWith("/dev/recruitment-preview");
   const apiStatus = useApiHealthStatus(!bootstrapped && !isPublicStore && !isDevPreview);
   if (hostTarget) return null;
+  if (onShopSite) return <ShopRoutes />;
   if (!bootstrapped && !isPublicStore && !isDevPreview) return <AppLoadingScreen apiStatus={apiStatus} />;
   return (
     <Routes>
@@ -121,22 +120,27 @@ function AppRoutes() {
       <Route path="/billing/cancelled" element={<BillingCancelledPage />} />
       <Route path="/billing/trial-expired" element={<TrialExpiredPage />} />
 
+      {shopRoutesUnderPrefix()}
+      <Route path="/raw/*" element={<OldShopAddress />} />
+      <Route path="/market/shop/*" element={<OldShopAddress />} />
+
       <Route element={<PublicLayout />}>
-        {onMarketSite ? <Route path="/" element={<MarketHomePage />} /> : null}
-        <Route path="/shop" element={<ShopPage />} />
-        <Route path="/shop/checkout" element={<CheckoutPage />} />
-        <Route path="/shop/order/:ref" element={<OrderTrackPage />} />
-        <Route path="/shop/:category" element={<ShopPage />} />
-        <Route path="/wholesale" element={<PublicMarketPage />} />
-        <Route path="/raw/*" element={<ShopRedirect />} />
-        <Route path="/live" element={<ShopRedirect />} />
-        <Route path="/market" element={<PublicMarketPage />} />
-        <Route path="/market/lot/:publicRef" element={<PublicLotDetailPage />} />
+        {onMarketSite ? <Route path="/" element={<BusinessHome />} /> : null}
+        <Route path="/market" element={<BusinessHome />} />
+        <Route path="/wholesale" element={<Navigate to={onMarketSite ? "/" : "/market"} replace />} />
+        <Route path="/live" element={<Navigate to={onMarketSite ? "/" : "/market"} replace />} />
+        <Route
+          path="/market/lot/:publicRef"
+          element={
+            <BusinessOnly>
+              <PublicLotDetailPage />
+            </BusinessOnly>
+          }
+        />
         <Route path="/market/farms" element={<PublicFarmsPage />} />
         <Route path="/market/farm/:slug" element={<PublicFarmPage />} />
         <Route path="/market/how-it-works" element={<HowItWorksPage />} />
         <Route path="/market/sell" element={<SellYourBirdsPage />} />
-        <Route path="/market/shop/*" element={<ShopRedirect />} />
         <Route path="/privacy" element={<PrivacyPage />} />
       </Route>
 

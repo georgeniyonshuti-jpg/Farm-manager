@@ -113,7 +113,7 @@ const EN = {
   openMarket: "Open your orders",
   storeBrand: "Cleva Market",
   footerContact: "Cleva Technologies · Rwanda",
-  footerBlurb: "Weekly poultry board. Rwanda.",
+  footerBlurb: "Chicken supply for businesses across Rwanda.",
   footerMarket: "Market",
   footerTalk: "Talk to Cleva",
   howTitle: "How it works",

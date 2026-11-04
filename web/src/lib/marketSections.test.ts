@@ -1,59 +1,91 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { categoryFromSlug, categoryPath, isSectionPath, isShopArea, legacyRedirectPath, storePageFor } from "./marketSections.ts";
+import {
+  categoryFromSlug,
+  categoryPath,
+  isOldWholesalePath,
+  isSectionPath,
+  isShopHostname,
+  shopHostPath,
+  shopPath,
+} from "./marketSections.ts";
 import { hostRedirectTarget, isPublicMarketPath } from "./marketHost.ts";
 
-describe("market sections", () => {
-  it("moves older addresses, keeping order links and their token", () => {
-    assert.equal(legacyRedirectPath("/market/shop"), "/shop");
-    assert.equal(legacyRedirectPath("/market/shop/"), "/shop");
-    assert.equal(legacyRedirectPath("/market/shop/checkout"), "/shop/checkout");
-    assert.equal(legacyRedirectPath("/market/shop/order/CK-ABC234", "?t=x%2Fy"), "/shop/order/CK-ABC234?t=x%2Fy");
-    assert.equal(legacyRedirectPath("/raw"), "/shop");
-    assert.equal(legacyRedirectPath("/raw/order/CK-1", "?t=z"), "/shop/order/CK-1?t=z");
-    assert.equal(legacyRedirectPath("/live", "?utm=x"), "/wholesale?utm=x");
-    assert.equal(legacyRedirectPath("/market/shopping"), null);
-    assert.equal(legacyRedirectPath("/market"), null);
+describe("shop addresses", () => {
+  it("are short on the shop host and under /shop elsewhere", () => {
+    assert.equal(shopPath("", "shop.cleva.rw"), "/");
+    assert.equal(shopPath("checkout", "shop.cleva.rw"), "/checkout");
+    assert.equal(shopPath("/order/CK-1", "shop.localhost"), "/order/CK-1");
+    assert.equal(shopPath("", "localhost"), "/shop");
+    assert.equal(shopPath("checkout", "localhost"), "/shop/checkout");
+    assert.equal(categoryPath("cooked", "shop.cleva.rw"), "/hot-and-ready");
+    assert.equal(categoryPath(null, "shop.cleva.rw"), "/");
+    assert.equal(categoryPath("cooked", "localhost"), "/shop/hot-and-ready");
+    assert.equal(isShopHostname("shop.cleva.rw"), true);
+    assert.equal(isShopHostname("market.cleva.rw"), false);
   });
 
   it("maps category words both ways", () => {
     assert.equal(categoryFromSlug("skewers-and-more"), "prepared");
     assert.equal(categoryFromSlug("nope"), null);
-    assert.equal(categoryPath("cooked"), "/shop/bigchix");
+    assert.equal(categoryFromSlug("hot-and-ready"), "cooked");
     assert.equal(categoryFromSlug("bigchix"), "cooked");
     assert.equal(categoryFromSlug("BigChix"), "cooked");
     assert.equal(categoryFromSlug("ready-to-eat"), "cooked");
-    assert.equal(categoryPath(null), "/shop");
   });
 
-  it("knows which side of the market a page is on", () => {
-    assert.equal(storePageFor("/", true), "shop");
-    assert.equal(storePageFor("/", false), "wholesale");
-    assert.equal(storePageFor("/shop", true), "shop");
-    assert.equal(storePageFor("/shop/cuts", true), "shop");
-    assert.equal(storePageFor("/wholesale", true), "wholesale");
-    assert.equal(storePageFor("/market", true), "wholesale");
-    assert.equal(storePageFor("/shop/checkout", true), null);
-    assert.equal(storePageFor("/shop/order/X", true), null);
-    assert.equal(storePageFor("/market/lot/ABC", true), null);
+  it("finds the shop-host path for older addresses, keeping order tokens", () => {
+    assert.equal(shopHostPath("/shop"), "/");
+    assert.equal(shopHostPath("/shop/"), "/");
+    assert.equal(shopHostPath("/shop/bigchix"), "/bigchix");
+    assert.equal(shopHostPath("/shop/order/CK-ABC234", "?t=x%2Fy"), "/order/CK-ABC234?t=x%2Fy");
+    assert.equal(shopHostPath("/market/shop/checkout"), "/checkout");
+    assert.equal(shopHostPath("/raw/order/CK-1", "?t=z"), "/order/CK-1?t=z");
+    assert.equal(shopHostPath("/shopping"), null);
+    assert.equal(shopHostPath("/market"), null);
   });
 
-  it("treats the short addresses as public market pages", () => {
+  it("knows the old wholesale addresses and the public paths", () => {
+    assert.equal(isOldWholesalePath("/wholesale"), true);
+    assert.equal(isOldWholesalePath("/live/"), true);
+    assert.equal(isOldWholesalePath("/market"), false);
     for (const p of ["/shop", "/shop/cuts", "/shop/order/X", "/wholesale", "/live", "/raw", "/raw/checkout"]) {
       assert.equal(isSectionPath(p), true, p);
       assert.equal(isPublicMarketPath(p), true, p);
     }
     assert.equal(isSectionPath("/shopping"), false);
-    assert.equal(hostRedirectTarget("farm.cleva.rw", "/shop", "?a=1"), "https://market.cleva.rw/shop?a=1");
-    assert.equal(hostRedirectTarget("market.cleva.rw", "/wholesale"), null);
+  });
+});
+
+describe("shop host redirects", () => {
+  it("sends shop pages on the market and farm hosts to shop.cleva.rw", () => {
+    assert.equal(hostRedirectTarget("market.cleva.rw", "/shop"), "https://shop.cleva.rw/");
+    assert.equal(hostRedirectTarget("market.cleva.rw", "/shop/bigchix", "?a=1"), "https://shop.cleva.rw/bigchix?a=1");
+    assert.equal(
+      hostRedirectTarget("market.cleva.rw", "/shop/order/CK-1", "?t=abc"),
+      "https://shop.cleva.rw/order/CK-1?t=abc",
+    );
+    assert.equal(hostRedirectTarget("market.cleva.rw", "/market/shop/checkout"), "https://shop.cleva.rw/checkout");
+    assert.equal(hostRedirectTarget("farm.cleva.rw", "/raw"), "https://shop.cleva.rw/");
+    assert.equal(hostRedirectTarget("localhost", "/shop"), null);
   });
 
-  it("gives shop pages the Grill look", () => {
-    assert.equal(isShopArea("/", true), true);
-    assert.equal(isShopArea("/", false), false);
-    assert.equal(isShopArea("/shop/checkout", false), true);
-    assert.equal(isShopArea("/wholesale", true), false);
-    assert.equal(isShopArea("/market", true), false);
-    assert.equal(isShopArea("/shopping", true), false);
+  it("sends business pages on the shop host to market.cleva.rw", () => {
+    assert.equal(hostRedirectTarget("shop.cleva.rw", "/login"), "https://market.cleva.rw/login");
+    assert.equal(hostRedirectTarget("shop.cleva.rw", "/market/sell", "?x=1"), "https://market.cleva.rw/market/sell?x=1");
+    assert.equal(hostRedirectTarget("shop.cleva.rw", "/wholesale"), "https://market.cleva.rw/");
+    assert.equal(hostRedirectTarget("shop.cleva.rw", "/app/cleva/market"), "https://market.cleva.rw/app/cleva/market");
+    assert.equal(hostRedirectTarget("shop.cleva.rw", "/"), null);
+    assert.equal(hostRedirectTarget("shop.cleva.rw", "/bigchix"), null);
+    assert.equal(hostRedirectTarget("shop.cleva.rw", "/order/CK-1", "?t=a"), null);
+    assert.equal(hostRedirectTarget("shop.cleva.rw", "/shop/cuts"), null);
+    assert.equal(hostRedirectTarget("shop.cleva.rw", "/privacy"), null);
+    assert.equal(hostRedirectTarget("shop.localhost", "/login"), null);
+  });
+
+  it("keeps the business market where it is", () => {
+    assert.equal(hostRedirectTarget("market.cleva.rw", "/"), null);
+    assert.equal(hostRedirectTarget("market.cleva.rw", "/wholesale"), null);
+    assert.equal(hostRedirectTarget("market.cleva.rw", "/market/lot/ABC"), null);
   });
 });
