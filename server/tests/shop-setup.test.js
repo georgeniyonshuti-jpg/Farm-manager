@@ -140,7 +140,28 @@ describe("shop setup writes", () => {
     assert.deepEqual(r.butcher.zones, [{ zoneId, priority: 1 }]);
     assert.equal(db.calls.length, 1);
     assert.equal(db.calls.some((c) => /^\s*(BEGIN|COMMIT)/.test(c.sql)), false);
-    assert.deepEqual(db.calls[0].params.slice(-2), [[zoneId], [1]]);
+    assert.deepEqual(db.calls[0].params.slice(13, 15), [[zoneId], [1]]);
+    assert.equal(db.calls[0].params[15], null);
+  });
+
+  it("links a butcher login by email only when the user is a butcher", async () => {
+    const row = { id: "22222222-2222-4222-8222-222222222222", shop_name: "Remera Meats", status: "pending" };
+    const userId = "44444444-4444-4444-8444-444444444444";
+    const db = fakeDb([
+      ["FROM users WHERE lower(email)", (_sql, params) => (params[0] === "jean@shop.rw" ? [{ id: userId, email: "jean@shop.rw", role: "butcher" }] : [{ id: "x", email: params[0], role: "manager" }])],
+      ["INSERT INTO shop_butchers", [row]],
+    ]);
+    const ok = await saveButcher(db, null, { ...goodButcher, loginEmail: " Jean@Shop.rw " }, actor);
+    assert.equal(ok.ok, true);
+    assert.equal(ok.butcher.loginEmail, "jean@shop.rw");
+    assert.equal(db.calls.at(-1).params[15], userId);
+
+    const wrongRole = await saveButcher(db, null, { ...goodButcher, loginEmail: "boss@farm.rw" }, actor);
+    assert.equal(wrongRole.ok, false);
+    assert.match(wrongRole.error, /role is manager/);
+
+    const none = await saveButcher(fakeDb(), null, { ...goodButcher, loginEmail: "nobody@x.rw" }, actor);
+    assert.match(none.error, /Create the login under Users first/);
   });
 });
 

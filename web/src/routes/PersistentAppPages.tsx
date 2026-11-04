@@ -66,6 +66,7 @@ const PersonPage = lazyNamed(() => import("../pages/market/PersonPage"), "Person
 const FlockBook = lazyNamed(() => import("../pages/market/FlockBook"), "FlockBook");
 const FlockPage = lazyNamed(() => import("../pages/market/FlockPage"), "FlockPage");
 const ShopSetupPage = lazyNamed(() => import("../pages/market/shop/ShopSetupPage"), "ShopSetupPage");
+const ButcherOrdersPage = lazyNamed(() => import("../pages/butcher/ButcherOrdersPage"), "ButcherOrdersPage");
 const RedirectMarketBuyers = lazyNamed(() => import("../pages/market/MarketHubRedirect"), "RedirectMarketBuyers");
 const RedirectMarketPricing = lazyNamed(() => import("../pages/market/MarketHubRedirect"), "RedirectMarketPricing");
 const RedirectMarketJobs = lazyNamed(() => import("../pages/market/MarketHubRedirect"), "RedirectMarketJobs");
@@ -470,6 +471,14 @@ export function PersistentAppPages() {
           <LazyPage>
             <PersistentRouteGuard roles={["buyer", "superuser", "sales_coordinator"]}>
               <MarketHomePage />
+            </PersistentRouteGuard>
+          </LazyPage>
+        </PersistentPageSlot>
+
+        <PersistentPageSlot active={pathExact(p, "/market/butcher")} mountDelayMs={0}>
+          <LazyPage>
+            <PersistentRouteGuard roles={["butcher"]}>
+              <ButcherOrdersPage />
             </PersistentRouteGuard>
           </LazyPage>
         </PersistentPageSlot>

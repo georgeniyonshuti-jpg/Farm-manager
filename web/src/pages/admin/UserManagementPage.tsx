@@ -76,6 +76,7 @@ const USER_ROLE_OPTIONS: SessionUser["role"][] = [
   "sales_coordinator",
   "sales_officer",
   "buyer",
+  "butcher",
   "investor",
   "dispatcher",
 ];
@@ -93,6 +94,7 @@ const ROLE_LABELS: Record<string, string> = {
   sales_coordinator: "Sales Coordinator",
   sales_officer: "Sales officer",
   buyer: "Buyer",
+  butcher: "Butcher",
   investor: "Investor",
   dispatcher: "Dispatcher",
 };

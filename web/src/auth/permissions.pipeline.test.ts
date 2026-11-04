@@ -10,6 +10,7 @@ import {
   canFlockAction,
   canScoutPipeline,
   isBuyerRole,
+  isButcherRole,
   isMarketDeskPath,
   isMarketOnlySeller,
   isMarketScout,
@@ -159,5 +160,17 @@ describe("account kind labels", () => {
     assert.equal(accountKindLabel(user("manager", ["farm_flocks", "farm_market"])), null);
     assert.equal(accountKindLabel(user("vet", ["farm_vet_logs", "farm_pipeline"])), null);
     assert.equal(accountKindLabel(user("superuser")), null);
+  });
+});
+
+describe("butcher role", () => {
+  it("stays in the market workspace and uses the partner shell", () => {
+    const b = user("butcher", ["farm_market"]);
+    assert.equal(isButcherRole(b), true);
+    assert.deepEqual(workspacesForUser(b), ["market"]);
+    assert.equal(usesMarketPartnerShell(b, "/market/butcher"), true);
+    assert.equal(canAccessPipelineDesk(b), false);
+    assert.equal(canAccessPathByPageVisibility(b, "/market/butcher"), true);
+    assert.equal(canAccessPathByPageVisibility(b, "/farm/flocks"), false);
   });
 });

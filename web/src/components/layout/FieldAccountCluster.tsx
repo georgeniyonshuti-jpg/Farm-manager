@@ -16,6 +16,7 @@ const ROLE_LABEL_EN: Record<UserRole, string> = {
   sales_coordinator: "Sales coordinator",
   sales_officer: "Sales officer",
   buyer: "Buyer",
+  butcher: "Butcher",
   investor: "Investor",
   dispatcher: "Dispatcher",
 };

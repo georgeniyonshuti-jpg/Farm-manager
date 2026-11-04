@@ -5,7 +5,8 @@
  */
 
 import express from "express";
-import { canAccessPipelineDesk } from "../services/pipeline/pipeline.js";
+import { canAccessPipelineDesk, isButcherRole } from "../services/pipeline/pipeline.js";
+import { applyOrderStep, listButcherOrders, loadButcherForUser, reassignOrder } from "../services/shop/shopButcher.js";
 import { cancelOrder, confirmPayment, listDeskOrders, rejectPayment } from "../services/shop/shopOrders.js";
 import { getShopSetup, saveButcher, saveProduct, saveShopSettings, saveZone } from "../services/shop/shopSetup.js";
 
@@ -110,6 +111,73 @@ export function createShopDeskRouter(deps) {
   router.post("/orders/:id/cancel", async (req, res) => {
     const id = idParam(req, res);
     if (id) sendResult(res, await cancelOrder(dbQuery, id, req.body ?? {}, actor(req)));
+  });
+
+  // Ops takes a butcher step for an order handled by phone.
+  router.post("/orders/:id/step", async (req, res) => {
+    const id = idParam(req, res);
+    if (!id) return;
+    const a = actor(req);
+    const audit = (action, resourceId, meta) => a.audit?.(a.userId, a.role, action, "shop_order", resourceId, meta);
+    sendResult(res, await applyOrderStep(dbQuery, id, String(req.body?.action || ""), { kind: "ops", userId: a.userId }, audit));
+  });
+
+  router.post("/orders/:id/assign", async (req, res) => {
+    const id = idParam(req, res);
+    const butcherId = String(req.body?.butcherId || "");
+    if (!id) return;
+    if (!UUID_RE.test(butcherId)) {
+      res.status(400).json({ error: "Choose a butcher." });
+      return;
+    }
+    sendResult(res, await reassignOrder(dbQuery, id, butcherId, actor(req)));
+  });
+
+  return router;
+}
+
+/** A partner butcher's own orders. Role butcher, linked to a shop on the desk. */
+export function createShopButcherRouter(deps) {
+  const router = express.Router();
+  const dbQuery = deps.dbQuery;
+  const hasDb = () => (typeof deps.hasDb === "function" ? Boolean(deps.hasDb()) : Boolean(deps.hasDb));
+
+  router.use(async (req, res, next) => {
+    req.app.locals.appendAudit = deps.appendAudit;
+    if (!isButcherRole(req.authUser)) {
+      res.status(403).json({ error: "Butcher account required." });
+      return;
+    }
+    if (!hasDb() || !dbQuery) {
+      res.status(503).json({ error: "Database unavailable." });
+      return;
+    }
+    try {
+      const butcher = await loadButcherForUser(dbQuery, req.authUser.id);
+      if (!butcher) {
+        res.status(403).json({ error: "This login is not linked to a butcher shop yet. Ask Cleva to link it.", code: "not_linked" });
+        return;
+      }
+      req.butcher = butcher;
+      next();
+    } catch (e) {
+      res.status(503).json({ error: e instanceof Error ? e.message : "Could not load your shop." });
+    }
+  });
+
+  router.get("/orders", async (req, res) => {
+    sendResult(res, await listButcherOrders(dbQuery, req.butcher));
+  });
+
+  router.post("/orders/:id/:action", async (req, res) => {
+    const id = idParam(req, res);
+    if (!id) return;
+    const a = actor(req);
+    const audit = (action, resourceId, meta) => a.audit?.(a.userId, a.role, action, "shop_order", resourceId, meta);
+    sendResult(
+      res,
+      await applyOrderStep(dbQuery, id, req.params.action, { kind: "butcher", butcherId: req.butcher.id, userId: a.userId }, audit)
+    );
   });
 
   return router;

@@ -164,6 +164,11 @@ export function isBuyerRole(user) {
   return user?.role === "buyer";
 }
 
+/** Partner butcher for the home chicken shop. Sees only their own shop orders. */
+export function isButcherRole(user) {
+  return user?.role === "butcher";
+}
+
 export function canBrowseMarket(user) {
   if (!user) return false;
   if (canAccessPipelineDesk(user)) return true;

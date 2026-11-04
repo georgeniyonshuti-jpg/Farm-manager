@@ -118,6 +118,8 @@ export function defaultHomePathForRole(role: UserRole): string {
       return "/farm/pipeline/people";
     case "buyer":
       return "/market";
+    case "butcher":
+      return "/market/butcher";
     default:
       return "/dashboard/management";
   }

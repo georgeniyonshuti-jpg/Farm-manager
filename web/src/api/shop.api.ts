@@ -56,6 +56,7 @@ export type ShopButcher = {
   momoPayoutName: string;
   status: ButcherStatus;
   notes: string;
+  loginEmail: string | null;
   zones: Array<{ zoneId: string; priority: number }>;
 };
 
@@ -301,4 +302,71 @@ export function deskOrderAction(
     token,
     { method: "POST", body: JSON.stringify(body) }
   );
+}
+
+export type OrderStep = "accept" | "ready" | "out" | "delivered";
+
+export function deskOrderStep(token: string | null, id: string, action: OrderStep) {
+  return sendJson<{ status: ShopOrderStatus }>(`${BASE}/orders/${encodeURIComponent(id)}/step`, token, {
+    method: "POST",
+    body: JSON.stringify({ action }),
+  });
+}
+
+export function deskReassignOrder(token: string | null, id: string, butcherId: string) {
+  return sendJson<{ status: ShopOrderStatus; butcherName: string }>(`${BASE}/orders/${encodeURIComponent(id)}/assign`, token, {
+    method: "POST",
+    body: JSON.stringify({ butcherId }),
+  });
+}
+
+// ---------- butcher (role butcher) ----------
+
+const BUTCHER = `${API_BASE_URL}/api/shop/butcher`;
+
+export type ButcherOrder = {
+  id: string;
+  ref: string;
+  status: ShopOrderStatus;
+  placedAt: string;
+  paidConfirmedAt: string | null;
+  acceptedAt: string | null;
+  readyAt: string | null;
+  outAt: string | null;
+  deliveredAt: string | null;
+  district: string;
+  sector: string;
+  customerName: string | null;
+  customerPhone: string | null;
+  addressNote: string | null;
+  lines: Array<{ name: string; qty: number; weightMinKg: number | null; weightMaxKg: number | null }>;
+  deliveryFeeRwf: number;
+  deliveryPaidBy: "customer" | "cleva";
+  butcherPayoutRwf: number;
+  acceptLate: boolean;
+};
+
+export class ButcherNotLinkedError extends Error {}
+
+export async function fetchButcherOrders(token: string | null) {
+  const res = await fetch(`${BUTCHER}/orders`, { headers: readAuthHeaders(token) });
+  const data = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    code?: string;
+    shopName?: string;
+    shopStatus?: string;
+    orders?: ButcherOrder[];
+  };
+  if (!res.ok) {
+    if (data.code === "not_linked") throw new ButcherNotLinkedError(data.error || "Not linked");
+    throw new Error(data.error || "Could not load your orders.");
+  }
+  return { shopName: data.shopName ?? "", shopStatus: data.shopStatus ?? "", orders: data.orders ?? [] };
+}
+
+export function butcherOrderStep(token: string | null, id: string, action: OrderStep) {
+  return sendJson<{ status: ShopOrderStatus }>(`${BUTCHER}/orders/${encodeURIComponent(id)}/${action}`, token, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }

@@ -31,6 +31,7 @@ export function resolveFieldChromeMode(pathname: string, search: string): FieldC
     path === "/farm/pipeline" ||
     path === "/market" ||
     path === "/market/orders" ||
+    path === "/market/butcher" ||
     path === "/market/listings" ||
     path === "/market/verify" ||
     path === "/market/rates" ||

@@ -146,7 +146,7 @@ import {
   createSellerContractAdminRouter,
   createSellerContractPublicRouter,
 } from "./src/routes/sellerContract.routes.js";
-import { createShopDeskRouter } from "./src/routes/shop.routes.js";
+import { createShopButcherRouter, createShopDeskRouter } from "./src/routes/shop.routes.js";
 import { createShopPublicRouter } from "./src/routes/shopPublic.routes.js";
 import { autoDraftReadyLots, syncManagedLotFromFlock } from "./src/services/pipeline/autoDraftLots.js";
 import { fetchClevaUserExists } from "./src/services/clevaSso.js";
@@ -431,6 +431,7 @@ function hasUserPageAccess(user, key) {
   // Company admin is the tenant sovereign for company-scoped pages (incl. Reports).
   if (user.role === "company_admin") return true;
   if (user.role === "sales_officer") return String(key) === "farm_pipeline";
+  if (user.role === "butcher") return String(key) === "farm_market";
   if (!PAGE_ACCESS_KEY_SET.has(String(key))) return true;
   const access = Array.isArray(user.pageAccess) ? user.pageAccess.map(String) : [];
   if (access.length === 0) {
@@ -3359,7 +3360,9 @@ app.post("/api/users", requireAuth, requireUserManagementAccess, requirePageAcce
   const departmentKeys = Array.isArray(body.departmentKeys) ? body.departmentKeys.map(String) : [];
   const pageAccess = role === "sales_officer"
     ? ["farm_pipeline"]
-    : normalizePageAccess(body.pageAccess, PAGE_ACCESS_KEYS);
+    : role === "butcher"
+      ? ["farm_market"]
+      : normalizePageAccess(body.pageAccess, PAGE_ACCESS_KEYS);
   for (const dk of departmentKeys) {
     if (!systemConfig.validateAgainstCategory("department_key", dk, systemConfig.getStaticFallbackCodes("department_key"))) {
       res.status(400).json({ error: `Invalid department key: ${dk}` });
@@ -3489,7 +3492,9 @@ app.put("/api/users/:id", requireAuth, requireUserManagementAccess, requirePageA
   const departmentKeys = Array.isArray(body.departmentKeys) ? body.departmentKeys.map(String) : existing.departmentKeys;
   const pageAccess = role === "sales_officer"
     ? ["farm_pipeline"]
-    : normalizePageAccess(body.pageAccess, existing.pageAccess ?? PAGE_ACCESS_KEYS);
+    : role === "butcher"
+      ? ["farm_market"]
+      : normalizePageAccess(body.pageAccess, existing.pageAccess ?? PAGE_ACCESS_KEYS);
   for (const dk of departmentKeys) {
     if (!systemConfig.validateAgainstCategory("department_key", dk, systemConfig.getStaticFallbackCodes("department_key"))) {
       res.status(400).json({ error: `Invalid department key: ${dk}` });
@@ -3601,7 +3606,9 @@ app.patch("/api/users/:id/page-access", requireAuth, requireUserManagementAccess
   const body = req.body ?? {};
   const pageAccess = existing.role === "sales_officer"
     ? ["farm_pipeline"]
-    : normalizePageAccess(body.pageAccess, existing.pageAccess ?? PAGE_ACCESS_KEYS);
+    : existing.role === "butcher"
+      ? ["farm_market"]
+      : normalizePageAccess(body.pageAccess, existing.pageAccess ?? PAGE_ACCESS_KEYS);
   const updatedDraft = {
     ...existing,
     pageAccess,
@@ -11694,6 +11701,7 @@ app.use(
   createSellerContractAdminRouter({ dbQuery, hasDb, appendAudit })
 );
 app.use("/api/shop/desk", requireAuth, createShopDeskRouter({ dbQuery, hasDb, appendAudit }));
+app.use("/api/shop/butcher", requireAuth, createShopButcherRouter({ dbQuery, hasDb, appendAudit }));
 app.use(
   "/api/public/contracts",
   requireAuth,

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { hostRedirectTarget, isMarketSignup } from "./marketHost.ts";
+import { hostRedirectTarget, isFarmControlPath, isMarketSignup } from "./marketHost.ts";
 
 describe("market host", () => {
   it("sends the public market and market signup off the farm host", () => {
@@ -55,5 +55,12 @@ describe("market host", () => {
     assert.equal(hostRedirectTarget("market.cleva.rw", "/app/cleva/market/listings", ""), null);
     assert.equal(hostRedirectTarget("market.cleva.rw", "/", ""), null);
     assert.equal(hostRedirectTarget("localhost", "/market", ""), null);
+  });
+});
+
+describe("butcher page host", () => {
+  it("keeps the butcher page on the market host", () => {
+    assert.equal(isFarmControlPath("/market/butcher"), false);
+    assert.equal(hostRedirectTarget("market.cleva.rw", "/app/cleva/market/butcher", ""), null);
   });
 });

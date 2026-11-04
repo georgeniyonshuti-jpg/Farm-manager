@@ -19,6 +19,7 @@ import {
   canListFarmerMarketLots,
   canScoutPipeline,
   isBuyerRole,
+  isButcherRole,
   isMarketOnlySeller,
   isPipelineSalesRole,
   shouldShowRoundCheckin,
@@ -54,6 +55,9 @@ export function FieldShellBottomNav() {
   const tMeds = useLaborerT("Meds");
 
   if (!user) return null;
+
+  // A butcher has one page; no bottom bar.
+  if (isButcherRole(user)) return null;
 
   if (isBuyerRole(user)) {
     return (

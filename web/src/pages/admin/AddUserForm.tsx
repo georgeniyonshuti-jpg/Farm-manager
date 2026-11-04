@@ -32,6 +32,7 @@ const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: "sales_coordinator", label: "Sales coordinator" },
   { value: "sales_officer", label: "Sales officer" },
   { value: "buyer", label: "Buyer (market)" },
+  { value: "butcher", label: "Butcher (shop partner)" },
   { value: "vet", label: "Veterinarian" },
   { value: "vet_manager", label: "Vet manager" },
   { value: "investor", label: "Investor (read-oriented)" },
@@ -71,9 +72,12 @@ export function AddUserForm({ onCreated }: Props) {
     token,
     ROLE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
   ).filter((o) => isSuperuser(user) || o.value !== "superuser");
-  const roleLabelOptions = loadedRoleLabels.some((o) => o.value === "sales_officer")
+  const withOfficer = loadedRoleLabels.some((o) => o.value === "sales_officer")
     ? loadedRoleLabels
     : insertRoleOption(loadedRoleLabels, { value: "sales_officer", label: "Sales officer" });
+  const roleLabelOptions = withOfficer.some((o) => o.value === "butcher")
+    ? withOfficer
+    : [...withOfficer, { value: "butcher", label: "Butcher (shop partner)" }];
   const departmentRefOptions = useReferenceOptions(
     "department_key",
     token,

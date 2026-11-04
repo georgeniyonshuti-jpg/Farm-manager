@@ -15,15 +15,20 @@ import {
   Modal,
   SectionCard,
   SegmentedControl,
+  Select,
   StatusPill,
   type DataColumn,
 } from "../../../components/ui";
 import { formatRwf } from "../../../lib/formatRwf";
 import {
   deskOrderAction,
+  deskOrderStep,
+  deskReassignOrder,
   fetchDeskOrders,
   type DeskOrderView,
   type DeskShopOrder,
+  type OrderStep,
+  type ShopButcher,
   type ShopOrderStatus,
 } from "../../../api/shop.api";
 
@@ -56,6 +61,15 @@ const STATUS_TONE: Record<ShopOrderStatus, "success" | "warning" | "danger" | "i
 };
 
 const CANCELLABLE: ShopOrderStatus[] = ["placed", "payment_pending", "paid", "accepted", "ready", "out_for_delivery"];
+const REASSIGNABLE: ShopOrderStatus[] = ["paid", "accepted", "ready"];
+
+/** The next butcher step, for orders ops handles by phone. */
+const NEXT_STEP: Partial<Record<ShopOrderStatus, { action: OrderStep; label: string }>> = {
+  paid: { action: "accept", label: "Mark accepted" },
+  accepted: { action: "ready", label: "Mark ready" },
+  ready: { action: "out", label: "Mark on the way" },
+  out_for_delivery: { action: "delivered", label: "Mark delivered" },
+};
 
 function kigaliTime(iso: string): string {
   return new Intl.DateTimeFormat("en-GB", {
@@ -69,7 +83,13 @@ function kigaliTime(iso: string): string {
 
 type ReasonAction = { order: DeskShopOrder; action: "reject-payment" | "cancel" };
 
-export function ShopOrdersPanel({ onCounts }: { onCounts?: (counts: { toConfirm: number; open: number }) => void }) {
+export function ShopOrdersPanel({
+  onCounts,
+  butchers = [],
+}: {
+  onCounts?: (counts: { toConfirm: number; open: number }) => void;
+  butchers?: ShopButcher[];
+}) {
   const { token } = useAuth();
   const { showToast } = useToast();
   const [view, setView] = useState<DeskOrderView>("to_confirm");
@@ -80,6 +100,7 @@ export function ShopOrdersPanel({ onCounts }: { onCounts?: (counts: { toConfirm:
   const [reasonFor, setReasonFor] = useState<ReasonAction | null>(null);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [moveTo, setMoveTo] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -118,6 +139,36 @@ export function ShopOrdersPanel({ onCounts }: { onCounts?: (counts: { toConfirm:
       await load();
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "Could not do that");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function step(order: DeskShopOrder, action: OrderStep) {
+    setBusy(true);
+    try {
+      await deskOrderStep(token, order.id, action);
+      showToast("success", `${order.ref} updated`);
+      setOpen(null);
+      await load();
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Could not update");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reassign(order: DeskShopOrder) {
+    if (!moveTo) return;
+    setBusy(true);
+    try {
+      const r = await deskReassignOrder(token, order.id, moveTo);
+      showToast("success", `${order.ref} moved to ${r.butcherName}. They need to accept it.`);
+      setOpen(null);
+      setMoveTo("");
+      await load();
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Could not move the order");
     } finally {
       setBusy(false);
     }
@@ -171,9 +222,17 @@ export function ShopOrdersPanel({ onCounts }: { onCounts?: (counts: { toConfirm:
           open
           wide
           title={`Order ${open.ref}`}
-          onClose={() => setOpen(null)}
+          onClose={() => {
+            setOpen(null);
+            setMoveTo("");
+          }}
           footer={
             <div className="flex flex-wrap justify-end gap-2">
+              {open.butcherId && NEXT_STEP[open.status] ? (
+                <Button variant="secondary" size="md" disabled={busy} onClick={() => void step(open, NEXT_STEP[open.status]!.action)}>
+                  {NEXT_STEP[open.status]!.label}
+                </Button>
+              ) : null}
               {CANCELLABLE.includes(open.status) ? (
                 <Button variant="dangerGhost" size="md" disabled={busy} onClick={() => setReasonFor({ order: open, action: "cancel" })}>
                   Cancel order
@@ -252,6 +311,25 @@ export function ShopOrdersPanel({ onCounts }: { onCounts?: (counts: { toConfirm:
               <dd>{open.payerPhone ?? open.customerPhone}</dd>
             </div>
           </dl>
+          {REASSIGNABLE.includes(open.status) ? (
+            <div className="mt-4 flex flex-wrap items-end gap-2">
+              <Field label={open.butcherId ? "Move to another butcher" : "Give to a butcher"} className="min-w-[16rem] flex-1">
+                <Select value={moveTo} onChange={(e) => setMoveTo(e.target.value)}>
+                  <option value="">Choose a butcher</option>
+                  {butchers
+                    .filter((b) => b.id !== open.butcherId)
+                    .map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.shopName}
+                      </option>
+                    ))}
+                </Select>
+              </Field>
+              <Button variant="secondary" size="md" disabled={!moveTo || busy} onClick={() => void reassign(open)}>
+                Move
+              </Button>
+            </div>
+          ) : null}
           {open.status === "payment_pending" ? (
             <p className="mt-4 text-sm text-[var(--text-secondary)]">
               Find {formatRwf(open.totalRwf)} with ID {open.momoTxnId} in the Cleva MoMo account before you confirm.

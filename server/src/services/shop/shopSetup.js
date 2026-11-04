@@ -135,6 +135,8 @@ export function butcherFromBody(body) {
   if (district && !isRwandaDistrict(district)) return bad("Choose a district.");
   if (sector && !isSectorInDistrict(district, sector)) return bad(`${sector} is not in ${district || "that district"}.`);
   const status = BUTCHER_STATUSES.includes(body?.status) ? body.status : "pending";
+  const loginEmail = str(body?.loginEmail, 200).toLowerCase();
+  if (loginEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(loginEmail)) return bad("Login email does not look right.");
   const values = {
     shopName,
     ownerName: str(body?.ownerName, 100),
@@ -148,6 +150,7 @@ export function butcherFromBody(body) {
     momoPayoutName: str(body?.momoPayoutName, 100),
     status,
     notes: str(body?.notes, 1000),
+    loginEmail,
   };
   if (status === "active") {
     const missing = [];
@@ -229,6 +232,7 @@ function mapButcher(r, links) {
   return {
     id: r.id,
     userId: r.user_id,
+    loginEmail: r.login_email ?? null,
     shopName: r.shop_name,
     ownerName: r.owner_name,
     phone: r.phone,
@@ -253,9 +257,11 @@ async function loadAll(dbQuery) {
     dbQuery(`SELECT * FROM shop_products ORDER BY sort_order, name`),
     dbQuery(`SELECT id::text, name, district, sectors, delivery_fee_rwf, free_delivery_over_rwf, active
                FROM shop_zones ORDER BY district, name`),
-    dbQuery(`SELECT id::text, user_id::text, shop_name, owner_name, phone, whatsapp, district, sector,
-                    address_note, licence_ref, momo_payout_phone, momo_payout_name, status, notes
-               FROM shop_butchers ORDER BY shop_name`),
+    dbQuery(`SELECT b.id::text, b.user_id::text, u.email AS login_email, b.shop_name, b.owner_name, b.phone,
+                    b.whatsapp, b.district, b.sector, b.address_note, b.licence_ref, b.momo_payout_phone,
+                    b.momo_payout_name, b.status, b.notes
+               FROM shop_butchers b LEFT JOIN users u ON u.id = b.user_id
+              ORDER BY b.shop_name`),
     dbQuery(`SELECT butcher_id::text, zone_id::text, priority FROM shop_butcher_zones`),
   ]);
   return { settings: settings.rows[0], products: products.rows, zones: zones.rows, butchers: butchers.rows, links: links.rows };
@@ -406,10 +412,31 @@ export async function saveZone(dbQuery, id, body, actor) {
   }
 }
 
+/**
+ * The butcher's login is a normal user with role "butcher", created under
+ * Users first. Linking it here lets that person see this shop's orders.
+ */
+export async function findButcherLogin(dbQuery, email) {
+  const r = await dbQuery(`SELECT id::text, email, role FROM users WHERE lower(email) = $1 LIMIT 1`, [email]);
+  const u = r.rows[0];
+  if (!u) return { error: "No user has that email. Create the login under Users first, with the role Butcher." };
+  if (u.role !== "butcher") return { error: `That user's role is ${u.role}. Change it to Butcher before linking.` };
+  return { userId: u.id, email: u.email };
+}
+
 export async function saveButcher(dbQuery, id, body, actor) {
   const parsed = butcherFromBody(body);
   if (!parsed.ok) return parsed;
   const v = parsed.values;
+  let login = { userId: null, email: null };
+  if (v.loginEmail) {
+    try {
+      login = await findButcherLogin(dbQuery, v.loginEmail);
+    } catch (e) {
+      return dbError(e, "Could not check the login.");
+    }
+    if (login.error) return bad(login.error);
+  }
   const params = [
     v.shopName, v.ownerName, v.phone, v.whatsapp, v.district, v.sector, v.addressNote,
     v.licenceRef, v.momoPayoutPhone, v.momoPayoutName, v.status, v.notes,
@@ -420,13 +447,13 @@ export async function saveButcher(dbQuery, id, body, actor) {
     ? `UPDATE shop_butchers
           SET shop_name = $1, owner_name = $2, phone = $3, whatsapp = $4, district = $5, sector = $6,
               address_note = $7, licence_ref = $8, momo_payout_phone = $9, momo_payout_name = $10,
-              status = $11, notes = $12, updated_at = now()
+              status = $11, notes = $12, user_id = $16::uuid, updated_at = now()
         WHERE id = $13::uuid
         RETURNING ${cols}`
     : `INSERT INTO shop_butchers
          (shop_name, owner_name, phone, whatsapp, district, sector, address_note,
-          licence_ref, momo_payout_phone, momo_payout_name, status, notes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::uuid)
+          licence_ref, momo_payout_phone, momo_payout_name, status, notes, created_by, user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::uuid, $16::uuid)
        RETURNING ${cols}`;
   const zoneIds = parsed.zones.map((z) => z.zoneId);
   const priorities = parsed.zones.map((z) => z.priority);
@@ -447,7 +474,7 @@ export async function saveButcher(dbQuery, id, body, actor) {
               ON CONFLICT (butcher_id, zone_id) DO UPDATE SET priority = EXCLUDED.priority
             )
        SELECT * FROM b`,
-      [...params, id || actor.userId, zoneIds, priorities]
+      [...params, id || actor.userId, zoneIds, priorities, login.userId]
     );
     const row = r.rows[0];
     if (!row) return { ok: false, status: 404, error: "Butcher not found." };
@@ -456,8 +483,11 @@ export async function saveButcher(dbQuery, id, body, actor) {
       status: v.status,
       zones: parsed.zones.length,
     });
-    return { ok: true, butcher: mapButcher(row, links) };
+    return { ok: true, butcher: mapButcher({ ...row, login_email: login.email }, links) };
   } catch (e) {
+    if (String(e?.code) === "23505" && String(e?.constraint || "").includes("user_id")) {
+      return bad("That login is already linked to another butcher.");
+    }
     if (String(e?.code) === "23503") return bad("One of the chosen zones no longer exists.");
     if (String(e?.code) === "22P02") return bad("One of the chosen zones is not valid.");
     return dbError(e, "Could not save the butcher.");

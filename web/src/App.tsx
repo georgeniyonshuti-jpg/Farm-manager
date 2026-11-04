@@ -221,6 +221,7 @@ function AppRoutes() {
 
           <Route path="market" element={null} />
           <Route path="market/orders" element={null} />
+          <Route path="market/butcher" element={null} />
           <Route path="market/listings" element={null} />
           <Route path="market/pending" element={null} />
           <Route path="market/verify" element={null} />

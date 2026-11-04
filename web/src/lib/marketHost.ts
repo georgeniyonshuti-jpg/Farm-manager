@@ -14,6 +14,7 @@ const SCOUT_PREFIXES = [
 ];
 
 const MARKET_ACCOUNT_PREFIXES = [
+  "/market/butcher",
   "/market/listings",
   "/market/pending",
   "/market/orders",

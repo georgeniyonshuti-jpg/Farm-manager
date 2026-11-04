@@ -166,6 +166,7 @@ export function ShopSetupPage() {
               .join(", ")
           : "None",
     },
+    { key: "login", header: "Login", render: (b) => b.loginEmail ?? "Not linked" },
     { key: "status", header: "Status", render: (b) => <StatusPill tone={BUTCHER_TONE[b.status]}>{b.status}</StatusPill> },
   ];
 
@@ -214,7 +215,9 @@ export function ShopSetupPage() {
               : "The shop is closed. A superuser can open it under Settings."}
         </NoticeStrip>
 
-        {tab === "orders" ? <ShopOrdersPanel onCounts={onCounts} /> : null}
+        {tab === "orders" ? (
+          <ShopOrdersPanel onCounts={onCounts} butchers={setup.butchers.filter((b) => b.status === "active")} />
+        ) : null}
 
         {tab === "products" ? (
           <SectionCard flushBody>
@@ -536,6 +539,7 @@ function ButcherModal({
     momoPayoutName: butcher?.momoPayoutName ?? "",
     status: (butcher?.status ?? "pending") as ButcherStatus,
     notes: butcher?.notes ?? "",
+    loginEmail: butcher?.loginEmail ?? "",
   });
   const [links, setLinks] = useState<Record<string, string>>(
     Object.fromEntries((butcher?.zones ?? []).map((l) => [l.zoneId, String(l.priority)]))
@@ -548,6 +552,7 @@ function ButcherModal({
       district: f.district || null,
       sector: f.sector || null,
       momoPayoutPhone: f.momoPayoutPhone || null,
+      loginEmail: f.loginEmail.trim() || null,
       zones: Object.entries(links).map(([zoneId, priority]) => ({ zoneId, priority: Number(priority) || 100 })),
     })
   );
@@ -614,6 +619,13 @@ function ButcherModal({
         </Field>
         <Field label="MoMo account name">
           <Input value={f.momoPayoutName} onChange={(e) => set("momoPayoutName", e.target.value)} />
+        </Field>
+        <Field
+          label="Login email"
+          className="md:col-span-2"
+          help="Create the user under Users with the role Butcher, then enter that email here. They will see this shop's orders."
+        >
+          <Input type="email" value={f.loginEmail} onChange={(e) => set("loginEmail", e.target.value)} />
         </Field>
         <Field label="Notes" className="md:col-span-2">
           <Textarea value={f.notes} onChange={(e) => set("notes", e.target.value)} />

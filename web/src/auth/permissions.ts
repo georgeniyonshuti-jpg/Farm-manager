@@ -110,6 +110,11 @@ export function isBuyerRole(user: SessionUser | null): boolean {
   return user?.role === "buyer";
 }
 
+/** Partner butcher for home chicken orders — sees only their shop's orders. */
+export function isButcherRole(user: SessionUser | null): boolean {
+  return user?.role === "butcher";
+}
+
 /** Market signup seller — pageAccess is only farm_market, no Farm OS. */
 export function isMarketOnlySeller(user: SessionUser | null): boolean {
   if (!user) return false;
@@ -121,7 +126,7 @@ export function isMarketOnlySeller(user: SessionUser | null): boolean {
 /** Chocolate market chrome: buyers, market-only sellers, farmers on /market, desk on /market. */
 export function usesMarketPartnerShell(user: SessionUser | null, appPath: string): boolean {
   if (!user) return false;
-  if (isBuyerRole(user) || isMarketOnlySeller(user)) return true;
+  if (isBuyerRole(user) || isButcherRole(user) || isMarketOnlySeller(user)) return true;
   const path = (appPath || "/").replace(/\/+$/, "") || "/";
   const onMarket = path === "/market" || path.startsWith("/market/");
   if (canAccessPipelineDesk(user)) return onMarket;
@@ -217,7 +222,7 @@ export function roleInAllowList(role: UserRole, roles: UserRole[]): boolean {
   return false;
 }
 
-const MARKET_ONLY_ROLES = new Set<UserRole>(["sales_officer", "sales_coordinator", "buyer"]);
+const MARKET_ONLY_ROLES = new Set<UserRole>(["sales_officer", "sales_coordinator", "buyer", "butcher"]);
 const WORKSPACE_ORDER: ActiveWorkspace[] = ["farm", "market", "clevacredit"];
 
 /** Categories this person can switch between. Market roles stay in Market. */

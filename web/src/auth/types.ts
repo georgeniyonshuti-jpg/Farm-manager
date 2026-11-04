@@ -10,6 +10,7 @@ export type UserRole =
   | "sales_coordinator"
   | "sales_officer"
   | "buyer"
+  | "butcher"
   | "investor"
   | "dispatcher";
 
