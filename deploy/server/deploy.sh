@@ -6,9 +6,15 @@
 #
 #   bash ~/apps/farm-manager/releases/<sha>/deploy/server/deploy.sh <sha>
 #
-# Steps: build both images (nothing live changes yet), back up the farm
-# database, keep the running images as :previous, switch to the new images,
-# wait for both to be healthy, and put :previous back if they are not.
+# Steps: check there is enough disk, use the images GitHub built and loaded
+# (or build them here if they are missing), back up the farm database, keep
+# the running images as :previous, switch to the new images, wait for both
+# to be healthy, and put :previous back if they are not.
+#
+# Docker's disk on this server is shared with ERPNext, mail and the other
+# stacks. A full disk takes all of their databases down (4 Nov 2026), so the
+# deploy refuses to start below MIN_FREE_GB and never builds on the server
+# when GitHub has already sent the images.
 #
 # Only farm-api and farm-web restart. Postgres, ERPNext, mail and the rest
 # of ~/gitops/clevafarm.yaml are left alone. Secrets stay in ~/gitops.
@@ -29,7 +35,8 @@ ENV_FILE="${GITOPS_DIR}/clevafarm.env"
 PROJECT="${COMPOSE_PROJECT:-clevafarm}"
 BACKUP_DIR="${BACKUP_DIR:-$HOME/backups/farm}"
 KEEP_BACKUPS="${KEEP_BACKUPS:-5}"
-KEEP_RELEASES="${KEEP_RELEASES:-5}"
+KEEP_RELEASES="${KEEP_RELEASES:-3}"
+MIN_FREE_GB="${MIN_FREE_GB:-6}"
 API_IMAGE="cleva-farm-api"
 WEB_IMAGE="cleva-farm-web"
 API_URL="${FARM_API_URL:-https://farmapi.cleva.rw}"
@@ -85,16 +92,40 @@ switch_to() {
   compose up -d --no-deps farm-api farm-web
 }
 
+free_gb() {
+  df -P -B1G "$1" | awk 'NR == 2 { print $4 }'
+}
+
+# Stop before touching anything when Docker's disk or the backup disk is low.
+check_space() {
+  local docker_root docker_free backup_free
+  docker_root="$(docker info --format '{{.DockerRootDir}}')"
+  docker_free="$(free_gb "${docker_root}")"
+  mkdir -p "${BACKUP_DIR}"
+  backup_free="$(free_gb "${BACKUP_DIR}")"
+  echo "  Docker disk free: ${docker_free} GB (need ${MIN_FREE_GB}), backup disk free: ${backup_free} GB"
+  ((docker_free >= MIN_FREE_GB)) || die "Only ${docker_free} GB free on Docker's disk. Free space first; nothing was changed."
+  ((backup_free >= 2)) || die "Only ${backup_free} GB free for the database backup. Nothing was changed."
+}
+
 log "Release ${SHORT}"
 
-log "Building ${API_IMAGE}:${SHORT} (live site not touched yet)"
-docker build -f deploy/api.Dockerfile -t "${API_IMAGE}:${SHORT}" .
+log "Checking free disk space"
+check_space
 
-log "Building ${WEB_IMAGE}:${SHORT}"
-docker build -f deploy/web.Dockerfile \
-  --build-arg "VITE_API_URL=${API_URL}" \
-  --build-arg "VITE_APP_VERSION=${SHORT}" \
-  -t "${WEB_IMAGE}:${SHORT}" .
+if docker image inspect "${API_IMAGE}:${SHORT}" >/dev/null 2>&1 \
+  && docker image inspect "${WEB_IMAGE}:${SHORT}" >/dev/null 2>&1; then
+  log "Using ${API_IMAGE}:${SHORT} and ${WEB_IMAGE}:${SHORT} (already on the server)"
+else
+  log "Images not sent by GitHub; building here (live site not touched yet)"
+  docker build -f deploy/api.Dockerfile -t "${API_IMAGE}:${SHORT}" .
+  docker build -f deploy/web.Dockerfile \
+    --build-arg "VITE_API_URL=${API_URL}" \
+    --build-arg "VITE_APP_VERSION=${SHORT}" \
+    -t "${WEB_IMAGE}:${SHORT}" .
+  docker builder prune -af >/dev/null 2>&1 || true
+  check_space
+fi
 
 log "Backing up the farm database"
 mkdir -p "${BACKUP_DIR}"

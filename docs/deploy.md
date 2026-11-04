@@ -17,15 +17,16 @@ Deploys go through GitHub only. Do not build or copy code to the server from Cur
 **Deploy.** GitHub > Actions > **Deploy** > Run workflow. Leave `main`, or type a branch, tag or commit. It:
 
 1. runs the tests again for that exact commit, and stops if any fail;
-2. uploads that commit to `~/apps/farm-manager/releases/<commit>` on the server;
-3. builds both images (the live site is not touched yet);
-4. backs up the farm database to `~/backups/farm/` (the last 5 are kept);
-5. keeps the running images as `:previous`;
-6. restarts only farm-api and farm-web on the new images;
-7. waits until both are healthy and farmapi.cleva.rw/health, farm.cleva.rw and market.cleva.rw answer;
-8. if they do not, puts `:previous` back by itself and the run shows red.
+2. builds both images on GitHub's machine, not on the server;
+3. checks the server's Docker disk has at least 6 GB free, and stops if not;
+4. uploads that commit to `~/apps/farm-manager/releases/<commit>` and streams the images into Docker on the server;
+5. backs up the farm database to `~/backups/farm/` (the last 5 are kept);
+6. keeps the running images as `:previous`;
+7. restarts only farm-api and farm-web on the new images;
+8. waits until both are healthy and farmapi.cleva.rw/health, farm.cleva.rw and market.cleva.rw answer;
+9. if they do not, puts `:previous` back by itself and the run shows red.
 
-A deploy takes about 10–15 minutes, most of it building on the server.
+A deploy takes about 10 minutes.
 
 **Rollback.** GitHub > Actions > **Rollback** > Run workflow with `previous`, or with the first 12 characters of an earlier deployed commit (the last 5 are kept). This puts the old code back. It does **not** undo database changes.
 
@@ -107,5 +108,5 @@ Settings > Environments > `production` (created by the first deploy run) > Requi
 ## Later
 
 - **Staging.** A second copy (for example staging.market.cleva.rw with its own database) that GitHub deploys first, so changes are clicked through before production.
-- **Build on GitHub, not on the server.** The server has about 1 GB of free memory and also runs ERPNext and mail. Building the images on GitHub and pushing them to the GitHub container registry would take that load off. The server would then only download and restart.
+- **Disk.** Docker's disk on the server (`/mnt/HC_Volume_106255492`, 49 GB) is shared by every stack. On 4 Nov 2026 the first deploy built images on the server, the disk filled, and the farm and ERPNext databases stopped until the build cache was cleared. Images are now built on GitHub and the deploy refuses to run below 6 GB free. Old `cleva-farm-*:before-*` images from the Cursor deploys can be removed once the GitHub deploys have run well, or the volume can be made larger in the Hetzner console.
 - **Secrets file.** `~/gitops/clevafarm.yaml` holds passwords inline and other users in its group can read it (`rw-rw-r--`). Run `chmod 600 ~/gitops/clevafarm.yaml`, or move the values into `clevafarm.env`, which is already private.

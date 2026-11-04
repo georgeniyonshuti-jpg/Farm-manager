@@ -39,7 +39,22 @@ jobs:
 
       - name: Resolve the exact commit
         id: rev
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "short=$(git rev-parse HEAD | cut -c1-12)" >> "$GITHUB_OUTPUT"
+
+      # Build here, not on the server: the server shares its disk and memory
+      # with ERPNext and mail, and a build there filled the disk on 4 Nov 2026.
+      - name: Build the images
+        env:
+          SHORT: ${{ steps.rev.outputs.short }}
+        run: |
+          docker build -f deploy/api.Dockerfile -t "cleva-farm-api:$SHORT" .
+          docker build -f deploy/web.Dockerfile \
+            --build-arg VITE_API_URL=https://farmapi.cleva.rw \
+            --build-arg "VITE_APP_VERSION=$SHORT" \
+            -t "cleva-farm-web:$SHORT" .
+          docker images "cleva-farm-*"
 
       - name: Set up SSH
         env:
@@ -63,7 +78,30 @@ jobs:
           ssh -i ~/.ssh/deploy_key "$USER@$HOST" \
             "tar -xzf ~/apps/farm-manager/releases/$SHA.tar.gz -C ~/apps/farm-manager/releases/$SHA && rm ~/apps/farm-manager/releases/$SHA.tar.gz"
 
-      - name: Build, back up, switch, check
+      - name: Check the server has room
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          free=$(ssh -i ~/.ssh/deploy_key "$USER@$HOST" \
+            'df -P -B1G "$(docker info --format "{{.DockerRootDir}}")" | awk "NR==2 {print \$4}"')
+          echo "Docker disk free on the server: ${free} GB"
+          if [ "${free:-0}" -lt 6 ]; then
+            echo "::error::Only ${free} GB free on the server's Docker disk. Free space before deploying."
+            exit 1
+          fi
+
+      - name: Send the images to the server
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          SHORT: ${{ steps.rev.outputs.short }}
+        run: |
+          # Streamed straight into Docker on the server; no file is written there.
+          docker save "cleva-farm-api:$SHORT" "cleva-farm-web:$SHORT" | gzip -1 \
+            | ssh -i ~/.ssh/deploy_key "$USER@$HOST" 'gunzip | docker load'
+
+      - name: Back up, switch, check
         env:
           HOST: ${{ secrets.DEPLOY_HOST }}
           USER: ${{ secrets.DEPLOY_USER }}
