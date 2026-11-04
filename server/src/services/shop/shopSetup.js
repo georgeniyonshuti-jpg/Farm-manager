@@ -10,6 +10,9 @@ import { isAllowedPhotoUrl } from "./shopPhotos.js";
 
 export const BUTCHER_STATUSES = ["pending", "active", "paused", "ended"];
 
+/** Shelves on the public shop, in display order. */
+export const SHOP_CATEGORIES = ["whole", "cuts", "prepared", "cooked"];
+
 function str(value, max) {
   return String(value ?? "").trim().slice(0, max);
 }
@@ -83,6 +86,8 @@ export function productFromBody(body) {
   const sortOrder = intOrNull(body?.sortOrder) ?? 0;
   if (!Number.isInteger(sortOrder)) return bad("Order must be a whole number.");
   const photoUrl = str(body?.photoUrl, 500) || null;
+  const category = str(body?.category, 20) || "whole";
+  if (!SHOP_CATEGORIES.includes(category)) return bad("Choose a category.");
   if (photoUrl && !isAllowedPhotoUrl(photoUrl)) return bad("Upload the photo again.");
   return {
     ok: true,
@@ -96,6 +101,7 @@ export function productFromBody(body) {
       weightMaxKg,
       priceRwf,
       photoUrl,
+      category,
       active: body?.active !== false,
       sortOrder,
     },
@@ -214,6 +220,7 @@ function mapProduct(r) {
     weightMaxKg: r.weight_max_kg === null ? null : Number(r.weight_max_kg),
     priceRwf: r.price_rwf,
     photoUrl: r.photo_url,
+    category: r.category || "whole",
     active: r.active,
     sortOrder: r.sort_order,
   };
@@ -341,7 +348,7 @@ export async function saveProduct(dbQuery, id, body, actor) {
   const v = parsed.values;
   const params = [
     v.sku, v.name, v.nameRw, v.description, v.descriptionRw,
-    v.weightMinKg, v.weightMaxKg, v.priceRwf, v.photoUrl, v.active, v.sortOrder,
+    v.weightMinKg, v.weightMaxKg, v.priceRwf, v.photoUrl, v.active, v.sortOrder, v.category,
   ];
   try {
     const r = id
@@ -349,16 +356,16 @@ export async function saveProduct(dbQuery, id, body, actor) {
           `UPDATE shop_products
               SET sku = $1, name = $2, name_rw = $3, description = $4, description_rw = $5,
                   weight_min_kg = $6, weight_max_kg = $7, price_rwf = $8, photo_url = $9,
-                  active = $10, sort_order = $11, updated_at = now()
-            WHERE id = $12::uuid
+                  active = $10, sort_order = $11, category = $12, updated_at = now()
+            WHERE id = $13::uuid
             RETURNING *`,
           [...params, id]
         )
       : await dbQuery(
           `INSERT INTO shop_products
              (sku, name, name_rw, description, description_rw, weight_min_kg, weight_max_kg,
-              price_rwf, photo_url, active, sort_order)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+              price_rwf, photo_url, active, sort_order, category)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
            RETURNING *`,
           params
         );

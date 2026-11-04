@@ -54,6 +54,13 @@ const BUTCHER_TONE: Record<ButcherStatus, "success" | "warning" | "neutral" | "d
   ended: "danger",
 };
 
+const CATEGORY_LABEL: Record<ShopProduct["category"], string> = {
+  whole: "Whole chicken",
+  cuts: "Cuts",
+  prepared: "Skewers and more",
+  cooked: "Ready to eat",
+};
+
 function weightLabel(p: Pick<ShopProduct, "weightMinKg" | "weightMaxKg">): string {
   if (p.weightMinKg != null && p.weightMaxKg != null) return `${p.weightMinKg}–${p.weightMaxKg} kg`;
   if (p.weightMinKg != null) return `from ${p.weightMinKg} kg`;
@@ -130,6 +137,7 @@ export function ShopSetupPage() {
         </span>
       ),
     },
+    { key: "category", header: "Category", render: (p) => CATEGORY_LABEL[p.category] ?? "Whole chicken" },
     { key: "sku", header: "Code", render: (p) => <span className="font-mono text-xs">{p.sku}</span> },
     { key: "weight", header: "Size", render: weightLabel },
     { key: "price", header: "Price", numeric: true, render: (p) => formatRwf(p.priceRwf) },
@@ -390,6 +398,7 @@ function ProductModal({
     weightMaxKg: product?.weightMaxKg?.toString() ?? "",
     priceRwf: product?.priceRwf?.toString() ?? "",
     sortOrder: product?.sortOrder?.toString() ?? "0",
+    category: product?.category ?? "whole",
     active: product?.active ?? true,
   });
   const set = (k: keyof typeof f, v: string | boolean) => setF((prev) => ({ ...prev, [k]: v }));
@@ -427,6 +436,7 @@ function ProductModal({
       weightMaxKg: numOrNull(f.weightMaxKg),
       priceRwf: Number(f.priceRwf),
       photoUrl,
+      category: f.category as ShopProduct["category"],
       active: f.active,
       sortOrder: Number(f.sortOrder) || 0,
     })
@@ -488,6 +498,14 @@ function ProductModal({
         </Field>
         <Field label="Name (Kinyarwanda)">
           <Input value={f.nameRw} onChange={(e) => set("nameRw", e.target.value)} />
+        </Field>
+        <Field label="Category" help="Where it shows on the shop.">
+          <Select value={f.category} onChange={(e) => set("category", e.target.value)}>
+            <option value="whole">Whole chicken</option>
+            <option value="cuts">Cuts</option>
+            <option value="prepared">Skewers and more</option>
+            <option value="cooked">Ready to eat</option>
+          </Select>
         </Field>
         <Field label="Code" help="Short and unique, for example CK-M.">
           <Input value={f.sku} onChange={(e) => set("sku", e.target.value.toUpperCase())} />

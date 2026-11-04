@@ -116,7 +116,7 @@ async function loadContext(dbQuery) {
     dbQuery(`SELECT * FROM shop_settings WHERE id = 1`),
     dbQuery(
       `SELECT id::text, sku, name, name_rw, description, description_rw, weight_min_kg, weight_max_kg,
-              price_rwf, photo_url, active, sort_order
+              price_rwf, photo_url, active, sort_order, category
          FROM shop_products ORDER BY sort_order, name`
     ),
     dbQuery(
@@ -167,6 +167,7 @@ function publicProduct(r) {
     weightMaxKg: r.weight_max_kg === null ? null : Number(r.weight_max_kg),
     priceRwf: r.price_rwf,
     photoUrl: r.photo_url,
+    category: r.category || "whole",
   };
 }
 

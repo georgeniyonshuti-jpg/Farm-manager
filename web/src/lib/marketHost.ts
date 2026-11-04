@@ -1,4 +1,5 @@
 import { isAdOrMarketSignupSearch } from "./signupAttribution.ts";
+import { isSectionPath } from "./marketSections.ts";
 
 /** Public market site. Farm superuser controls stay on farm.cleva.rw. */
 export const MARKET_HOST = "market.cleva.rw";
@@ -47,7 +48,7 @@ export function isFarmHostname(hostname: string): boolean {
 }
 
 export function isPublicMarketPath(pathname: string): boolean {
-  if (pathname === "/live" || pathname === "/raw" || pathname.startsWith("/raw/")) return true;
+  if (isSectionPath(pathname)) return true;
   return pathname === "/market" || pathname.startsWith("/market/");
 }
 

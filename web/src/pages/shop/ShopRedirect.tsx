@@ -1,8 +1,8 @@
 import { Navigate, useLocation } from "react-router-dom";
-import { RAW_PATH, shopRedirectPath } from "../../lib/marketSections";
+import { SHOP_PATH, legacyRedirectPath } from "../../lib/marketSections";
 
-/** Old /market/shop… links, including order links already sent to customers. */
+/** Older addresses (/raw, /live, /market/shop), including order links already sent to customers. */
 export function ShopRedirect() {
   const { pathname, search } = useLocation();
-  return <Navigate to={shopRedirectPath(pathname, search) ?? RAW_PATH} replace />;
+  return <Navigate to={legacyRedirectPath(pathname, search) ?? SHOP_PATH} replace />;
 }

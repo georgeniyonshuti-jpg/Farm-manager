@@ -220,3 +220,16 @@ describe("shop desk routes", () => {
     assert.equal(r.body.error, "Name is required.");
   });
 });
+
+describe("shop item category", () => {
+  const base = { sku: "CK-SK", name: "Chicken skewers", priceRwf: 3000 };
+  it("defaults to whole chicken and accepts the four shelves", () => {
+    assert.equal(productFromBody(base).values.category, "whole");
+    for (const c of ["whole", "cuts", "prepared", "cooked"]) {
+      assert.equal(productFromBody({ ...base, category: c }).values.category, c);
+    }
+  });
+  it("refuses an unknown shelf", () => {
+    assert.equal(productFromBody({ ...base, category: "frozen" }).ok, false);
+  });
+});

@@ -123,10 +123,13 @@ function AppRoutes() {
 
       <Route element={<PublicLayout />}>
         {onMarketSite ? <Route path="/" element={<MarketHomePage />} /> : null}
-        <Route path="/live" element={<PublicMarketPage />} />
-        <Route path="/raw" element={<ShopPage />} />
-        <Route path="/raw/checkout" element={<CheckoutPage />} />
-        <Route path="/raw/order/:ref" element={<OrderTrackPage />} />
+        <Route path="/shop" element={<ShopPage />} />
+        <Route path="/shop/checkout" element={<CheckoutPage />} />
+        <Route path="/shop/order/:ref" element={<OrderTrackPage />} />
+        <Route path="/shop/:category" element={<ShopPage />} />
+        <Route path="/wholesale" element={<PublicMarketPage />} />
+        <Route path="/raw/*" element={<ShopRedirect />} />
+        <Route path="/live" element={<ShopRedirect />} />
         <Route path="/market" element={<PublicMarketPage />} />
         <Route path="/market/lot/:publicRef" element={<PublicLotDetailPage />} />
         <Route path="/market/farms" element={<PublicFarmsPage />} />

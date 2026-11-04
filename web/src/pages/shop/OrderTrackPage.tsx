@@ -72,7 +72,7 @@ export function OrderTrackPage() {
         <p className="text-sm text-[#9a3412]" role="alert">
           {error}
         </p>
-        <Link className="store-btn store-btn-ember mt-4 inline-flex" to="/raw">
+        <Link className="store-btn store-btn-ember mt-4 inline-flex" to="/shop">
           {t("newOrder")}
         </Link>
       </div>
@@ -168,7 +168,7 @@ export function OrderTrackPage() {
         </div>
 
         {FINAL.includes(order.status) ? (
-          <Link className="store-btn store-btn-ghost inline-flex" to="/raw">
+          <Link className="store-btn store-btn-ghost inline-flex" to="/shop">
             {t("newOrder")}
           </Link>
         ) : null}

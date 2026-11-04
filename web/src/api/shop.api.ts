@@ -1,4 +1,7 @@
 import { API_BASE_URL } from "./config";
+import type { ShopCategory } from "../lib/marketSections";
+
+export type { ShopCategory };
 import { jsonAuthHeaders, readAuthHeaders } from "../lib/authHeaders";
 
 export type ShopSettings = {
@@ -25,6 +28,7 @@ export type ShopProduct = {
   weightMaxKg: number | null;
   priceRwf: number;
   photoUrl: string | null;
+  category: ShopCategory;
   active: boolean;
   sortOrder: number;
 };
@@ -138,6 +142,7 @@ export type ShopCatalogProduct = {
   weightMaxKg: number | null;
   priceRwf: number;
   photoUrl: string | null;
+  category: ShopCategory;
 };
 
 export type ShopCatalog = {

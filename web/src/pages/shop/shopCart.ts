@@ -107,7 +107,7 @@ export function saveLastOrder(order: LastOrder | null) {
 }
 
 export function orderPath(ref: string, token: string): string {
-  return `/raw/order/${encodeURIComponent(ref)}?t=${encodeURIComponent(token)}`;
+  return `/shop/order/${encodeURIComponent(ref)}?t=${encodeURIComponent(token)}`;
 }
 
 /** The WhatsApp message for customers who would rather order by chat. */

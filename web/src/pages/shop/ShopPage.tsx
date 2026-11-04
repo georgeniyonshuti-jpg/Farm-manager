@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useOutletContext } from "react-router-dom";
+import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { SHOP_CATEGORIES, categoryFromSlug, categoryPath, type ShopCategory } from "../../lib/marketSections";
 import { type PublicOutletCtx } from "../../components/public/PublicLayout";
 import { usePublicMeta } from "../../hooks/usePublicMeta";
 import { formatRwf } from "../../lib/formatRwf";
@@ -57,6 +58,8 @@ export function ShopPage() {
   const [cart, setCart] = useState<ShopCart>(loadCart);
   const lastOrder = useMemo(loadLastOrder, []);
   const { quote, loading } = useShopQuote(cart);
+  const { category: categorySlug } = useParams();
+  const category = categoryFromSlug(categorySlug);
 
   useEffect(() => {
     fetchShopCatalog()
@@ -70,6 +73,18 @@ export function ShopPage() {
   useEffect(() => saveCart(cart), [cart]);
 
   const places = catalog ? servedPlaces(catalog) : [];
+  const shelves = SHOP_CATEGORIES.filter((c) => catalog?.products.some((p) => (p.category ?? "whole") === c.id));
+  const shown = catalog
+    ? category
+      ? catalog.products.filter((p) => (p.category ?? "whole") === category)
+      : catalog.products
+    : [];
+  const catLabel: Record<ShopCategory, Parameters<typeof shopT>[1]> = {
+    whole: "catWhole",
+    cuts: "catCuts",
+    prepared: "catPrepared",
+    cooked: "catCooked",
+  };
   const placeValue = cart.sector ? `${cart.district}|${cart.sector}` : "";
   const canContinue = Boolean(catalog?.open && quote?.ok);
   const waHref =
@@ -86,7 +101,7 @@ export function ShopPage() {
   return (
     <div>
       <section className="store-hero" id="store-hero-edge">
-        <div className="store-wrap relative z-10 py-10 sm:py-14">
+        <div className="store-wrap relative z-10 py-6 sm:py-10">
           <p className="store-kicker">{t("kicker")}</p>
           <h1 className="store-display mt-3 max-w-3xl">{t("title")}</h1>
           <p className="store-hero-lead max-w-xl">{t("lead")}</p>
@@ -137,8 +152,35 @@ export function ShopPage() {
                 <span className="store-field-hint">{t("notServedHint")}</span>
               </label>
 
+              {shelves.length > 1 ? (
+                <nav className="store-cat-row" aria-label={t("categoriesLabel")}>
+                  <Link to={categoryPath(null)} className="store-chip" data-on={category ? "false" : "true"} aria-current={category ? undefined : "page"}>
+                    {t("catAll")}
+                  </Link>
+                  {shelves.map((c) => (
+                    <Link
+                      key={c.id}
+                      to={categoryPath(c.id)}
+                      className="store-chip"
+                      data-on={category === c.id ? "true" : "false"}
+                      aria-current={category === c.id ? "page" : undefined}
+                    >
+                      {t(catLabel[c.id])}
+                    </Link>
+                  ))}
+                </nav>
+              ) : null}
+
+              {category && shown.length === 0 ? (
+                <p className="text-sm text-[var(--store-muted)]">
+                  <Link className="font-semibold text-[var(--store-ember)] underline" to={categoryPath(null)}>
+                    {t("emptyCategory")}
+                  </Link>
+                </p>
+              ) : null}
+
               <ul className="grid gap-3 sm:grid-cols-2">
-                {catalog.products.map((p) => {
+                {shown.map((p) => {
                   const qty = qtyOf(cart, p.sku);
                   const name = locale === "rw" && p.nameRw ? p.nameRw : p.name;
                   const description = locale === "rw" && p.descriptionRw ? p.descriptionRw : p.description;
@@ -201,7 +243,7 @@ export function ShopPage() {
                 type="button"
                 className="store-btn store-btn-ember mt-4 w-full"
                 disabled={!canContinue}
-                onClick={() => navigate("/raw/checkout")}
+                onClick={() => navigate("/shop/checkout")}
               >
                 {t("continue")}
               </button>

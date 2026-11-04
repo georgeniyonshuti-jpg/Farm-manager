@@ -54,7 +54,7 @@ describe("shop cart", () => {
   });
 
   it("builds the private order link", () => {
-    assert.equal(orderPath("CK-ABC234", "a/b"), "/raw/order/CK-ABC234?t=a%2Fb");
+    assert.equal(orderPath("CK-ABC234", "a/b"), "/shop/order/CK-ABC234?t=a%2Fb");
   });
 
   it("writes the WhatsApp order message", () => {
