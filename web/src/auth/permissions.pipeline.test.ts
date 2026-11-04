@@ -65,6 +65,7 @@ describe("sales officer", () => {
     assert.deepEqual(workspacesForUser(user("investor")), ["farm"]);
     assert.equal(isMarketDeskPath("/farm/pipeline/people/abc"), true);
     assert.equal(isMarketDeskPath("/app/cleva/farm/pipeline/shop"), true);
+    assert.equal(isMarketDeskPath("/app/cleva/farm/pipeline/bigchix"), true);
     assert.equal(isMarketDeskPath("/farm/pipeline/home"), false);
     assert.equal(isMarketDeskPath("/farm/flocks"), false);
   });

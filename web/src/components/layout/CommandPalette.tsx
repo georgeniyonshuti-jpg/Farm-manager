@@ -34,6 +34,7 @@ const PAGES: Array<{ label: string; to: string; keywords: string }> = [
   { label: "People", to: "/farm/pipeline/people", keywords: "desk market call review ready signup" },
   { label: "Flocks", to: "/farm/pipeline/flocks", keywords: "desk market approve assign scout price" },
   { label: "Shop", to: "/farm/pipeline/shop", keywords: "butcher shop chicken orders payments momo items zones delivery commission" },
+  { label: "BigChix", to: "/farm/pipeline/bigchix", keywords: "bigchix menu dishes cooked food hot grilled restaurant" },
   { label: "Live market", to: "/market", keywords: "buy birds book lot" },
   { label: "Farm storefronts", to: "/market/farms", keywords: "farm profile photos" },
   { label: "Commissions", to: "/market/commissions", keywords: "scout payout unpaid" },

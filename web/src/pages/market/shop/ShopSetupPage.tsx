@@ -75,10 +75,16 @@ function numOrNull(value: string): number | null {
   return Number.isFinite(n) ? n : NaN;
 }
 
-export function ShopSetupPage() {
+/**
+ * One desk, two views. "shop" runs the whole operation (orders, fresh items,
+ * zones, butchers, settings); "bigchix" is just the BigChix menu of cooked dishes.
+ */
+export function ShopSetupPage({ mode = "shop" }: { mode?: "shop" | "bigchix" }) {
   const { token, user } = useAuth();
   const { showToast } = useToast();
-  const [tab, setTab] = useState<Tab>("orders");
+  const bigchix = mode === "bigchix";
+  const title = bigchix ? "BigChix" : "Shop";
+  const [tab, setTab] = useState<Tab>(bigchix ? "products" : "orders");
   const [toConfirm, setToConfirm] = useState(0);
   const onCounts = useCallback((c: { toConfirm: number }) => setToConfirm(c.toConfirm), []);
   const [setup, setSetup] = useState<ShopSetup | null>(null);
@@ -110,7 +116,7 @@ export function ShopSetupPage() {
   if (loading && !setup) {
     return (
       <ManagerPage>
-        <PageHeader title="Shop" />
+        <PageHeader title={title} />
         <SkeletonList rows={6} />
       </ManagerPage>
     );
@@ -118,7 +124,7 @@ export function ShopSetupPage() {
   if (error || !setup) {
     return (
       <ManagerPage>
-        <PageHeader title="Shop" />
+        <PageHeader title={title} />
         <ErrorState message={error || "Could not load the shop setup."} onRetry={() => void load()} />
       </ManagerPage>
     );
@@ -193,10 +199,14 @@ export function ShopSetupPage() {
     { key: "status", header: "Status", render: (b) => <StatusPill tone={BUTCHER_TONE[b.status]}>{b.status}</StatusPill> },
   ];
 
+  const dishes = setup.products.filter((p) => p.category === "cooked");
+  const freshItems = setup.products.filter((p) => p.category !== "cooked");
+  const listed = bigchix ? dishes : freshItems;
+
   const add =
     tab === "products" ? (
       <Button variant="primary" size="sm" onClick={() => setEditingProduct("new")}>
-        Add item
+        {bigchix ? "Add dish" : "Add item"}
       </Button>
     ) : tab === "zones" ? (
       <Button variant="primary" size="sm" onClick={() => setEditingZone("new")}>
@@ -211,10 +221,10 @@ export function ShopSetupPage() {
   return (
     <ManagerPage>
       <PageHeader
-        title="Shop"
+        title={title}
         action={add}
         tabs={
-          <PageTabs
+          bigchix ? undefined : <PageTabs
             value={tab}
             onChange={(v) => setTab(v as Tab)}
             aria-label="Shop setup sections"
@@ -222,7 +232,7 @@ export function ShopSetupPage() {
               { value: "orders", label: "Orders", badge: toConfirm || undefined },
               { value: "today", label: "Today" },
               { value: "payouts", label: "Payouts" },
-              { value: "products", label: "Items", badge: setup.products.length },
+              { value: "products", label: "Fresh items", badge: freshItems.length },
               { value: "zones", label: "Zones", badge: setup.zones.length },
               { value: "butchers", label: "Butchers", badge: setup.butchers.length },
               { value: "settings", label: "Settings" },
@@ -238,7 +248,18 @@ export function ShopSetupPage() {
             : setup.openBlockers.length
               ? `The shop is closed. ${setup.openBlockers.join(" ")}`
               : "The shop is closed. A superuser can open it under Settings."}
+          {bigchix ? " Orders, delivery zones, butchers and opening hours are under Shop." : ""}
         </NoticeStrip>
+
+        {bigchix ? (
+          <p className="text-sm text-[var(--text-muted)]">
+            These dishes lead the page on{" "}
+            <a className="font-semibold underline" href="https://shop.cleva.rw/?preview=1" target="_blank" rel="noreferrer">
+              shop.cleva.rw
+            </a>
+            . The first dish with a photo becomes the big picture at the top.
+          </p>
+        ) : null}
 
         {tab === "orders" ? (
           <ShopOrdersPanel onCounts={onCounts} butchers={setup.butchers.filter((b) => b.status === "active")} />
@@ -250,12 +271,16 @@ export function ShopSetupPage() {
         {tab === "products" ? (
           <SectionCard flushBody>
             <DataTable
-              columns={productColumns}
-              rows={setup.products}
+              columns={bigchix ? productColumns.filter((c) => c.key !== "category" && c.key !== "weight") : productColumns}
+              rows={listed}
               rowKey={(p) => p.id}
               onRowClick={(p) => setEditingProduct(p)}
-              emptyTitle="No items yet"
-              emptyDescription="Add the sizes you sell, for example small, medium and large whole chicken."
+              emptyTitle={bigchix ? "No dishes yet" : "No items yet"}
+              emptyDescription={
+                bigchix
+                  ? "Add your first dish, for example a skewer plate or wings, with a good photo."
+                  : "Add the sizes you sell, for example small, medium and large whole chicken."
+              }
               flush
             />
           </SectionCard>
@@ -308,11 +333,12 @@ export function ShopSetupPage() {
 
       {editingProduct ? (
         <ProductModal
+          kind={bigchix ? "dish" : "fresh"}
           product={editingProduct === "new" ? null : editingProduct}
           onClose={() => setEditingProduct(null)}
           onSave={async (body) => {
             await saveShopProduct(token, editingProduct === "new" ? null : editingProduct.id, body);
-            showToast("success", "Item saved");
+            showToast("success", bigchix ? "Dish saved" : "Item saved");
             setEditingProduct(null);
             await load();
           }}
@@ -380,10 +406,12 @@ function ModalFooter({ busy, onClose, onSave }: { busy: boolean; onClose: () => 
 }
 
 function ProductModal({
+  kind,
   product,
   onClose,
   onSave,
 }: {
+  kind: "fresh" | "dish";
   product: ShopProduct | null;
   onClose: () => void;
   onSave: (body: Omit<ShopProduct, "id">) => Promise<void>;
@@ -398,7 +426,7 @@ function ProductModal({
     weightMaxKg: product?.weightMaxKg?.toString() ?? "",
     priceRwf: product?.priceRwf?.toString() ?? "",
     sortOrder: product?.sortOrder?.toString() ?? "0",
-    category: product?.category ?? "whole",
+    category: product?.category ?? (kind === "dish" ? "cooked" : "whole"),
     active: product?.active ?? true,
   });
   const set = (k: keyof typeof f, v: string | boolean) => setF((prev) => ({ ...prev, [k]: v }));
@@ -444,7 +472,7 @@ function ProductModal({
   return (
     <Modal
       open
-      title={product ? `Edit ${product.name}` : "Add item"}
+      title={product ? `Edit ${product.name}` : kind === "dish" ? "Add dish" : "Add item"}
       onClose={onClose}
       footer={<ModalFooter busy={busy || photoBusy} onClose={onClose} onSave={() => void run()} />}
     >
@@ -489,36 +517,47 @@ function ProductModal({
             </div>
           </div>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
-            A clear photo of the chicken, taken in good light. Customers see it on the shop.
+            {kind === "dish"
+              ? "A close, appetising photo of the dish, in good light. It sells the food."
+              : "A clear photo of the chicken, taken in good light. Customers see it on the shop."}
           </p>
           {photoError ? <p className="mt-1 text-sm text-[var(--status-danger)]">{photoError}</p> : null}
         </div>
         <Field label="Name (English)">
-          <Input value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="Medium whole chicken" />
+          <Input
+            value={f.name}
+            onChange={(e) => set("name", e.target.value)}
+            placeholder={kind === "dish" ? "Skewer plate" : "Medium whole chicken"}
+          />
         </Field>
         <Field label="Name (Kinyarwanda)">
           <Input value={f.nameRw} onChange={(e) => set("nameRw", e.target.value)} />
         </Field>
-        <Field label="Category" help="Where it shows on the shop.">
-          <Select value={f.category} onChange={(e) => set("category", e.target.value)}>
-            <option value="whole">Whole chicken</option>
-            <option value="cuts">Cuts</option>
-            <option value="prepared">Skewers and more</option>
-            <option value="cooked">Hot and ready (cooked food)</option>
-          </Select>
-        </Field>
-        <Field label="Code" help="Short and unique, for example CK-M.">
+        {kind === "fresh" ? (
+          <Field label="Category" help="Where it shows on the shop.">
+            <Select value={f.category} onChange={(e) => set("category", e.target.value)}>
+              <option value="whole">Whole chicken</option>
+              <option value="cuts">Cuts</option>
+              <option value="prepared">Skewers and more</option>
+            </Select>
+          </Field>
+        ) : null}
+        <Field label="Code" help={kind === "dish" ? "Short and unique, for example BC-PLATE." : "Short and unique, for example CK-M."}>
           <Input value={f.sku} onChange={(e) => set("sku", e.target.value.toUpperCase())} />
         </Field>
-        <Field label="Price (RWF)" help="Every butcher sells at this price.">
+        <Field label="Price (RWF)" help={kind === "dish" ? "The price customers pay for the dish." : "Every butcher sells at this price."}>
           <Input inputMode="numeric" value={f.priceRwf} onChange={(e) => set("priceRwf", e.target.value)} />
         </Field>
-        <Field label="Smallest weight (kg)">
-          <Input inputMode="decimal" value={f.weightMinKg} onChange={(e) => set("weightMinKg", e.target.value)} />
-        </Field>
-        <Field label="Largest weight (kg)">
-          <Input inputMode="decimal" value={f.weightMaxKg} onChange={(e) => set("weightMaxKg", e.target.value)} />
-        </Field>
+        {kind === "fresh" ? (
+          <>
+            <Field label="Smallest weight (kg)">
+              <Input inputMode="decimal" value={f.weightMinKg} onChange={(e) => set("weightMinKg", e.target.value)} />
+            </Field>
+            <Field label="Largest weight (kg)">
+              <Input inputMode="decimal" value={f.weightMaxKg} onChange={(e) => set("weightMaxKg", e.target.value)} />
+            </Field>
+          </>
+        ) : null}
         <Field label="Description (English)" className="md:col-span-2">
           <Textarea value={f.description} onChange={(e) => set("description", e.target.value)} />
         </Field>
@@ -870,4 +909,9 @@ function SettingsForm({
       ) : null}
     </SectionCard>
   );
+}
+
+/** The BigChix menu desk: cooked dishes only. */
+export function BigChixDeskPage() {
+  return <ShopSetupPage mode="bigchix" />;
 }

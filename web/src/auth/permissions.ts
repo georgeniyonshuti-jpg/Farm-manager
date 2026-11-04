@@ -250,7 +250,7 @@ export function canAccessWorkspace(user: SessionUser | null, workspace: ActiveWo
 export function isMarketDeskPath(path: string): boolean {
   const appPath = path.replace(/^\/app\/[^/]+/, "") || "/";
   if (appPath === "/farm/pipeline") return true;
-  return ["/farm/pipeline/people", "/farm/pipeline/flocks", "/farm/pipeline/messages", "/farm/pipeline/buyers", "/farm/pipeline/shop"].some(
+  return ["/farm/pipeline/people", "/farm/pipeline/flocks", "/farm/pipeline/messages", "/farm/pipeline/buyers", "/farm/pipeline/shop", "/farm/pipeline/bigchix"].some(
     (prefix) => appPath === prefix || appPath.startsWith(`${prefix}/`)
   );
 }
