@@ -64,9 +64,8 @@ export function ShopLayout() {
             <div className="store-footer-col">
               <p className="store-footer-label">{t("footerMenu")}</p>
               <nav className="store-footer-links" aria-label={t("footerMenu")}>
-                <Link to={categoryPath("whole")}>{t("catWhole")}</Link>
-                <Link to={categoryPath("cuts")}>{t("catCuts")}</Link>
-                <Link to={categoryPath("cooked")}>{t("catCooked")}</Link>
+                <Link to={shopPath()}>{t("backToMenu")}</Link>
+                <Link to={categoryPath("whole")}>{t("freshLink")}</Link>
               </nav>
             </div>
             <div className="store-footer-col">

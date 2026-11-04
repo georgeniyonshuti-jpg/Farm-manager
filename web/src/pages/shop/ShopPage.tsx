@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, MapPin, Minus, Plus, ShieldCheck, Smartphone, Truck } from "lucide-react";
+import { ArrowRight, Minus, Plus } from "lucide-react";
 import { Link, useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { ShopComingSoon } from "./ShopComingSoon";
 import { SHOP_CATEGORIES, categoryFromSlug, categoryPath, shopPath, type ShopCategory } from "../../lib/marketSections";
@@ -59,12 +59,6 @@ const CAT_LABEL: Record<ShopCategory, ShopCopyKey> = {
   cooked: "catCooked",
 };
 
-const CAT_SUB: Record<ShopCategory, ShopCopyKey> = {
-  whole: "catWholeSub",
-  cuts: "catCutsSub",
-  prepared: "catPreparedSub",
-  cooked: "catCookedSub",
-};
 
 function catOf(p: ShopItem): ShopCategory {
   return p.category ?? "whole";
@@ -114,12 +108,20 @@ export function ShopPage() {
         )
       : null;
 
-  const groups = (category ? shelves.filter((c) => c.id === category) : shelves).map((c) => ({
-    ...c,
-    items: products.filter((p) => catOf(p) === c.id),
-  }));
+  // BigChix leads: the front page is the cooked menu; fresh chicken is one tap away.
+  const menuFirst = cooked.length > 0;
+  const freshShelves = shelves.filter((c) => c.id !== "cooked");
+  const onFresh = category !== null && category !== "cooked";
+  const shown = category
+    ? shelves.filter((c) => c.id === category)
+    : menuFirst
+      ? shelves.filter((c) => c.id === "cooked")
+      : shelves;
+  const groups = shown.map((c) => ({ ...c, items: products.filter((p) => catOf(p) === c.id) }));
   const heroPhoto = shopPhotoSrc((cooked.find((p) => p.photoUrl) ?? products.find((p) => p.photoUrl))?.photoUrl);
-  const freshShelf = shelves.find((c) => c.id !== "cooked")?.id ?? null;
+  const freshFrom = freshShelves.length
+    ? Math.min(...products.filter((p) => catOf(p) !== "cooked").map((p) => p.priceRwf))
+    : 0;
 
   const extraClosedMessage =
     catalog?.closedMessage && !/^The shop is (closed for now|not open yet)\.?$/i.test(catalog.closedMessage.trim())
@@ -144,9 +146,7 @@ export function ShopPage() {
           {photo ? (
             <img src={photo} alt="" loading="lazy" />
           ) : (
-            <span className={`sh-art sh-art--${cat}`} aria-hidden="true">
-              <span className="grill-display">{t(CAT_LABEL[cat])}</span>
-            </span>
+            <span className={`sh-art sh-art--${cat}`} aria-hidden="true" />
           )}
         </div>
         <div className="sh-card-body">
@@ -185,34 +185,36 @@ export function ShopPage() {
     return <ShopComingSoon locale={locale} />;
   }
 
+  const placePicker = (
+    <label className="sh-place">
+      <span>{t("deliverTo")}</span>
+      <select
+        value={placeValue}
+        onChange={(e) => {
+          const [district = "", sector = ""] = e.target.value.split("|");
+          setCart((prev) => ({ ...prev, district, sector }));
+        }}
+      >
+        <option value="">{t("chooseSector")}</option>
+        {places.map((p) => (
+          <option key={p.value} value={p.value}>
+            {p.sector} ({p.district})
+          </option>
+        ))}
+        {places.length > 0 ? <option disabled>{t("notServedHint")}</option> : null}
+      </select>
+    </label>
+  );
+
   return (
     <div className="store-wrap store-body sh-page">
-      <div className="sh-where">
-        <MapPin size={16} aria-hidden />
-        <label className="sh-where-label">
-          <span>{t("deliverTo")}</span>
-          <select
-            value={placeValue}
-            onChange={(e) => {
-              const [district = "", sector = ""] = e.target.value.split("|");
-              setCart((prev) => ({ ...prev, district, sector }));
-            }}
-          >
-            <option value="">{t("chooseSector")}</option>
-            {places.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.sector} ({p.district})
-              </option>
-            ))}
-            {places.length > 0 ? <option disabled>{t("notServedHint")}</option> : null}
-          </select>
-        </label>
-        {lastOrder ? (
+      {lastOrder ? (
+        <p className="sh-lastline">
           <Link className="sh-last" to={orderPath(lastOrder.ref, lastOrder.token)}>
-            {t("lastOrder", { ref: lastOrder.ref })}
+            {t("lastOrder", { ref: lastOrder.ref })} →
           </Link>
-        ) : null}
-      </div>
+        </p>
+      ) : null}
 
       {error ? (
         <p className="mt-4 text-sm text-[var(--store-danger)]" role="alert">
@@ -230,62 +232,42 @@ export function ShopPage() {
       ) : null}
 
       {!category ? (
-        <>
-          <section className="sh-hero">
-            {heroPhoto ? <img src={heroPhoto} alt="" className="sh-hero-img" /> : <span className="sh-hero-art" aria-hidden="true" />}
-            <span className="sh-hero-shade" aria-hidden="true" />
-            <div className="sh-hero-body">
-              <span className="sh-kicker">{t("heroKicker")}</span>
-              <h1 className="grill-display sh-hero-title">{t("heroTitle")}</h1>
-              <p className="sh-hero-lead">{t("heroLead")}</p>
-              <div className="sh-hero-actions">
-                {cooked.length > 0 ? (
-                  <Link to={categoryPath("cooked")} className="sh-cta">
-                    {t("heroHotCta")}
-                    <ArrowRight size={18} strokeWidth={2.4} aria-hidden />
-                  </Link>
-                ) : null}
-                {freshShelf ? (
-                  <Link to={categoryPath(freshShelf)} className={cooked.length > 0 ? "sh-cta sh-cta--light" : "sh-cta"}>
-                    {t("heroFreshCta")}
-                    <ArrowRight size={18} strokeWidth={2.4} aria-hidden />
-                  </Link>
-                ) : null}
-              </div>
-            </div>
-          </section>
-          <ul className="sh-promises">
-            <li>
-              <Truck size={18} aria-hidden />
-              {t("trustDoor")}
-            </li>
-            <li>
-              <ShieldCheck size={18} aria-hidden />
-              {t("trustButchers")}
-            </li>
-            <li>
-              <Smartphone size={18} aria-hidden />
-              {t("trustMomo")}
-            </li>
-          </ul>
-        </>
-      ) : null}
-
-      {shelves.length > 1 ? (
-        <nav className="sh-cats" aria-label={t("categoriesLabel")}>
-          <Link to={categoryPath(null)} className="sh-chip" aria-current={!category ? "page" : undefined}>
-            {t("catAll")}
-          </Link>
-          {shelves.map((c) => (
-            <Link key={c.id} to={categoryPath(c.id)} className="sh-chip" aria-current={category === c.id ? "page" : undefined}>
-              {t(CAT_LABEL[c.id])}
+        <section className="sh-hero">
+          {heroPhoto ? <img src={heroPhoto} alt="" className="sh-hero-img" /> : <span className="sh-hero-art" aria-hidden="true" />}
+          <span className="sh-hero-shade" aria-hidden="true" />
+          <div className="sh-hero-body">
+            <span className="sh-kicker">{t("heroKicker")}</span>
+            <h1 className="grill-display sh-hero-title">{t(menuFirst ? "heroTitle" : "title")}</h1>
+            <p className="sh-hero-lead">{t("heroNote")}</p>
+          </div>
+        </section>
+      ) : onFresh ? (
+        <div className="sh-fresh-head">
+          {menuFirst ? (
+            <Link className="sh-back" to={categoryPath(null)}>
+              ← {t("backToMenu")}
             </Link>
-          ))}
-        </nav>
-      ) : null}
+          ) : null}
+          <h1 className="grill-display sh-fresh-title">{t("freshTitle")}</h1>
+          <p className="sh-shelf-sub">{t("freshSub")}</p>
+          {freshShelves.length > 1 ? (
+            <nav className="sh-cats" aria-label={t("categoriesLabel")}>
+              {freshShelves.map((c) => (
+                <Link key={c.id} to={categoryPath(c.id)} className="sh-chip" aria-current={category === c.id ? "page" : undefined}>
+                  {t(CAT_LABEL[c.id])}
+                </Link>
+              ))}
+            </nav>
+          ) : null}
+        </div>
+      ) : (
+        <Link className="sh-back" to={categoryPath(null)}>
+          ← {t("backToMenu")}
+        </Link>
+      )}
 
       {catalog ? (
-        <div className={itemCount > 0 ? "mt-5 grid gap-6 lg:grid-cols-[1fr_22rem]" : "mt-5"}>
+        <div className={itemCount > 0 ? "mt-6 grid gap-6 lg:grid-cols-[1fr_22rem]" : "mt-6"}>
           <div className="space-y-9">
             {category && groups.length === 0 ? (
               <p className="text-sm text-[var(--store-muted)]">
@@ -296,30 +278,49 @@ export function ShopPage() {
             ) : null}
             {groups.map((g) => (
               <section key={g.id} aria-labelledby={`shelf-${g.id}`}>
-                <div className="sh-shelf-head">
-                  <h2 id={`shelf-${g.id}`} className="grill-display sh-shelf-title">
+                {!onFresh || freshShelves.length === 1 ? (
+                  <div className="sh-shelf-head">
+                    <h2 id={`shelf-${g.id}`} className="grill-display sh-shelf-title">
+                      {g.id === "cooked" ? t("menuTitle") : t(CAT_LABEL[g.id])}
+                    </h2>
+                  </div>
+                ) : (
+                  <h2 id={`shelf-${g.id}`} className="sr-only">
                     {t(CAT_LABEL[g.id])}
                   </h2>
-                  <span className="sh-shelf-sub">{t(CAT_SUB[g.id])}</span>
-                </div>
+                )}
                 <ul className="sh-grid">{g.items.map(card)}</ul>
               </section>
             ))}
+
+            {menuFirst && !category && freshShelves.length > 0 ? (
+              <Link to={categoryPath(freshShelves[0].id)} className="sh-fresh-link">
+                <span>
+                  <span className="sh-fresh-ask">{t("freshAsk")}</span>
+                  <span className="sh-fresh-sub">{t("freshLinkSub", { amount: formatRwf(freshFrom) })}</span>
+                </span>
+                <span className="sh-fresh-go">
+                  {t("freshLink")}
+                  <ArrowRight size={16} strokeWidth={2.4} aria-hidden />
+                </span>
+              </Link>
+            ) : null}
           </div>
 
           {itemCount > 0 ? (
-          <aside id="your-order" className="sh-order h-fit lg:sticky lg:top-24">
-            <p className="store-request-title">{t("yourOrder")}</p>
-            <ShopSummary locale={locale} catalog={catalog} cart={cart} quote={quote} loading={loading} />
-            <button type="button" className="store-btn store-btn-ember mt-4 w-full" disabled={!canContinue} onClick={checkout}>
-              {t("continue")}
-            </button>
-            {waHref ? (
-              <a className="store-wa-order" href={waHref} target="_blank" rel="noreferrer">
-                {t("orderOnWhatsapp")}
-              </a>
-            ) : null}
-          </aside>
+            <aside id="your-order" className="sh-order h-fit lg:sticky lg:top-24">
+              <p className="store-request-title">{t("yourOrder")}</p>
+              {placePicker}
+              <ShopSummary locale={locale} catalog={catalog} cart={cart} quote={quote} loading={loading} />
+              <button type="button" className="store-btn store-btn-ember mt-4 w-full" disabled={!canContinue} onClick={checkout}>
+                {t("continue")}
+              </button>
+              {waHref ? (
+                <a className="store-wa-order" href={waHref} target="_blank" rel="noreferrer">
+                  {t("orderOnWhatsapp")}
+                </a>
+              ) : null}
+            </aside>
           ) : null}
         </div>
       ) : !error ? (

@@ -2518,42 +2518,6 @@ a.store-chip {
   color: var(--grill-yellow);
 }
 
-/* Delivery place: one quiet line, not a form. */
-.sh-where {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.35rem 0.5rem;
-  color: var(--grill-flame);
-}
-
-.sh-where-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.88rem;
-  color: var(--store-muted);
-}
-
-.sh-where-label select {
-  min-height: 40px;
-  max-width: 14rem;
-  padding: 0 1.6rem 0 0.2rem;
-  border: 0;
-  background: transparent
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23f7f1ea' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
-    no-repeat right 0.3rem center;
-  color: var(--store-ink);
-  font: inherit;
-  font-weight: 700;
-  appearance: none;
-}
-
-.sh-where-label select option {
-  background: #1d1713;
-  color: #f7f1ea;
-}
-
 .public-store .sh-last {
   margin-left: auto;
   font-size: 0.85rem;
@@ -2583,7 +2547,7 @@ a.store-chip {
 .sh-hero {
   position: relative;
   display: grid;
-  min-height: 22rem;
+  min-height: 13.5rem;
   margin-top: 0.75rem;
   overflow: hidden;
   border-radius: 1.6rem;
@@ -2613,19 +2577,21 @@ a.store-chip {
   display: flex;
   flex-direction: column;
   align-self: end;
-  gap: 0.5rem;
+  gap: 0.45rem;
   max-width: 34rem;
-  padding: 1.4rem 1.25rem 1.4rem;
+  padding: 1.1rem 1.15rem 1.2rem;
 }
 
 .sh-hero-title {
-  font-size: clamp(2.5rem, 11vw, 4.5rem);
+  margin: 0;
+  font-size: clamp(2rem, 8.5vw, 3.25rem);
   text-shadow: 0 2px 24px rgba(0, 0, 0, 0.35);
 }
 
 .sh-hero-lead {
   max-width: 30rem;
-  font-size: 1rem;
+  margin: 0;
+  font-size: 0.9rem;
   line-height: 1.5;
   color: rgba(255, 245, 235, 0.88);
 }
@@ -2649,38 +2615,16 @@ a.store-chip {
 
 @media (min-width: 768px) {
   .sh-hero {
-    min-height: 26rem;
+    min-height: 17rem;
   }
 
   .sh-hero-body {
-    padding: 2.5rem;
+    padding: 2rem 2.25rem;
   }
 
   .sh-hero-shade {
     background: linear-gradient(90deg, rgba(10, 7, 5, 0.85) 0%, rgba(10, 7, 5, 0.35) 55%, rgba(10, 7, 5, 0) 100%);
   }
-}
-
-.sh-promises {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem 1.4rem;
-  margin: 1rem 0 0;
-  padding: 0;
-  list-style: none;
-  font-size: 0.88rem;
-  font-weight: 600;
-  color: var(--store-ink-soft);
-}
-
-.sh-promises li {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-}
-
-.sh-promises svg {
-  color: var(--grill-flame);
 }
 
 /* Category chips: stay in reach while scrolling. */
@@ -2690,7 +2634,7 @@ a.store-chip {
   z-index: 20;
   display: flex;
   gap: 0.5rem;
-  margin: 1.5rem -1rem 0;
+  margin: 1rem -1rem 0;
   padding: 0.6rem 1rem;
   overflow-x: auto;
   background: var(--store-paper);
@@ -3207,4 +3151,99 @@ a.store-chip {
 .public-store .sh-cta--light {
   background: rgba(255, 248, 240, 0.95);
   box-shadow: none;
+}
+
+/* Delivery place lives in the order panel, where it matters. */
+.sh-place {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--store-muted);
+}
+
+.sh-place select {
+  min-height: 46px;
+  padding: 0 2.2rem 0 0.85rem;
+  border: 1px solid rgba(255, 240, 225, 0.16);
+  border-radius: 0.8rem;
+  background: #140f0c
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23f7f1ea' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")
+    no-repeat right 0.85rem center;
+  color: var(--store-ink);
+  font: 600 0.95rem/1.2 inherit;
+  text-transform: none;
+  letter-spacing: 0;
+  appearance: none;
+}
+
+.sh-place select option {
+  background: #1d1713;
+  color: #f7f1ea;
+}
+
+.sh-lastline {
+  margin: 0 0 0.6rem;
+  text-align: right;
+}
+
+/* Fresh chicken: one quiet row under the menu. */
+.public-store .sh-fresh-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+  padding: 1rem 1.1rem;
+  border-radius: 1.1rem;
+  border: 1px solid rgba(255, 240, 225, 0.12);
+  color: var(--store-ink);
+  text-decoration: none;
+}
+
+.public-store .sh-fresh-link:hover {
+  border-color: rgba(255, 240, 225, 0.28);
+}
+
+.sh-fresh-ask {
+  display: block;
+  font-weight: 800;
+}
+
+.sh-fresh-sub {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.85rem;
+  color: var(--store-muted);
+}
+
+.sh-fresh-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 800;
+  color: var(--grill-yellow);
+}
+
+.public-store .sh-back {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--grill-yellow);
+  text-decoration: none;
+}
+
+.sh-fresh-title {
+  margin: 0.25rem 0 0;
+  font-size: clamp(1.9rem, 7vw, 2.6rem);
+}
+
+.sh-fresh-head .sh-shelf-sub {
+  display: block;
+  margin-top: 0.35rem;
 }
