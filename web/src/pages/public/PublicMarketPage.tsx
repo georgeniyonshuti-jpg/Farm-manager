@@ -5,7 +5,6 @@ import { PublicMarketBoard } from "../../components/public/PublicMarketBoard";
 import { usePublicMeta } from "../../hooks/usePublicMeta";
 import { recordMarketReach } from "../../lib/marketReach";
 import { storeT } from "../../lib/publicStoreCopy";
-import { ShopEntry } from "../shop/ShopEntry";
 
 export function PublicMarketPage() {
   const { locale } = useOutletContext<PublicOutletCtx>();
@@ -15,12 +14,9 @@ export function PublicMarketPage() {
   }, []);
 
   return (
-    <>
-      <ShopEntry locale={locale} />
-      <PublicMarketBoard
-        locale={locale}
-        variant="public"
-      />
-    </>
+    <PublicMarketBoard
+      locale={locale}
+      variant="public"
+    />
   );
 }

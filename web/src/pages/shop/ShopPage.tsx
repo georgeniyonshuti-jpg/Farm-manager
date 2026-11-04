@@ -3,6 +3,7 @@ import { Link, useNavigate, useOutletContext } from "react-router-dom";
 import { type PublicOutletCtx } from "../../components/public/PublicLayout";
 import { usePublicMeta } from "../../hooks/usePublicMeta";
 import { formatRwf } from "../../lib/formatRwf";
+import { clevaMarketWhatsapp, waMeHref } from "../../lib/marketWhatsapp";
 import { fetchShopCatalog, quoteShopCart, shopPhotoSrc, type ShopCatalog, type ShopQuote } from "../../api/shop.api";
 import {
   cartForCatalog,
@@ -13,6 +14,7 @@ import {
   saveCart,
   servedPlaces,
   setQty,
+  whatsappOrderText,
   type ShopCart,
 } from "./shopCart";
 import { shopT } from "./shopCopy";
@@ -70,6 +72,16 @@ export function ShopPage() {
   const places = catalog ? servedPlaces(catalog) : [];
   const placeValue = cart.sector ? `${cart.district}|${cart.sector}` : "";
   const canContinue = Boolean(catalog?.open && quote?.ok);
+  const waHref =
+    catalog?.open && cart.items.length > 0
+      ? waMeHref(
+          clevaMarketWhatsapp(),
+          whatsappOrderText(cart, catalog.products, {
+            intro: t("waOrderIntro"),
+            deliverTo: t("waDeliverTo", { sector: cart.sector, district: cart.district }),
+          })
+        )
+      : null;
 
   return (
     <div>
@@ -189,10 +201,15 @@ export function ShopPage() {
                 type="button"
                 className="store-btn store-btn-ember mt-4 w-full"
                 disabled={!canContinue}
-                onClick={() => navigate("/market/shop/checkout")}
+                onClick={() => navigate("/raw/checkout")}
               >
                 {t("continue")}
               </button>
+              {waHref ? (
+                <a className="store-wa-order" href={waHref} target="_blank" rel="noreferrer">
+                  {t("orderOnWhatsapp")}
+                </a>
+              ) : null}
             </aside>
           </div>
         ) : !error ? (

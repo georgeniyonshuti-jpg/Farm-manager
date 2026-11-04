@@ -4,6 +4,7 @@ import { BrandLogo } from "../BrandLogo";
 import { type LaborerLocale, writePreLoginLocale } from "../../i18n/laborerI18n";
 import { isMarketHostname } from "../../lib/marketHost";
 import { storeT, type StoreLocale } from "../../lib/publicStoreCopy";
+import { MarketTabs } from "./MarketTabs";
 import { StoreAccountMenu } from "./StoreAccountMenu";
 import { StoreLocaleSelect } from "./StoreLocaleSelect";
 import { StoreSiteFooter } from "./StoreSiteFooter";
@@ -51,6 +52,8 @@ export function PublicLayout() {
           </div>
         </div>
       </header>
+
+      <MarketTabs locale={locale} />
 
       <main>
         <Outlet context={{ locale } satisfies PublicOutletCtx} />

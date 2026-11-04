@@ -47,6 +47,7 @@ export function isFarmHostname(hostname: string): boolean {
 }
 
 export function isPublicMarketPath(pathname: string): boolean {
+  if (pathname === "/live" || pathname === "/raw" || pathname.startsWith("/raw/")) return true;
   return pathname === "/market" || pathname.startsWith("/market/");
 }
 

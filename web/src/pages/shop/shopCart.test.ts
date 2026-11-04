@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ShopCatalog } from "../../api/shop.api.ts";
-import { cartForCatalog, cleanCart, EMPTY_CART, orderPath, qtyOf, servedPlaces, setQty } from "./shopCart.ts";
+import { cartForCatalog, cleanCart, EMPTY_CART, orderPath, qtyOf, servedPlaces, setQty, whatsappOrderText } from "./shopCart.ts";
 
 const catalog: ShopCatalog = {
   open: true,
@@ -54,6 +54,20 @@ describe("shop cart", () => {
   });
 
   it("builds the private order link", () => {
-    assert.equal(orderPath("CK-ABC234", "a/b"), "/market/shop/order/CK-ABC234?t=a%2Fb");
+    assert.equal(orderPath("CK-ABC234", "a/b"), "/raw/order/CK-ABC234?t=a%2Fb");
+  });
+
+  it("writes the WhatsApp order message", () => {
+    const text = whatsappOrderText(
+      { items: [{ sku: "CK-M", qty: 2 }, { sku: "CK-X", qty: 1 }], district: "Gasabo", sector: "Remera" },
+      [{ sku: "CK-M", name: "Medium chicken" }],
+      { intro: "Hello Cleva, I would like to order:", deliverTo: "Deliver to Remera, Gasabo." }
+    );
+    assert.equal(text, "Hello Cleva, I would like to order:\n- 2 × Medium chicken\n- 1 × CK-X\nDeliver to Remera, Gasabo.");
+    const noPlace = whatsappOrderText({ items: [{ sku: "CK-M", qty: 1 }], district: "", sector: "" }, [], {
+      intro: "Hi",
+      deliverTo: "Deliver to ,.",
+    });
+    assert.equal(noPlace, "Hi\n- 1 × CK-M");
   });
 });

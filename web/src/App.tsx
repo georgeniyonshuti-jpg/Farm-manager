@@ -33,6 +33,9 @@ import { SellYourBirdsPage } from "./pages/public/SellYourBirdsPage";
 import { ShopPage } from "./pages/shop/ShopPage";
 import { CheckoutPage } from "./pages/shop/CheckoutPage";
 import { OrderTrackPage } from "./pages/shop/OrderTrackPage";
+import { ShopRedirect } from "./pages/shop/ShopRedirect";
+import { MarketHomePage } from "./pages/public/MarketHomePage";
+import { isSectionPath } from "./lib/marketSections";
 import { PrivacyPage } from "./pages/public/PrivacyPage";
 
 function FlockFcrLegacyRedirect() {
@@ -78,6 +81,7 @@ function AppRoutes() {
   const onMarketSite = isMarketHostname(host);
   const isPublicStore =
     pathname.startsWith("/market") ||
+    isSectionPath(pathname) ||
     pathname === "/privacy" ||
     (onMarketSite && (pathname === "/" || pathname === ""));
   const isDevPreview = import.meta.env.DEV && pathname.startsWith("/dev/recruitment-preview");
@@ -118,16 +122,18 @@ function AppRoutes() {
       <Route path="/billing/trial-expired" element={<TrialExpiredPage />} />
 
       <Route element={<PublicLayout />}>
-        {onMarketSite ? <Route path="/" element={<PublicMarketPage />} /> : null}
+        {onMarketSite ? <Route path="/" element={<MarketHomePage />} /> : null}
+        <Route path="/live" element={<PublicMarketPage />} />
+        <Route path="/raw" element={<ShopPage />} />
+        <Route path="/raw/checkout" element={<CheckoutPage />} />
+        <Route path="/raw/order/:ref" element={<OrderTrackPage />} />
         <Route path="/market" element={<PublicMarketPage />} />
         <Route path="/market/lot/:publicRef" element={<PublicLotDetailPage />} />
         <Route path="/market/farms" element={<PublicFarmsPage />} />
         <Route path="/market/farm/:slug" element={<PublicFarmPage />} />
         <Route path="/market/how-it-works" element={<HowItWorksPage />} />
         <Route path="/market/sell" element={<SellYourBirdsPage />} />
-        <Route path="/market/shop" element={<ShopPage />} />
-        <Route path="/market/shop/checkout" element={<CheckoutPage />} />
-        <Route path="/market/shop/order/:ref" element={<OrderTrackPage />} />
+        <Route path="/market/shop/*" element={<ShopRedirect />} />
         <Route path="/privacy" element={<PrivacyPage />} />
       </Route>
 

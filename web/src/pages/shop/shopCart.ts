@@ -107,5 +107,18 @@ export function saveLastOrder(order: LastOrder | null) {
 }
 
 export function orderPath(ref: string, token: string): string {
-  return `/market/shop/order/${encodeURIComponent(ref)}?t=${encodeURIComponent(token)}`;
+  return `/raw/order/${encodeURIComponent(ref)}?t=${encodeURIComponent(token)}`;
+}
+
+/** The WhatsApp message for customers who would rather order by chat. */
+export function whatsappOrderText(
+  cart: ShopCart,
+  products: { sku: string; name: string }[],
+  words: { intro: string; deliverTo: string }
+): string {
+  const names = new Map(products.map((p) => [p.sku, p.name]));
+  const lines = cart.items
+    .filter((i) => i.qty > 0)
+    .map((i) => `- ${i.qty} × ${names.get(i.sku) ?? i.sku}`);
+  return [words.intro, ...lines, cart.sector ? words.deliverTo : ""].filter(Boolean).join("\n");
 }
