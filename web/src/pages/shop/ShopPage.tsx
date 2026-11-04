@@ -181,6 +181,9 @@ export function ShopPage() {
     );
   }
 
+  // Nothing until the shop answers, so visitors never see the wrong page flash by.
+  if (!catalog && !error) return <div className="store-wrap store-body sh-page" aria-busy="true" style={{ minHeight: "60vh" }} />;
+
   if (catalog && !preview && (catalog.closedReason === "closed" || products.length === 0)) {
     return <ShopComingSoon locale={locale} />;
   }
