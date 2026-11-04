@@ -13,6 +13,7 @@ import {
   exportCompanyBundle,
   invalidateSessionsForCompany,
 } from "../services/tenant/companyDelete.js";
+import { runInTransaction } from "../services/db/transaction.js";
 import {
   isMarketSignupRequest,
   loadMarketHostCompany,
@@ -102,23 +103,7 @@ export function createSaasRouter(deps) {
 
   async function withDbTransaction(fn) {
     if (!dbPool?.connect) return fn(dbQuery);
-    const client = await dbPool.connect();
-    try {
-      await client.query("BEGIN");
-      const q = (sql, params = []) => client.query(sql, params);
-      const out = await fn(q);
-      await client.query("COMMIT");
-      return out;
-    } catch (err) {
-      try {
-        await client.query("ROLLBACK");
-      } catch {
-        /* already aborted */
-      }
-      throw err;
-    } finally {
-      client.release();
-    }
+    return runInTransaction(dbPool, fn);
   }
 
   const router = express.Router();
@@ -1106,7 +1091,10 @@ export function createSaasRouter(deps) {
     }
     try {
       invalidateSessionsForCompany(sessions, usersById, id);
-      await deleteCompanyHard(dbQuery, id, { confirmSlug });
+      await deleteCompanyHard(dbQuery, id, {
+        confirmSlug,
+        withTransaction: (fn) => runInTransaction(dbPool, fn),
+      });
       if (typeof scrubCompanyFromMemory === "function") {
         scrubCompanyFromMemory(id);
       }
