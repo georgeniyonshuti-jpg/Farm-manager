@@ -6,6 +6,7 @@
 import { isRwandaDistrict, isSectorInDistrict } from "../pipeline/rwandaLocations.js";
 import { normalizeRwandaPhone, rwandaPhoneError } from "../pipeline/rwandaPhone.js";
 import { zoneSectorConflicts } from "./assignButcher.js";
+import { isAllowedPhotoUrl } from "./shopPhotos.js";
 
 export const BUTCHER_STATUSES = ["pending", "active", "paused", "ended"];
 
@@ -81,6 +82,8 @@ export function productFromBody(body) {
   }
   const sortOrder = intOrNull(body?.sortOrder) ?? 0;
   if (!Number.isInteger(sortOrder)) return bad("Order must be a whole number.");
+  const photoUrl = str(body?.photoUrl, 500) || null;
+  if (photoUrl && !isAllowedPhotoUrl(photoUrl)) return bad("Upload the photo again.");
   return {
     ok: true,
     values: {
@@ -92,7 +95,7 @@ export function productFromBody(body) {
       weightMinKg,
       weightMaxKg,
       priceRwf,
-      photoUrl: str(body?.photoUrl, 500) || null,
+      photoUrl,
       active: body?.active !== false,
       sortOrder,
     },

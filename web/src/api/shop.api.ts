@@ -102,6 +102,20 @@ export function saveShopProduct(token: string | null, id: string | null, body: O
   return save<{ product: ShopProduct }>(token, "/products", id, body);
 }
 
+/** Upload a resized item photo; returns the link to store on the item. */
+export function uploadShopPhoto(token: string | null, dataBase64: string) {
+  return sendJson<{ photoUrl: string }>(`${BASE}/photos`, token, {
+    method: "POST",
+    body: JSON.stringify({ dataBase64 }),
+  });
+}
+
+/** Item photos uploaded here are stored as API paths; make them loadable from any site. */
+export function shopPhotoSrc(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return url.startsWith("/") ? `${API_BASE_URL}${url}` : url;
+}
+
 export function saveShopZone(token: string | null, id: string | null, body: Omit<ShopZone, "id">) {
   return save<{ zone: ShopZone }>(token, "/zones", id, body);
 }

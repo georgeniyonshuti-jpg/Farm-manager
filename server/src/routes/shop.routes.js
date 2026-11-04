@@ -17,6 +17,7 @@ import {
   setDeliveryCost,
 } from "../services/shop/shopMoney.js";
 import { cancelOrder, confirmPayment, listDeskOrders, rejectPayment } from "../services/shop/shopOrders.js";
+import { saveShopPhoto } from "../services/shop/shopPhotos.js";
 import { getShopSetup, saveButcher, saveProduct, saveShopSettings, saveZone } from "../services/shop/shopSetup.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -78,6 +79,10 @@ export function createShopDeskRouter(deps) {
 
   router.post("/products", async (req, res) => {
     sendResult(res, await saveProduct(dbQuery, null, req.body ?? {}, actor(req)), 201);
+  });
+
+  router.post("/photos", async (req, res) => {
+    sendResult(res, await saveShopPhoto(dbQuery, req.body ?? {}, actor(req)), 201);
   });
 
   router.put("/products/:id", async (req, res) => {

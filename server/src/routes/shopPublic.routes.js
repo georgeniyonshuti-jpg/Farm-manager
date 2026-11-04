@@ -4,6 +4,7 @@
  */
 
 import { Router } from "express";
+import { loadShopPhoto } from "../services/shop/shopPhotos.js";
 import { attributionFieldsFromReq } from "../services/pipeline/signupAttribution.js";
 import {
   getPublicOrder,
@@ -42,6 +43,28 @@ export function createShopPublicRouter(deps) {
     () => getAppSettingNumber("rate_limit_shop_order_max", 5),
     () => getAppSettingNumber("rate_limit_shop_order_window_ms", 15 * 60 * 1000)
   );
+
+  // Item photos. Each id is a new upload and never changes, so browsers may keep it.
+  router.get("/photos/:id", browseLimit, async (req, res) => {
+    if (!hasDb() || !dbQuery) {
+      res.status(503).end();
+      return;
+    }
+    try {
+      const photo = await loadShopPhoto(dbQuery, req.params.id);
+      if (!photo) {
+        res.status(404).end();
+        return;
+      }
+      res.setHeader("Content-Type", photo.contentType);
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      res.end(photo.bytes);
+    } catch {
+      res.status(500).end();
+    }
+  });
 
   router.use((_req, res, next) => {
     res.setHeader("Cache-Control", "no-store");

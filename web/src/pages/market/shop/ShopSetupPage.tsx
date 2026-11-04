@@ -3,7 +3,7 @@
  * and shop settings. Only a superuser changes settings or opens the shop.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useAuth } from "../../../auth/AuthContext";
 import { PageHeader } from "../../../components/PageHeader";
 import { ManagerPage } from "../../../components/layout/ManagerPage";
@@ -25,6 +25,7 @@ import {
   type DataColumn,
 } from "../../../components/ui";
 import { formatRwf } from "../../../lib/formatRwf";
+import { fileToImageDataUrl } from "../../../lib/imageFile";
 import { RWANDA_DISTRICTS, sectorsInDistrict } from "../../../lib/rwandaLocations";
 import {
   fetchShopSetup,
@@ -32,6 +33,8 @@ import {
   saveShopProduct,
   saveShopSettings,
   saveShopZone,
+  shopPhotoSrc,
+  uploadShopPhoto,
   type ButcherStatus,
   type ShopButcher,
   type ShopProduct,
@@ -115,7 +118,18 @@ export function ShopSetupPage() {
   }
 
   const productColumns: DataColumn<ShopProduct>[] = [
-    { key: "name", header: "Item", render: (p) => <span className="font-medium">{p.name}</span> },
+    {
+      key: "name",
+      header: "Item",
+      render: (p) => (
+        <span className="flex items-center gap-2">
+          {p.photoUrl ? (
+            <img src={shopPhotoSrc(p.photoUrl) ?? undefined} alt="" className="h-8 w-8 shrink-0 rounded object-cover" loading="lazy" />
+          ) : null}
+          <span className="font-medium">{p.name}</span>
+        </span>
+      ),
+    },
     { key: "sku", header: "Code", render: (p) => <span className="font-mono text-xs">{p.sku}</span> },
     { key: "weight", header: "Size", render: weightLabel },
     { key: "price", header: "Price", numeric: true, render: (p) => formatRwf(p.priceRwf) },
@@ -379,6 +393,29 @@ function ProductModal({
     active: product?.active ?? true,
   });
   const set = (k: keyof typeof f, v: string | boolean) => setF((prev) => ({ ...prev, [k]: v }));
+  const { token } = useAuth();
+  const [photoUrl, setPhotoUrl] = useState<string | null>(product?.photoUrl ?? null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoError, setPhotoError] = useState("");
+  const photoInputId = useId();
+  async function pickPhoto(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setPhotoError("Choose a photo.");
+      return;
+    }
+    setPhotoBusy(true);
+    setPhotoError("");
+    try {
+      const dataUrl = await fileToImageDataUrl(file, 1200);
+      const saved = await uploadShopPhoto(token, dataUrl);
+      setPhotoUrl(saved.photoUrl);
+    } catch (e) {
+      setPhotoError(e instanceof Error ? e.message : "Could not upload the photo.");
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
   const { busy, error, run } = useSaving(() =>
     onSave({
       sku: f.sku,
@@ -389,7 +426,7 @@ function ProductModal({
       weightMinKg: numOrNull(f.weightMinKg),
       weightMaxKg: numOrNull(f.weightMaxKg),
       priceRwf: Number(f.priceRwf),
-      photoUrl: product?.photoUrl ?? null,
+      photoUrl,
       active: f.active,
       sortOrder: Number(f.sortOrder) || 0,
     })
@@ -399,9 +436,53 @@ function ProductModal({
       open
       title={product ? `Edit ${product.name}` : "Add item"}
       onClose={onClose}
-      footer={<ModalFooter busy={busy} onClose={onClose} onSave={() => void run()} />}
+      footer={<ModalFooter busy={busy || photoBusy} onClose={onClose} onSave={() => void run()} />}
     >
       <div className="grid gap-3 md:grid-cols-2">
+        <div className="md:col-span-2">
+          <p className="mb-1 text-sm font-medium text-[var(--text-primary)]">Photo</p>
+          <div className="flex flex-wrap items-center gap-3">
+            {photoUrl ? (
+              <img
+                src={shopPhotoSrc(photoUrl) ?? undefined}
+                alt=""
+                className="aspect-[4/3] w-40 rounded-lg border border-[var(--border-color)] object-cover"
+              />
+            ) : (
+              <div className="flex aspect-[4/3] w-40 items-center justify-center rounded-lg border border-dashed border-[var(--border-color)] text-xs text-[var(--text-muted)]">
+                No photo
+              </div>
+            )}
+            <div className="flex flex-col gap-2">
+              <label
+                htmlFor={photoInputId}
+                className="inline-flex min-h-[40px] cursor-pointer items-center justify-center rounded-lg border border-[var(--border-color)] px-3 text-sm font-semibold text-[var(--text-primary)]"
+              >
+                {photoBusy ? "Uploading…" : photoUrl ? "Change photo" : "Add photo"}
+              </label>
+              <input
+                id={photoInputId}
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                disabled={photoBusy}
+                onChange={(e) => {
+                  void pickPhoto(e.target.files?.[0]);
+                  e.target.value = "";
+                }}
+              />
+              {photoUrl && !photoBusy ? (
+                <Button variant="ghost" size="sm" onClick={() => setPhotoUrl(null)}>
+                  Remove photo
+                </Button>
+              ) : null}
+            </div>
+          </div>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            A clear photo of the chicken, taken in good light. Customers see it on the shop.
+          </p>
+          {photoError ? <p className="mt-1 text-sm text-[var(--status-danger)]">{photoError}</p> : null}
+        </div>
         <Field label="Name (English)">
           <Input value={f.name} onChange={(e) => set("name", e.target.value)} placeholder="Medium whole chicken" />
         </Field>

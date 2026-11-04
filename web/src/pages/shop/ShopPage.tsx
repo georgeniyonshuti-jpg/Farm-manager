@@ -3,7 +3,7 @@ import { Link, useNavigate, useOutletContext } from "react-router-dom";
 import { type PublicOutletCtx } from "../../components/public/PublicLayout";
 import { usePublicMeta } from "../../hooks/usePublicMeta";
 import { formatRwf } from "../../lib/formatRwf";
-import { fetchShopCatalog, quoteShopCart, type ShopCatalog, type ShopQuote } from "../../api/shop.api";
+import { fetchShopCatalog, quoteShopCart, shopPhotoSrc, type ShopCatalog, type ShopQuote } from "../../api/shop.api";
 import {
   cartForCatalog,
   loadCart,
@@ -134,7 +134,7 @@ export function ShopPage() {
                   return (
                     <li key={p.sku} className="rounded-2xl border border-[var(--store-line)] bg-[var(--store-card)] p-4">
                       {p.photoUrl ? (
-                        <img src={p.photoUrl} alt="" className="mb-3 aspect-[4/3] w-full rounded-xl object-cover" loading="lazy" />
+                        <img src={shopPhotoSrc(p.photoUrl) ?? undefined} alt="" className="mb-3 aspect-[4/3] w-full rounded-xl object-cover" loading="lazy" />
                       ) : null}
                       <p className="font-semibold text-[var(--store-ink)]">{name}</p>
                       {size ? <p className="text-sm text-[var(--store-muted)]">{size}</p> : null}
