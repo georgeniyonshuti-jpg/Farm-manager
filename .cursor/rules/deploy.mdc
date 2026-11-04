@@ -1,0 +1,13 @@
+---
+description: How Cleva Farm Manager reaches production
+alwaysApply: true
+---
+
+# Deploys go through GitHub only
+
+- Never build images, copy files, or run `docker compose` for farm-api / farm-web on the Hetzner server (178.105.103.228) from Cursor.
+- To ship: commit, push to GitHub, then GitHub > Actions > Deploy. See `docs/deploy.md`.
+- To undo: GitHub > Actions > Rollback.
+- Never run `production/scripts/deploy-clevafarm-stack.sh` from the ERPNext repo. Without `SKIP_DB_MIGRATE=1` it replaces the production database with the old Supabase copy.
+- The API runs new `database/migrations/*.sql` files on start, tracked by file name. Never rename a migration production has already run. Make migrations safe to run twice.
+- Read-only checks on the server (logs, `docker ps`, `cat ~/apps/farm-manager/current`) are fine.

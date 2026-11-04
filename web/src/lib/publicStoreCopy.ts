@@ -77,7 +77,6 @@ const EN = {
   chipFarmDelivery: "Farm delivery",
   needClevaDelivery: "Need delivery help",
   needClevaDeliveryDone: "Asked Cleva for delivery help",
-  clevaDelivers: "Cleva delivery",
   createAccountLots: "Create an account to see lots",
   createAccount: "Create an account",
   message: "Note for Cleva",
@@ -166,9 +165,6 @@ const EN = {
   faqProcessQ: "Live or slaughtered?",
   faqProcessA:
     "Live birds default to collect after you pay — you arrange transport. Slaughtered birds can add farm delivery for a trip fee when the farm offers it.",
-  faqDeliveryQ: "Do you deliver live birds?",
-  faqDeliveryA:
-    "Usually you collect. Farm delivery is only when the farm opted in. Cleva does not run a self-serve live courier.",
   faqEmptyQ: "What if nothing is listed?",
   faqEmptyA: "We match a flock and call you.",
   faqTakeQ: "What does Cleva take?",
@@ -382,7 +378,6 @@ const RW: typeof EN = {
   chipFarmDelivery: "Umurima utanga",
   needClevaDelivery: "Ukeneye ubufasha bwo gutanga",
   needClevaDeliveryDone: "Wasabye Cleva ubufasha bwo gutanga",
-  clevaDelivers: "Cleva itanga",
   createAccountLots: "Fungura konti urebe inkoko",
   createAccount: "Fungura konti",
   message: "Ubutumwa kuri Cleva",
@@ -471,9 +466,6 @@ const RW: typeof EN = {
   faqProcessQ: "Zizima cyangwa zabazwe?",
   faqProcessA:
     "Inkoko zizima zisanzwe zifatwa nyuma yo kwishyura — witegura gutwara. Zabazwe zishobora kongeraho gutanga kwa murima iyo umurima ubyemera.",
-  faqDeliveryQ: "Mutanga inkoko zizima?",
-  faqDeliveryA:
-    "Ubusanzwe ugafata. Gutanga kwa murima ni iyo umurima yemeye. Cleva ntabwo ifite courier ya live ku giti cye.",
   faqEmptyQ: "Niba nta n'imwe iri ku isoko?",
   faqEmptyA: "Duhura n'ishyo tukakuhamagara.",
   faqTakeQ: "Cleva ifata iki?",

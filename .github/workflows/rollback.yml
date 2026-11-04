@@ -1,0 +1,57 @@
+# Put back the farm images from before the last deploy, or a named release.
+# Code only: it does not undo database changes.
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "previous, or the first 12 characters of a deployed commit"
+        required: true
+        default: previous
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    name: Roll back on Hetzner
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://market.cleva.rw
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the target
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          [[ "$TARGET" == "previous" || "$TARGET" =~ ^[0-9a-f]{7,40}$ ]] || {
+            echo "Target must be 'previous' or a commit hash."; exit 1; }
+
+      - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Roll back
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          TARGET: ${{ inputs.target }}
+        run: |
+          # The script comes from this checkout, so rollback works even if the
+          # release folder on the server was removed.
+          ssh -i ~/.ssh/deploy_key "$USER@$HOST" "bash -s -- $TARGET" < deploy/server/rollback.sh
+
+      - name: Remove the SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

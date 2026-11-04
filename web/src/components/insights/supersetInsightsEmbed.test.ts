@@ -57,6 +57,8 @@ describe("Farm PWA Insights Trends surface", () => {
       join(srcRoot, "pages/dashboards/MarketTrendsPage.tsx"),
       "utf8"
     );
-    assert.match(trends, /mode="deep"/);
+    // The deep view is the Superset embed itself.
+    assert.match(trends, /<SupersetInsightsEmbed/);
+    assert.match(trends, /surface="market"/);
   });
 });

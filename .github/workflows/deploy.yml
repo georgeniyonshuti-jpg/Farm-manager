@@ -1,0 +1,91 @@
+# Deploy to Hetzner (farm.cleva.rw, market.cleva.rw, farmapi.cleva.rw).
+# Run it from GitHub: Actions > Deploy > Run workflow.
+# Tests run first; if they fail, nothing is sent to the server.
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag or commit to deploy
+        required: true
+        default: main
+
+# Never two deploys at once. A second one waits for the first.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ inputs.ref }}
+
+  deploy:
+    name: Deploy to Hetzner
+    needs: tests
+    runs-on: ubuntu-latest
+    # Add required reviewers to this environment in Settings > Environments
+    # if you want a second person to approve each deploy.
+    environment:
+      name: production
+      url: https://market.cleva.rw
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Resolve the exact commit
+        id: rev
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Upload the release
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          SHA: ${{ steps.rev.outputs.sha }}
+        run: |
+          git archive --format=tar.gz -o release.tar.gz "$SHA"
+          ssh -i ~/.ssh/deploy_key "$USER@$HOST" "mkdir -p ~/apps/farm-manager/releases/$SHA"
+          scp -i ~/.ssh/deploy_key release.tar.gz "$USER@$HOST:~/apps/farm-manager/releases/$SHA.tar.gz"
+          ssh -i ~/.ssh/deploy_key "$USER@$HOST" \
+            "tar -xzf ~/apps/farm-manager/releases/$SHA.tar.gz -C ~/apps/farm-manager/releases/$SHA && rm ~/apps/farm-manager/releases/$SHA.tar.gz"
+
+      - name: Build, back up, switch, check
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          SHA: ${{ steps.rev.outputs.sha }}
+        run: |
+          ssh -i ~/.ssh/deploy_key "$USER@$HOST" \
+            "bash ~/apps/farm-manager/releases/$SHA/deploy/server/deploy.sh $SHA"
+
+      - name: Summary
+        if: always()
+        env:
+          SHA: ${{ steps.rev.outputs.sha }}
+        run: |
+          {
+            echo "### Deploy ${{ job.status }}"
+            echo ""
+            echo "Commit: \`$SHA\`"
+            echo ""
+            echo "If it failed after switching, the previous version was put back automatically."
+            echo "Database backups from each deploy are in \`~/backups/farm\` on the server."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
