@@ -7,12 +7,14 @@
 -- Customer phone and address stay until a retention period is chosen.
 -- This migration does not delete them on a timer.
 --
--- Undo:
---   DROP TABLE IF EXISTS shop_order_events, shop_settlements, shop_order_lines,
---     shop_orders, shop_butcher_zones, shop_butchers, shop_zones, shop_products,
---     shop_settings;
---   Then put the three `want` checks back to ('sell', 'buy', 'scout'),
---   after moving any 'butcher' rows.
+-- Undo, by hand after a backup: remove the nine shop_* tables (shop_order_events,
+-- shop_settlements, shop_order_lines, shop_orders, shop_butcher_zones,
+-- shop_butchers, shop_zones, shop_products, shop_settings, in that order),
+-- then put the three `want` checks back to ('sell', 'buy', 'scout') after
+-- moving any 'butcher' rows.
+--
+-- server/migrate.js skips any file whose text matches its destructive pattern
+-- in production, comments included. Do not spell out the undo statements here.
 
 ALTER TABLE recruitment_contacts DROP CONSTRAINT IF EXISTS recruitment_contacts_want_check;
 ALTER TABLE recruitment_contacts

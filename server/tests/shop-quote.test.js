@@ -144,6 +144,17 @@ describe("butcher shop migration", () => {
     }
   });
 
+  it("is not skipped by the production destructive-migration guard", () => {
+    // Same pattern as server/migrate.js. It reads comments too.
+    const guard = /\b(DROP\s+TABLE|TRUNCATE\s+TABLE|TRUNCATE\s+\w|DELETE\s+FROM)\b/i;
+    const migrate = readFileSync(join(root, "server/migrate.js"), "utf8");
+    assert.ok(migrate.includes(guard.source), "guard pattern in migrate.js changed; update this test");
+    for (const file of ["095_butcher_shop.sql", "096_shop_payout_once.sql"]) {
+      const text = readFileSync(join(root, "database/migrations", file), "utf8");
+      assert.equal(guard.test(text), false, file);
+    }
+  });
+
   it("stores only the tracking token hash", () => {
     assert.ok(sql.includes("track_token_hash"));
     assert.equal(/track_token\s+TEXT/.test(sql), false);
