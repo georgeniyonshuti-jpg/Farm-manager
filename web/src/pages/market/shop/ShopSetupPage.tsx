@@ -40,8 +40,9 @@ import {
   type ShopZone,
 } from "../../../api/shop.api";
 import { ShopOrdersPanel } from "./ShopOrdersPanel";
+import { ShopPayoutsPanel, ShopTodayPanel } from "./ShopMoneyPanels";
 
-type Tab = "orders" | "products" | "zones" | "butchers" | "settings";
+type Tab = "orders" | "today" | "payouts" | "products" | "zones" | "butchers" | "settings";
 
 const BUTCHER_TONE: Record<ButcherStatus, "success" | "warning" | "neutral" | "danger"> = {
   active: "success",
@@ -197,6 +198,8 @@ export function ShopSetupPage() {
             aria-label="Shop setup sections"
             options={[
               { value: "orders", label: "Orders", badge: toConfirm || undefined },
+              { value: "today", label: "Today" },
+              { value: "payouts", label: "Payouts" },
               { value: "products", label: "Items", badge: setup.products.length },
               { value: "zones", label: "Zones", badge: setup.zones.length },
               { value: "butchers", label: "Butchers", badge: setup.butchers.length },
@@ -218,6 +221,9 @@ export function ShopSetupPage() {
         {tab === "orders" ? (
           <ShopOrdersPanel onCounts={onCounts} butchers={setup.butchers.filter((b) => b.status === "active")} />
         ) : null}
+
+        {tab === "today" ? <ShopTodayPanel /> : null}
+        {tab === "payouts" ? <ShopPayoutsPanel /> : null}
 
         {tab === "products" ? (
           <SectionCard flushBody>

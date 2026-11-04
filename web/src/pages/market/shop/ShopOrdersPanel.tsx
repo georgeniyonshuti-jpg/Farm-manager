@@ -25,6 +25,7 @@ import {
   deskOrderStep,
   deskReassignOrder,
   fetchDeskOrders,
+  setShopDeliveryCost,
   type DeskOrderView,
   type DeskShopOrder,
   type OrderStep,
@@ -101,6 +102,7 @@ export function ShopOrdersPanel({
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [moveTo, setMoveTo] = useState("");
+  const [deliveryCost, setDeliveryCost] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -153,6 +155,26 @@ export function ShopOrdersPanel({
       await load();
     } catch (e) {
       showToast("error", e instanceof Error ? e.message : "Could not update");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveDeliveryCost(order: DeskShopOrder) {
+    const amount = Number(deliveryCost);
+    if (!Number.isInteger(amount) || amount < 0) {
+      showToast("error", "Enter the delivery cost in whole RWF");
+      return;
+    }
+    setBusy(true);
+    try {
+      await setShopDeliveryCost(token, order.id, amount);
+      showToast("success", `Delivery cost for ${order.ref} saved`);
+      setDeliveryCost("");
+      setOpen(null);
+      await load();
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Could not save");
     } finally {
       setBusy(false);
     }
@@ -311,6 +333,24 @@ export function ShopOrdersPanel({
               <dd>{open.payerPhone ?? open.customerPhone}</dd>
             </div>
           </dl>
+          {open.deliveryPaidBy === "cleva" ? (
+            <div className="mt-4 flex flex-wrap items-end gap-2">
+              <Field
+                label="Delivery cost Cleva pays (RWF)"
+                help={
+                  open.clevaDeliveryCostRwf != null
+                    ? `Recorded: ${formatRwf(open.clevaDeliveryCostRwf)}. Paid to the butcher with their payout.`
+                    : "Not recorded. The zone's delivery fee is used until you enter the real cost."
+                }
+                className="min-w-[16rem] flex-1"
+              >
+                <Input inputMode="numeric" value={deliveryCost} onChange={(e) => setDeliveryCost(e.target.value)} />
+              </Field>
+              <Button variant="secondary" size="md" disabled={!deliveryCost.trim() || busy} onClick={() => void saveDeliveryCost(open)}>
+                Save cost
+              </Button>
+            </div>
+          ) : null}
           {REASSIGNABLE.includes(open.status) ? (
             <div className="mt-4 flex flex-wrap items-end gap-2">
               <Field label={open.butcherId ? "Move to another butcher" : "Give to a butcher"} className="min-w-[16rem] flex-1">

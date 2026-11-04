@@ -438,7 +438,7 @@ export async function listDeskOrders(dbQuery, view = "open") {
               o.district, o.sector, o.address_note AS "addressNote",
               o.subtotal_rwf AS "subtotalRwf", o.delivery_fee_rwf AS "deliveryFeeRwf", o.total_rwf AS "totalRwf",
               o.commission_rwf AS "commissionRwf", o.butcher_payout_rwf AS "butcherPayoutRwf",
-              o.delivery_paid_by AS "deliveryPaidBy",
+              o.delivery_paid_by AS "deliveryPaidBy", o.cleva_delivery_cost_rwf AS "clevaDeliveryCostRwf",
               o.momo_txn_id AS "momoTxnId", o.payer_phone AS "payerPhone",
               o.placed_at AS "placedAt", o.updated_at AS "updatedAt", o.paid_confirmed_at AS "paidConfirmedAt",
               o.butcher_id::text AS "butcherId", b.shop_name AS "butcherName", z.name AS "zoneName",

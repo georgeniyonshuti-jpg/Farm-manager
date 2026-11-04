@@ -15,6 +15,7 @@ import { formatRwf } from "../../lib/formatRwf";
 import {
   ButcherNotLinkedError,
   butcherOrderStep,
+  fetchButcherMoney,
   fetchButcherOrders,
   type ButcherOrder,
   type OrderStep,
@@ -95,6 +96,7 @@ export function ButcherOrdersPage() {
   const [notLinked, setNotLinked] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const seenNew = useRef<Set<string> | null>(null);
+  const [money, setMoney] = useState<Awaited<ReturnType<typeof fetchButcherMoney>> | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -107,6 +109,9 @@ export function ButcherOrdersPage() {
       const newIds = new Set(r.orders.filter((o) => o.status === "paid").map((o) => o.id));
       if (seenNew.current && [...newIds].some((id) => !seenNew.current!.has(id))) beep();
       seenNew.current = newIds;
+      fetchButcherMoney(token)
+        .then(setMoney)
+        .catch(() => {});
     } catch (e) {
       if (e instanceof ButcherNotLinkedError) setNotLinked(true);
       else setError(e instanceof Error ? e.message : "Could not load your orders.");
@@ -234,6 +239,32 @@ export function ButcherOrdersPage() {
             </SectionCard>
           );
         })}
+
+        {money ? (
+          <SectionCard title="My money">
+            <p className="text-base">
+              Cleva owes you <strong>{formatRwf(money.owed.owedRwf)}</strong> for {money.owed.orders} delivered order
+              {money.owed.orders === 1 ? "" : "s"}.
+            </p>
+            {money.payouts.length > 0 ? (
+              <ul className="mt-3 divide-y divide-[var(--border-color)] text-sm">
+                {money.payouts.map((p) => (
+                  <li key={p.reference} className="flex flex-wrap justify-between gap-2 py-2">
+                    <span>
+                      Paid {kigaliTime(p.paidAt)} {new Date(p.paidAt).toLocaleDateString("en-GB", { timeZone: "Africa/Kigali" })} ·{" "}
+                      {p.orders} order{p.orders === 1 ? "" : "s"}
+                    </span>
+                    <span>
+                      {formatRwf(p.amountRwf)} <span className="font-mono text-xs text-[var(--text-secondary)]">{p.reference}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-sm text-[var(--text-secondary)]">No payouts yet.</p>
+            )}
+          </SectionCard>
+        ) : null}
 
         {recent.length > 0 ? (
           <SectionCard title="Last 7 days">

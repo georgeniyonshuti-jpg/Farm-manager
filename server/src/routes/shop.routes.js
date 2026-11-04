@@ -7,6 +7,15 @@
 import express from "express";
 import { canAccessPipelineDesk, isButcherRole } from "../services/pipeline/pipeline.js";
 import { applyOrderStep, listButcherOrders, loadButcherForUser, reassignOrder } from "../services/shop/shopButcher.js";
+import {
+  getButcherMoney,
+  getPayoutSummary,
+  getShopTotals,
+  listRefunds,
+  markRefundSent,
+  payButcher,
+  setDeliveryCost,
+} from "../services/shop/shopMoney.js";
 import { cancelOrder, confirmPayment, listDeskOrders, rejectPayment } from "../services/shop/shopOrders.js";
 import { getShopSetup, saveButcher, saveProduct, saveShopSettings, saveZone } from "../services/shop/shopSetup.js";
 
@@ -122,6 +131,33 @@ export function createShopDeskRouter(deps) {
     sendResult(res, await applyOrderStep(dbQuery, id, String(req.body?.action || ""), { kind: "ops", userId: a.userId }, audit));
   });
 
+  router.post("/orders/:id/delivery-cost", async (req, res) => {
+    const id = idParam(req, res);
+    if (id) sendResult(res, await setDeliveryCost(dbQuery, id, req.body ?? {}, actor(req)));
+  });
+
+  router.get("/payouts", async (_req, res) => {
+    sendResult(res, await getPayoutSummary(dbQuery));
+  });
+
+  router.post("/payouts/:id", async (req, res) => {
+    const id = idParam(req, res);
+    if (id) sendResult(res, await payButcher(dbQuery, id, req.body ?? {}, actor(req)));
+  });
+
+  router.get("/refunds", async (_req, res) => {
+    sendResult(res, await listRefunds(dbQuery));
+  });
+
+  router.post("/refunds/:id/sent", async (req, res) => {
+    const id = idParam(req, res);
+    if (id) sendResult(res, await markRefundSent(dbQuery, id, req.body ?? {}, actor(req)));
+  });
+
+  router.get("/totals", async (req, res) => {
+    sendResult(res, await getShopTotals(dbQuery, Number(req.query.days) || 7));
+  });
+
   router.post("/orders/:id/assign", async (req, res) => {
     const id = idParam(req, res);
     const butcherId = String(req.body?.butcherId || "");
@@ -167,6 +203,10 @@ export function createShopButcherRouter(deps) {
 
   router.get("/orders", async (req, res) => {
     sendResult(res, await listButcherOrders(dbQuery, req.butcher));
+  });
+
+  router.get("/money", async (req, res) => {
+    sendResult(res, await getButcherMoney(dbQuery, req.butcher.id));
   });
 
   router.post("/orders/:id/:action", async (req, res) => {

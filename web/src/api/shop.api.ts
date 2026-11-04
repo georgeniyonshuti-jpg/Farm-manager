@@ -273,6 +273,7 @@ export type DeskShopOrder = {
   commissionRwf: number;
   butcherPayoutRwf: number;
   deliveryPaidBy: "customer" | "cleva";
+  clevaDeliveryCostRwf: number | null;
   momoTxnId: string | null;
   payerPhone: string | null;
   placedAt: string;
@@ -369,4 +370,101 @@ export function butcherOrderStep(token: string | null, id: string, action: Order
     method: "POST",
     body: JSON.stringify({}),
   });
+}
+
+// ---------- money ----------
+
+export type PayoutButcher = {
+  butcherId: string;
+  shopName: string;
+  payoutPhone: string | null;
+  payoutName: string;
+  totalRwf: number;
+  heldOrders: number;
+  orders: Array<{
+    orderId: string;
+    ref: string;
+    deliveredAt: string | null;
+    payoutRwf: number;
+    clevaDeliveryRwf: number;
+    amountRwf: number;
+  }>;
+};
+
+export type ShopRefund = {
+  id: string;
+  orderId: string;
+  ref: string;
+  customerName: string;
+  phone: string | null;
+  amountRwf: number;
+  status: "pending" | "paid" | "failed" | "cancelled";
+  reference: string | null;
+  note: string | null;
+  createdAt: string;
+  confirmedAt: string | null;
+};
+
+export type ShopDayTotals = {
+  day: string;
+  placed: number;
+  paid: number;
+  paidRwf: number;
+  commissionRwf: number;
+  clevaDeliveryRwf: number;
+  clevaNetRwf: number;
+  delivered: number;
+  cancelledAfterPay: number;
+};
+
+export type ShopNow = {
+  paymentsToCheck: number;
+  waitingForButcher: number;
+  inProgress: number;
+  problems: number;
+  refundsToSend: number;
+};
+
+export function fetchShopPayouts(token: string | null) {
+  return sendJson<{ butchers: PayoutButcher[] }>(`${BASE}/payouts`, token);
+}
+
+export function payShopButcher(
+  token: string | null,
+  butcherId: string,
+  body: { reference: string; orderIds: string[]; expectedTotalRwf: number }
+) {
+  return sendJson<{ totalRwf: number; orders: number }>(`${BASE}/payouts/${encodeURIComponent(butcherId)}`, token, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function fetchShopRefunds(token: string | null) {
+  return sendJson<{ refunds: ShopRefund[] }>(`${BASE}/refunds`, token);
+}
+
+export function markShopRefundSent(token: string | null, id: string, reference: string) {
+  return sendJson<{ amountRwf: number }>(`${BASE}/refunds/${encodeURIComponent(id)}/sent`, token, {
+    method: "POST",
+    body: JSON.stringify({ reference }),
+  });
+}
+
+export function fetchShopTotals(token: string | null, days = 7) {
+  return sendJson<{ days: ShopDayTotals[]; now: ShopNow }>(`${BASE}/totals?days=${days}`, token);
+}
+
+export function setShopDeliveryCost(token: string | null, orderId: string, amountRwf: number) {
+  return sendJson<{ amountRwf: number }>(`${BASE}/orders/${encodeURIComponent(orderId)}/delivery-cost`, token, {
+    method: "POST",
+    body: JSON.stringify({ amountRwf }),
+  });
+}
+
+export function fetchButcherMoney(token: string | null) {
+  return sendJson<{
+    owed: { orders: number; owedRwf: number };
+    payouts: Array<{ reference: string; paidAt: string; amountRwf: number; orders: number }>;
+  }>(`${BUTCHER}/money`, token);
 }
