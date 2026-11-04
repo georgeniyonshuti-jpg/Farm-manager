@@ -112,7 +112,7 @@ export function CheckoutPage() {
             className="absolute left-[-9999px] h-px w-px opacity-0"
           />
           {error ? (
-            <p className="text-sm text-[#9a3412]" role="alert">
+            <p className="text-sm text-[var(--store-danger)]" role="alert">
               {error}
             </p>
           ) : null}
@@ -124,7 +124,7 @@ export function CheckoutPage() {
         <aside className="h-fit rounded-3xl border border-[var(--store-line)] bg-[var(--store-card)] p-5">
           <p className="store-request-title">{t("yourOrder")}</p>
           {catalog ? <ShopSummary locale={locale} catalog={catalog} cart={cart} quote={quote} loading={loading} /> : null}
-          {catalog && !catalog.open ? <p className="mt-3 text-sm text-[#9a3412]">{catalog.closedMessage || t("closed")}</p> : null}
+          {catalog && !catalog.open ? <p className="mt-3 text-sm text-[var(--store-danger)]">{catalog.closedMessage || t("closed")}</p> : null}
         </aside>
       </div>
     </div>

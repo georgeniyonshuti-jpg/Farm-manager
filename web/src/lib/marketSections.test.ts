@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { categoryFromSlug, categoryPath, isSectionPath, legacyRedirectPath, storePageFor } from "./marketSections.ts";
+import { categoryFromSlug, categoryPath, isSectionPath, isShopArea, legacyRedirectPath, storePageFor } from "./marketSections.ts";
 import { hostRedirectTarget, isPublicMarketPath } from "./marketHost.ts";
 
 describe("market sections", () => {
@@ -19,7 +19,10 @@ describe("market sections", () => {
   it("maps category words both ways", () => {
     assert.equal(categoryFromSlug("skewers-and-more"), "prepared");
     assert.equal(categoryFromSlug("nope"), null);
-    assert.equal(categoryPath("cooked"), "/shop/ready-to-eat");
+    assert.equal(categoryPath("cooked"), "/shop/bigchix");
+    assert.equal(categoryFromSlug("bigchix"), "cooked");
+    assert.equal(categoryFromSlug("BigChix"), "cooked");
+    assert.equal(categoryFromSlug("ready-to-eat"), "cooked");
     assert.equal(categoryPath(null), "/shop");
   });
 
@@ -43,5 +46,14 @@ describe("market sections", () => {
     assert.equal(isSectionPath("/shopping"), false);
     assert.equal(hostRedirectTarget("farm.cleva.rw", "/shop", "?a=1"), "https://market.cleva.rw/shop?a=1");
     assert.equal(hostRedirectTarget("market.cleva.rw", "/wholesale"), null);
+  });
+
+  it("gives shop pages the Grill look", () => {
+    assert.equal(isShopArea("/", true), true);
+    assert.equal(isShopArea("/", false), false);
+    assert.equal(isShopArea("/shop/checkout", false), true);
+    assert.equal(isShopArea("/wholesale", true), false);
+    assert.equal(isShopArea("/market", true), false);
+    assert.equal(isShopArea("/shopping", true), false);
   });
 });

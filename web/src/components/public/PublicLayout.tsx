@@ -1,5 +1,7 @@
 import { useState } from "react";
-import { Link, Outlet } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
+import { isShopArea } from "../../lib/marketSections";
+import { useShopOpen } from "../../lib/useShopOpen";
 import { BrandLogo } from "../BrandLogo";
 import { type LaborerLocale, writePreLoginLocale } from "../../i18n/laborerI18n";
 import { isMarketHostname } from "../../lib/marketHost";
@@ -26,6 +28,9 @@ export type PublicOutletCtx = {
 export function PublicLayout() {
   const [locale, setLocale] = useState<StoreLocale>(readInitialLocale);
   const t = (k: Parameters<typeof storeT>[1]) => storeT(locale, k);
+  const { pathname } = useLocation();
+  const shopOpen = useShopOpen();
+  const grill = isShopArea(pathname, Boolean(shopOpen));
 
   const pickLocale = (l: StoreLocale) => {
     setLocale(l);
@@ -33,7 +38,7 @@ export function PublicLayout() {
   };
 
   return (
-    <div className="public-store public-store--guest locale-fade">
+    <div className={grill ? "public-store public-store--guest locale-fade store-grill" : "public-store public-store--guest locale-fade"}>
       <header className="store-header">
         <div className="store-wrap">
           <div className="store-header-row">

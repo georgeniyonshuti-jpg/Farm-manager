@@ -58,7 +58,7 @@ const CATEGORY_LABEL: Record<ShopProduct["category"], string> = {
   whole: "Whole chicken",
   cuts: "Cuts",
   prepared: "Skewers and more",
-  cooked: "Ready to eat",
+  cooked: "BigChix (cooked)",
 };
 
 function weightLabel(p: Pick<ShopProduct, "weightMinKg" | "weightMaxKg">): string {
@@ -504,7 +504,7 @@ function ProductModal({
             <option value="whole">Whole chicken</option>
             <option value="cuts">Cuts</option>
             <option value="prepared">Skewers and more</option>
-            <option value="cooked">Ready to eat</option>
+            <option value="cooked">BigChix (cooked food)</option>
           </Select>
         </Field>
         <Field label="Code" help="Short and unique, for example CK-M.">

@@ -51,7 +51,7 @@ export function ShopSummary({
   if (!quote.ok) {
     return (
       <div className="mt-2 space-y-2 text-sm">
-        <p className="text-[#9a3412]" role="alert">
+        <p className="text-[var(--store-danger)]" role="alert">
           {quote.code === "below_minimum" && minimum ? minimum : quote.error}
         </p>
         {quote.subtotalRwf ? (

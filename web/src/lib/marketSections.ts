@@ -14,11 +14,15 @@ export const SHOP_CATEGORIES: { id: ShopCategory; slug: string }[] = [
   { id: "whole", slug: "whole-chicken" },
   { id: "cuts", slug: "cuts" },
   { id: "prepared", slug: "skewers-and-more" },
-  { id: "cooked", slug: "ready-to-eat" },
+  { id: "cooked", slug: "bigchix" },
 ];
 
+/** Earlier category words that still open the same shelf. */
+const SLUG_ALIASES: Record<string, ShopCategory> = { "ready-to-eat": "cooked" };
+
 export function categoryFromSlug(slug: string | undefined): ShopCategory | null {
-  return SHOP_CATEGORIES.find((c) => c.slug === slug)?.id ?? null;
+  const s = (slug || "").toLowerCase();
+  return SHOP_CATEGORIES.find((c) => c.slug === s)?.id ?? SLUG_ALIASES[s] ?? null;
 }
 
 export function categoryPath(category: ShopCategory | null): string {
@@ -45,6 +49,13 @@ export function storePageFor(pathname: string, shopOpen: boolean): StorePage {
   const m = path.match(/^\/shop\/([^/]+)$/);
   if (m && categoryFromSlug(m[1])) return "shop";
   return null;
+}
+
+/** Shop pages wear the Grill look: the shop, its categories, checkout and order pages. */
+export function isShopArea(pathname: string, shopOpen: boolean): boolean {
+  const path = pathname.replace(/\/+$/, "") || "/";
+  if (path === "/") return shopOpen;
+  return path === SHOP_PATH || path.startsWith(`${SHOP_PATH}/`);
 }
 
 /** Public pages that need no sign-in. */

@@ -13,6 +13,7 @@
   --store-muted: #6d5e53;
   --store-line: rgba(22, 17, 13, 0.1);
   --store-shadow: 0 18px 50px rgba(22, 17, 13, 0.1);
+  --store-danger: #9a3412;
   background: var(--store-paper);
   color: var(--store-ink);
   font-family: var(--font-body);
@@ -2364,4 +2365,327 @@ a.store-chip {
   font-size: 0.92rem;
   font-weight: 700;
   text-decoration: none;
+}
+
+/* ---------- Grill: the shop's look (shop, checkout and order pages) ---------- */
+
+.public-store.store-grill {
+  --store-ink: #f7f1ea;
+  --store-ink-soft: #d9ccc2;
+  --store-paper: #131110;
+  --store-cream: #131110;
+  --store-card: #1e1a18;
+  --store-ember: #ff6a1a;
+  --store-ember-dark: #ff8a47;
+  --store-gold: #ffc23d;
+  --store-muted: #b9ada4;
+  --store-line: rgba(247, 241, 234, 0.12);
+  --store-danger: #ff9a7a;
+  --grill-flame: #ff6a1a;
+  --grill-yellow: #ffc23d;
+  --grill-raised: #2a2421;
+  --grill-display: "Anton", Impact, "Arial Narrow", sans-serif;
+  background: var(--store-paper);
+  color: var(--store-ink);
+}
+
+.store-grill .store-header {
+  background: rgba(19, 17, 16, 0.96);
+}
+
+.store-grill .store-btn-ember {
+  background: var(--grill-flame);
+  color: #131110 !important;
+}
+
+.store-grill .store-btn-ember:hover {
+  background: var(--store-ember-dark);
+}
+
+.store-grill .store-btn-ink {
+  background: var(--store-ink);
+  color: #131110 !important;
+}
+
+.store-grill .store-field input,
+.store-grill .store-field select,
+.store-grill .store-field textarea {
+  border-color: #3a3330;
+  background: #1e1a18;
+  color: var(--store-ink);
+}
+
+.store-grill .store-footer {
+  color: #f7f1ea;
+}
+
+.store-grill .store-switch-bar {
+  background: #1e1a18;
+}
+
+.store-grill .store-switch-link {
+  color: var(--grill-yellow);
+}
+
+.store-grill .store-chip {
+  background: var(--store-card);
+  color: var(--store-ink-soft);
+}
+
+.store-grill .store-chip[data-on="true"] {
+  background: var(--grill-flame);
+  color: #131110;
+}
+
+.store-grill .store-wa-order {
+  border-color: #3ccf7a;
+  color: #6be39b;
+}
+
+.grill-display {
+  font-family: var(--grill-display);
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+
+.grill-kicker {
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--grill-yellow);
+}
+
+.grill-place {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 44px;
+  padding: 0 0.4rem 0 0.9rem;
+  border: 1px solid #3a3330;
+  border-radius: 999px;
+  background: var(--store-card);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--store-muted);
+}
+
+.grill-place select {
+  min-height: 40px;
+  max-width: 15rem;
+  border: 0;
+  background: transparent;
+  color: var(--store-ink);
+  font: inherit;
+  font-weight: 700;
+}
+
+.grill-hero {
+  display: block;
+  overflow: hidden;
+  border-radius: 1.5rem;
+  background: #2a1b12;
+  color: var(--store-ink);
+  text-decoration: none;
+}
+
+.grill-hero-photo {
+  display: block;
+  width: 100%;
+  height: 13rem;
+  object-fit: cover;
+  background:
+    radial-gradient(120% 90% at 85% 10%, rgba(255, 106, 26, 0.55), transparent 55%),
+    radial-gradient(90% 80% at 10% 100%, rgba(255, 194, 61, 0.28), transparent 60%),
+    #3a1f12;
+}
+
+.grill-hero-body {
+  padding: 1rem 1.15rem 1.2rem;
+}
+
+.grill-hero-title {
+  margin: 0.4rem 0 0;
+  font-size: clamp(2.2rem, 10vw, 3.4rem);
+}
+
+.grill-cta {
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+  margin-top: 0.9rem;
+  padding: 0 1.25rem;
+  border-radius: 0.75rem;
+  background: var(--grill-flame);
+  color: #131110;
+  font-weight: 800;
+  font-size: 0.92rem;
+  text-decoration: none;
+}
+
+.grill-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+@media (min-width: 768px) {
+  .grill-tiles {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.grill-tile {
+  display: flex;
+  min-height: 7rem;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 0.9rem;
+  border-radius: 1.1rem;
+  border: 2px solid transparent;
+  text-decoration: none;
+}
+
+.grill-tile[aria-current="page"] {
+  border-color: var(--store-ink);
+}
+
+.grill-tile-name {
+  font-size: 1.4rem;
+}
+
+.grill-tile-sub {
+  font-size: 0.78rem;
+  font-weight: 700;
+  opacity: 0.8;
+}
+
+.grill-tile--whole { background: #f7f1ea; color: #131110; }
+.grill-tile--cuts { background: var(--grill-yellow); color: #131110; }
+.grill-tile--prepared { background: var(--grill-flame); color: #131110; }
+.grill-tile--cooked { background: var(--grill-raised); color: #f7f1ea; border-color: #3a3330; }
+
+.grill-products {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+@media (min-width: 640px) {
+  .grill-products {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.grill-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 1.1rem;
+  border: 1px solid #2e2825;
+  background: var(--store-card);
+}
+
+.grill-card-photo {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background:
+    radial-gradient(110% 90% at 80% 0%, rgba(255, 106, 26, 0.35), transparent 60%),
+    #3a2a20;
+}
+
+.grill-card-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.7rem 0.8rem 0.8rem;
+}
+
+.grill-price {
+  white-space: nowrap;
+  font-weight: 800;
+  color: var(--grill-yellow);
+}
+
+.grill-add {
+  display: inline-flex;
+  min-width: 44px;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 0.7rem;
+  background: var(--grill-flame);
+  color: #131110;
+  font-weight: 800;
+  font-size: 1.15rem;
+}
+
+.grill-add:disabled {
+  opacity: 0.45;
+}
+
+.grill-qty {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.grill-qty button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid #3a3330;
+  border-radius: 0.65rem;
+  background: var(--grill-raised);
+  color: var(--store-ink);
+  font-weight: 800;
+}
+
+.grill-cartbar {
+  position: sticky;
+  bottom: 0.75rem;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 60px;
+  margin-top: 1rem;
+  padding: 0 0.5rem 0 1.1rem;
+  border-radius: 1rem;
+  background: var(--grill-flame);
+  color: #131110;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.grill-cartbar button {
+  min-height: 44px;
+  padding: 0 1.1rem;
+  border: 0;
+  border-radius: 0.75rem;
+  background: #131110;
+  color: #f7f1ea;
+  font-weight: 800;
+}
+
+@media (min-width: 1024px) {
+  .grill-cartbar {
+    display: none;
+  }
+}
+
+/* Keep the chat button clear of the cart bar on phones. */
+@media (max-width: 1023px) {
+  .store-grill:has(.grill-cartbar) .store-wa-fab {
+    bottom: calc(max(1.15rem, env(safe-area-inset-bottom)) + 72px);
+  }
 }

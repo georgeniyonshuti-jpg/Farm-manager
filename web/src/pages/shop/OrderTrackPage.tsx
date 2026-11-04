@@ -69,7 +69,7 @@ export function OrderTrackPage() {
   if (error && !order) {
     return (
       <div className="store-wrap store-body">
-        <p className="text-sm text-[#9a3412]" role="alert">
+        <p className="text-sm text-[var(--store-danger)]" role="alert">
           {error}
         </p>
         <Link className="store-btn store-btn-ember mt-4 inline-flex" to="/shop">
@@ -117,7 +117,7 @@ export function OrderTrackPage() {
                 <li>{t("payStep3")}</li>
               </ol>
             ) : (
-              <p className="text-sm text-[#9a3412]">{t("payNoNumber")}</p>
+              <p className="text-sm text-[var(--store-danger)]">{t("payNoNumber")}</p>
             )}
             {order.payBy ? <p className="text-sm text-[var(--store-muted)]">{t("payBy", { time: kigaliTime(order.payBy) })}</p> : null}
             <label className="store-field">
@@ -131,7 +131,7 @@ export function OrderTrackPage() {
               <input type="tel" inputMode="tel" value={payer} onChange={(e) => setPayer(e.target.value)} />
             </label>
             {payError ? (
-              <p className="text-sm text-[#9a3412]" role="alert">
+              <p className="text-sm text-[var(--store-danger)]" role="alert">
                 {payError}
               </p>
             ) : null}
