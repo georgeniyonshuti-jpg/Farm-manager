@@ -69,8 +69,19 @@ export function loadCart(): ShopCart {
   return cleanCart(read(session(), CART_KEY));
 }
 
+export const CART_EVENT = "cleva-cart";
+
 export function saveCart(cart: ShopCart | null) {
   write(session(), CART_KEY, cart ? cleanCart(cart) : null);
+  try {
+    window.dispatchEvent(new Event(CART_EVENT));
+  } catch {
+    // No window (tests): nothing listens.
+  }
+}
+
+export function cartCount(cart: ShopCart): number {
+  return cart.items.reduce((n, i) => n + i.qty, 0);
 }
 
 export function setQty(cart: ShopCart, sku: string, qty: number): ShopCart {

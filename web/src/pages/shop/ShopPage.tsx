@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { ShopComingSoon } from "./ShopComingSoon";
 import { SHOP_CATEGORIES, categoryFromSlug, categoryPath, type ShopCategory } from "../../lib/marketSections";
 import { type PublicOutletCtx } from "../../components/public/PublicLayout";
 import { usePublicMeta } from "../../hooks/usePublicMeta";
@@ -80,6 +81,8 @@ export function ShopPage() {
   const { quote, loading } = useShopQuote(cart);
   const { category: categorySlug } = useParams();
   const category = categoryFromSlug(categorySlug);
+  const { search } = useLocation();
+  const preview = new URLSearchParams(search).has("preview");
 
   useEffect(() => {
     fetchShopCatalog()
@@ -117,6 +120,11 @@ export function ShopPage() {
   const heroCooked = !category && cooked.length > 0;
   const heroPhoto = shopPhotoSrc((heroCooked ? cooked : products).find((p) => p.photoUrl)?.photoUrl);
 
+  const extraClosedMessage =
+    catalog?.closedMessage && !/^The shop is (closed for now|not open yet)\.?$/i.test(catalog.closedMessage.trim())
+      ? catalog.closedMessage
+      : "";
+
   function checkout() {
     if (canContinue) navigate("/shop/checkout");
     else document.getElementById("your-order")?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -133,7 +141,11 @@ export function ShopPage() {
         {photo ? (
           <img src={photo} alt="" className="grill-card-photo" loading="lazy" />
         ) : (
-          <span className="grill-card-photo" aria-hidden="true" />
+          <span className="grill-card-photo grill-card-photo--empty" aria-hidden="true">
+            <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M15.5 3.5a5 5 0 0 1 5 5c0 3.5-3.6 6.2-7.2 6.9l-2.7 2.7a2 2 0 1 1-2.8 2.8 2 2 0 1 1-2.8-2.8 2 2 0 1 1 2.8-2.8l2.7-2.7c.7-3.6 3.4-7.1 7-7.1z" />
+            </svg>
+          </span>
         )}
         <div className="grill-card-body">
           <p className="font-bold leading-snug text-[var(--store-ink)]">{name}</p>
@@ -168,6 +180,10 @@ export function ShopPage() {
         </div>
       </li>
     );
+  }
+
+  if (catalog && !preview && (catalog.closedReason === "closed" || products.length === 0)) {
+    return <ShopComingSoon locale={locale} />;
   }
 
   return (
@@ -206,18 +222,23 @@ export function ShopPage() {
 
       {catalog && !catalog.open ? (
         <div className="mt-4 rounded-2xl border border-[var(--store-line)] bg-[var(--store-card)] p-4">
-          <p className="font-semibold">{t("closed")}</p>
-          {catalog.closedMessage ? <p className="mt-1 text-sm text-[var(--store-muted)]">{catalog.closedMessage}</p> : null}
+          <p className="font-semibold">
+            {preview && catalog.closedReason !== "hours" ? t("previewNote") : t("hoursClosed", { time: catalog.openTime ?? "08:00" })}
+          </p>
+          {extraClosedMessage ? <p className="mt-1 text-sm text-[var(--store-muted)]">{extraClosedMessage}</p> : null}
         </div>
       ) : null}
 
       {!category ? (
-        <Link to={heroCooked ? categoryPath("cooked") : categoryPath(shelves[0]?.id ?? null)} className="grill-hero mt-4">
-          {heroPhoto ? <img src={heroPhoto} alt="" className="grill-hero-photo" /> : <span className="grill-hero-photo" aria-hidden="true" />}
+        <Link
+          to={heroCooked ? categoryPath("cooked") : categoryPath(shelves[0]?.id ?? null)}
+          className={heroPhoto ? "grill-hero grill-hero--photo mt-4" : "grill-hero mt-4"}
+        >
+          {heroPhoto ? <img src={heroPhoto} alt="" className="grill-hero-photo" /> : null}
           <span className="grill-hero-body block">
             <span className="grill-kicker block">{t(heroCooked ? "heroHotKicker" : "heroFreshKicker")}</span>
             <span className="grill-display grill-hero-title block">{t(heroCooked ? "heroHotTitle" : "title")}</span>
-            <span className="mt-2 block text-sm text-[var(--store-ink-soft)]">{t("lead")}</span>
+            <span className="mt-2 block text-sm text-[var(--store-ink-soft)]">{t(heroCooked ? "heroHotLead" : "lead")}</span>
             <span className="grill-cta">{t(heroCooked ? "heroHotCta" : "heroFreshCta")} →</span>
           </span>
         </Link>
@@ -252,7 +273,7 @@ export function ShopPage() {
       ) : null}
 
       {catalog ? (
-        <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_22rem]">
+        <div className={itemCount > 0 ? "mt-6 grid gap-6 lg:grid-cols-[1fr_22rem]" : "mt-6"}>
           <div className="space-y-7">
             {category && groups.length === 0 ? (
               <p className="text-sm text-[var(--store-muted)]">
@@ -271,6 +292,7 @@ export function ShopPage() {
             ))}
           </div>
 
+          {itemCount > 0 ? (
           <aside id="your-order" className="h-fit rounded-3xl border border-[var(--store-line)] bg-[var(--store-card)] p-5 lg:sticky lg:top-24">
             <p className="store-request-title">{t("yourOrder")}</p>
             <ShopSummary locale={locale} catalog={catalog} cart={cart} quote={quote} loading={loading} />
@@ -283,6 +305,7 @@ export function ShopPage() {
               </a>
             ) : null}
           </aside>
+          ) : null}
         </div>
       ) : !error ? (
         <p className="mt-6 text-sm text-[var(--store-muted)]">…</p>

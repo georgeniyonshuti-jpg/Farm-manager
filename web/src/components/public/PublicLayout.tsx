@@ -8,6 +8,7 @@ import { isMarketHostname } from "../../lib/marketHost";
 import { storeT, type StoreLocale } from "../../lib/publicStoreCopy";
 import { StoreSwitchBar } from "./StoreSwitchBar";
 import { StoreAccountMenu } from "./StoreAccountMenu";
+import { StoreCartButton } from "./StoreCartButton";
 import { StoreLocaleSelect } from "./StoreLocaleSelect";
 import { StoreSiteFooter } from "./StoreSiteFooter";
 import { StoreWhatsAppFab } from "./StoreWhatsAppFab";
@@ -53,6 +54,7 @@ export function PublicLayout() {
                 {t("join")}
               </Link>
               <StoreAccountMenu locale={locale} signupTo="/signup?from=market" />
+              {grill && shopOpen ? <StoreCartButton locale={locale} /> : null}
             </div>
           </div>
         </div>
