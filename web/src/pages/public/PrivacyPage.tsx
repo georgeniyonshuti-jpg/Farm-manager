@@ -1,6 +1,7 @@
 import { useOutletContext } from "react-router-dom";
 import { usePublicMeta } from "../../hooks/usePublicMeta";
 import { storeT, type StoreLocale } from "../../lib/publicStoreCopy";
+import { shopT } from "../shop/shopCopy";
 
 type OutletCtx = { locale: StoreLocale };
 
@@ -26,6 +27,9 @@ export function PrivacyPage() {
         <h2 className="store-section-title mt-8">{t("privacyUseTitle")}</h2>
         <p className="text-[var(--store-ink)]">{t("privacyUseBody")}</p>
         <p className="mt-3 text-[var(--store-ink)]">{t("privacyPublic")}</p>
+
+        <h2 className="store-section-title mt-8">{shopT(locale, "privacyShopTitle")}</h2>
+        <p className="text-[var(--store-ink)]">{shopT(locale, "privacyShopBody")}</p>
 
         <h2 className="store-section-title mt-8">{t("privacyShareTitle")}</h2>
         <p className="text-[var(--store-ink)]">{t("privacyShareBody")}</p>

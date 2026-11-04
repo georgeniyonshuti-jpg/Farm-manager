@@ -30,6 +30,9 @@ import { PublicFarmPage } from "./pages/public/PublicFarmPage";
 import { PublicFarmsPage } from "./pages/public/PublicFarmsPage";
 import { HowItWorksPage } from "./pages/public/HowItWorksPage";
 import { SellYourBirdsPage } from "./pages/public/SellYourBirdsPage";
+import { ShopPage } from "./pages/shop/ShopPage";
+import { CheckoutPage } from "./pages/shop/CheckoutPage";
+import { OrderTrackPage } from "./pages/shop/OrderTrackPage";
 import { PrivacyPage } from "./pages/public/PrivacyPage";
 
 function FlockFcrLegacyRedirect() {
@@ -122,6 +125,9 @@ function AppRoutes() {
         <Route path="/market/farm/:slug" element={<PublicFarmPage />} />
         <Route path="/market/how-it-works" element={<HowItWorksPage />} />
         <Route path="/market/sell" element={<SellYourBirdsPage />} />
+        <Route path="/market/shop" element={<ShopPage />} />
+        <Route path="/market/shop/checkout" element={<CheckoutPage />} />
+        <Route path="/market/shop/order/:ref" element={<OrderTrackPage />} />
         <Route path="/privacy" element={<PrivacyPage />} />
       </Route>
 

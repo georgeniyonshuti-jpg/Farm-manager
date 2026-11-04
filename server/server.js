@@ -146,6 +146,7 @@ import {
   createSellerContractPublicRouter,
 } from "./src/routes/sellerContract.routes.js";
 import { createShopDeskRouter } from "./src/routes/shop.routes.js";
+import { createShopPublicRouter } from "./src/routes/shopPublic.routes.js";
 import { autoDraftReadyLots, syncManagedLotFromFlock } from "./src/services/pipeline/autoDraftLots.js";
 import { fetchClevaUserExists } from "./src/services/clevaSso.js";
 import { createPasswordResetService } from "./src/services/passwordReset.js";
@@ -11650,6 +11651,15 @@ app.use("/api/farm-sales", requireAuth, farmSalesRouter);
 app.use("/api/pipeline", requireAuth, pipelineRouter);
 app.use("/api/internal/crm", createCrmInternalRouter({ dbQuery, hasDb }));
 app.use("/api/crm", requireAuth, createCrmStaffRouter({ dbQuery, hasDb }));
+app.use(
+  "/api/market/shop",
+  createShopPublicRouter({
+    dbQuery,
+    hasDb,
+    ipWindowRateLimitMiddleware: systemConfig.ipWindowRateLimitMiddleware,
+    getAppSettingNumber: systemConfig.getAppSettingNumber,
+  })
+);
 app.use(
   "/api/market",
   createPublicMarketRouter({

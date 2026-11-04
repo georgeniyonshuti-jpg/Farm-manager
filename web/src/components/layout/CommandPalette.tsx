@@ -33,7 +33,7 @@ const PAGES: Array<{ label: string; to: string; keywords: string }> = [
   { label: "Slaughter", to: "/farm/slaughter", keywords: "harvest" },
   { label: "People", to: "/farm/pipeline/people", keywords: "desk market call review ready signup" },
   { label: "Flocks", to: "/farm/pipeline/flocks", keywords: "desk market approve assign scout price" },
-  { label: "Shop setup", to: "/farm/pipeline/shop", keywords: "butcher shop chicken items zones delivery commission" },
+  { label: "Shop", to: "/farm/pipeline/shop", keywords: "butcher shop chicken orders payments momo items zones delivery commission" },
   { label: "Live market", to: "/market", keywords: "buy birds book lot" },
   { label: "Farm storefronts", to: "/market/farms", keywords: "farm profile photos" },
   { label: "Commissions", to: "/market/commissions", keywords: "scout payout unpaid" },

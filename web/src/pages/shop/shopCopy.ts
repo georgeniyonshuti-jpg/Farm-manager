@@ -1,0 +1,99 @@
+/**
+ * Butcher shop words. English is complete. Kinyarwanda falls back to English
+ * key by key until a native speaker fills `rw`; do not machine-translate.
+ */
+
+import type { StoreLocale } from "../../lib/publicStoreCopy";
+import type { ShopOrderStatus } from "../../api/shop.api";
+
+const en = {
+  kicker: "Cleva chicken",
+  title: "Fresh chicken, delivered to your door.",
+  lead: "Order from partner butchers near you. One fair price, paid by MoMo.",
+  closed: "The shop is closed for now.",
+  yourSector: "Your sector",
+  chooseSector: "Choose where to deliver",
+  notServedHint: "Not on the list? We do not deliver there yet.",
+  each: "each",
+  add: "Add",
+  less: "One less",
+  more: "One more",
+  yourOrder: "Your order",
+  emptyCart: "Add chicken to start your order.",
+  subtotal: "Chicken",
+  delivery: "Delivery",
+  free: "Free",
+  total: "Total",
+  toFree: "Add {amount} more for free delivery.",
+  minimum: "Minimum order: {items} items or {amount}.",
+  minimumItems: "Minimum order: {items} items.",
+  minimumAmount: "Minimum order: {amount}.",
+  pickSectorFirst: "Choose your sector to see delivery.",
+  continue: "Continue",
+  back: "Back to the shop",
+  checkoutTitle: "Where should we deliver?",
+  name: "Your name",
+  phone: "Phone",
+  phoneHint: "The butcher calls this number when they arrive.",
+  address: "Delivery directions",
+  addressHint: "Street, house, landmark. Anything that helps the rider find you.",
+  placeOrder: "Place order",
+  placing: "Placing…",
+  sizeRange: "{min}–{max} kg",
+  orderTitle: "Order {ref}",
+  hello: "Hello {name}.",
+  payTitle: "Pay with MoMo",
+  payStep1: "Send {amount} to {phone}.",
+  payStep2: "Use {ref} as the reason.",
+  payStep3: "Enter the transaction ID from your MoMo message below.",
+  payBy: "Pay by {time} or the order expires.",
+  payNoNumber: "The MoMo number is not set yet. Please call us before paying.",
+  txnId: "MoMo transaction ID",
+  payerPhone: "Number you paid from (if different)",
+  sentPayment: "I have paid",
+  sending: "Sending…",
+  keepLink: "Keep this page. The link is the only way to see your order.",
+  statusPlaced: "Waiting for your payment.",
+  statusPaymentPending: "We are checking your payment. This usually takes a few minutes.",
+  statusPaid: "Paid. A butcher is getting your order ready.",
+  statusAccepted: "The butcher accepted your order.",
+  statusReady: "Your order is packed and ready to leave.",
+  statusOut: "On the way to you.",
+  statusDelivered: "Delivered. Enjoy your meal.",
+  statusProblem: "We are looking into a problem with this order.",
+  statusResolved: "This order is closed.",
+  statusCancelled: "This order was cancelled. If you paid, we will refund you by MoMo.",
+  statusExpired: "This order expired before payment. You can place a new one.",
+  newOrder: "Start a new order",
+  notFound: "We could not find this order. Check the link from when you ordered.",
+  lastOrder: "Your last order: {ref}",
+  orderCta: "Order chicken for home",
+  orderCtaSub: "Fresh chicken from butchers near you, delivered.",
+  privacyShopTitle: "Home chicken orders",
+  privacyShopBody:
+    "When you order chicken for home we keep your name, phone, sector, delivery directions, what you ordered and your MoMo transaction ID. The butcher who fills your order sees your name, phone and directions so they can deliver. Cleva staff see them to check payment and help with problems. Your order page shows only your first name and sector.",
+};
+
+export type ShopCopyKey = keyof typeof en;
+
+// Filled by a native speaker. Missing keys show English.
+const rw: Partial<Record<ShopCopyKey, string>> = {};
+
+export function shopT(locale: StoreLocale, key: ShopCopyKey, vars: Record<string, string | number> = {}): string {
+  const text = (locale === "rw" ? rw[key] : undefined) ?? en[key];
+  return text.replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k] ?? `{${k}}`));
+}
+
+export const STATUS_COPY: Record<ShopOrderStatus, ShopCopyKey> = {
+  placed: "statusPlaced",
+  payment_pending: "statusPaymentPending",
+  paid: "statusPaid",
+  accepted: "statusAccepted",
+  ready: "statusReady",
+  out_for_delivery: "statusOut",
+  delivered: "statusDelivered",
+  problem: "statusProblem",
+  resolved: "statusResolved",
+  cancelled: "statusCancelled",
+  expired: "statusExpired",
+};

@@ -1,11 +1,12 @@
 /**
- * Butcher shop desk: settings, products, zones and butchers.
+ * Butcher shop desk: settings, products, zones, butchers, and orders.
  * Superuser and sales coordinator. Only a superuser changes commission,
  * minimums or opens the shop.
  */
 
 import express from "express";
 import { canAccessPipelineDesk } from "../services/pipeline/pipeline.js";
+import { cancelOrder, confirmPayment, listDeskOrders, rejectPayment } from "../services/shop/shopOrders.js";
 import { getShopSetup, saveButcher, saveProduct, saveShopSettings, saveZone } from "../services/shop/shopSetup.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -90,6 +91,25 @@ export function createShopDeskRouter(deps) {
   router.put("/butchers/:id", async (req, res) => {
     const id = idParam(req, res);
     if (id) sendResult(res, await saveButcher(dbQuery, id, req.body ?? {}, actor(req)));
+  });
+
+  router.get("/orders", async (req, res) => {
+    sendResult(res, await listDeskOrders(dbQuery, String(req.query.view || "open")));
+  });
+
+  router.post("/orders/:id/confirm-payment", async (req, res) => {
+    const id = idParam(req, res);
+    if (id) sendResult(res, await confirmPayment(dbQuery, id, actor(req)));
+  });
+
+  router.post("/orders/:id/reject-payment", async (req, res) => {
+    const id = idParam(req, res);
+    if (id) sendResult(res, await rejectPayment(dbQuery, id, req.body ?? {}, actor(req)));
+  });
+
+  router.post("/orders/:id/cancel", async (req, res) => {
+    const id = idParam(req, res);
+    if (id) sendResult(res, await cancelOrder(dbQuery, id, req.body ?? {}, actor(req)));
   });
 
   return router;

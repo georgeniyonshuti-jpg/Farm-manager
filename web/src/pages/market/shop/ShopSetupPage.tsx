@@ -1,5 +1,5 @@
 /**
- * Butcher shop setup for the desk: products, delivery zones, partner butchers,
+ * Butcher shop desk: orders, products, delivery zones, partner butchers,
  * and shop settings. Only a superuser changes settings or opens the shop.
  */
 
@@ -39,8 +39,9 @@ import {
   type ShopSetup,
   type ShopZone,
 } from "../../../api/shop.api";
+import { ShopOrdersPanel } from "./ShopOrdersPanel";
 
-type Tab = "products" | "zones" | "butchers" | "settings";
+type Tab = "orders" | "products" | "zones" | "butchers" | "settings";
 
 const BUTCHER_TONE: Record<ButcherStatus, "success" | "warning" | "neutral" | "danger"> = {
   active: "success",
@@ -66,7 +67,9 @@ function numOrNull(value: string): number | null {
 export function ShopSetupPage() {
   const { token, user } = useAuth();
   const { showToast } = useToast();
-  const [tab, setTab] = useState<Tab>("products");
+  const [tab, setTab] = useState<Tab>("orders");
+  const [toConfirm, setToConfirm] = useState(0);
+  const onCounts = useCallback((c: { toConfirm: number }) => setToConfirm(c.toConfirm), []);
   const [setup, setSetup] = useState<ShopSetup | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -96,7 +99,7 @@ export function ShopSetupPage() {
   if (loading && !setup) {
     return (
       <ManagerPage>
-        <PageHeader title="Shop setup" />
+        <PageHeader title="Shop" />
         <SkeletonList rows={6} />
       </ManagerPage>
     );
@@ -104,7 +107,7 @@ export function ShopSetupPage() {
   if (error || !setup) {
     return (
       <ManagerPage>
-        <PageHeader title="Shop setup" />
+        <PageHeader title="Shop" />
         <ErrorState message={error || "Could not load the shop setup."} onRetry={() => void load()} />
       </ManagerPage>
     );
@@ -184,7 +187,7 @@ export function ShopSetupPage() {
   return (
     <ManagerPage>
       <PageHeader
-        title="Shop setup"
+        title="Shop"
         action={add}
         tabs={
           <PageTabs
@@ -192,6 +195,7 @@ export function ShopSetupPage() {
             onChange={(v) => setTab(v as Tab)}
             aria-label="Shop setup sections"
             options={[
+              { value: "orders", label: "Orders", badge: toConfirm || undefined },
               { value: "products", label: "Items", badge: setup.products.length },
               { value: "zones", label: "Zones", badge: setup.zones.length },
               { value: "butchers", label: "Butchers", badge: setup.butchers.length },
@@ -209,6 +213,8 @@ export function ShopSetupPage() {
               ? `The shop is closed. ${setup.openBlockers.join(" ")}`
               : "The shop is closed. A superuser can open it under Settings."}
         </NoticeStrip>
+
+        {tab === "orders" ? <ShopOrdersPanel onCounts={onCounts} /> : null}
 
         {tab === "products" ? (
           <SectionCard flushBody>
