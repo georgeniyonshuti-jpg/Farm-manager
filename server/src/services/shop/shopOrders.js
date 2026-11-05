@@ -111,6 +111,17 @@ function itemsFromBody(body) {
 
 // ---------- loading ----------
 
+/**
+ * Cooked BigChix dishes stay off sale until kitchen partners exist: every order
+ * is routed to a butcher today, so a dish order would reach the wrong partner.
+ * The desk can still build the menu, and the shop shows it in preview only.
+ */
+export const COOKED_ON_SALE = false;
+
+export function isOrderable(row) {
+  return COOKED_ON_SALE || (row.category || "whole") !== "cooked";
+}
+
 async function loadContext(dbQuery) {
   const [settings, products, zones] = await Promise.all([
     dbQuery(`SELECT * FROM shop_settings WHERE id = 1`),
@@ -124,7 +135,12 @@ async function loadContext(dbQuery) {
          FROM shop_zones WHERE active`
     ),
   ]);
-  return { settings: settings.rows[0] || null, products: products.rows, zones: zones.rows };
+  return {
+    settings: settings.rows[0] || null,
+    allProducts: products.rows,
+    products: products.rows.filter(isOrderable),
+    zones: zones.rows,
+  };
 }
 
 export async function loadPayTo(dbQuery, env = process.env) {
@@ -168,10 +184,11 @@ function publicProduct(r) {
     priceRwf: r.price_rwf,
     photoUrl: r.photo_url,
     category: r.category || "whole",
+    orderable: isOrderable(r),
   };
 }
 
-export async function getShopCatalog(dbQuery, now = new Date()) {
+export async function getShopCatalog(dbQuery, now = new Date(), { preview = false } = {}) {
   try {
     const ctx = await loadContext(dbQuery);
     const state = shopOpenState(ctx.settings, now);
@@ -185,7 +202,7 @@ export async function getShopCatalog(dbQuery, now = new Date()) {
       closeTime: state.closeTime ?? null,
       minOrderRwf: cfg.minOrderRwf,
       minOrderItems: cfg.minOrderItems,
-      products: ctx.products.filter((p) => p.active).map(publicProduct),
+      products: (preview ? ctx.allProducts : ctx.products).filter((p) => p.active).map(publicProduct),
       zones: ctx.zones.map((z) => ({
         name: z.name,
         district: z.district,

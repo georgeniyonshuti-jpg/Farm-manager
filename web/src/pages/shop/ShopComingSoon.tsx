@@ -1,12 +1,12 @@
-import { ArrowRight, Drumstick, Flame, Smartphone } from "lucide-react";
+import { ArrowRight, Drumstick, Flame, Truck } from "lucide-react";
 import type { StoreLocale } from "../../lib/publicStoreCopy";
 import { clevaMarketWhatsapp, waMeHref } from "../../lib/marketWhatsapp";
 import { shopT, type ShopCopyKey } from "./shopCopy";
 
 const FEATURES: { title: ShopCopyKey; sub: ShopCopyKey; Icon: typeof Flame }[] = [
   { title: "soonFresh", sub: "soonFreshSub", Icon: Drumstick },
-  { title: "soonBigchix", sub: "soonBigchixSub", Icon: Flame },
-  { title: "soonMomo", sub: "soonMomoSub", Icon: Smartphone },
+  { title: "soonBigchix", sub: "soonBigchixSub", Icon: Truck },
+  { title: "soonMomo", sub: "soonMomoSub", Icon: Flame },
 ];
 
 /** What customers see while the shop is closed or has nothing on sale. */

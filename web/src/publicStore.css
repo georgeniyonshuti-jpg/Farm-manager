@@ -2503,7 +2503,7 @@ a.store-chip {
   font-weight: 800;
 }
 
-/* ---------- Shop (shop.cleva.rw): photo-led, calm, one clear action per block ---------- */
+/* ---------- Shop (bigchix.cleva.rw): photo-led, calm, one clear action per block ---------- */
 
 .sh-page {
   padding-top: 0.75rem;
@@ -3190,42 +3190,38 @@ a.store-chip {
   text-align: right;
 }
 
-/* Fresh chicken: one quiet row under the menu. */
-.public-store .sh-fresh-link {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem 1rem;
-  padding: 1rem 1.1rem;
-  border-radius: 1.1rem;
-  border: 1px solid rgba(255, 240, 225, 0.12);
-  color: var(--store-ink);
-  text-decoration: none;
-}
-
-.public-store .sh-fresh-link:hover {
-  border-color: rgba(255, 240, 225, 0.28);
-}
-
-.sh-fresh-ask {
-  display: block;
-  font-weight: 800;
-}
-
-.sh-fresh-sub {
-  display: block;
-  margin-top: 0.15rem;
-  font-size: 0.85rem;
+/* Fresh chicken: one quiet line under the menu, not a second product pitch. */
+.sh-fresh-line {
+  margin: 0;
+  padding-top: 0.25rem;
+  font-size: 0.92rem;
   color: var(--store-muted);
 }
 
-.sh-fresh-go {
+.public-store .sh-fresh-go {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  font-weight: 800;
+  gap: 0.3rem;
+  min-height: 40px;
+  font-weight: 700;
   color: var(--grill-yellow);
+  text-decoration: none;
+}
+
+/* The other basket, so nothing a customer added is ever lost. */
+.sh-basket-note {
+  margin: 0.9rem 0 0;
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.9rem;
+  background: rgba(255, 194, 61, 0.08);
+  font-size: 0.88rem;
+  color: var(--store-ink-soft);
+}
+
+.public-store .sh-basket-note a {
+  font-weight: 700;
+  color: var(--grill-yellow);
+  text-decoration: none;
 }
 
 .public-store .sh-back {

@@ -75,8 +75,9 @@ export function createShopPublicRouter(deps) {
     next();
   });
 
-  router.get("/catalog", browseLimit, async (_req, res) => {
-    sendResult(res, await getShopCatalog(dbQuery));
+  router.get("/catalog", browseLimit, async (req, res) => {
+    const preview = req.query?.preview === "1";
+    sendResult(res, await getShopCatalog(dbQuery, new Date(), { preview }));
   });
 
   router.post("/quote", browseLimit, async (req, res) => {

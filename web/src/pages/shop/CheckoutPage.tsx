@@ -1,10 +1,10 @@
 import { shopPath } from "../../lib/marketSections";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Link, Navigate, useNavigate, useOutletContext } from "react-router-dom";
+import { Link, Navigate, useLocation, useNavigate, useOutletContext } from "react-router-dom";
 import { type PublicOutletCtx } from "../../components/public/PublicLayout";
 import { usePublicMeta } from "../../hooks/usePublicMeta";
 import { fetchShopCatalog, placeShopOrder, type ShopCatalog } from "../../api/shop.api";
-import { loadCart, orderPath, saveCart, saveLastOrder } from "./shopCart";
+import { basketFromSearch, loadCart, orderPath, saveCart, saveLastOrder } from "./shopCart";
 import { shopT } from "./shopCopy";
 import { ShopSummary } from "./ShopSummary";
 import { useShopQuote } from "./ShopPage";
@@ -14,7 +14,8 @@ export function CheckoutPage() {
   const t = (k: Parameters<typeof shopT>[1], v?: Record<string, string | number>) => shopT(locale, k, v);
   usePublicMeta(t("checkoutTitle"), t("lead"));
   const navigate = useNavigate();
-  const [cart] = useState(loadCart);
+  const basket = basketFromSearch(useLocation().search);
+  const [cart] = useState(() => loadCart(basket));
   const [catalog, setCatalog] = useState<ShopCatalog | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -49,7 +50,7 @@ export function CheckoutPage() {
         formStartedAt: startedAt.current,
       });
       saveLastOrder({ ref: r.ref, token: r.token });
-      saveCart(null);
+      saveCart(null, basket);
       navigate(orderPath(r.ref, r.token), { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not place this order.");

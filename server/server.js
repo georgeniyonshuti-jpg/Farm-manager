@@ -183,6 +183,7 @@ const allowedOrigins = [
   "https://farm.cleva.rw",
   "https://market.cleva.rw",
   "https://shop.cleva.rw",
+  "https://bigchix.cleva.rw",
   "https://farm.clevacredit.com",
   "http://localhost:5173",
   "http://127.0.0.1:5173",

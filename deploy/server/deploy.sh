@@ -40,7 +40,7 @@ MIN_FREE_GB="${MIN_FREE_GB:-6}"
 API_IMAGE="cleva-farm-api"
 WEB_IMAGE="cleva-farm-web"
 API_URL="${FARM_API_URL:-https://farmapi.cleva.rw}"
-CHECK_URLS=("${API_URL}/health" "https://farm.cleva.rw/" "https://market.cleva.rw/" "https://shop.cleva.rw/")
+CHECK_URLS=("${API_URL}/health" "https://farm.cleva.rw/" "https://market.cleva.rw/" "https://bigchix.cleva.rw/")
 DB_CONTAINER="${PROJECT}-farm-postgres-1"
 
 log() { printf '\n==> %s\n' "$*"; }

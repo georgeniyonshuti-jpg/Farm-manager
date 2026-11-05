@@ -1,19 +1,24 @@
 /**
  * Two front doors:
- * - shop.cleva.rw is BigChix, the food shop for homes (fresh chicken and hot food, one delivery),
- *   with short addresses: shop.cleva.rw, shop.cleva.rw/hot-and-ready, shop.cleva.rw/checkout, shop.cleva.rw/order/CK-…
+ * - bigchix.cleva.rw is BigChix, the food shop for homes, with short addresses:
+ *   bigchix.cleva.rw, bigchix.cleva.rw/fresh, bigchix.cleva.rw/checkout, bigchix.cleva.rw/order/CK-…
+ *   The earlier shop.cleva.rw forwards there, path and all.
  * - market.cleva.rw is the business market (live and dressed birds), behind a login.
  * Anywhere else (local dev) the shop lives under /shop.
  */
 
 export type ShopCategory = "whole" | "cuts" | "prepared" | "cooked";
 
-export const SHOP_HOST = "shop.cleva.rw";
-/** Local stand-in for shop.cleva.rw (browsers send *.localhost to this machine). */
-export const SHOP_DEV_HOST = "shop.localhost";
+export const SHOP_HOST = "bigchix.cleva.rw";
+/** The shop's first address; it now forwards to SHOP_HOST. */
+export const OLD_SHOP_HOST = "shop.cleva.rw";
+/** Local stand-in for bigchix.cleva.rw (browsers send *.localhost to this machine). */
+export const SHOP_DEV_HOST = "bigchix.localhost";
 export const SHOP_PREFIX = "/shop";
+/** All fresh (uncooked) chicken on one page: bigchix.cleva.rw/fresh. */
+export const FRESH_SLUG = "fresh";
 
-/** Shelf order and the words used in links, e.g. shop.cleva.rw/skewers-and-more. */
+/** Shelf order and the words used in links, e.g. bigchix.cleva.rw/skewers-and-more. */
 export const SHOP_CATEGORIES: { id: ShopCategory; slug: string }[] = [
   { id: "cooked", slug: "hot-and-ready" },
   { id: "whole", slug: "whole-chicken" },

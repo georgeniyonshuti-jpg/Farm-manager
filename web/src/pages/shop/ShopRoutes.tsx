@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes, useLocation, useParams } from "react-router-dom";
-import { categoryFromSlug, shopHostPath, shopPath } from "../../lib/marketSections";
+import { FRESH_SLUG, categoryFromSlug, shopHostPath, shopPath } from "../../lib/marketSections";
 import { PrivacyPage } from "../public/PrivacyPage";
 import { CheckoutPage } from "./CheckoutPage";
 import { OrderTrackPage } from "./OrderTrackPage";
@@ -15,11 +15,11 @@ export function OldShopAddress() {
 /** A category shelf; any other word goes to the shop front (or its old address). */
 function ShopShelf() {
   const { category } = useParams();
-  if (!categoryFromSlug(category)) return <OldShopAddress />;
+  if (!categoryFromSlug(category) && (category || "").toLowerCase() !== FRESH_SLUG) return <OldShopAddress />;
   return <ShopPage />;
 }
 
-/** Everything on shop.cleva.rw. */
+/** Everything on bigchix.cleva.rw. */
 export function ShopRoutes() {
   return (
     <Routes>
@@ -35,7 +35,7 @@ export function ShopRoutes() {
   );
 }
 
-/** The same shop under /shop, for local development and hosts other than shop.cleva.rw. */
+/** The same shop under /shop, for local development and hosts other than bigchix.cleva.rw. */
 export function shopRoutesUnderPrefix() {
   return (
     <Route path="/shop" element={<ShopLayout />}>

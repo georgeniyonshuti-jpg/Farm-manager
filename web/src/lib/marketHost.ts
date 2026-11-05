@@ -1,5 +1,5 @@
 import { isAdOrMarketSignupSearch } from "./signupAttribution.ts";
-import { SHOP_HOST, isSectionPath, shopHostPath } from "./marketSections.ts";
+import { OLD_SHOP_HOST, SHOP_HOST, isSectionPath, shopHostPath } from "./marketSections.ts";
 
 /** Public market site. Farm superuser controls stay on farm.cleva.rw. */
 export const MARKET_HOST = "market.cleva.rw";
@@ -94,7 +94,9 @@ function isBusinessPath(pathname: string): boolean {
 /** Full URL when this request belongs on another host. Null means stay. */
 export function hostRedirectTarget(hostname: string, pathname: string, search = ""): string | null {
   const query = search ? (search.startsWith("?") ? search : `?${search}`) : "";
-  // The food shop lives on shop.cleva.rw with short addresses.
+  // BigChix moved from shop.cleva.rw; keep every path, order links included.
+  if (hostname === OLD_SHOP_HOST) return `https://${SHOP_HOST}${pathname}${query}`;
+  // The food shop lives on bigchix.cleva.rw with short addresses.
   if (isMarketHostname(hostname) || isFarmHostname(hostname)) {
     const shopPage = shopHostPath(pathname, query);
     if (shopPage) return `https://${SHOP_HOST}${shopPage}`;

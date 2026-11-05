@@ -253,11 +253,11 @@ export function ShopSetupPage({ mode = "shop" }: { mode?: "shop" | "bigchix" }) 
 
         {bigchix ? (
           <p className="text-sm text-[var(--text-muted)]">
-            These dishes lead the page on{" "}
-            <a className="font-semibold underline" href="https://shop.cleva.rw/?preview=1" target="_blank" rel="noreferrer">
-              shop.cleva.rw
+            Dishes are not on sale yet: customers can order them once kitchen partners are set up. Until then,{" "}
+            <a className="font-semibold underline" href="https://bigchix.cleva.rw/?preview=1" target="_blank" rel="noreferrer">
+              preview the menu on bigchix.cleva.rw
             </a>
-            . The first dish with a photo becomes the big picture at the top.
+            . Once on sale, dishes lead the page and the first one with a photo becomes the big picture at the top.
           </p>
         ) : null}
 

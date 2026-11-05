@@ -7,7 +7,13 @@
 import type { CartItem, ShopCatalog } from "../../api/shop.api";
 import { shopPath } from "../../lib/marketSections.ts";
 
-const CART_KEY = "cleva_shop_cart_v1";
+/**
+ * Two baskets: BigChix dishes come from a kitchen and fresh chicken from a
+ * butcher, so each is its own order. A customer can fill both and check out
+ * one at a time; neither basket is ever emptied by the other.
+ */
+export type Basket = "cooked" | "fresh";
+const CART_KEYS: Record<Basket, string> = { fresh: "cleva_shop_cart_v1", cooked: "cleva_shop_cart_cooked_v1" };
 const LAST_ORDER_KEY = "cleva_shop_last_order_v1";
 
 export type ShopCart = { items: CartItem[]; district: string; sector: string };
@@ -66,14 +72,26 @@ export function cleanCart(value: unknown): ShopCart {
   };
 }
 
-export function loadCart(): ShopCart {
-  return cleanCart(read(session(), CART_KEY));
+export function loadCart(basket: Basket = "fresh"): ShopCart {
+  return cleanCart(read(session(), CART_KEYS[basket]));
+}
+
+export function basketOfCategory(category: string | null | undefined): Basket {
+  return category === "cooked" ? "cooked" : "fresh";
+}
+
+export function basketFromSearch(search: string): Basket {
+  return new URLSearchParams(search).get("basket") === "cooked" ? "cooked" : "fresh";
+}
+
+export function checkoutPath(basket: Basket): string {
+  return basket === "cooked" ? `${shopPath("checkout")}?basket=cooked` : shopPath("checkout");
 }
 
 export const CART_EVENT = "cleva-cart";
 
-export function saveCart(cart: ShopCart | null) {
-  write(session(), CART_KEY, cart ? cleanCart(cart) : null);
+export function saveCart(cart: ShopCart | null, basket: Basket = "fresh") {
+  write(session(), CART_KEYS[basket], cart ? cleanCart(cart) : null);
   try {
     window.dispatchEvent(new Event(CART_EVENT));
   } catch {

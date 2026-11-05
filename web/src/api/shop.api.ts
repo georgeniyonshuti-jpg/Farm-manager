@@ -143,6 +143,8 @@ export type ShopCatalogProduct = {
   priceRwf: number;
   photoUrl: string | null;
   category: ShopCategory;
+  /** False for BigChix dishes until kitchens can take orders (shown in preview only). */
+  orderable?: boolean;
 };
 
 export type ShopCatalog = {
@@ -244,8 +246,8 @@ async function publicJson<T>(url: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-export function fetchShopCatalog() {
-  return publicJson<ShopCatalog>(`${PUBLIC}/catalog`);
+export function fetchShopCatalog({ preview = false }: { preview?: boolean } = {}) {
+  return publicJson<ShopCatalog>(`${PUBLIC}/catalog${preview ? "?preview=1" : ""}`);
 }
 
 export function quoteShopCart(body: { items: CartItem[]; district: string; sector: string }) {

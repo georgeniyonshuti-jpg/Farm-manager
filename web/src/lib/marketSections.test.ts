@@ -13,15 +13,15 @@ import { hostRedirectTarget, isPublicMarketPath } from "./marketHost.ts";
 
 describe("shop addresses", () => {
   it("are short on the shop host and under /shop elsewhere", () => {
-    assert.equal(shopPath("", "shop.cleva.rw"), "/");
-    assert.equal(shopPath("checkout", "shop.cleva.rw"), "/checkout");
-    assert.equal(shopPath("/order/CK-1", "shop.localhost"), "/order/CK-1");
+    assert.equal(shopPath("", "bigchix.cleva.rw"), "/");
+    assert.equal(shopPath("checkout", "bigchix.cleva.rw"), "/checkout");
+    assert.equal(shopPath("/order/CK-1", "bigchix.localhost"), "/order/CK-1");
     assert.equal(shopPath("", "localhost"), "/shop");
     assert.equal(shopPath("checkout", "localhost"), "/shop/checkout");
-    assert.equal(categoryPath("cooked", "shop.cleva.rw"), "/hot-and-ready");
-    assert.equal(categoryPath(null, "shop.cleva.rw"), "/");
+    assert.equal(categoryPath("cooked", "bigchix.cleva.rw"), "/hot-and-ready");
+    assert.equal(categoryPath(null, "bigchix.cleva.rw"), "/");
     assert.equal(categoryPath("cooked", "localhost"), "/shop/hot-and-ready");
-    assert.equal(isShopHostname("shop.cleva.rw"), true);
+    assert.equal(isShopHostname("bigchix.cleva.rw"), true);
     assert.equal(isShopHostname("market.cleva.rw"), false);
   });
 
@@ -58,29 +58,35 @@ describe("shop addresses", () => {
 });
 
 describe("shop host redirects", () => {
-  it("sends shop pages on the market and farm hosts to shop.cleva.rw", () => {
-    assert.equal(hostRedirectTarget("market.cleva.rw", "/shop"), "https://shop.cleva.rw/");
-    assert.equal(hostRedirectTarget("market.cleva.rw", "/shop/bigchix", "?a=1"), "https://shop.cleva.rw/bigchix?a=1");
+  it("sends shop pages on the market and farm hosts to bigchix.cleva.rw", () => {
+    assert.equal(hostRedirectTarget("market.cleva.rw", "/shop"), "https://bigchix.cleva.rw/");
+    assert.equal(hostRedirectTarget("market.cleva.rw", "/shop/bigchix", "?a=1"), "https://bigchix.cleva.rw/bigchix?a=1");
     assert.equal(
       hostRedirectTarget("market.cleva.rw", "/shop/order/CK-1", "?t=abc"),
-      "https://shop.cleva.rw/order/CK-1?t=abc",
+      "https://bigchix.cleva.rw/order/CK-1?t=abc",
     );
-    assert.equal(hostRedirectTarget("market.cleva.rw", "/market/shop/checkout"), "https://shop.cleva.rw/checkout");
-    assert.equal(hostRedirectTarget("farm.cleva.rw", "/raw"), "https://shop.cleva.rw/");
+    assert.equal(hostRedirectTarget("market.cleva.rw", "/market/shop/checkout"), "https://bigchix.cleva.rw/checkout");
+    assert.equal(hostRedirectTarget("farm.cleva.rw", "/raw"), "https://bigchix.cleva.rw/");
     assert.equal(hostRedirectTarget("localhost", "/shop"), null);
   });
 
   it("sends business pages on the shop host to market.cleva.rw", () => {
-    assert.equal(hostRedirectTarget("shop.cleva.rw", "/login"), "https://market.cleva.rw/login");
-    assert.equal(hostRedirectTarget("shop.cleva.rw", "/market/sell", "?x=1"), "https://market.cleva.rw/market/sell?x=1");
-    assert.equal(hostRedirectTarget("shop.cleva.rw", "/wholesale"), "https://market.cleva.rw/");
-    assert.equal(hostRedirectTarget("shop.cleva.rw", "/app/cleva/market"), "https://market.cleva.rw/app/cleva/market");
-    assert.equal(hostRedirectTarget("shop.cleva.rw", "/"), null);
-    assert.equal(hostRedirectTarget("shop.cleva.rw", "/bigchix"), null);
-    assert.equal(hostRedirectTarget("shop.cleva.rw", "/order/CK-1", "?t=a"), null);
-    assert.equal(hostRedirectTarget("shop.cleva.rw", "/shop/cuts"), null);
-    assert.equal(hostRedirectTarget("shop.cleva.rw", "/privacy"), null);
-    assert.equal(hostRedirectTarget("shop.localhost", "/login"), null);
+    assert.equal(hostRedirectTarget("bigchix.cleva.rw", "/login"), "https://market.cleva.rw/login");
+    assert.equal(hostRedirectTarget("bigchix.cleva.rw", "/market/sell", "?x=1"), "https://market.cleva.rw/market/sell?x=1");
+    assert.equal(hostRedirectTarget("bigchix.cleva.rw", "/wholesale"), "https://market.cleva.rw/");
+    assert.equal(hostRedirectTarget("bigchix.cleva.rw", "/app/cleva/market"), "https://market.cleva.rw/app/cleva/market");
+    assert.equal(hostRedirectTarget("bigchix.cleva.rw", "/"), null);
+    assert.equal(hostRedirectTarget("bigchix.cleva.rw", "/bigchix"), null);
+    assert.equal(hostRedirectTarget("bigchix.cleva.rw", "/order/CK-1", "?t=a"), null);
+    assert.equal(hostRedirectTarget("bigchix.cleva.rw", "/shop/cuts"), null);
+    assert.equal(hostRedirectTarget("bigchix.cleva.rw", "/privacy"), null);
+    assert.equal(hostRedirectTarget("bigchix.localhost", "/login"), null);
+  });
+
+  it("forwards the old shop address to bigchix.cleva.rw, path and all", () => {
+    assert.equal(hostRedirectTarget("shop.cleva.rw", "/"), "https://bigchix.cleva.rw/");
+    assert.equal(hostRedirectTarget("shop.cleva.rw", "/order/CK-1", "?t=abc"), "https://bigchix.cleva.rw/order/CK-1?t=abc");
+    assert.equal(hostRedirectTarget("shop.cleva.rw", "/login"), "https://bigchix.cleva.rw/login");
   });
 
   it("keeps the business market where it is", () => {

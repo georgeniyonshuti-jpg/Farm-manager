@@ -2,14 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, Minus, Plus } from "lucide-react";
 import { Link, useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { ShopComingSoon } from "./ShopComingSoon";
-import { SHOP_CATEGORIES, categoryFromSlug, categoryPath, shopPath, type ShopCategory } from "../../lib/marketSections";
+import { FRESH_SLUG, SHOP_CATEGORIES, categoryFromSlug, categoryPath, shopPath, type ShopCategory } from "../../lib/marketSections";
 import { type PublicOutletCtx } from "../../components/public/PublicLayout";
 import { usePublicMeta } from "../../hooks/usePublicMeta";
 import { formatRwf } from "../../lib/formatRwf";
 import { clevaMarketWhatsapp, waMeHref } from "../../lib/marketWhatsapp";
 import { fetchShopCatalog, quoteShopCart, shopPhotoSrc, type ShopCatalog, type ShopQuote } from "../../api/shop.api";
 import {
+  basketOfCategory,
   cartForCatalog,
+  checkoutPath,
   loadCart,
   loadLastOrder,
   orderPath,
@@ -18,6 +20,7 @@ import {
   servedPlaces,
   setQty,
   whatsappOrderText,
+  type Basket,
   type ShopCart,
 } from "./shopCart";
 import { shopT, type ShopCopyKey } from "./shopCopy";
@@ -67,33 +70,52 @@ function catOf(p: ShopItem): ShopCategory {
 export function ShopPage() {
   const { locale } = useOutletContext<PublicOutletCtx>();
   const t = (k: ShopCopyKey, v?: Record<string, string | number>) => shopT(locale, k, v);
-  usePublicMeta(t("heroTitle"), t("heroLead"));
   const navigate = useNavigate();
   const [catalog, setCatalog] = useState<ShopCatalog | null>(null);
   const [error, setError] = useState("");
-  const [cart, setCart] = useState<ShopCart>(loadCart);
+  const [carts, setCarts] = useState<Record<Basket, ShopCart>>(() => ({
+    cooked: loadCart("cooked"),
+    fresh: loadCart("fresh"),
+  }));
   const lastOrder = useMemo(loadLastOrder, []);
-  const { quote, loading } = useShopQuote(cart);
   const { category: categorySlug } = useParams();
+  const freshAll = (categorySlug || "").toLowerCase() === FRESH_SLUG;
   const category = categoryFromSlug(categorySlug);
   const { search } = useLocation();
   const preview = new URLSearchParams(search).has("preview");
 
   useEffect(() => {
-    fetchShopCatalog()
+    fetchShopCatalog({ preview })
       .then((c) => {
         setCatalog(c);
-        setCart((prev) => cartForCatalog(prev, c));
+        setCarts((prev) => ({ cooked: cartForCatalog(prev.cooked, c), fresh: cartForCatalog(prev.fresh, c) }));
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Could not load the shop."));
-  }, []);
+  }, [preview]);
 
-  useEffect(() => saveCart(cart), [cart]);
+  useEffect(() => {
+    saveCart(carts.cooked, "cooked");
+    saveCart(carts.fresh, "fresh");
+  }, [carts]);
 
   const products = catalog?.products ?? [];
   const places = catalog ? servedPlaces(catalog) : [];
   const shelves = SHOP_CATEGORIES.filter((c) => products.some((p) => catOf(p) === c.id));
   const cooked = products.filter((p) => catOf(p) === "cooked");
+  // BigChix leads with its menu once there are dishes; until then the shop is fresh chicken.
+  const menuFirst = cooked.length > 0;
+  const onFresh = freshAll || (category !== null && category !== "cooked");
+  const basket: Basket = menuFirst && !onFresh ? "cooked" : "fresh";
+  const otherBasket: Basket = basket === "cooked" ? "fresh" : "cooked";
+  const cart = carts[basket];
+  const otherCount = carts[otherBasket].items.reduce((n, i) => n + i.qty, 0);
+  const { quote, loading } = useShopQuote(cart);
+  usePublicMeta(t(menuFirst && !onFresh ? "heroTitle" : onFresh ? "freshTitle" : "title"), t("heroNote"));
+
+  function changeQty(p: ShopItem, qty: number) {
+    const b = basketOfCategory(catOf(p));
+    setCarts((prev) => ({ ...prev, [b]: setQty(prev[b], p.sku, qty) }));
+  }
   const placeValue = cart.sector ? `${cart.district}|${cart.sector}` : "";
   const canContinue = Boolean(catalog?.open && quote?.ok);
   const itemCount = cart.items.reduce((n, i) => n + i.qty, 0);
@@ -108,20 +130,16 @@ export function ShopPage() {
         )
       : null;
 
-  // BigChix leads: the front page is the cooked menu; fresh chicken is one tap away.
-  const menuFirst = cooked.length > 0;
   const freshShelves = shelves.filter((c) => c.id !== "cooked");
-  const onFresh = category !== null && category !== "cooked";
-  const shown = category
+  const shown = freshAll
+    ? freshShelves
+    : category
     ? shelves.filter((c) => c.id === category)
     : menuFirst
       ? shelves.filter((c) => c.id === "cooked")
       : shelves;
   const groups = shown.map((c) => ({ ...c, items: products.filter((p) => catOf(p) === c.id) }));
   const heroPhoto = shopPhotoSrc((cooked.find((p) => p.photoUrl) ?? products.find((p) => p.photoUrl))?.photoUrl);
-  const freshFrom = freshShelves.length
-    ? Math.min(...products.filter((p) => catOf(p) !== "cooked").map((p) => p.priceRwf))
-    : 0;
 
   const extraClosedMessage =
     catalog?.closedMessage && !/^The shop is (closed for now|not open yet)\.?$/i.test(catalog.closedMessage.trim())
@@ -129,12 +147,13 @@ export function ShopPage() {
       : "";
 
   function checkout() {
-    if (canContinue) navigate(shopPath("checkout"));
+    if (canContinue) navigate(checkoutPath(basket));
     else document.getElementById("your-order")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   function card(p: ShopItem) {
-    const qty = qtyOf(cart, p.sku);
+    const qty = qtyOf(carts[basketOfCategory(catOf(p))], p.sku);
+    const orderable = p.orderable !== false;
     const name = locale === "rw" && p.nameRw ? p.nameRw : p.name;
     const description = locale === "rw" && p.descriptionRw ? p.descriptionRw : p.description;
     const size = sizeLabel(p.weightMinKg, p.weightMaxKg, locale);
@@ -159,18 +178,19 @@ export function ShopPage() {
                 type="button"
                 className="sh-add"
                 aria-label={`${t("add")}: ${name}`}
-                disabled={!catalog?.open}
-                onClick={() => setCart((prev) => setQty(prev, p.sku, 1))}
+                disabled={!catalog?.open || !orderable}
+                title={orderable ? undefined : t("dishSoon")}
+                onClick={() => changeQty(p, 1)}
               >
                 <Plus size={20} strokeWidth={2.6} aria-hidden />
               </button>
             ) : (
               <span className="sh-qty">
-                <button type="button" aria-label={t("less")} onClick={() => setCart((prev) => setQty(prev, p.sku, qty - 1))}>
+                <button type="button" aria-label={t("less")} onClick={() => changeQty(p, qty - 1)}>
                   <Minus size={16} strokeWidth={2.6} aria-hidden />
                 </button>
                 <span aria-live="polite">{qty}</span>
-                <button type="button" aria-label={t("more")} onClick={() => setCart((prev) => setQty(prev, p.sku, qty + 1))}>
+                <button type="button" aria-label={t("more")} onClick={() => changeQty(p, qty + 1)}>
                   <Plus size={16} strokeWidth={2.6} aria-hidden />
                 </button>
               </span>
@@ -195,7 +215,8 @@ export function ShopPage() {
         value={placeValue}
         onChange={(e) => {
           const [district = "", sector = ""] = e.target.value.split("|");
-          setCart((prev) => ({ ...prev, district, sector }));
+          // One delivery place for both baskets.
+          setCarts((prev) => ({ cooked: { ...prev.cooked, district, sector }, fresh: { ...prev.fresh, district, sector } }));
         }}
       >
         <option value="">{t("chooseSector")}</option>
@@ -234,7 +255,7 @@ export function ShopPage() {
         </div>
       ) : null}
 
-      {!category ? (
+      {!category && !freshAll ? (
         <section className="sh-hero">
           {heroPhoto ? <img src={heroPhoto} alt="" className="sh-hero-img" /> : <span className="sh-hero-art" aria-hidden="true" />}
           <span className="sh-hero-shade" aria-hidden="true" />
@@ -255,6 +276,9 @@ export function ShopPage() {
           <p className="sh-shelf-sub">{t("freshSub")}</p>
           {freshShelves.length > 1 ? (
             <nav className="sh-cats" aria-label={t("categoriesLabel")}>
+              <Link to={shopPath(FRESH_SLUG)} className="sh-chip" aria-current={freshAll ? "page" : undefined}>
+                {t("catAll")}
+              </Link>
               {freshShelves.map((c) => (
                 <Link key={c.id} to={categoryPath(c.id)} className="sh-chip" aria-current={category === c.id ? "page" : undefined}>
                   {t(CAT_LABEL[c.id])}
@@ -269,6 +293,13 @@ export function ShopPage() {
         </Link>
       )}
 
+      {otherCount > 0 ? (
+        <p className="sh-basket-note">
+          {t(otherBasket === "fresh" ? "otherFresh" : "otherCooked", { n: otherCount })}{" "}
+          <Link to={otherBasket === "fresh" ? shopPath(FRESH_SLUG) : shopPath()}>{t("openBasket")} →</Link>
+        </p>
+      ) : null}
+
       {catalog ? (
         <div className={itemCount > 0 ? "mt-6 grid gap-6 lg:grid-cols-[1fr_22rem]" : "mt-6"}>
           <div className="space-y-9">
@@ -281,7 +312,7 @@ export function ShopPage() {
             ) : null}
             {groups.map((g) => (
               <section key={g.id} aria-labelledby={`shelf-${g.id}`}>
-                {!onFresh || freshShelves.length === 1 ? (
+                {!onFresh || freshAll || freshShelves.length === 1 ? (
                   <div className="sh-shelf-head">
                     <h2 id={`shelf-${g.id}`} className="grill-display sh-shelf-title">
                       {g.id === "cooked" ? t("menuTitle") : t(CAT_LABEL[g.id])}
@@ -297,16 +328,13 @@ export function ShopPage() {
             ))}
 
             {menuFirst && !category && freshShelves.length > 0 ? (
-              <Link to={categoryPath(freshShelves[0].id)} className="sh-fresh-link">
-                <span>
-                  <span className="sh-fresh-ask">{t("freshAsk")}</span>
-                  <span className="sh-fresh-sub">{t("freshLinkSub", { amount: formatRwf(freshFrom) })}</span>
-                </span>
-                <span className="sh-fresh-go">
+              <p className="sh-fresh-line">
+                {t("freshAsk")}{" "}
+                <Link to={shopPath(FRESH_SLUG)} className="sh-fresh-go">
                   {t("freshLink")}
-                  <ArrowRight size={16} strokeWidth={2.4} aria-hidden />
-                </span>
-              </Link>
+                  <ArrowRight size={15} strokeWidth={2.4} aria-hidden />
+                </Link>
+              </p>
             ) : null}
           </div>
 

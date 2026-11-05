@@ -6,7 +6,7 @@ import { StoreWhatsAppFab } from "../../components/public/StoreWhatsAppFab";
 import type { PublicOutletCtx } from "../../components/public/PublicLayout";
 import { type LaborerLocale, writePreLoginLocale } from "../../i18n/laborerI18n";
 import { MARKET_HOST } from "../../lib/marketHost";
-import { categoryPath, shopPath } from "../../lib/marketSections";
+import { FRESH_SLUG, shopPath } from "../../lib/marketSections";
 import { clevaMarketWhatsapp, waMeHref } from "../../lib/marketWhatsapp";
 import type { StoreLocale } from "../../lib/publicStoreCopy";
 import { BigChixMark } from "./BigChixMark";
@@ -21,7 +21,7 @@ function readInitialLocale(): StoreLocale {
   }
 }
 
-/** The food shop: shop.cleva.rw (or /shop locally). Only food here; businesses go to market.cleva.rw. */
+/** The food shop: bigchix.cleva.rw (or /shop locally). Only food here; businesses go to market.cleva.rw. */
 export function ShopLayout() {
   const [locale, setLocale] = useState<StoreLocale>(readInitialLocale);
   const t = (k: ShopCopyKey) => shopT(locale, k);
@@ -64,8 +64,8 @@ export function ShopLayout() {
             <div className="store-footer-col">
               <p className="store-footer-label">{t("footerMenu")}</p>
               <nav className="store-footer-links" aria-label={t("footerMenu")}>
-                <Link to={shopPath()}>{t("backToMenu")}</Link>
-                <Link to={categoryPath("whole")}>{t("freshLink")}</Link>
+                <Link to={shopPath()}>{t("menuLink")}</Link>
+                <Link to={shopPath(FRESH_SLUG)}>{t("freshLink")}</Link>
               </nav>
             </div>
             <div className="store-footer-col">

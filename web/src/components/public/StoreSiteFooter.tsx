@@ -58,7 +58,7 @@ export function StoreSiteFooter({ locale }: { locale: StoreLocale }) {
                   Instagram
                 </a>
               ) : null}
-              <a href="https://shop.cleva.rw/">BigChix: chicken for home</a>
+              <a href="https://bigchix.cleva.rw/">BigChix: chicken for home</a>
               {facebook ? (
                 <a href={facebook} target="_blank" rel="noreferrer">
                   Facebook
