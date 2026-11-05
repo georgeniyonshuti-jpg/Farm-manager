@@ -48,6 +48,7 @@ import {
 } from "../../../api/shop.api";
 import { ShopOrdersPanel } from "./ShopOrdersPanel";
 import { BigChixRidersPanel } from "./BigChixRidersPanel";
+import { BigChixLaunchCard } from "./BigChixLaunchCard";
 import { ShopPayoutsPanel, ShopTodayPanel } from "./ShopMoneyPanels";
 
 type Tab = "orders" | "today" | "payouts" | "products" | "zones" | "butchers" | "kitchens" | "riders" | "settings";
@@ -318,6 +319,10 @@ export function ShopSetupPage({ mode = "shop" }: { mode?: "shop" | "bigchix" }) 
 
         {tab === "today" ? <ShopTodayPanel /> : null}
         {tab === "payouts" ? <ShopPayoutsPanel /> : null}
+
+        {tab === "products" && bigchix ? (
+          <BigChixLaunchCard onSale={Boolean(setup.dishesOnSale)} dishes={dishes} kitchens={kitchens} onChanged={load} />
+        ) : null}
 
         {tab === "products" ? (
           <SectionCard flushBody>

@@ -423,6 +423,7 @@ export async function getShopSetup(dbQuery) {
       products: all.products.map((r) => mapProduct({ ...r, id: String(r.id) })),
       zones: all.zones.map(mapZone),
       butchers: all.butchers.filter((b) => (b.kind || "butcher") === "butcher").map((b) => mapButcher(b, all.links)),
+      dishesOnSale: all.settings?.dishes_on_sale === true,
       kitchens: all.butchers
         .filter((b) => b.kind === "kitchen")
         .map((b) => mapKitchen(b, all.links, all.kitchenSettings, all.kitchenDishes)),
@@ -755,5 +756,47 @@ export async function saveKitchen(dbQuery, id, body, actor) {
     if (String(e?.code) === "23503") return bad("One of the chosen zones or dishes no longer exists.");
     if (String(e?.code) === "22P02") return bad("One of the chosen zones or dishes is not valid.");
     return dbError(e, "Could not save the kitchen.");
+  }
+}
+
+/**
+ * What still stops BigChix dishes going on sale. Empty means they can.
+ * Needs a dish on the menu, an active kitchen that makes it with opening
+ * hours, and a way to reach customers: a rider for delivery, or pickup.
+ */
+export function dishesOnSaleBlockers(c) {
+  const out = [];
+  if (!(c.activeDishes > 0)) out.push("Add at least one dish to the menu that is on sale.");
+  if (!(c.readyKitchens > 0)) out.push("Make a kitchen active, with opening hours and at least one dish and its fee.");
+  if (!(c.activeRiders > 0) && !(c.pickupKitchens > 0)) out.push("Add a rider, or turn on pickup at a kitchen.");
+  return out;
+}
+
+export async function setDishesOnSale(dbQuery, body, actor) {
+  const onSale = body?.onSale === true;
+  try {
+    if (onSale) {
+      const r = await dbQuery(
+        `SELECT
+           (SELECT count(*) FROM shop_products WHERE active AND category = 'cooked')::int AS "activeDishes",
+           (SELECT count(*) FROM shop_butchers b JOIN shop_kitchen_settings s ON s.partner_id = b.id
+             WHERE b.kind = 'kitchen' AND b.status = 'active' AND s.hours <> '{}'::jsonb
+               AND EXISTS (SELECT 1 FROM shop_kitchen_dishes d JOIN shop_products p ON p.id = d.product_id
+                            WHERE d.partner_id = b.id AND p.active AND p.category = 'cooked'))::int AS "readyKitchens",
+           (SELECT count(*) FROM shop_butchers b JOIN shop_kitchen_settings s ON s.partner_id = b.id
+             WHERE b.kind = 'kitchen' AND b.status = 'active' AND s.pickup_enabled)::int AS "pickupKitchens",
+           (SELECT count(*) FROM shop_riders WHERE active)::int AS "activeRiders"`
+      );
+      const blockers = dishesOnSaleBlockers(r.rows[0] || {});
+      if (blockers.length) return bad(`Dishes cannot go on sale yet. ${blockers.join(" ")}`);
+    }
+    await dbQuery(
+      `UPDATE shop_settings SET dishes_on_sale = $1, updated_at = now(), updated_by = $2::uuid WHERE id = 1`,
+      [onSale, actor.userId]
+    );
+    actor.audit?.(actor.userId, actor.role, "shop.dishes_on_sale", "shop_settings", "1", { onSale });
+    return { ok: true, dishesOnSale: onSale };
+  } catch (e) {
+    return dbError(e, "Could not change whether dishes are on sale.");
   }
 }

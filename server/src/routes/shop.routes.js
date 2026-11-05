@@ -16,9 +16,17 @@ import {
   payButcher,
   setDeliveryCost,
 } from "../services/shop/shopMoney.js";
-import { cancelOrder, confirmPayment, listDeskOrders, rejectPayment } from "../services/shop/shopOrders.js";
+import { cancelOrder, confirmPayment, listDeskOrders, placeShopOrder, rejectPayment } from "../services/shop/shopOrders.js";
 import { saveShopPhoto } from "../services/shop/shopPhotos.js";
-import { getShopSetup, saveButcher, saveKitchen, saveProduct, saveShopSettings, saveZone } from "../services/shop/shopSetup.js";
+import {
+  getShopSetup,
+  saveButcher,
+  saveKitchen,
+  saveProduct,
+  saveShopSettings,
+  saveZone,
+  setDishesOnSale,
+} from "../services/shop/shopSetup.js";
 import { declineKitchenOrder } from "../services/shop/shopKitchenOrders.js";
 import { bookRider, getRiderBoard, payRider, saveRider } from "../services/shop/shopRiders.js";
 
@@ -108,6 +116,32 @@ export function createShopDeskRouter(deps) {
   router.put("/butchers/:id", async (req, res) => {
     const id = idParam(req, res);
     if (id) sendResult(res, await saveButcher(dbQuery, id, req.body ?? {}, actor(req)));
+  });
+
+  router.put("/bigchix/on-sale", async (req, res) => {
+    if (req.authUser?.role !== "superuser") {
+      res.status(403).json({ error: "Only a superuser can put dishes on sale." });
+      return;
+    }
+    sendResult(res, await setDishesOnSale(dbQuery, req.body ?? {}, actor(req)));
+  });
+
+  // A staff test order: dishes may be off sale and the shop closed. It is a real order, paid by MoMo.
+  router.post("/test-orders", async (req, res) => {
+    if (req.authUser?.role !== "superuser") {
+      res.status(403).json({ error: "Only a superuser can place a test order." });
+      return;
+    }
+    const r = await placeShopOrder(dbQuery, { ...(req.body ?? {}), formStartedAt: 0 }, {
+      test: true,
+      attribution: { source: "test" },
+    });
+    if (r.ok) {
+      const a = actor(req);
+      a.audit?.(a.userId, a.role, "shop.order.test", "shop_order", r.ref, {});
+      r.link = `https://bigchix.cleva.rw/order/${encodeURIComponent(r.ref)}?t=${encodeURIComponent(r.token)}`;
+    }
+    sendResult(res, r, 201);
   });
 
   router.get("/riders", async (_req, res) => {

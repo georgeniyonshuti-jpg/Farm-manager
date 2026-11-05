@@ -16,7 +16,14 @@ export type Basket = "cooked" | "fresh";
 const CART_KEYS: Record<Basket, string> = { fresh: "cleva_shop_cart_v1", cooked: "cleva_shop_cart_cooked_v1" };
 const LAST_ORDER_KEY = "cleva_shop_last_order_v1";
 
-export type ShopCart = { items: CartItem[]; district: string; sector: string };
+export type ShopCart = {
+  items: CartItem[];
+  district: string;
+  sector: string;
+  /** Dish orders only: delivered, or collected at the chosen kitchen. */
+  fulfilment?: "delivery" | "pickup";
+  pickupKitchenId?: string;
+};
 export type LastOrder = { ref: string; token: string };
 
 export const EMPTY_CART: ShopCart = { items: [], district: "", sector: "" };
@@ -69,6 +76,8 @@ export function cleanCart(value: unknown): ShopCart {
     items: [...qty].map(([sku, n]) => ({ sku, qty: n })),
     district: typeof v.district === "string" ? v.district : "",
     sector: typeof v.sector === "string" ? v.sector : "",
+    ...(v.fulfilment === "pickup" ? { fulfilment: "pickup" as const } : {}),
+    ...(typeof v.pickupKitchenId === "string" && v.pickupKitchenId ? { pickupKitchenId: v.pickupKitchenId } : {}),
   };
 }
 

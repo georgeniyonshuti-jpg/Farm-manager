@@ -32,7 +32,12 @@ export function CheckoutPage() {
       .catch((e) => setError(e instanceof Error ? e.message : "Could not load the shop."));
   }, []);
 
-  if (cart.items.length === 0 || !cart.sector) return <Navigate to={shopPath()} replace />;
+  const pickup = basket === "cooked" && cart.fulfilment === "pickup";
+  const placed = pickup ? Boolean(cart.pickupKitchenId) : Boolean(cart.sector);
+  if (cart.items.length === 0 || !placed) return <Navigate to={shopPath()} replace />;
+  const pickupKitchen = pickup ? catalog?.kitchens?.find((k) => k.id === cart.pickupKitchenId) ?? null : null;
+  // Fresh chicken follows the shop's hours; dishes follow the kitchens.
+  const canOrder = basket === "cooked" ? Boolean(catalog?.dishesOnSale) : Boolean(catalog?.open);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -44,10 +49,12 @@ export function CheckoutPage() {
         phone,
         district: cart.district,
         sector: cart.sector,
-        addressNote: address,
+        addressNote: pickup ? "" : address,
         items: cart.items,
         website,
         formStartedAt: startedAt.current,
+        ...(basket === "cooked" ? { fulfilment: pickup ? ("pickup" as const) : ("delivery" as const) } : {}),
+        ...(pickup && cart.pickupKitchenId ? { pickupKitchenId: cart.pickupKitchenId } : {}),
       });
       saveLastOrder({ ref: r.ref, token: r.token });
       saveCart(null, basket);
@@ -70,10 +77,18 @@ export function CheckoutPage() {
           className="store-form space-y-3 rounded-3xl border border-[var(--store-line)] bg-[var(--store-card)] p-5 sm:p-6"
           onSubmit={(e) => void submit(e)}
         >
-          <p className="store-request-title">{t("checkoutTitle")}</p>
-          <p className="text-sm text-[var(--store-muted)]">
-            {cart.sector} ({cart.district})
-          </p>
+          <p className="store-request-title">{pickup ? t("pickupCheckoutTitle") : t("checkoutTitle")}</p>
+          {pickup ? (
+            <p className="text-sm text-[var(--store-muted)]">
+              {pickupKitchen
+                ? `${pickupKitchen.name}${pickupKitchen.pickup?.address ? ` · ${pickupKitchen.pickup.address}` : ""} · ${t("readyIn", { n: pickupKitchen.readyInMinutes })}`
+                : "…"}
+            </p>
+          ) : (
+            <p className="text-sm text-[var(--store-muted)]">
+              {cart.sector} ({cart.district})
+            </p>
+          )}
           <label className="store-field">
             <span>
               {t("name")} <em className="store-required">*</em>
@@ -95,13 +110,15 @@ export function CheckoutPage() {
             />
             <span className="store-field-hint">{t("phoneHint")}</span>
           </label>
-          <label className="store-field">
-            <span>
-              {t("address")} <em className="store-required">*</em>
-            </span>
-            <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={3} required minLength={3} />
-            <span className="store-field-hint">{t("addressHint")}</span>
-          </label>
+          {pickup ? null : (
+            <label className="store-field">
+              <span>
+                {t("address")} <em className="store-required">*</em>
+              </span>
+              <textarea value={address} onChange={(e) => setAddress(e.target.value)} rows={3} required minLength={3} />
+              <span className="store-field-hint">{t("addressHint")}</span>
+            </label>
+          )}
           {/* Left empty by people; bots fill it. */}
           <input
             type="text"
@@ -118,15 +135,17 @@ export function CheckoutPage() {
               {error}
             </p>
           ) : null}
-          <button type="submit" className="store-btn store-btn-ember w-full" disabled={busy || !quote?.ok || !catalog?.open}>
+          <button type="submit" className="store-btn store-btn-ember w-full" disabled={busy || !quote?.ok || !canOrder}>
             {busy ? t("placing") : t("placeOrder")}
           </button>
         </form>
 
         <aside className="h-fit rounded-3xl border border-[var(--store-line)] bg-[var(--store-card)] p-5">
           <p className="store-request-title">{t("yourOrder")}</p>
-          {catalog ? <ShopSummary locale={locale} catalog={catalog} cart={cart} quote={quote} loading={loading} /> : null}
-          {catalog && !catalog.open ? <p className="mt-3 text-sm text-[var(--store-danger)]">{catalog.closedMessage || t("closed")}</p> : null}
+          {catalog ? <ShopSummary locale={locale} catalog={catalog} cart={cart} quote={quote} loading={loading} dishes={basket === "cooked"} /> : null}
+          {catalog && !canOrder ? (
+            <p className="mt-3 text-sm text-[var(--store-danger)]">{basket === "cooked" ? t("grillClosed") : catalog.closedMessage || t("closed")}</p>
+          ) : null}
         </aside>
       </div>
     </div>

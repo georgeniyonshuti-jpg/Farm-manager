@@ -25,6 +25,7 @@ import {
 } from "./shopCart";
 import { shopT, type ShopCopyKey } from "./shopCopy";
 import { ShopSummary, sizeLabel } from "./ShopSummary";
+import { anyDishAvailable, dishState, kitchensOpenAt, pickupKitchensFor, zoneIdFor, type DishState } from "./dishAvailability";
 
 /** Prices the cart on the server, so the page and the order always agree. */
 export function useShopQuote(cart: ShopCart) {
@@ -32,7 +33,8 @@ export function useShopQuote(cart: ShopCart) {
   const [loading, setLoading] = useState(false);
   const key = JSON.stringify(cart);
   useEffect(() => {
-    if (cart.items.length === 0 || !cart.sector) {
+    const placed = cart.fulfilment === "pickup" ? Boolean(cart.pickupKitchenId) : Boolean(cart.sector);
+    if (cart.items.length === 0 || !placed) {
       setQuote(null);
       return;
     }
@@ -102,10 +104,13 @@ export function ShopPage() {
   const places = catalog ? servedPlaces(catalog) : [];
   const shelves = SHOP_CATEGORIES.filter((c) => products.some((p) => catOf(p) === c.id));
   const cooked = products.filter((p) => catOf(p) === "cooked");
-  // BigChix leads with its menu once there are dishes; until then the shop is fresh chicken.
-  const menuFirst = cooked.length > 0;
+  const dishesLive = Boolean(catalog?.dishesOnSale);
+  // BigChix leads with its menu when a kitchen can cook now; otherwise fresh chicken leads.
+  const dishesNow = Boolean(catalog) && cooked.length > 0 && (anyDishAvailable(catalog!) || (preview && !(catalog!.kitchens ?? []).length));
+  const menuFirst = dishesNow;
+  const grillOpensAt = catalog ? kitchensOpenAt(catalog) : null;
   const onFresh = freshAll || (category !== null && category !== "cooked");
-  const basket: Basket = menuFirst && !onFresh ? "cooked" : "fresh";
+  const basket: Basket = category === "cooked" || (menuFirst && !onFresh) ? "cooked" : "fresh";
   const otherBasket: Basket = basket === "cooked" ? "fresh" : "cooked";
   const cart = carts[basket];
   const otherCount = carts[otherBasket].items.reduce((n, i) => n + i.qty, 0);
@@ -117,10 +122,18 @@ export function ShopPage() {
     setCarts((prev) => ({ ...prev, [b]: setQty(prev[b], p.sku, qty) }));
   }
   const placeValue = cart.sector ? `${cart.district}|${cart.sector}` : "";
-  const canContinue = Boolean(catalog?.open && quote?.ok);
+  const cookedCart = carts.cooked;
+  const dishCtx = {
+    fulfilment: cookedCart.fulfilment ?? "delivery",
+    pickupKitchenId: cookedCart.pickupKitchenId,
+    zoneId: catalog && cart.sector ? zoneIdFor(catalog, cart.district, cart.sector) : undefined,
+  } as const;
+  const pickupChoices = catalog ? pickupKitchensFor(catalog, cookedCart.items.map((i) => i.sku)) : [];
+  // Fresh chicken follows the shop's hours; dishes follow the kitchens.
+  const canContinue = Boolean(quote?.ok && (basket === "cooked" ? dishesLive : catalog?.open));
   const itemCount = cart.items.reduce((n, i) => n + i.qty, 0);
   const waHref =
-    catalog?.open && cart.items.length > 0
+    (basket === "cooked" ? dishesLive : catalog?.open) && cart.items.length > 0
       ? waMeHref(
           clevaMarketWhatsapp(),
           whatsappOrderText(cart, products, {
@@ -137,7 +150,7 @@ export function ShopPage() {
     ? shelves.filter((c) => c.id === category)
     : menuFirst
       ? shelves.filter((c) => c.id === "cooked")
-      : shelves;
+      : shelves.filter((c) => c.id !== "cooked");
   const groups = shown.map((c) => ({ ...c, items: products.filter((p) => catOf(p) === c.id) }));
   const heroPhoto = shopPhotoSrc((cooked.find((p) => p.photoUrl) ?? products.find((p) => p.photoUrl))?.photoUrl);
 
@@ -153,7 +166,21 @@ export function ShopPage() {
 
   function card(p: ShopItem) {
     const qty = qtyOf(carts[basketOfCategory(catOf(p))], p.sku);
-    const orderable = p.orderable !== false;
+    const isDish = catOf(p) === "cooked";
+    const dish: { state: DishState; opensAt?: string } | null = isDish && catalog ? dishState(p.sku, catalog, dishCtx) : null;
+    const orderable = isDish ? dish?.state === "available" : Boolean(catalog?.open) && p.orderable !== false;
+    const dishNote =
+      dish && dish.state !== "available"
+        ? dish.state === "closed"
+          ? dish.opensAt
+            ? t("dishOpensAt", { time: dish.opensAt })
+            : t("dishClosed")
+          : dish.state === "sold_out"
+            ? t("dishSoldOut")
+            : dish.state === "not_here"
+              ? t("dishNotHere")
+              : t("dishSoon")
+        : null;
     const name = locale === "rw" && p.nameRw ? p.nameRw : p.name;
     const description = locale === "rw" && p.descriptionRw ? p.descriptionRw : p.description;
     const size = sizeLabel(p.weightMinKg, p.weightMaxKg, locale);
@@ -171,6 +198,7 @@ export function ShopPage() {
         <div className="sh-card-body">
           <p className="sh-card-name">{name}</p>
           {size || description ? <p className="sh-card-meta">{size || description}</p> : null}
+          {dishNote ? <p className="sh-card-note">{dishNote}</p> : null}
           <div className="sh-card-foot">
             <span className="sh-price">{formatRwf(p.priceRwf)}</span>
             {qty === 0 ? (
@@ -178,8 +206,8 @@ export function ShopPage() {
                 type="button"
                 className="sh-add"
                 aria-label={`${t("add")}: ${name}`}
-                disabled={!catalog?.open || !orderable}
-                title={orderable ? undefined : t("dishSoon")}
+                disabled={!orderable}
+                title={dishNote ?? undefined}
                 onClick={() => changeQty(p, 1)}
               >
                 <Plus size={20} strokeWidth={2.6} aria-hidden />
@@ -204,7 +232,7 @@ export function ShopPage() {
   // Nothing until the shop answers, so visitors never see the wrong page flash by.
   if (!catalog && !error) return <div className="store-wrap store-body sh-page" aria-busy="true" style={{ minHeight: "60vh" }} />;
 
-  if (catalog && !preview && (catalog.closedReason === "closed" || products.length === 0)) {
+  if (catalog && !preview && ((catalog.closedReason === "closed" && !dishesLive) || products.length === 0)) {
     return <ShopComingSoon locale={locale} />;
   }
 
@@ -246,10 +274,14 @@ export function ShopPage() {
         </p>
       ) : null}
 
-      {catalog && !catalog.open ? (
+      {catalog && !catalog.open && basket === "fresh" ? (
         <div className="sh-note">
           <p className="font-semibold">
-            {preview && catalog.closedReason !== "hours" ? t("previewNote") : t("hoursClosed", { time: catalog.openTime ?? "08:00" })}
+            {preview && catalog.closedReason !== "hours"
+              ? t("previewNote")
+              : catalog.closedReason === "closed"
+                ? t("freshClosed")
+                : t("hoursClosed", { time: catalog.openTime ?? "08:00" })}
           </p>
           {extraClosedMessage ? <p className="mt-1 text-sm text-[var(--store-muted)]">{extraClosedMessage}</p> : null}
         </div>
@@ -292,6 +324,13 @@ export function ShopPage() {
           ← {t("backToMenu")}
         </Link>
       )}
+
+      {!category && !freshAll && !menuFirst && dishesLive && cooked.length > 0 ? (
+        <p className="sh-basket-note">
+          {grillOpensAt ? t("grillOpensAt", { time: grillOpensAt }) : t("grillClosed")}{" "}
+          <Link to={categoryPath("cooked")}>{t("seeMenu")} →</Link>
+        </p>
+      ) : null}
 
       {otherCount > 0 ? (
         <p className="sh-basket-note">
@@ -341,8 +380,51 @@ export function ShopPage() {
           {itemCount > 0 ? (
             <aside id="your-order" className="sh-order h-fit lg:sticky lg:top-24">
               <p className="store-request-title">{t("yourOrder")}</p>
-              {placePicker}
-              <ShopSummary locale={locale} catalog={catalog} cart={cart} quote={quote} loading={loading} />
+              {basket === "cooked" ? (
+                <div className="sh-fulfil" role="group" aria-label={t("fulfilmentLabel")}>
+                  {(["delivery", "pickup"] as const).map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      aria-pressed={(cookedCart.fulfilment ?? "delivery") === f}
+                      onClick={() =>
+                        setCarts((prev) => ({
+                          ...prev,
+                          cooked: { ...prev.cooked, fulfilment: f, pickupKitchenId: f === "pickup" ? prev.cooked.pickupKitchenId : undefined },
+                        }))
+                      }
+                    >
+                      {t(f)}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {basket === "cooked" && cookedCart.fulfilment === "pickup" ? (
+                pickupChoices.length === 0 ? (
+                  <p className="mt-2 text-sm text-[var(--store-muted)]">{t("noPickup")}</p>
+                ) : (
+                  <label className="sh-place">
+                    <span>{t("pickupFrom")}</span>
+                    <select
+                      value={cookedCart.pickupKitchenId ?? ""}
+                      onChange={(e) =>
+                        setCarts((prev) => ({ ...prev, cooked: { ...prev.cooked, pickupKitchenId: e.target.value || undefined } }))
+                      }
+                    >
+                      <option value="">{t("choosePickup")}</option>
+                      {pickupChoices.map((k) => (
+                        <option key={k.id} value={k.id}>
+                          {k.name}
+                          {k.pickup?.sector ? ` · ${k.pickup.sector}` : ""} · {t("readyIn", { n: k.readyInMinutes })}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )
+              ) : (
+                placePicker
+              )}
+              <ShopSummary locale={locale} catalog={catalog} cart={cart} quote={quote} loading={loading} dishes={basket === "cooked"} />
               <button type="button" className="store-btn store-btn-ember mt-4 w-full" disabled={!canContinue} onClick={checkout}>
                 {t("continue")}
               </button>

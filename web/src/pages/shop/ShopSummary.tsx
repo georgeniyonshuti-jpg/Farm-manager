@@ -27,15 +27,18 @@ export function ShopSummary({
   cart,
   quote,
   loading,
+  dishes = false,
 }: {
   locale: StoreLocale;
   catalog: ShopCatalog;
   cart: ShopCart;
   quote: ShopQuote | null;
   loading: boolean;
+  /** A BigChix dish order: no minimum, and the subtotal is food, not chicken. */
+  dishes?: boolean;
 }) {
   const t = (k: Parameters<typeof shopT>[1], v?: Record<string, string | number>) => shopT(locale, k, v);
-  const minimum = minimumText(locale, catalog);
+  const minimum = dishes ? null : minimumText(locale, catalog);
 
   if (cart.items.length === 0) {
     return (
@@ -45,7 +48,9 @@ export function ShopSummary({
       </div>
     );
   }
-  if (!cart.sector) return <p className="mt-2 text-sm text-[var(--store-muted)]">{t("pickSectorFirst")}</p>;
+  const pickup = cart.fulfilment === "pickup";
+  if (pickup && !cart.pickupKitchenId) return <p className="mt-2 text-sm text-[var(--store-muted)]">{t("choosePickup")}</p>;
+  if (!pickup && !cart.sector) return <p className="mt-2 text-sm text-[var(--store-muted)]">{t("pickSectorFirst")}</p>;
   if (!quote) return <p className="mt-2 text-sm text-[var(--store-muted)]">{loading ? "…" : ""}</p>;
 
   if (!quote.ok) {
@@ -74,12 +79,12 @@ export function ShopSummary({
         </div>
       ))}
       <div className="flex justify-between gap-3 border-t border-[var(--store-line)] pt-2">
-        <dt>{t("subtotal")}</dt>
+        <dt>{dishes ? t("subtotalFood") : t("subtotal")}</dt>
         <dd>{formatRwf(quote.subtotalRwf ?? 0)}</dd>
       </div>
       <div className="flex justify-between gap-3">
-        <dt>{t("delivery")}</dt>
-        <dd>{quote.deliveryFeeRwf ? formatRwf(quote.deliveryFeeRwf) : t("free")}</dd>
+        <dt>{pickup ? t("pickup") : t("delivery")}</dt>
+        <dd>{pickup ? "—" : quote.deliveryFeeRwf ? formatRwf(quote.deliveryFeeRwf) : t("free")}</dd>
       </div>
       <div className="flex justify-between gap-3 text-base font-semibold text-[var(--store-ink)]">
         <dt>{t("total")}</dt>

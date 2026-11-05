@@ -74,3 +74,20 @@ describe("kitchen setup", () => {
     assert.equal(ready.ok, true, ready.error);
   });
 });
+
+import { dishesOnSaleBlockers } from "../src/services/shop/shopSetup.js";
+import { dishesOnSale } from "../src/services/shop/shopOrders.js";
+
+describe("putting dishes on sale", () => {
+  it("lists what is missing", () => {
+    assert.equal(dishesOnSaleBlockers({ activeDishes: 0, readyKitchens: 0, activeRiders: 0, pickupKitchens: 0 }).length, 3);
+    assert.deepEqual(dishesOnSaleBlockers({ activeDishes: 2, readyKitchens: 1, activeRiders: 0, pickupKitchens: 1 }), []);
+    assert.deepEqual(dishesOnSaleBlockers({ activeDishes: 2, readyKitchens: 1, activeRiders: 1, pickupKitchens: 0 }), []);
+  });
+
+  it("follows the desk switch, or the server setting", () => {
+    assert.equal(dishesOnSale({ dishes_on_sale: false }, {}), false);
+    assert.equal(dishesOnSale({ dishes_on_sale: true }, {}), true);
+    assert.equal(dishesOnSale({ dishes_on_sale: false }, { SHOP_COOKED_ON_SALE: "1" }), true);
+  });
+});

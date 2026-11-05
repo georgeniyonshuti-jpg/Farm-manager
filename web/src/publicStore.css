@@ -3243,3 +3243,37 @@ a.store-chip {
   display: block;
   margin-top: 0.35rem;
 }
+
+/* Why a dish cannot be added right now (closed, sold out, not in your area). */
+.sh-card-note {
+  margin: 0.15rem 0 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--grill-yellow);
+}
+
+/* Delivery or pickup, for BigChix dish orders. */
+.sh-fulfil {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem;
+  margin-top: 0.75rem;
+  padding: 0.25rem;
+  border-radius: 0.9rem;
+  background: #140f0c;
+}
+
+.sh-fulfil button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 0.7rem;
+  background: transparent;
+  color: var(--store-muted);
+  font: inherit;
+  font-weight: 700;
+}
+
+.sh-fulfil button[aria-pressed="true"] {
+  background: var(--store-ink);
+  color: #140f0c;
+}

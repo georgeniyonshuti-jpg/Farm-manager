@@ -11,7 +11,7 @@ import { pickButcher, zoneForSector } from "./assignButcher.js";
 import { hashToken, newOrderRef, newTrackToken, normalizeOrderRef, trackTokenMatches } from "./orderRef.js";
 import { nextShopOrderStatus } from "./orderStatus.js";
 import { normalizeShopSettings, publicQuoteView, quoteShopOrder } from "./shopQuote.js";
-import { kigaliNow, kitchenPayout, noKitchenMessage, pickKitchen } from "./kitchenRouting.js";
+import { isKitchenOpen, kigaliNow, kitchenPayout, noKitchenMessage, pickKitchen } from "./kitchenRouting.js";
 import { loadKitchens, routeKitchenOrder, sweepLateKitchenOrders } from "./shopKitchenOrders.js";
 
 const DESK_VIEWS = ["to_confirm", "open", "done", "all"];
@@ -125,8 +125,13 @@ export function cookedOnSale(env = process.env) {
 /** Kept for callers that read it once; the live switch is cookedOnSale(). */
 export const COOKED_ON_SALE = cookedOnSale();
 
-export function isOrderable(row) {
-  return cookedOnSale() || (row.category || "whole") !== "cooked";
+/** Dishes are on sale when a superuser switched them on (or the server says so). */
+export function dishesOnSale(settingsRow, env = process.env) {
+  return cookedOnSale(env) || settingsRow?.dishes_on_sale === true;
+}
+
+export function isOrderable(row, onSale = cookedOnSale()) {
+  return onSale || (row.category || "whole") !== "cooked";
 }
 
 /** Dishes and fresh chicken are separate orders. Returns the order's channel, or an error. */
@@ -149,7 +154,9 @@ function quoteKitchenOrder(ctx, body, items, now) {
   const pickupKitchenId = str(body?.pickupKitchenId, 64);
   const zone = fulfilment === "pickup" ? null : zoneForSector(ctx.zones, body?.district, body?.sector);
   const pricingZone = fulfilment === "pickup" ? { id: "", deliveryFeeRwf: 0, freeDeliveryOverRwf: null } : zone;
-  const quote = quoteShopOrder({ items, products: ctx.products, zone: pricingZone, settings: ctx.settings || {} });
+  // The shop's minimum order is for fresh chicken from butchers; a single dish is a fine order.
+  const dishSettings = { ...(ctx.settings || {}), min_order_rwf: 0, min_order_items: 0 };
+  const quote = quoteShopOrder({ items, products: ctx.products, zone: pricingZone, settings: dishSettings });
   if (!quote.ok) return { quote, fulfilment, zone };
   const lines = quote.lines.map((l) => ({ ...l }));
   const need = { fulfilment, zoneId: zone?.id ?? null, pickupKitchenId, productIds: [...new Set(lines.map((l) => l.productId))] };
@@ -191,11 +198,14 @@ async function loadContext(dbQuery, { withKitchens = false } = {}) {
          FROM shop_zones WHERE active`
     ),
   ]);
+  const settingsRow = settings.rows[0] || null;
+  const onSale = dishesOnSale(settingsRow);
   return {
     kitchens: withKitchens ? await loadKitchens(dbQuery) : [],
-    settings: settings.rows[0] || null,
+    settings: settingsRow,
+    dishesOnSale: onSale,
     allProducts: products.rows,
-    products: products.rows.filter(isOrderable),
+    products: products.rows.filter((p) => isOrderable(p, onSale)),
     zones: zones.rows,
   };
 }
@@ -229,6 +239,40 @@ export async function expireUnpaidOrders(dbQuery) {
 
 // ---------- public ----------
 
+/**
+ * What the shop may know about kitchens to show dishes honestly: which are
+ * open now, where they deliver, which dishes they can make today, and pickup
+ * details. Never fees, payout numbers or contacts.
+ */
+export function publicKitchens(kitchens, now = new Date(), products = []) {
+  const clock = kigaliNow(now);
+  const skuOf = new Map(products.map((p) => [String(p.id), p.sku]));
+  return (kitchens || [])
+    .filter((k) => k.status === "active")
+    .map((k) => ({
+      id: k.id,
+      name: k.name,
+      open: Boolean(k.takingOrders) && isKitchenOpen(k.hours, clock) && (k.openOrders ?? 0) < (k.maxOpenOrders ?? 10),
+      zoneIds: (k.zones || []).map((z) => z.zoneId),
+      // Dish codes (the shop's item key) it can make today.
+      dishSkus: (k.dishes || [])
+        .filter((d) => !(d.soldOutOn && d.soldOutOn === clock.date))
+        .map((d) => skuOf.get(String(d.productId)))
+        .filter(Boolean),
+      readyInMinutes: k.prepMinutes ?? 25,
+      opensAt: nextOpening(k.hours, clock),
+      pickup: k.pickupEnabled
+        ? { district: k.district, sector: k.sector, address: k.pickupAddress, directions: k.pickupDirections }
+        : null,
+    }));
+}
+
+/** "Opens at 11:00" (today, later) or null. */
+function nextOpening(hours, clock) {
+  const h = hours?.[clock.day];
+  return h && h.open && clock.time < h.open ? h.open : null;
+}
+
 function publicProduct(r) {
   return {
     sku: r.sku,
@@ -241,13 +285,15 @@ function publicProduct(r) {
     priceRwf: r.price_rwf,
     photoUrl: r.photo_url,
     category: r.category || "whole",
-    orderable: isOrderable(r),
+    orderable: isOrderable(r, r.__onSale),
   };
 }
 
 export async function getShopCatalog(dbQuery, now = new Date(), { preview = false } = {}) {
   try {
     const ctx = await loadContext(dbQuery);
+    const showDishes = ctx.dishesOnSale || preview;
+    const kitchens = showDishes ? publicKitchens(await loadKitchens(dbQuery), now, ctx.allProducts) : [];
     const state = shopOpenState(ctx.settings, now);
     const cfg = normalizeShopSettings(ctx.settings || {});
     return {
@@ -259,8 +305,13 @@ export async function getShopCatalog(dbQuery, now = new Date(), { preview = fals
       closeTime: state.closeTime ?? null,
       minOrderRwf: cfg.minOrderRwf,
       minOrderItems: cfg.minOrderItems,
-      products: (preview ? ctx.allProducts : ctx.products).filter((p) => p.active).map(publicProduct),
+      dishesOnSale: ctx.dishesOnSale,
+      products: (preview ? ctx.allProducts : ctx.products)
+        .filter((p) => p.active)
+        .map((p) => publicProduct({ ...p, __onSale: ctx.dishesOnSale })),
+      kitchens,
       zones: ctx.zones.map((z) => ({
+        id: z.id,
         name: z.name,
         district: z.district,
         sectors: z.sectors || [],
@@ -277,8 +328,11 @@ export async function quoteForCustomer(dbQuery, body, now = new Date()) {
   try {
     const ctx = await loadContext(dbQuery);
     const items = itemsFromBody(body);
-    const channel = channelForItems(items, ctx.products);
+    const channel = channelForItems(items, ctx.allProducts);
     if (!channel.ok) return { ok: true, quote: { ok: false, code: "mixed", error: channel.error } };
+    if (channel.channel === "kitchen" && !ctx.dishesOnSale) {
+      return { ok: true, quote: { ok: false, code: "dishes_off", error: "BigChix dishes are not on sale yet." } };
+    }
     if (channel.channel === "kitchen") {
       ctx.kitchens = await loadKitchens(dbQuery);
       const k = quoteKitchenOrder(ctx, body, items, now);
@@ -296,17 +350,29 @@ export async function quoteForCustomer(dbQuery, body, now = new Date()) {
  * Places an order. Returns the ref and the raw tracking token; the token is
  * shown to the customer once, in their link, and only its hash is stored.
  */
-export async function placeShopOrder(dbQuery, body, { attribution = {}, now = new Date() } = {}) {
+/**
+ * `test`: a staff test order from the desk. It may include dishes before they
+ * are on sale and ignores the shop's opening, but still needs a kitchen that
+ * can take it, and is paid and handled like any order.
+ */
+export async function placeShopOrder(dbQuery, body, { attribution = {}, now = new Date(), test = false } = {}) {
   // Bots and empty forms stop here, before any database work.
   const early = customerFromBody(body, now.getTime(), { pickup: body?.fulfilment === "pickup" });
   if (!early.ok && early.error !== "Choose your district and sector.") return early;
   try {
     const ctx = await loadContext(dbQuery);
-    const state = shopOpenState(ctx.settings, now);
-    if (!state.open) return fail(409, state.message, "shop_closed");
+    if (test) ctx.products = ctx.allProducts;
     const items = itemsFromBody(body);
-    const channel = channelForItems(items, ctx.products);
+    // Judge the channel on the whole menu, so a dish off sale says so instead of "closed".
+    const channel = channelForItems(items, ctx.allProducts);
     if (!channel.ok) return fail(400, channel.error, "mixed");
+    if (channel.channel === "fresh") {
+      // Fresh chicken follows the shop's hours. Dishes follow each kitchen's own hours instead.
+      const state = shopOpenState(ctx.settings, now);
+      if (!state.open && !test) return fail(409, state.message, "shop_closed");
+    } else if (!ctx.dishesOnSale && !test) {
+      return fail(409, "BigChix dishes are not on sale yet.", "dishes_off");
+    }
 
     let zone = null;
     let quote = null;
@@ -415,8 +481,14 @@ async function loadOrderByRef(dbQuery, ref) {
     `SELECT o.id::text, o.ref, o.track_token_hash, o.customer_name, o.district, o.sector, o.status,
             o.payment_status, o.momo_txn_id, o.subtotal_rwf, o.delivery_fee_rwf, o.total_rwf,
             o.placed_at, o.updated_at, o.accepted_at, o.ready_at, o.out_at, o.delivered_at, o.cancelled_at,
-            o.butcher_id::text, s.pay_within_minutes
+            o.butcher_id::text, s.pay_within_minutes, o.channel, o.fulfilment,
+            k.shop_name AS partner_name, k.district AS partner_district, k.sector AS partner_sector,
+            ks.pickup_address, ks.pickup_directions, ks.prep_minutes,
+            r.name AS rider_name, r.phone AS rider_phone
        FROM shop_orders o CROSS JOIN shop_settings s
+       LEFT JOIN shop_butchers k ON k.id = o.butcher_id
+       LEFT JOIN shop_kitchen_settings ks ON ks.partner_id = o.butcher_id
+       LEFT JOIN shop_riders r ON r.id = o.rider_id
       WHERE s.id = 1 AND o.ref = $1`,
     [ref]
   );
@@ -460,6 +532,34 @@ export function publicOrderView(o, lines, payTo) {
     outAt: o.out_at,
     deliveredAt: o.delivered_at,
     cancelledAt: o.cancelled_at,
+    channel: o.channel || "fresh",
+    fulfilment: o.fulfilment || "delivery",
+    ...kitchenOrderExtras(o),
+  };
+}
+
+/**
+ * Dish orders tell the customer when to expect the food, where to collect it,
+ * and who is bringing it. Kitchen and rider details only once they apply.
+ */
+function kitchenOrderExtras(o) {
+  if (o.channel !== "kitchen") return {};
+  const kitchenKnown = Boolean(o.butcher_id) && ["paid", "accepted", "ready", "out_for_delivery", "delivered"].includes(o.status);
+  const readyBy =
+    o.accepted_at && o.prep_minutes ? new Date(new Date(o.accepted_at).getTime() + Number(o.prep_minutes) * 60000).toISOString() : null;
+  return {
+    kitchenName: kitchenKnown || o.fulfilment === "pickup" ? o.partner_name ?? null : null,
+    readyBy,
+    pickup:
+      o.fulfilment === "pickup"
+        ? {
+            district: o.partner_district,
+            sector: o.partner_sector,
+            address: o.pickup_address ?? "",
+            directions: o.pickup_directions ?? "",
+          }
+        : null,
+    rider: o.status === "out_for_delivery" && o.rider_name ? { name: o.rider_name, phone: o.rider_phone } : null,
   };
 }
 

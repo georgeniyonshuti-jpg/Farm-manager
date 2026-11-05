@@ -87,6 +87,7 @@ export type ShopSetup = {
   zones: ShopZone[];
   butchers: ShopButcher[];
   kitchens?: ShopKitchen[];
+  dishesOnSale?: boolean;
   openBlockers: string[];
 };
 
@@ -144,6 +145,22 @@ export function saveShopZone(token: string | null, id: string | null, body: Omit
 
 export function saveShopButcher(token: string | null, id: string | null, body: Omit<ShopButcher, "id" | "userId">) {
   return save<{ butcher: ShopButcher }>(token, "/butchers", id, body);
+}
+
+/** Superuser: put BigChix dishes on sale on bigchix.cleva.rw, or take them off. */
+export function setDishesOnSale(token: string | null, onSale: boolean) {
+  return sendJson<{ dishesOnSale: boolean }>(`${BASE}/bigchix/on-sale`, token, {
+    method: "PUT",
+    body: JSON.stringify({ onSale }),
+  });
+}
+
+/** Superuser: a real dish order for testing, allowed before dishes are on sale. Pay it by MoMo like a customer. */
+export function placeTestOrder(token: string | null, body: Omit<PlaceOrderBody, "website" | "formStartedAt">) {
+  return sendJson<{ ref: string; token: string; link: string }>(`${BASE}/test-orders`, token, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 export function saveShopKitchen(token: string | null, id: string | null, body: Omit<ShopKitchen, "id">) {
@@ -256,13 +273,34 @@ export type ShopCatalog = {
   minOrderItems: number;
   products: ShopCatalogProduct[];
   zones: Array<{
+    id?: string;
     name: string;
     district: string;
     sectors: string[];
     deliveryFeeRwf: number;
     freeDeliveryOverRwf: number | null;
   }>;
+  /** True once a superuser put BigChix dishes on sale. */
+  dishesOnSale?: boolean;
+  /** Kitchens, when dishes are on sale (or in preview). No fees or contacts. */
+  kitchens?: PublicKitchen[];
 };
+
+export type PublicKitchen = {
+  id: string;
+  name: string;
+  /** Open, taking orders and not full, right now. */
+  open: boolean;
+  zoneIds: string[];
+  /** Dish codes it can make today. */
+  dishSkus: string[];
+  readyInMinutes: number;
+  /** "11:00" when it opens later today. */
+  opensAt: string | null;
+  pickup: { district: string | null; sector: string | null; address: string; directions: string } | null;
+};
+
+export type Fulfilment = "delivery" | "pickup";
 
 export type CartItem = { sku: string; qty: number };
 
@@ -322,6 +360,12 @@ export type PublicShopOrder = {
   outAt: string | null;
   deliveredAt: string | null;
   cancelledAt: string | null;
+  channel?: "fresh" | "kitchen";
+  fulfilment?: Fulfilment;
+  kitchenName?: string | null;
+  readyBy?: string | null;
+  pickup?: { district: string | null; sector: string | null; address: string; directions: string } | null;
+  rider?: { name: string; phone: string | null } | null;
 };
 
 export type PlaceOrderBody = {
@@ -333,6 +377,8 @@ export type PlaceOrderBody = {
   items: CartItem[];
   website?: string;
   formStartedAt?: number;
+  fulfilment?: Fulfilment;
+  pickupKitchenId?: string;
 };
 
 async function publicJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -349,7 +395,13 @@ export function fetchShopCatalog({ preview = false }: { preview?: boolean } = {}
   return publicJson<ShopCatalog>(`${PUBLIC}/catalog${preview ? "?preview=1" : ""}`);
 }
 
-export function quoteShopCart(body: { items: CartItem[]; district: string; sector: string }) {
+export function quoteShopCart(body: {
+  items: CartItem[];
+  district: string;
+  sector: string;
+  fulfilment?: Fulfilment;
+  pickupKitchenId?: string;
+}) {
   return publicJson<{ quote: ShopQuote }>(`${PUBLIC}/quote`, { method: "POST", body: JSON.stringify(body) });
 }
 
