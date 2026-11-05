@@ -69,7 +69,7 @@ export type Weekday = (typeof WEEKDAYS)[number];
 export type KitchenHours = Record<Weekday, { open: string; close: string } | null>;
 
 /** A BigChix kitchen: a partner like a butcher, plus kitchen settings and the dishes it makes. */
-export type ShopKitchen = Omit<ShopButcher, "userId" | "loginEmail"> & {
+export type ShopKitchen = Omit<ShopButcher, "userId"> & {
   hours: KitchenHours;
   prepMinutes: number;
   maxOpenOrders: number;
@@ -304,6 +304,9 @@ export type DeskShopOrder = {
   id: string;
   ref: string;
   status: ShopOrderStatus;
+  /** "kitchen" = a BigChix dish order; butcherId/butcherName then name the kitchen. */
+  channel?: "fresh" | "kitchen";
+  fulfilment?: "delivery" | "pickup";
   paymentStatus: string;
   customerName: string;
   customerPhone: string;
@@ -348,7 +351,7 @@ export function deskOrderAction(
   );
 }
 
-export type OrderStep = "accept" | "ready" | "out" | "delivered";
+export type OrderStep = "accept" | "ready" | "out" | "delivered" | "collected";
 
 export function deskOrderStep(token: string | null, id: string, action: OrderStep) {
   return sendJson<{ status: ShopOrderStatus }>(`${BASE}/orders/${encodeURIComponent(id)}/step`, token, {
@@ -383,7 +386,9 @@ export type ButcherOrder = {
   customerName: string | null;
   customerPhone: string | null;
   addressNote: string | null;
-  lines: Array<{ name: string; qty: number; weightMinKg: number | null; weightMaxKg: number | null }>;
+  lines: Array<{ name: string; qty: number; weightMinKg: number | null; weightMaxKg: number | null; feeRwf?: number | null }>;
+  channel?: "fresh" | "kitchen";
+  fulfilment?: "delivery" | "pickup";
   deliveryFeeRwf: number;
   deliveryPaidBy: "customer" | "cleva";
   butcherPayoutRwf: number;
@@ -399,13 +404,22 @@ export async function fetchButcherOrders(token: string | null) {
     code?: string;
     shopName?: string;
     shopStatus?: string;
+    kind?: "butcher" | "kitchen";
     orders?: ButcherOrder[];
   };
   if (!res.ok) {
     if (data.code === "not_linked") throw new ButcherNotLinkedError(data.error || "Not linked");
     throw new Error(data.error || "Could not load your orders.");
   }
-  return { shopName: data.shopName ?? "", shopStatus: data.shopStatus ?? "", orders: data.orders ?? [] };
+  return { shopName: data.shopName ?? "", shopStatus: data.shopStatus ?? "", kind: data.kind ?? "butcher", orders: data.orders ?? [] };
+}
+
+/** A kitchen says no to a dish order; it moves to the next kitchen. */
+export function partnerDeclineOrder(token: string | null, id: string, reason: string) {
+  return sendJson<{ status: ShopOrderStatus }>(`${BUTCHER}/orders/${encodeURIComponent(id)}/decline`, token, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
 }
 
 export function butcherOrderStep(token: string | null, id: string, action: OrderStep) {

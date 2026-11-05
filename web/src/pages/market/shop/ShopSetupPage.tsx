@@ -1031,6 +1031,7 @@ function KitchenModal({
     momoPayoutName: kitchen?.momoPayoutName ?? "",
     status: (kitchen?.status ?? "pending") as ButcherStatus,
     notes: kitchen?.notes ?? "",
+    loginEmail: kitchen?.loginEmail ?? "",
     prepMinutes: String(kitchen?.prepMinutes ?? 25),
     maxOpenOrders: String(kitchen?.maxOpenOrders ?? 10),
     takingOrders: kitchen?.takingOrders ?? false,
@@ -1067,6 +1068,7 @@ function KitchenModal({
       momoPayoutName: f.momoPayoutName,
       status: f.status,
       notes: f.notes,
+      loginEmail: f.loginEmail.trim() || null,
       zones: Object.entries(links).map(([zoneId, priority]) => ({ zoneId, priority: Number(priority) || 100 })),
       hours,
       prepMinutes: Number(f.prepMinutes),
@@ -1139,6 +1141,13 @@ function KitchenModal({
         </Field>
         <Field label="MoMo account name">
           <Input value={f.momoPayoutName} onChange={(e) => set("momoPayoutName", e.target.value)} />
+        </Field>
+        <Field
+          label="Login email"
+          className="md:col-span-2"
+          help="Create the user under Users with the role Butcher (kitchens use it too), then enter that email here. They will see this kitchen's orders."
+        >
+          <Input type="email" value={f.loginEmail} onChange={(e) => set("loginEmail", e.target.value)} />
         </Field>
       </div>
 

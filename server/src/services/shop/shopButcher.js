@@ -5,6 +5,7 @@
  */
 
 import { isAcceptLate, nextShopOrderStatus } from "./orderStatus.js";
+import { sweepLateKitchenOrders } from "./shopKitchenOrders.js";
 
 const STAMP_COLUMN = {
   acceptedAt: "accepted_at",
@@ -13,7 +14,7 @@ const STAMP_COLUMN = {
   deliveredAt: "delivered_at",
 };
 
-const STEP_ACTIONS = ["accept", "ready", "out", "delivered"];
+const STEP_ACTIONS = ["accept", "ready", "out", "delivered", "collected"];
 
 /** Days after delivery that the butcher still sees the customer's phone and directions. */
 export const CONTACT_DAYS_AFTER_DELIVERY = 7;
@@ -31,9 +32,9 @@ function dbError(e, fallback) {
 export async function loadButcherForUser(dbQuery, userId) {
   if (!userId) return null;
   const r = await dbQuery(
-    `SELECT id::text, shop_name AS "shopName", status
+    `SELECT id::text, shop_name AS "shopName", status, kind
        FROM shop_butchers
-      WHERE user_id = $1::uuid AND kind = 'butcher' AND status IN ('active', 'paused', 'pending')
+      WHERE user_id = $1::uuid AND status IN ('active', 'paused', 'pending')
       LIMIT 1`,
     [userId]
   );
@@ -70,6 +71,8 @@ export function butcherOrderView(row, acceptWithinMinutes, now = new Date()) {
     customerPhone: contact ? row.customerPhone : null,
     addressNote: contact ? row.addressNote : null,
     lines: row.lines || [],
+    channel: row.channel || "fresh",
+    fulfilment: row.fulfilment || "delivery",
     deliveryFeeRwf: row.deliveryFeeRwf,
     deliveryPaidBy: row.deliveryPaidBy,
     butcherPayoutRwf: row.butcherPayoutRwf,
@@ -79,15 +82,19 @@ export function butcherOrderView(row, acceptWithinMinutes, now = new Date()) {
 
 export async function listButcherOrders(dbQuery, butcher, now = new Date()) {
   try {
+    if (butcher.kind === "kitchen") await sweepLateKitchenOrders(dbQuery, now);
     const r = await dbQuery(
       `SELECT o.id::text, o.ref, o.status, o.placed_at AS "placedAt", o.paid_confirmed_at AS "paidConfirmedAt",
               o.accepted_at AS "acceptedAt", o.ready_at AS "readyAt", o.out_at AS "outAt",
               o.delivered_at AS "deliveredAt", o.district, o.sector,
               o.customer_name AS "customerName", o.customer_phone AS "customerPhone", o.address_note AS "addressNote",
               o.delivery_fee_rwf AS "deliveryFeeRwf", o.delivery_paid_by AS "deliveryPaidBy",
-              o.butcher_payout_rwf AS "butcherPayoutRwf", s.accept_within_minutes AS "acceptWithin",
+              o.butcher_payout_rwf AS "butcherPayoutRwf", o.channel, o.fulfilment,
+              CASE WHEN o.channel = 'kitchen' THEN s.kitchen_accept_within_minutes ELSE s.accept_within_minutes END
+                AS "acceptWithin",
               COALESCE((SELECT json_agg(json_build_object(
-                          'name', l.name, 'qty', l.qty, 'weightMinKg', l.weight_min_kg, 'weightMaxKg', l.weight_max_kg)
+                          'name', l.name, 'qty', l.qty, 'weightMinKg', l.weight_min_kg, 'weightMaxKg', l.weight_max_kg,
+                          'feeRwf', l.partner_fee_rwf)
                           ORDER BY l.name)
                           FROM shop_order_lines l WHERE l.order_id = o.id), '[]'::json) AS lines
          FROM shop_orders o CROSS JOIN shop_settings s
@@ -102,7 +109,7 @@ export async function listButcherOrders(dbQuery, butcher, now = new Date()) {
       [butcher.id]
     );
     const orders = r.rows.map((row) => butcherOrderView(row, Number(row.acceptWithin) || 20, now));
-    return { ok: true, shopName: butcher.shopName, shopStatus: butcher.status, orders };
+    return { ok: true, shopName: butcher.shopName, shopStatus: butcher.status, kind: butcher.kind || "butcher", orders };
   } catch (e) {
     return dbError(e, "Could not load your orders.");
   }
@@ -116,7 +123,7 @@ export async function applyOrderStep(dbQuery, orderId, action, actor, audit) {
   if (!STEP_ACTIONS.includes(action)) return fail(400, "Unknown step.");
   try {
     const r = await dbQuery(
-      `SELECT id::text, status, butcher_id::text AS "butcherId" FROM shop_orders WHERE id = $1::uuid`,
+      `SELECT id::text, status, butcher_id::text AS "butcherId", fulfilment FROM shop_orders WHERE id = $1::uuid`,
       [orderId]
     );
     const order = r.rows[0];

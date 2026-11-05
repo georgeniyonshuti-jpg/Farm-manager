@@ -11,6 +11,8 @@ const menu = [
 const base = {
   shopName: "Kimihurura Grill",
   phone: "0788123456",
+  district: "Gasabo",
+  sector: "Kimihurura",
   status: "pending",
   hours: { mon: { open: "11:00", close: "21:00" } },
   dishes: [{ productId: "d1", feeRwf: 4500 }],
@@ -44,8 +46,12 @@ describe("kitchen setup", () => {
     assert.equal(kitchenFromBody({ ...base, hours: { mon: { open: "21:00", close: "11:00" } } }, menu).ok, false);
   });
 
-  it("needs a pickup address when pickup is on", () => {
+  it("needs a pickup address and a place when pickup is on", () => {
     assert.equal(kitchenFromBody({ ...base, pickupEnabled: true }, menu).ok, false);
+    assert.equal(
+      kitchenFromBody({ ...base, district: "", sector: "", pickupEnabled: true, pickupAddress: "KG 7 Ave" }, menu).ok,
+      false
+    );
     assert.equal(kitchenFromBody({ ...base, pickupEnabled: true, pickupAddress: "KG 7 Ave, Kimihurura" }, menu).ok, true);
   });
 

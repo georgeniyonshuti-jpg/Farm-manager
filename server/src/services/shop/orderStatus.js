@@ -30,8 +30,10 @@ const REASSIGNABLE = new Set(["paid", "accepted", "ready"]);
 const BUTCHER_STEPS = {
   accept: { from: "paid", to: "accepted", stamp: "acceptedAt" },
   ready: { from: "accepted", to: "ready", stamp: "readyAt" },
-  out: { from: "ready", to: "out_for_delivery", stamp: "outAt" },
-  delivered: { from: "out_for_delivery", to: "delivered", stamp: "deliveredAt" },
+  out: { from: "ready", to: "out_for_delivery", stamp: "outAt", delivery: true },
+  delivered: { from: "out_for_delivery", to: "delivered", stamp: "deliveredAt", delivery: true },
+  // A pickup order: the customer collected it at the kitchen.
+  collected: { from: "ready", to: "delivered", stamp: "deliveredAt", pickup: true },
 };
 
 function fail(code, error) {
@@ -63,6 +65,9 @@ export function nextShopOrderStatus(order, action, actor, input = {}) {
     if (kind !== "butcher" && kind !== "ops") return fail("forbidden", "Not allowed.");
     const step = BUTCHER_STEPS[action];
     if (!order.butcherId) return fail("unassigned", "No butcher is assigned to this order.");
+    const pickup = order.fulfilment === "pickup";
+    if (step.delivery && pickup) return fail("wrong_status", "This order is collected, not delivered.");
+    if (step.pickup && !pickup) return fail("wrong_status", "This order is delivered, not collected.");
     if (status !== step.from) return fail("wrong_status", `Order is ${status}, not ${step.from}.`);
     return ok(step.to, { stamp: step.stamp });
   }

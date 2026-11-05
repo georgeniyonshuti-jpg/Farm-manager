@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { COOKED_ON_SALE, getShopCatalog, isOrderable, quoteForCustomer } from "../src/services/shop/shopOrders.js";
+import { COOKED_ON_SALE, cookedOnSale, getShopCatalog, isOrderable, quoteForCustomer } from "../src/services/shop/shopOrders.js";
 
 const settings = { id: 1, is_open: true, open_time: null, close_time: null, min_order_rwf: 0, min_order_items: 1 };
 const products = [
@@ -21,6 +21,8 @@ function fakeDb() {
 describe("cooked dishes before kitchens exist", () => {
   it("are not orderable while kitchens are not set up", () => {
     assert.equal(COOKED_ON_SALE, false);
+    assert.equal(cookedOnSale({}), false);
+    assert.equal(cookedOnSale({ SHOP_COOKED_ON_SALE: "1" }), true);
     assert.equal(isOrderable({ category: "cooked" }), false);
     assert.equal(isOrderable({ category: "whole" }), true);
     assert.equal(isOrderable({}), true);

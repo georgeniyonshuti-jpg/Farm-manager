@@ -72,6 +72,13 @@ const NEXT_STEP: Partial<Record<ShopOrderStatus, { action: OrderStep; label: str
   out_for_delivery: { action: "delivered", label: "Mark delivered" },
 };
 
+/** The next step, with pickup orders collected instead of sent out. */
+function nextStepFor(o: DeskShopOrder): { action: OrderStep; label: string } | undefined {
+  if (o.fulfilment === "pickup" && o.status === "ready") return { action: "collected", label: "Mark collected" };
+  if (o.fulfilment === "pickup" && o.status === "out_for_delivery") return undefined;
+  return NEXT_STEP[o.status];
+}
+
 function kigaliTime(iso: string): string {
   return new Intl.DateTimeFormat("en-GB", {
     timeZone: "Africa/Kigali",
@@ -204,7 +211,12 @@ export function ShopOrdersPanel({
     { key: "items", header: "Items", render: (o) => o.lines.map((l) => `${l.qty} × ${l.name}`).join(", ") },
     { key: "total", header: "Total", numeric: true, render: (o) => formatRwf(o.totalRwf) },
     { key: "txn", header: "MoMo ID", render: (o) => (o.momoTxnId ? <span className="font-mono text-xs">{o.momoTxnId}</span> : "—") },
-    { key: "butcher", header: "Butcher", render: (o) => o.butcherName ?? (o.status === "paid" ? "None yet" : "—") },
+    {
+      key: "butcher",
+      header: "Partner",
+      render: (o) =>
+        `${o.butcherName ?? (o.status === "paid" ? "None yet" : "—")}${o.channel === "kitchen" ? ` · BigChix ${o.fulfilment === "pickup" ? "pickup" : "delivery"}` : ""}`,
+    },
     { key: "status", header: "Status", render: (o) => <StatusPill tone={STATUS_TONE[o.status]}>{STATUS_LABEL[o.status]}</StatusPill> },
   ];
 
@@ -250,9 +262,9 @@ export function ShopOrdersPanel({
           }}
           footer={
             <div className="flex flex-wrap justify-end gap-2">
-              {open.butcherId && NEXT_STEP[open.status] ? (
-                <Button variant="secondary" size="md" disabled={busy} onClick={() => void step(open, NEXT_STEP[open.status]!.action)}>
-                  {NEXT_STEP[open.status]!.label}
+              {open.butcherId && nextStepFor(open) ? (
+                <Button variant="secondary" size="md" disabled={busy} onClick={() => void step(open, nextStepFor(open)!.action)}>
+                  {nextStepFor(open)!.label}
                 </Button>
               ) : null}
               {CANCELLABLE.includes(open.status) ? (
@@ -351,7 +363,14 @@ export function ShopOrdersPanel({
               </Button>
             </div>
           ) : null}
-          {REASSIGNABLE.includes(open.status) ? (
+          {REASSIGNABLE.includes(open.status) && open.channel === "kitchen" ? (
+            <p className="mt-4 text-sm text-[var(--text-secondary)]">
+              {open.butcherId
+                ? "A BigChix order moves to the next kitchen by itself if this one declines or waits too long."
+                : "No kitchen can take this order right now. Call the customer, or cancel it and refund."}
+            </p>
+          ) : null}
+          {REASSIGNABLE.includes(open.status) && open.channel !== "kitchen" ? (
             <div className="mt-4 flex flex-wrap items-end gap-2">
               <Field label={open.butcherId ? "Move to another butcher" : "Give to a butcher"} className="min-w-[16rem] flex-1">
                 <Select value={moveTo} onChange={(e) => setMoveTo(e.target.value)}>

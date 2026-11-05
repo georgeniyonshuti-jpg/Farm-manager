@@ -11,6 +11,8 @@ import { pickButcher, zoneForSector } from "./assignButcher.js";
 import { hashToken, newOrderRef, newTrackToken, normalizeOrderRef, trackTokenMatches } from "./orderRef.js";
 import { nextShopOrderStatus } from "./orderStatus.js";
 import { normalizeShopSettings, publicQuoteView, quoteShopOrder } from "./shopQuote.js";
+import { kigaliNow, kitchenPayout, noKitchenMessage, pickKitchen } from "./kitchenRouting.js";
+import { loadKitchens, routeKitchenOrder, sweepLateKitchenOrders } from "./shopKitchenOrders.js";
 
 const DESK_VIEWS = ["to_confirm", "open", "done", "all"];
 
@@ -73,7 +75,7 @@ export function shopOpenState(settingsRow, now = new Date()) {
  * Checks the checkout form. Honeypot and a too-fast submit reject bots,
  * the same way public buyer requests do.
  */
-export function customerFromBody(body, now = Date.now()) {
+export function customerFromBody(body, now = Date.now(), { pickup = false } = {}) {
   if (str(body?.website ?? body?.honeypot, 200)) return fail(400, "Rejected.");
   const started = Number(body?.formStartedAt);
   if (Number.isFinite(started) && started > 0) {
@@ -88,7 +90,7 @@ export function customerFromBody(body, now = Date.now()) {
   const sector = str(body?.sector, 60);
   if (!isSectorInDistrict(district, sector)) return fail(400, "Choose your district and sector.");
   const addressNote = str(body?.addressNote, 300);
-  if (addressNote.length < 3) return fail(400, "Tell the butcher where to deliver.");
+  if (!pickup && addressNote.length < 3) return fail(400, "Tell us where to deliver.");
   return {
     ok: true,
     values: { name, phone: normalizeRwandaPhone(body?.phone), district, sector, addressNote },
@@ -116,13 +118,67 @@ function itemsFromBody(body) {
  * is routed to a butcher today, so a dish order would reach the wrong partner.
  * The desk can still build the menu, and the shop shows it in preview only.
  */
-export const COOKED_ON_SALE = false;
-
-export function isOrderable(row) {
-  return COOKED_ON_SALE || (row.category || "whole") !== "cooked";
+export function cookedOnSale(env = process.env) {
+  return String(env.SHOP_COOKED_ON_SALE || "").trim() === "1";
 }
 
-async function loadContext(dbQuery) {
+/** Kept for callers that read it once; the live switch is cookedOnSale(). */
+export const COOKED_ON_SALE = cookedOnSale();
+
+export function isOrderable(row) {
+  return cookedOnSale() || (row.category || "whole") !== "cooked";
+}
+
+/** Dishes and fresh chicken are separate orders. Returns the order's channel, or an error. */
+export function channelForItems(items, products) {
+  const bySku = new Map(products.map((p) => [String(p.sku).trim().toUpperCase(), p]));
+  const kinds = new Set(
+    items.map((i) => bySku.get(String(i.sku).toUpperCase())).filter(Boolean).map((p) => (p.category === "cooked" ? "kitchen" : "fresh"))
+  );
+  if (kinds.size > 1) return { ok: false, error: "Dishes and fresh chicken are separate orders. Check out one at a time." };
+  return { ok: true, channel: kinds.has("kitchen") ? "kitchen" : "fresh" };
+}
+
+/**
+ * Prices a BigChix dish order: the BigChix price, plus the zone's delivery fee
+ * (none for pickup), with the first kitchen that can take it right now. That
+ * kitchen's fees are an estimate until payment, when the order is routed again.
+ */
+function quoteKitchenOrder(ctx, body, items, now) {
+  const fulfilment = body?.fulfilment === "pickup" ? "pickup" : "delivery";
+  const pickupKitchenId = str(body?.pickupKitchenId, 64);
+  const zone = fulfilment === "pickup" ? null : zoneForSector(ctx.zones, body?.district, body?.sector);
+  const pricingZone = fulfilment === "pickup" ? { id: "", deliveryFeeRwf: 0, freeDeliveryOverRwf: null } : zone;
+  const quote = quoteShopOrder({ items, products: ctx.products, zone: pricingZone, settings: ctx.settings || {} });
+  if (!quote.ok) return { quote, fulfilment, zone };
+  const lines = quote.lines.map((l) => ({ ...l }));
+  const need = { fulfilment, zoneId: zone?.id ?? null, pickupKitchenId, productIds: [...new Set(lines.map((l) => l.productId))] };
+  const clock = kigaliNow(now);
+  const kitchen = pickKitchen(ctx.kitchens, need, clock);
+  if (!kitchen) {
+    return {
+      quote: { ...quote, ok: false, code: "no_kitchen", error: noKitchenMessage(ctx.kitchens, need, clock) },
+      fulfilment,
+      zone,
+    };
+  }
+  const pay = kitchenPayout(lines, kitchen.dishes);
+  return {
+    quote: {
+      ...quote,
+      deliveryPaidBy: quote.deliveryFeeRwf > 0 ? "customer" : "cleva",
+      commissionPct: 0,
+      commissionRwf: pay.clevaShareRwf,
+      butcherPayoutRwf: pay.payoutRwf,
+      readyInMinutes: kitchen.prepMinutes,
+    },
+    fulfilment,
+    zone,
+    kitchen,
+  };
+}
+
+async function loadContext(dbQuery, { withKitchens = false } = {}) {
   const [settings, products, zones] = await Promise.all([
     dbQuery(`SELECT * FROM shop_settings WHERE id = 1`),
     dbQuery(
@@ -136,6 +192,7 @@ async function loadContext(dbQuery) {
     ),
   ]);
   return {
+    kitchens: withKitchens ? await loadKitchens(dbQuery) : [],
     settings: settings.rows[0] || null,
     allProducts: products.rows,
     products: products.rows.filter(isOrderable),
@@ -216,9 +273,17 @@ export async function getShopCatalog(dbQuery, now = new Date(), { preview = fals
   }
 }
 
-export async function quoteForCustomer(dbQuery, body) {
+export async function quoteForCustomer(dbQuery, body, now = new Date()) {
   try {
     const ctx = await loadContext(dbQuery);
+    const items = itemsFromBody(body);
+    const channel = channelForItems(items, ctx.products);
+    if (!channel.ok) return { ok: true, quote: { ok: false, code: "mixed", error: channel.error } };
+    if (channel.channel === "kitchen") {
+      ctx.kitchens = await loadKitchens(dbQuery);
+      const k = quoteKitchenOrder(ctx, body, items, now);
+      return { ok: true, quote: { ...publicQuoteView(k.quote), fulfilment: k.fulfilment } };
+    }
     const zone = zoneForSector(ctx.zones, body?.district, body?.sector);
     const quote = quoteShopOrder({ items: itemsFromBody(body), products: ctx.products, zone, settings: ctx.settings || {} });
     return { ok: true, quote: publicQuoteView(quote) };
@@ -232,16 +297,41 @@ export async function quoteForCustomer(dbQuery, body) {
  * shown to the customer once, in their link, and only its hash is stored.
  */
 export async function placeShopOrder(dbQuery, body, { attribution = {}, now = new Date() } = {}) {
-  const customer = customerFromBody(body, now.getTime());
-  if (!customer.ok) return customer;
-  const c = customer.values;
+  // Bots and empty forms stop here, before any database work.
+  const early = customerFromBody(body, now.getTime(), { pickup: body?.fulfilment === "pickup" });
+  if (!early.ok && early.error !== "Choose your district and sector.") return early;
   try {
     const ctx = await loadContext(dbQuery);
     const state = shopOpenState(ctx.settings, now);
     if (!state.open) return fail(409, state.message, "shop_closed");
-    const zone = zoneForSector(ctx.zones, c.district, c.sector);
-    const quote = quoteShopOrder({ items: itemsFromBody(body), products: ctx.products, zone, settings: ctx.settings });
-    if (!quote.ok) return fail(400, quote.error, quote.code);
+    const items = itemsFromBody(body);
+    const channel = channelForItems(items, ctx.products);
+    if (!channel.ok) return fail(400, channel.error, "mixed");
+
+    let zone = null;
+    let quote = null;
+    let fulfilment = "delivery";
+    let kitchenId = null;
+    let input = body;
+    if (channel.channel === "kitchen") {
+      ctx.kitchens = await loadKitchens(dbQuery);
+      const k = quoteKitchenOrder(ctx, body, items, now);
+      if (!k.quote.ok) return fail(400, k.quote.error, k.quote.code);
+      ({ zone, quote, fulfilment } = k);
+      if (fulfilment === "pickup") {
+        // Collected at the kitchen: the order carries the kitchen's place, and the kitchen from the start.
+        kitchenId = k.kitchen.id;
+        input = { ...body, district: k.kitchen.district, sector: k.kitchen.sector };
+      }
+    }
+    const customer = customerFromBody(input, now.getTime(), { pickup: fulfilment === "pickup" });
+    if (!customer.ok) return customer;
+    const c = customer.values;
+    if (channel.channel === "fresh") {
+      zone = zoneForSector(ctx.zones, c.district, c.sector);
+      quote = quoteShopOrder({ items, products: ctx.products, zone, settings: ctx.settings });
+      if (!quote.ok) return fail(400, quote.error, quote.code);
+    }
 
     const token = newTrackToken();
     const lines = quote.lines;
@@ -253,8 +343,9 @@ export async function placeShopOrder(dbQuery, body, { attribution = {}, now = ne
              INSERT INTO shop_orders
                (ref, track_token_hash, customer_name, customer_phone, district, sector, address_note, zone_id,
                 subtotal_rwf, delivery_fee_rwf, total_rwf, commission_pct, commission_rwf, butcher_payout_rwf,
-                delivery_paid_by, source, attribution)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uuid, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb)
+                delivery_paid_by, source, attribution, channel, fulfilment, butcher_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8::uuid, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb,
+                     $25, $26, $27::uuid)
              RETURNING id, ref, placed_at
            ),
            l AS (
@@ -278,7 +369,7 @@ export async function placeShopOrder(dbQuery, body, { attribution = {}, now = ne
             c.district,
             c.sector,
             c.addressNote,
-            zone.id,
+            zone?.id || null,
             quote.subtotalRwf,
             quote.deliveryFeeRwf,
             quote.totalRwf,
@@ -295,6 +386,9 @@ export async function placeShopOrder(dbQuery, body, { attribution = {}, now = ne
             lines.map((x) => x.weightMaxKg),
             lines.map((x) => x.unitPriceRwf),
             lines.map((x) => x.qty),
+            channel.channel,
+            fulfilment,
+            kitchenId,
           ]
         );
         return {
@@ -381,6 +475,7 @@ async function orderForToken(dbQuery, rawRef, token) {
 export async function getPublicOrder(dbQuery, rawRef, token) {
   try {
     await expireUnpaidOrders(dbQuery);
+    await sweepLateKitchenOrders(dbQuery);
     const o = await orderForToken(dbQuery, rawRef, token);
     if (!o) return fail(404, "Order not found.");
     const lines = await dbQuery(
@@ -450,6 +545,7 @@ export async function listDeskOrders(dbQuery, view = "open") {
   const v = DESK_VIEWS.includes(view) ? view : "open";
   try {
     await expireUnpaidOrders(dbQuery);
+    await sweepLateKitchenOrders(dbQuery);
     const r = await dbQuery(
       `SELECT o.id::text, o.ref, o.status, o.payment_status AS "paymentStatus",
               o.customer_name AS "customerName", o.customer_phone AS "customerPhone",
@@ -460,6 +556,7 @@ export async function listDeskOrders(dbQuery, view = "open") {
               o.momo_txn_id AS "momoTxnId", o.payer_phone AS "payerPhone",
               o.placed_at AS "placedAt", o.updated_at AS "updatedAt", o.paid_confirmed_at AS "paidConfirmedAt",
               o.butcher_id::text AS "butcherId", b.shop_name AS "butcherName", z.name AS "zoneName",
+              o.channel, o.fulfilment,
               COALESCE((SELECT json_agg(json_build_object('name', l.name, 'qty', l.qty) ORDER BY l.name)
                           FROM shop_order_lines l WHERE l.order_id = o.id), '[]'::json) AS lines
          FROM shop_orders o
@@ -484,7 +581,7 @@ export async function listDeskOrders(dbQuery, view = "open") {
 async function loadDeskOrder(dbQuery, id) {
   const r = await dbQuery(
     `SELECT id::text, status, payment_status AS "paymentStatus", butcher_id::text AS "butcherId",
-            zone_id::text AS "zoneId", total_rwf AS "totalRwf"
+            zone_id::text AS "zoneId", total_rwf AS "totalRwf", channel, fulfilment
        FROM shop_orders WHERE id = $1::uuid`,
     [id]
   );
@@ -500,7 +597,8 @@ export async function confirmPayment(dbQuery, id, actor) {
     if (!step.ok) return fail(409, step.error);
     let butcherId = o.butcherId;
     let choices = butcherId ? 1 : 0;
-    if (!butcherId && o.zoneId) {
+    const kitchenOrder = o.channel === "kitchen";
+    if (!butcherId && o.zoneId && !kitchenOrder) {
       const links = await dbQuery(
         `SELECT l.butcher_id::text AS "butcherId", l.priority, b.status
            FROM shop_butcher_zones l JOIN shop_butchers b ON b.id = l.butcher_id
@@ -527,9 +625,15 @@ export async function confirmPayment(dbQuery, id, actor) {
          SELECT id, $2::uuid, 'confirm_payment', 'payment_pending', 'paid', $4 FROM o
        )
        SELECT id::text FROM o`,
-      [id, actor.userId, butcherId, butcherId ? null : "No active butcher for this zone"]
+      [id, actor.userId, butcherId, butcherId || kitchenOrder ? null : "No active butcher for this zone"]
     );
     if (!r.rows[0]) return fail(409, "This order changed. Refresh the list.");
+    if (kitchenOrder) {
+      // Dish orders go to a kitchen now, with that kitchen's fees.
+      const routed = await routeKitchenOrder(dbQuery, id, { actorUserId: actor.userId });
+      butcherId = routed.kitchenId;
+      choices = butcherId ? 1 : 0;
+    }
     actor.audit?.(actor.userId, actor.role, "shop.order.confirm_payment", "shop_order", id, {
       butcherId,
       totalRwf: o.totalRwf,

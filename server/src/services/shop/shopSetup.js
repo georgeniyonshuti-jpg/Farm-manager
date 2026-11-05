@@ -190,7 +190,7 @@ const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
  * `products` = the menu rows, to check each dish and keep fees below the price.
  */
 export function kitchenFromBody(body, products = []) {
-  const partner = butcherFromBody({ ...body, loginEmail: "" }, { noun: "kitchen" });
+  const partner = butcherFromBody(body, { noun: "kitchen" });
   if (!partner.ok) return partner;
 
   const hours = {};
@@ -218,6 +218,9 @@ export function kitchenFromBody(body, products = []) {
   const pickupEnabled = body?.pickupEnabled === true;
   const pickupAddress = str(body?.pickupAddress, 300);
   if (pickupEnabled && !pickupAddress) return bad("Add the pickup address, or turn pickup off.");
+  if (pickupEnabled && !(partner.values.district && partner.values.sector)) {
+    return bad("Choose the kitchen's district and sector, so pickup orders show where it is.");
+  }
 
   const byId = new Map(products.map((p) => [String(p.id), p]));
   const dishes = [];
@@ -345,7 +348,6 @@ function mapKitchen(r, links, settingsRows, dishRows) {
   const s = settingsRows.find((x) => x.partner_id === r.id) || {};
   const base = mapButcher(r, links);
   delete base.userId;
-  delete base.loginEmail;
   return {
     ...base,
     hours: kitchenHoursFrom(s.hours),
@@ -644,6 +646,15 @@ export async function saveKitchen(dbQuery, id, body, actor) {
   if (!parsed.ok) return parsed;
   const v = parsed.values;
   const k = parsed.kitchen;
+  let login = { userId: null, email: null };
+  if (v.loginEmail) {
+    try {
+      login = await findButcherLogin(dbQuery, v.loginEmail);
+    } catch (e) {
+      return dbError(e, "Could not check the login.");
+    }
+    if (login.error) return bad(login.error);
+  }
   const params = [
     v.shopName, v.ownerName, v.phone, v.whatsapp, v.district, v.sector, v.addressNote,
     v.licenceRef, v.momoPayoutPhone, v.momoPayoutName, v.status, v.notes,
@@ -654,13 +665,13 @@ export async function saveKitchen(dbQuery, id, body, actor) {
     ? `UPDATE shop_butchers
           SET shop_name = $1, owner_name = $2, phone = $3, whatsapp = $4, district = $5, sector = $6,
               address_note = $7, licence_ref = $8, momo_payout_phone = $9, momo_payout_name = $10,
-              status = $11, notes = $12, updated_at = now()
+              status = $11, notes = $12, user_id = $25::uuid, updated_at = now()
         WHERE id = $13::uuid AND kind = 'kitchen'
         RETURNING ${cols}`
     : `INSERT INTO shop_butchers
          (shop_name, owner_name, phone, whatsapp, district, sector, address_note,
-          licence_ref, momo_payout_phone, momo_payout_name, status, notes, created_by, kind)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::uuid, 'kitchen')
+          licence_ref, momo_payout_phone, momo_payout_name, status, notes, created_by, kind, user_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::uuid, 'kitchen', $25::uuid)
        RETURNING ${cols}`;
   try {
     // One statement: the kitchen, its zones, settings and dishes change together or not at all.
@@ -714,6 +725,7 @@ export async function saveKitchen(dbQuery, id, body, actor) {
         k.pickupDirections,
         parsed.dishes.map((d) => d.productId),
         parsed.dishes.map((d) => d.feeRwf),
+        login.userId,
       ]
     );
     const row = r.rows[0];
@@ -735,8 +747,11 @@ export async function saveKitchen(dbQuery, id, body, actor) {
       zones: parsed.zones.length,
       dishes: parsed.dishes.map((d) => ({ productId: d.productId, feeRwf: d.feeRwf })),
     });
-    return { ok: true, kitchen: mapKitchen(row, links, [settingsRow], dishRows) };
+    return { ok: true, kitchen: mapKitchen({ ...row, login_email: login.email }, links, [settingsRow], dishRows) };
   } catch (e) {
+    if (String(e?.code) === "23505" && String(e?.constraint || "").includes("user_id")) {
+      return bad("That login is already linked to another butcher or kitchen.");
+    }
     if (String(e?.code) === "23503") return bad("One of the chosen zones or dishes no longer exists.");
     if (String(e?.code) === "22P02") return bad("One of the chosen zones or dishes is not valid.");
     return dbError(e, "Could not save the kitchen.");

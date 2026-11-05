@@ -1,7 +1,7 @@
 /**
- * A partner butcher's orders. One screen, phone first: new orders on top,
- * one big button for the next step. Checks every 30 seconds and beeps when
- * a new paid order arrives.
+ * A partner's orders: a butcher's fresh chicken, or a BigChix kitchen's dishes.
+ * One screen, phone first: new orders on top, one big button for the next step.
+ * Checks every 30 seconds (every 15 for kitchens) and beeps when a new paid order arrives.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -17,6 +17,7 @@ import {
   butcherOrderStep,
   fetchButcherMoney,
   fetchButcherOrders,
+  partnerDeclineOrder,
   type ButcherOrder,
   type OrderStep,
   type ShopOrderStatus,
@@ -28,6 +29,24 @@ const NEXT: Partial<Record<ShopOrderStatus, { action: OrderStep; label: string }
   ready: { action: "out", label: "On the way" },
   out_for_delivery: { action: "delivered", label: "Delivered" },
 };
+
+/** Kitchen steps: cook, then hand to the rider or the customer who collects. */
+function nextStep(o: ButcherOrder, kitchen: boolean): { action: OrderStep; label: string } | undefined {
+  if (!kitchen) return NEXT[o.status];
+  const pickup = o.fulfilment === "pickup";
+  switch (o.status) {
+    case "paid":
+      return { action: "accept", label: "Accept and start cooking" };
+    case "accepted":
+      return { action: "ready", label: "Food is ready" };
+    case "ready":
+      return pickup ? { action: "collected", label: "Customer collected it" } : { action: "out", label: "Rider has it" };
+    case "out_for_delivery":
+      return { action: "delivered", label: "Delivered" };
+    default:
+      return undefined;
+  }
+}
 
 const LABEL: Partial<Record<ShopOrderStatus, string>> = {
   paid: "New",
@@ -91,6 +110,8 @@ export function ButcherOrdersPage() {
   const [orders, setOrders] = useState<ButcherOrder[]>([]);
   const [shopName, setShopName] = useState("");
   const [shopStatus, setShopStatus] = useState("");
+  const [kind, setKind] = useState<"butcher" | "kitchen">("butcher");
+  const kitchen = kind === "kitchen";
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notLinked, setNotLinked] = useState(false);
@@ -104,6 +125,7 @@ export function ButcherOrdersPage() {
       setOrders(r.orders);
       setShopName(r.shopName);
       setShopStatus(r.shopStatus);
+      setKind(r.kind);
       setError("");
       setNotLinked(false);
       const newIds = new Set(r.orders.filter((o) => o.status === "paid").map((o) => o.id));
@@ -122,12 +144,28 @@ export function ButcherOrdersPage() {
 
   useEffect(() => {
     void load();
-    const id = window.setInterval(() => void load(), 30000);
+    // Hot food cannot wait: kitchens check twice as often.
+    const id = window.setInterval(() => void load(), kitchen ? 15000 : 30000);
     return () => window.clearInterval(id);
-  }, [load]);
+  }, [load, kitchen]);
+
+  async function decline(order: ButcherOrder) {
+    const reason = window.prompt("Why can't you take this order? (for example: out of a dish, too busy)") ?? "";
+    if (!reason.trim()) return;
+    setBusyId(order.id);
+    try {
+      await partnerDeclineOrder(token, order.id, reason.trim());
+      showToast("success", "Order passed on");
+      await load();
+    } catch (e) {
+      showToast("error", e instanceof Error ? e.message : "Could not decline");
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   async function next(order: ButcherOrder) {
-    const step = NEXT[order.status];
+    const step = nextStep(order, kitchen);
     if (!step) return;
     setBusyId(order.id);
     try {
@@ -140,7 +178,7 @@ export function ButcherOrdersPage() {
     }
   }
 
-  const title = shopName || "My orders";
+  const title = shopName || (kitchen ? "Kitchen orders" : "My orders");
 
   if (loading) {
     return (
@@ -155,7 +193,7 @@ export function ButcherOrdersPage() {
       <ManagerPage>
         <PageHeader title="My orders" />
         <NoticeStrip tone="warning">
-          This login is not linked to a butcher shop yet. Ask Cleva to add your email to your shop.
+          This login is not linked to a butcher shop or kitchen yet. Ask Cleva to add your email to it.
         </NoticeStrip>
       </ManagerPage>
     );
@@ -169,15 +207,17 @@ export function ButcherOrdersPage() {
     );
   }
 
-  const open = orders.filter((o) => NEXT[o.status]);
-  const recent = orders.filter((o) => !NEXT[o.status]);
+  const open = orders.filter((o) => nextStep(o, kitchen));
+  const recent = orders.filter((o) => !nextStep(o, kitchen));
 
   return (
     <ManagerPage>
       <PageHeader title={title} />
       <div className="space-y-4">
         {shopStatus !== "active" ? (
-          <NoticeStrip tone="warning">Your shop is not active, so you will not get new orders. Talk to Cleva.</NoticeStrip>
+          <NoticeStrip tone="warning">
+            {kitchen ? "Your kitchen" : "Your shop"} is not active, so you will not get new orders. Talk to Cleva.
+          </NoticeStrip>
         ) : null}
 
         {open.length === 0 ? (
@@ -185,14 +225,18 @@ export function ButcherOrdersPage() {
         ) : null}
 
         {open.map((o) => {
-          const step = NEXT[o.status]!;
+          const step = nextStep(o, kitchen)!;
+          const pickup = o.fulfilment === "pickup";
           return (
             <SectionCard
               key={o.id}
               title={
                 <span className="flex flex-wrap items-center gap-2">
                   <span className="font-mono">{o.ref}</span>
-                  <StatusPill tone={TONE[o.status] ?? "neutral"}>{LABEL[o.status] ?? o.status}</StatusPill>
+                  <StatusPill tone={TONE[o.status] ?? "neutral"}>
+                    {kitchen && o.status === "accepted" ? "Cooking" : (LABEL[o.status] ?? o.status)}
+                  </StatusPill>
+                  {kitchen ? <StatusPill tone="neutral">{pickup ? "Pickup" : "Delivery"}</StatusPill> : null}
                   {o.acceptLate ? <StatusPill tone="danger">Waiting too long</StatusPill> : null}
                 </span>
               }
@@ -207,10 +251,16 @@ export function ButcherOrdersPage() {
                   ))}
                 </ul>
                 <div className="text-sm">
-                  <p className="font-medium">
-                    {o.customerName} · {o.sector}, {o.district}
-                  </p>
-                  {o.addressNote ? <p className="text-[var(--text-secondary)]">{o.addressNote}</p> : null}
+                  {pickup ? (
+                    <p className="font-medium">{o.customerName} will collect it here.</p>
+                  ) : (
+                    <>
+                      <p className="font-medium">
+                        {o.customerName} · {o.sector}, {o.district}
+                      </p>
+                      {o.addressNote ? <p className="text-[var(--text-secondary)]">{o.addressNote}</p> : null}
+                    </>
+                  )}
                 </div>
                 {o.customerPhone ? (
                   <div className="flex flex-wrap gap-2">
@@ -229,12 +279,23 @@ export function ButcherOrdersPage() {
                 ) : null}
                 <p className="text-sm text-[var(--text-secondary)]">
                   You receive {formatRwf(o.butcherPayoutRwf)}
-                  {o.deliveryPaidBy === "customer" ? ` (includes ${formatRwf(o.deliveryFeeRwf)} delivery)` : " · Cleva pays delivery"}
+                  {kitchen
+                    ? pickup
+                      ? ""
+                      : " · Cleva sends a rider"
+                    : o.deliveryPaidBy === "customer"
+                      ? ` (includes ${formatRwf(o.deliveryFeeRwf)} delivery)`
+                      : " · Cleva pays delivery"}
                   {o.paidConfirmedAt ? ` · Paid at ${kigaliTime(o.paidConfirmedAt)}` : ""}
                 </p>
                 <Button variant="primary" size="field" className="w-full" loading={busyId === o.id} onClick={() => void next(o)}>
                   {step.label}
                 </Button>
+                {kitchen && o.status === "paid" ? (
+                  <Button variant="ghost" size="sm" className="w-full" disabled={busyId === o.id} onClick={() => void decline(o)}>
+                    Can&apos;t take this order
+                  </Button>
+                ) : null}
               </div>
             </SectionCard>
           );

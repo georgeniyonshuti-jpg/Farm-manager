@@ -19,6 +19,7 @@ import {
 import { cancelOrder, confirmPayment, listDeskOrders, rejectPayment } from "../services/shop/shopOrders.js";
 import { saveShopPhoto } from "../services/shop/shopPhotos.js";
 import { getShopSetup, saveButcher, saveKitchen, saveProduct, saveShopSettings, saveZone } from "../services/shop/shopSetup.js";
+import { declineKitchenOrder } from "../services/shop/shopKitchenOrders.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -227,6 +228,18 @@ export function createShopButcherRouter(deps) {
     const id = idParam(req, res);
     if (!id) return;
     const a = actor(req);
+    if (req.params.action === "decline") {
+      // Kitchens can say no to a dish order; it moves to the next kitchen.
+      if (req.butcher.kind !== "kitchen") {
+        res.status(403).json({ error: "Only kitchens can decline an order." });
+        return;
+      }
+      const reason = String(req.body?.reason || "").trim().slice(0, 200);
+      const r = await declineKitchenOrder(dbQuery, id, req.butcher.id, { actorUserId: a.userId, reason });
+      if (r.ok) a.audit?.(a.userId, a.role, "shop.order.decline", "shop_order", id, { reason });
+      sendResult(res, r);
+      return;
+    }
     const audit = (action, resourceId, meta) => a.audit?.(a.userId, a.role, action, "shop_order", resourceId, meta);
     sendResult(
       res,

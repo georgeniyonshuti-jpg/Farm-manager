@@ -149,7 +149,7 @@ describe("butcher shop migration", () => {
     const guard = /\b(DROP\s+TABLE|TRUNCATE\s+TABLE|TRUNCATE\s+\w|DELETE\s+FROM)\b/i;
     const migrate = readFileSync(join(root, "server/migrate.js"), "utf8");
     assert.ok(migrate.includes(guard.source), "guard pattern in migrate.js changed; update this test");
-    for (const file of ["095_butcher_shop.sql", "096_shop_payout_once.sql", "097_shop_product_photos.sql", "098_shop_product_category.sql", "099_shop_kitchens.sql"]) {
+    for (const file of ["095_butcher_shop.sql", "096_shop_payout_once.sql", "097_shop_product_photos.sql", "098_shop_product_category.sql", "099_shop_kitchens.sql", "100_shop_kitchen_orders.sql"]) {
       const text = readFileSync(join(root, "database/migrations", file), "utf8");
       assert.equal(guard.test(text), false, file);
     }
