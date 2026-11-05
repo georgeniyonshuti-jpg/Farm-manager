@@ -504,7 +504,7 @@ export async function confirmPayment(dbQuery, id, actor) {
       const links = await dbQuery(
         `SELECT l.butcher_id::text AS "butcherId", l.priority, b.status
            FROM shop_butcher_zones l JOIN shop_butchers b ON b.id = l.butcher_id
-          WHERE l.zone_id = $1::uuid`,
+          WHERE l.zone_id = $1::uuid AND b.kind = 'butcher'`,
         [o.zoneId]
       );
       ({ butcherId, choices } = pickButcher(links.rows));

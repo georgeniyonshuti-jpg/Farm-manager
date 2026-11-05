@@ -33,7 +33,7 @@ export async function loadButcherForUser(dbQuery, userId) {
   const r = await dbQuery(
     `SELECT id::text, shop_name AS "shopName", status
        FROM shop_butchers
-      WHERE user_id = $1::uuid AND status IN ('active', 'paused', 'pending')
+      WHERE user_id = $1::uuid AND kind = 'butcher' AND status IN ('active', 'paused', 'pending')
       LIMIT 1`,
     [userId]
   );
@@ -154,7 +154,7 @@ export async function reassignOrder(dbQuery, orderId, butcherId, actor) {
   try {
     const [orderR, butcherR] = await Promise.all([
       dbQuery(`SELECT id::text, status, butcher_id::text AS "butcherId" FROM shop_orders WHERE id = $1::uuid`, [orderId]),
-      dbQuery(`SELECT id::text, status, shop_name AS "shopName" FROM shop_butchers WHERE id = $1::uuid`, [butcherId]),
+      dbQuery(`SELECT id::text, status, shop_name AS "shopName" FROM shop_butchers WHERE id = $1::uuid AND kind = 'butcher'`, [butcherId]),
     ]);
     const order = orderR.rows[0];
     const butcher = butcherR.rows[0];

@@ -130,9 +130,9 @@ export function zoneFromBody(body) {
   };
 }
 
-export function butcherFromBody(body) {
+export function butcherFromBody(body, { noun = "butcher" } = {}) {
   const shopName = str(body?.shopName, 100);
-  if (!shopName) return bad("Shop name is required.");
+  if (!shopName) return bad(noun === "kitchen" ? "Kitchen name is required." : "Shop name is required.");
   const phoneErr = rwandaPhoneError(body?.phone, { required: true });
   if (phoneErr) return bad(phoneErr);
   const whatsappErr = rwandaPhoneError(body?.whatsapp);
@@ -166,7 +166,7 @@ export function butcherFromBody(body) {
     if (!values.licenceRef) missing.push("licence number");
     if (!values.momoPayoutPhone) missing.push("MoMo payout number");
     if (!values.momoPayoutName) missing.push("MoMo account name");
-    if (missing.length) return bad(`Before making this butcher active, add: ${missing.join(", ")}.`);
+    if (missing.length) return bad(`Before making this ${noun} active, add: ${missing.join(", ")}.`);
   }
   const zonesRaw = Array.isArray(body?.zones) ? body.zones : [];
   const zones = [];
@@ -180,6 +180,86 @@ export function butcherFromBody(body) {
     zones.push({ zoneId, priority });
   }
   return { ok: true, values, zones };
+}
+
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * A BigChix kitchen: the partner fields butchers use, plus hours, preparation
+ * time, capacity, pickup details and the dishes it makes with its fee for each.
+ * `products` = the menu rows, to check each dish and keep fees below the price.
+ */
+export function kitchenFromBody(body, products = []) {
+  const partner = butcherFromBody({ ...body, loginEmail: "" }, { noun: "kitchen" });
+  if (!partner.ok) return partner;
+
+  const hours = {};
+  for (const day of WEEKDAYS) {
+    const h = body?.hours?.[day];
+    if (!h || (!h.open && !h.close)) {
+      hours[day] = null;
+      continue;
+    }
+    const open = str(h.open, 5);
+    const close = str(h.close, 5);
+    if (!HHMM.test(open) || !HHMM.test(close)) return bad("Opening hours must look like 11:00.");
+    if (close <= open) return bad("Each day must close after it opens.");
+    hours[day] = { open, close };
+  }
+
+  const prepMinutes = intOrNull(body?.prepMinutes) ?? 25;
+  if (!Number.isInteger(prepMinutes) || prepMinutes < 5 || prepMinutes > 180) {
+    return bad("Preparation time must be between 5 and 180 minutes.");
+  }
+  const maxOpenOrders = intOrNull(body?.maxOpenOrders) ?? 10;
+  if (!Number.isInteger(maxOpenOrders) || maxOpenOrders < 1 || maxOpenOrders > 200) {
+    return bad("Most open orders must be between 1 and 200.");
+  }
+  const pickupEnabled = body?.pickupEnabled === true;
+  const pickupAddress = str(body?.pickupAddress, 300);
+  if (pickupEnabled && !pickupAddress) return bad("Add the pickup address, or turn pickup off.");
+
+  const byId = new Map(products.map((p) => [String(p.id), p]));
+  const dishes = [];
+  const seen = new Set();
+  for (const d of Array.isArray(body?.dishes) ? body.dishes : []) {
+    const productId = str(d?.productId, 64);
+    if (!productId || seen.has(productId)) continue;
+    const product = byId.get(productId);
+    if (!product) return bad("One of the dishes is no longer on the menu.");
+    if ((product.category || "whole") !== "cooked") return bad(`${product.name} is not a BigChix dish.`);
+    const feeRwf = intOrNull(d?.feeRwf);
+    if (!Number.isInteger(feeRwf) || feeRwf < 0) return bad(`Fee for ${product.name} must be a whole number of RWF.`);
+    if (feeRwf >= product.price_rwf) {
+      return bad(`Fee for ${product.name} must be below its price of ${product.price_rwf} RWF, or Cleva loses money on it.`);
+    }
+    seen.add(productId);
+    dishes.push({ productId, feeRwf });
+  }
+
+  if (partner.values.status === "active") {
+    const missing = [];
+    if (dishes.length === 0) missing.push("at least one dish with its fee");
+    if (!WEEKDAYS.some((d) => hours[d])) missing.push("opening hours");
+    if (partner.zones.length === 0 && !pickupEnabled) missing.push("a delivery zone or pickup");
+    if (missing.length) return bad(`Before making this kitchen active, add: ${missing.join(", ")}.`);
+  }
+
+  return {
+    ok: true,
+    values: partner.values,
+    zones: partner.zones,
+    kitchen: {
+      hours,
+      prepMinutes,
+      maxOpenOrders,
+      takingOrders: body?.takingOrders === true,
+      pickupEnabled,
+      pickupAddress,
+      pickupDirections: str(body?.pickupDirections, 500),
+    },
+    dishes,
+  };
 }
 
 /** What still stops the shop from opening. Empty means it can open. */
@@ -259,6 +339,36 @@ function mapButcher(r, links) {
   };
 }
 
+export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+function mapKitchen(r, links, settingsRows, dishRows) {
+  const s = settingsRows.find((x) => x.partner_id === r.id) || {};
+  const base = mapButcher(r, links);
+  delete base.userId;
+  delete base.loginEmail;
+  return {
+    ...base,
+    hours: kitchenHoursFrom(s.hours),
+    prepMinutes: s.prep_minutes ?? 25,
+    maxOpenOrders: s.max_open_orders ?? 10,
+    takingOrders: s.taking_orders ?? false,
+    pickupEnabled: s.pickup_enabled ?? false,
+    pickupAddress: s.pickup_address ?? "",
+    pickupDirections: s.pickup_directions ?? "",
+    dishes: dishRows
+      .filter((d) => d.partner_id === r.id)
+      .map((d) => ({ productId: d.product_id, feeRwf: d.fee_rwf, soldOutOn: d.sold_out_on })),
+  };
+}
+
+/** Always all seven days, each {open, close} or null (closed). */
+function kitchenHoursFrom(raw) {
+  const h = raw && typeof raw === "object" ? raw : {};
+  return Object.fromEntries(
+    WEEKDAYS.map((d) => [d, h[d] && h[d].open && h[d].close ? { open: h[d].open, close: h[d].close } : null])
+  );
+}
+
 // ---------- reads ----------
 
 async function loadAll(dbQuery) {
@@ -269,16 +379,32 @@ async function loadAll(dbQuery) {
                FROM shop_zones ORDER BY district, name`),
     dbQuery(`SELECT b.id::text, b.user_id::text, u.email AS login_email, b.shop_name, b.owner_name, b.phone,
                     b.whatsapp, b.district, b.sector, b.address_note, b.licence_ref, b.momo_payout_phone,
-                    b.momo_payout_name, b.status, b.notes
+                    b.momo_payout_name, b.status, b.notes, b.kind
                FROM shop_butchers b LEFT JOIN users u ON u.id = b.user_id
               ORDER BY b.shop_name`),
     dbQuery(`SELECT butcher_id::text, zone_id::text, priority FROM shop_butcher_zones`),
   ]);
-  return { settings: settings.rows[0], products: products.rows, zones: zones.rows, butchers: butchers.rows, links: links.rows };
+  const [kitchenSettings, kitchenDishes] = await Promise.all([
+    dbQuery(`SELECT partner_id::text, hours, prep_minutes, max_open_orders, taking_orders,
+                    pickup_enabled, pickup_address, pickup_directions
+               FROM shop_kitchen_settings`),
+    dbQuery(`SELECT partner_id::text, product_id::text, fee_rwf, sold_out_on::text FROM shop_kitchen_dishes`),
+  ]);
+  return {
+    settings: settings.rows[0],
+    products: products.rows,
+    zones: zones.rows,
+    butchers: butchers.rows,
+    links: links.rows,
+    kitchenSettings: kitchenSettings.rows,
+    kitchenDishes: kitchenDishes.rows,
+  };
 }
 
 function countsFrom(all) {
-  const activeButchers = new Set(all.butchers.filter((b) => b.status === "active").map((b) => b.id));
+  const activeButchers = new Set(
+    all.butchers.filter((b) => b.status === "active" && (b.kind || "butcher") === "butcher").map((b) => b.id)
+  );
   const activeZones = new Set(all.zones.filter((z) => z.active).map((z) => z.id));
   const served = new Set(
     all.links.filter((l) => activeButchers.has(l.butcher_id) && activeZones.has(l.zone_id)).map((l) => l.zone_id)
@@ -294,7 +420,10 @@ export async function getShopSetup(dbQuery) {
       settings: all.settings ? mapSettings(all.settings) : null,
       products: all.products.map((r) => mapProduct({ ...r, id: String(r.id) })),
       zones: all.zones.map(mapZone),
-      butchers: all.butchers.map((b) => mapButcher(b, all.links)),
+      butchers: all.butchers.filter((b) => (b.kind || "butcher") === "butcher").map((b) => mapButcher(b, all.links)),
+      kitchens: all.butchers
+        .filter((b) => b.kind === "kitchen")
+        .map((b) => mapKitchen(b, all.links, all.kitchenSettings, all.kitchenDishes)),
       openBlockers: openBlockers(countsFrom(all)),
     };
   } catch (e) {
@@ -458,7 +587,7 @@ export async function saveButcher(dbQuery, id, body, actor) {
           SET shop_name = $1, owner_name = $2, phone = $3, whatsapp = $4, district = $5, sector = $6,
               address_note = $7, licence_ref = $8, momo_payout_phone = $9, momo_payout_name = $10,
               status = $11, notes = $12, user_id = $16::uuid, updated_at = now()
-        WHERE id = $13::uuid
+        WHERE id = $13::uuid AND kind = 'butcher'
         RETURNING ${cols}`
     : `INSERT INTO shop_butchers
          (shop_name, owner_name, phone, whatsapp, district, sector, address_note,
@@ -501,5 +630,115 @@ export async function saveButcher(dbQuery, id, body, actor) {
     if (String(e?.code) === "23503") return bad("One of the chosen zones no longer exists.");
     if (String(e?.code) === "22P02") return bad("One of the chosen zones is not valid.");
     return dbError(e, "Could not save the butcher.");
+  }
+}
+
+export async function saveKitchen(dbQuery, id, body, actor) {
+  let products;
+  try {
+    products = (await dbQuery(`SELECT id::text, name, price_rwf, category FROM shop_products`)).rows;
+  } catch (e) {
+    return dbError(e, "Could not load the menu.");
+  }
+  const parsed = kitchenFromBody(body, products);
+  if (!parsed.ok) return parsed;
+  const v = parsed.values;
+  const k = parsed.kitchen;
+  const params = [
+    v.shopName, v.ownerName, v.phone, v.whatsapp, v.district, v.sector, v.addressNote,
+    v.licenceRef, v.momoPayoutPhone, v.momoPayoutName, v.status, v.notes,
+  ];
+  const cols = `id::text, user_id::text, shop_name, owner_name, phone, whatsapp, district, sector,
+                address_note, licence_ref, momo_payout_phone, momo_payout_name, status, notes, kind`;
+  const write = id
+    ? `UPDATE shop_butchers
+          SET shop_name = $1, owner_name = $2, phone = $3, whatsapp = $4, district = $5, sector = $6,
+              address_note = $7, licence_ref = $8, momo_payout_phone = $9, momo_payout_name = $10,
+              status = $11, notes = $12, updated_at = now()
+        WHERE id = $13::uuid AND kind = 'kitchen'
+        RETURNING ${cols}`
+    : `INSERT INTO shop_butchers
+         (shop_name, owner_name, phone, whatsapp, district, sector, address_note,
+          licence_ref, momo_payout_phone, momo_payout_name, status, notes, created_by, kind)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::uuid, 'kitchen')
+       RETURNING ${cols}`;
+  try {
+    // One statement: the kitchen, its zones, settings and dishes change together or not at all.
+    const r = await dbQuery(
+      `WITH b AS (${write}),
+            zones_dropped AS (
+              DELETE FROM shop_butcher_zones
+               WHERE butcher_id IN (SELECT id::uuid FROM b)
+                 AND NOT (zone_id = ANY($14::uuid[]))
+            ),
+            zones_kept AS (
+              INSERT INTO shop_butcher_zones (butcher_id, zone_id, priority)
+              SELECT b.id::uuid, t.zone_id, t.priority
+                FROM b CROSS JOIN unnest($14::uuid[], $15::int[]) AS t(zone_id, priority)
+              ON CONFLICT (butcher_id, zone_id) DO UPDATE SET priority = EXCLUDED.priority
+            ),
+            settings AS (
+              INSERT INTO shop_kitchen_settings
+                (partner_id, hours, prep_minutes, max_open_orders, taking_orders,
+                 pickup_enabled, pickup_address, pickup_directions)
+              SELECT b.id::uuid, $16::jsonb, $17, $18, $19, $20, $21, $22 FROM b
+              ON CONFLICT (partner_id) DO UPDATE
+                SET hours = EXCLUDED.hours, prep_minutes = EXCLUDED.prep_minutes,
+                    max_open_orders = EXCLUDED.max_open_orders, taking_orders = EXCLUDED.taking_orders,
+                    pickup_enabled = EXCLUDED.pickup_enabled, pickup_address = EXCLUDED.pickup_address,
+                    pickup_directions = EXCLUDED.pickup_directions, updated_at = now()
+            ),
+            dishes_dropped AS (
+              DELETE FROM shop_kitchen_dishes
+               WHERE partner_id IN (SELECT id::uuid FROM b)
+                 AND NOT (product_id = ANY($23::uuid[]))
+            ),
+            dishes_kept AS (
+              INSERT INTO shop_kitchen_dishes (partner_id, product_id, fee_rwf)
+              SELECT b.id::uuid, t.product_id, t.fee_rwf
+                FROM b CROSS JOIN unnest($23::uuid[], $24::int[]) AS t(product_id, fee_rwf)
+              ON CONFLICT (partner_id, product_id) DO UPDATE SET fee_rwf = EXCLUDED.fee_rwf, updated_at = now()
+            )
+       SELECT * FROM b`,
+      [
+        ...params,
+        id || actor.userId,
+        parsed.zones.map((z) => z.zoneId),
+        parsed.zones.map((z) => z.priority),
+        JSON.stringify(k.hours),
+        k.prepMinutes,
+        k.maxOpenOrders,
+        k.takingOrders,
+        k.pickupEnabled,
+        k.pickupAddress,
+        k.pickupDirections,
+        parsed.dishes.map((d) => d.productId),
+        parsed.dishes.map((d) => d.feeRwf),
+      ]
+    );
+    const row = r.rows[0];
+    if (!row) return { ok: false, status: 404, error: "Kitchen not found." };
+    const links = parsed.zones.map((z) => ({ butcher_id: row.id, zone_id: z.zoneId, priority: z.priority }));
+    const settingsRow = {
+      partner_id: row.id,
+      hours: k.hours,
+      prep_minutes: k.prepMinutes,
+      max_open_orders: k.maxOpenOrders,
+      taking_orders: k.takingOrders,
+      pickup_enabled: k.pickupEnabled,
+      pickup_address: k.pickupAddress,
+      pickup_directions: k.pickupDirections,
+    };
+    const dishRows = parsed.dishes.map((d) => ({ partner_id: row.id, product_id: d.productId, fee_rwf: d.feeRwf, sold_out_on: null }));
+    actor.audit?.(actor.userId, actor.role, id ? "shop.kitchen.update" : "shop.kitchen.create", "shop_butcher", row.id, {
+      status: v.status,
+      zones: parsed.zones.length,
+      dishes: parsed.dishes.map((d) => ({ productId: d.productId, feeRwf: d.feeRwf })),
+    });
+    return { ok: true, kitchen: mapKitchen(row, links, [settingsRow], dishRows) };
+  } catch (e) {
+    if (String(e?.code) === "23503") return bad("One of the chosen zones or dishes no longer exists.");
+    if (String(e?.code) === "22P02") return bad("One of the chosen zones or dishes is not valid.");
+    return dbError(e, "Could not save the kitchen.");
   }
 }

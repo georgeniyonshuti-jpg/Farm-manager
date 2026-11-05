@@ -64,11 +64,29 @@ export type ShopButcher = {
   zones: Array<{ zoneId: string; priority: number }>;
 };
 
+export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
+export type Weekday = (typeof WEEKDAYS)[number];
+export type KitchenHours = Record<Weekday, { open: string; close: string } | null>;
+
+/** A BigChix kitchen: a partner like a butcher, plus kitchen settings and the dishes it makes. */
+export type ShopKitchen = Omit<ShopButcher, "userId" | "loginEmail"> & {
+  hours: KitchenHours;
+  prepMinutes: number;
+  maxOpenOrders: number;
+  takingOrders: boolean;
+  pickupEnabled: boolean;
+  pickupAddress: string;
+  pickupDirections: string;
+  /** feeRwf = what Cleva pays the kitchen for one of this dish. */
+  dishes: Array<{ productId: string; feeRwf: number; soldOutOn?: string | null }>;
+};
+
 export type ShopSetup = {
   settings: ShopSettings | null;
   products: ShopProduct[];
   zones: ShopZone[];
   butchers: ShopButcher[];
+  kitchens?: ShopKitchen[];
   openBlockers: string[];
 };
 
@@ -126,6 +144,10 @@ export function saveShopZone(token: string | null, id: string | null, body: Omit
 
 export function saveShopButcher(token: string | null, id: string | null, body: Omit<ShopButcher, "id" | "userId">) {
   return save<{ butcher: ShopButcher }>(token, "/butchers", id, body);
+}
+
+export function saveShopKitchen(token: string | null, id: string | null, body: Omit<ShopKitchen, "id">) {
+  return save<{ kitchen: ShopKitchen }>(token, "/kitchens", id, body);
 }
 
 // ---------- public shop (no login) ----------

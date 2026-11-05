@@ -30,6 +30,7 @@ import { RWANDA_DISTRICTS, sectorsInDistrict } from "../../../lib/rwandaLocation
 import {
   fetchShopSetup,
   saveShopButcher,
+  saveShopKitchen,
   saveShopProduct,
   saveShopSettings,
   saveShopZone,
@@ -37,7 +38,10 @@ import {
   uploadShopPhoto,
   type ButcherStatus,
   type ShopButcher,
+  type ShopKitchen,
   type ShopProduct,
+  type Weekday,
+  WEEKDAYS,
   type ShopSettings,
   type ShopSetup,
   type ShopZone,
@@ -45,7 +49,7 @@ import {
 import { ShopOrdersPanel } from "./ShopOrdersPanel";
 import { ShopPayoutsPanel, ShopTodayPanel } from "./ShopMoneyPanels";
 
-type Tab = "orders" | "today" | "payouts" | "products" | "zones" | "butchers" | "settings";
+type Tab = "orders" | "today" | "payouts" | "products" | "zones" | "butchers" | "kitchens" | "settings";
 
 const BUTCHER_TONE: Record<ButcherStatus, "success" | "warning" | "neutral" | "danger"> = {
   active: "success",
@@ -93,6 +97,7 @@ export function ShopSetupPage({ mode = "shop" }: { mode?: "shop" | "bigchix" }) 
   const [editingProduct, setEditingProduct] = useState<ShopProduct | "new" | null>(null);
   const [editingZone, setEditingZone] = useState<ShopZone | "new" | null>(null);
   const [editingButcher, setEditingButcher] = useState<ShopButcher | "new" | null>(null);
+  const [editingKitchen, setEditingKitchen] = useState<ShopKitchen | "new" | null>(null);
   const isSuperuser = user?.role === "superuser";
 
   const load = useCallback(async () => {
@@ -216,7 +221,41 @@ export function ShopSetupPage({ mode = "shop" }: { mode?: "shop" | "bigchix" }) 
       <Button variant="primary" size="sm" onClick={() => setEditingButcher("new")}>
         Add butcher
       </Button>
+    ) : tab === "kitchens" ? (
+      <Button variant="primary" size="sm" onClick={() => setEditingKitchen("new")}>
+        Add kitchen
+      </Button>
     ) : null;
+
+  const kitchens = setup.kitchens ?? [];
+  const dishNames = new Map(dishes.map((p) => [p.id, p.name]));
+  const kitchenColumns: DataColumn<ShopKitchen>[] = [
+    { key: "name", header: "Kitchen", render: (k) => <span className="font-medium">{k.shopName}</span> },
+    { key: "phone", header: "Phone", render: (k) => k.phone },
+    {
+      key: "zones",
+      header: "Delivers to",
+      render: (k) =>
+        k.zones.length
+          ? [...k.zones]
+              .sort((x, y) => x.priority - y.priority)
+              .map((l) => zoneNames.get(l.zoneId) ?? "Removed zone")
+              .join(", ")
+          : "None",
+    },
+    { key: "pickup", header: "Pickup", render: (k) => (k.pickupEnabled ? "Yes" : "No") },
+    {
+      key: "dishes",
+      header: "Dishes",
+      render: (k) => (k.dishes.length ? k.dishes.map((d) => dishNames.get(d.productId) ?? "Removed dish").join(", ") : "None"),
+    },
+    {
+      key: "taking",
+      header: "Taking orders",
+      render: (k) => <StatusPill tone={k.takingOrders ? "success" : "neutral"}>{k.takingOrders ? "On" : "Off"}</StatusPill>,
+    },
+    { key: "status", header: "Status", render: (k) => <StatusPill tone={BUTCHER_TONE[k.status]}>{k.status}</StatusPill> },
+  ];
 
   return (
     <ManagerPage>
@@ -224,7 +263,17 @@ export function ShopSetupPage({ mode = "shop" }: { mode?: "shop" | "bigchix" }) 
         title={title}
         action={add}
         tabs={
-          bigchix ? undefined : <PageTabs
+          bigchix ? (
+            <PageTabs
+              value={tab}
+              onChange={(v) => setTab(v as Tab)}
+              aria-label="BigChix sections"
+              options={[
+                { value: "products", label: "Menu", badge: dishes.length },
+                { value: "kitchens", label: "Kitchens", badge: kitchens.length },
+              ]}
+            />
+          ) : <PageTabs
             value={tab}
             onChange={(v) => setTab(v as Tab)}
             aria-label="Shop setup sections"
@@ -286,6 +335,20 @@ export function ShopSetupPage({ mode = "shop" }: { mode?: "shop" | "bigchix" }) 
           </SectionCard>
         ) : null}
 
+        {tab === "kitchens" ? (
+          <SectionCard flushBody>
+            <DataTable
+              columns={kitchenColumns}
+              rows={kitchens}
+              rowKey={(k) => k.id}
+              onRowClick={(k) => setEditingKitchen(k)}
+              emptyTitle="No kitchens yet"
+              emptyDescription="Add a partner kitchen, then tick the dishes it makes and its fee for each."
+              flush
+            />
+          </SectionCard>
+        ) : null}
+
         {tab === "zones" ? (
           <SectionCard flushBody>
             <DataTable
@@ -340,6 +403,21 @@ export function ShopSetupPage({ mode = "shop" }: { mode?: "shop" | "bigchix" }) 
             await saveShopProduct(token, editingProduct === "new" ? null : editingProduct.id, body);
             showToast("success", bigchix ? "Dish saved" : "Item saved");
             setEditingProduct(null);
+            await load();
+          }}
+        />
+      ) : null}
+
+      {editingKitchen ? (
+        <KitchenModal
+          kitchen={editingKitchen === "new" ? null : editingKitchen}
+          zones={setup.zones}
+          dishes={dishes}
+          onClose={() => setEditingKitchen(null)}
+          onSave={async (body) => {
+            await saveShopKitchen(token, editingKitchen === "new" ? null : editingKitchen.id, body);
+            showToast("success", "Kitchen saved");
+            setEditingKitchen(null);
             await load();
           }}
         />
@@ -914,4 +992,328 @@ function SettingsForm({
 /** The BigChix menu desk: cooked dishes only. */
 export function BigChixDeskPage() {
   return <ShopSetupPage mode="bigchix" />;
+}
+
+const DAY_LABEL: Record<Weekday, string> = {
+  mon: "Monday",
+  tue: "Tuesday",
+  wed: "Wednesday",
+  thu: "Thursday",
+  fri: "Friday",
+  sat: "Saturday",
+  sun: "Sunday",
+};
+
+/** A BigChix kitchen: who it is, where it delivers, when it cooks, and what it is paid per dish. */
+function KitchenModal({
+  kitchen,
+  zones,
+  dishes,
+  onClose,
+  onSave,
+}: {
+  kitchen: ShopKitchen | null;
+  zones: ShopZone[];
+  dishes: ShopProduct[];
+  onClose: () => void;
+  onSave: (body: Omit<ShopKitchen, "id">) => Promise<void>;
+}) {
+  const [f, setF] = useState({
+    shopName: kitchen?.shopName ?? "",
+    ownerName: kitchen?.ownerName ?? "",
+    phone: kitchen?.phone ?? "",
+    whatsapp: kitchen?.whatsapp ?? "",
+    district: kitchen?.district ?? "",
+    sector: kitchen?.sector ?? "",
+    addressNote: kitchen?.addressNote ?? "",
+    licenceRef: kitchen?.licenceRef ?? "",
+    momoPayoutPhone: kitchen?.momoPayoutPhone ?? "",
+    momoPayoutName: kitchen?.momoPayoutName ?? "",
+    status: (kitchen?.status ?? "pending") as ButcherStatus,
+    notes: kitchen?.notes ?? "",
+    prepMinutes: String(kitchen?.prepMinutes ?? 25),
+    maxOpenOrders: String(kitchen?.maxOpenOrders ?? 10),
+    takingOrders: kitchen?.takingOrders ?? false,
+    pickupEnabled: kitchen?.pickupEnabled ?? false,
+    pickupAddress: kitchen?.pickupAddress ?? "",
+    pickupDirections: kitchen?.pickupDirections ?? "",
+  });
+  const set = (k: keyof typeof f, v: string | boolean) => setF((prev) => ({ ...prev, [k]: v }));
+  const [hours, setHours] = useState<Record<Weekday, { open: string; close: string } | null>>(
+    () =>
+      Object.fromEntries(WEEKDAYS.map((d) => [d, kitchen?.hours?.[d] ?? null])) as Record<
+        Weekday,
+        { open: string; close: string } | null
+      >
+  );
+  const [links, setLinks] = useState<Record<string, string>>(
+    Object.fromEntries((kitchen?.zones ?? []).map((l) => [l.zoneId, String(l.priority)]))
+  );
+  const [fees, setFees] = useState<Record<string, string>>(
+    Object.fromEntries((kitchen?.dishes ?? []).map((d) => [d.productId, String(d.feeRwf)]))
+  );
+
+  const { busy, error, run } = useSaving(() =>
+    onSave({
+      shopName: f.shopName,
+      ownerName: f.ownerName,
+      phone: f.phone,
+      whatsapp: f.whatsapp || null,
+      district: f.district || null,
+      sector: f.sector || null,
+      addressNote: f.addressNote,
+      licenceRef: f.licenceRef,
+      momoPayoutPhone: f.momoPayoutPhone || null,
+      momoPayoutName: f.momoPayoutName,
+      status: f.status,
+      notes: f.notes,
+      zones: Object.entries(links).map(([zoneId, priority]) => ({ zoneId, priority: Number(priority) || 100 })),
+      hours,
+      prepMinutes: Number(f.prepMinutes),
+      maxOpenOrders: Number(f.maxOpenOrders),
+      takingOrders: f.takingOrders,
+      pickupEnabled: f.pickupEnabled,
+      pickupAddress: f.pickupAddress,
+      pickupDirections: f.pickupDirections,
+      dishes: Object.entries(fees).map(([productId, fee]) => ({ productId, feeRwf: Number(fee) })),
+    })
+  );
+
+  return (
+    <Modal
+      open
+      wide
+      title={kitchen ? `Edit ${kitchen.shopName}` : "Add kitchen"}
+      onClose={onClose}
+      footer={<ModalFooter busy={busy} onClose={onClose} onSave={() => void run()} />}
+    >
+      <div className="grid gap-3 md:grid-cols-2">
+        <Field label="Kitchen name">
+          <Input value={f.shopName} onChange={(e) => set("shopName", e.target.value)} placeholder="Kimihurura Grill" />
+        </Field>
+        <Field label="Owner name">
+          <Input value={f.ownerName} onChange={(e) => set("ownerName", e.target.value)} />
+        </Field>
+        <Field label="Phone">
+          <Input inputMode="tel" value={f.phone} onChange={(e) => set("phone", e.target.value)} />
+        </Field>
+        <Field label="WhatsApp">
+          <Input inputMode="tel" value={f.whatsapp} onChange={(e) => set("whatsapp", e.target.value)} />
+        </Field>
+        <Field label="District">
+          <Select value={f.district} onChange={(e) => setF((prev) => ({ ...prev, district: e.target.value, sector: "" }))}>
+            <option value="">Choose a district</option>
+            {RWANDA_DISTRICTS.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Sector">
+          <Select value={f.sector} onChange={(e) => set("sector", e.target.value)} disabled={!f.district}>
+            <option value="">Choose a sector</option>
+            {(f.district ? sectorsInDistrict(f.district) : []).map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Where to find the kitchen" className="md:col-span-2">
+          <Input value={f.addressNote} onChange={(e) => set("addressNote", e.target.value)} />
+        </Field>
+        <Field label="Food business or hygiene licence number">
+          <Input value={f.licenceRef} onChange={(e) => set("licenceRef", e.target.value)} />
+        </Field>
+        <Field label="Status" help="Active needs the licence, MoMo payout, hours, a dish, and a zone or pickup.">
+          <Select value={f.status} onChange={(e) => set("status", e.target.value)}>
+            <option value="pending">Pending</option>
+            <option value="active">Active</option>
+            <option value="paused">Paused</option>
+            <option value="ended">Ended</option>
+          </Select>
+        </Field>
+        <Field label="MoMo payout number">
+          <Input inputMode="tel" value={f.momoPayoutPhone} onChange={(e) => set("momoPayoutPhone", e.target.value)} />
+        </Field>
+        <Field label="MoMo account name">
+          <Input value={f.momoPayoutName} onChange={(e) => set("momoPayoutName", e.target.value)} />
+        </Field>
+      </div>
+
+      <fieldset className="mt-5">
+        <legend className="type-label mb-1">Dishes it makes, and what Cleva pays per dish</legend>
+        <p className="mb-2 text-xs text-[var(--text-muted)]">
+          The customer always pays the BigChix price. The fee must be below it; the difference is Cleva&apos;s.
+        </p>
+        {dishes.length === 0 ? (
+          <p className="text-sm text-[var(--text-muted)]">Add dishes under Menu first.</p>
+        ) : (
+          <div className="space-y-2">
+            {dishes.map((d) => {
+              const on = d.id in fees;
+              const fee = Number(fees[d.id]);
+              const keep = on && Number.isFinite(fee) && fees[d.id] !== "" ? d.priceRwf - fee : null;
+              return (
+                <div key={d.id} className="flex flex-wrap items-center gap-3">
+                  <Checkbox
+                    label={`${d.name} · ${formatRwf(d.priceRwf)}`}
+                    checked={on}
+                    onChange={(e) =>
+                      setFees((prev) => {
+                        const next = { ...prev };
+                        if (e.target.checked) next[d.id] = "";
+                        else delete next[d.id];
+                        return next;
+                      })
+                    }
+                  />
+                  {on ? (
+                    <>
+                      <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+                        Fee (RWF)
+                        <Input
+                          className="w-28"
+                          inputMode="numeric"
+                          value={fees[d.id]}
+                          onChange={(e) => setFees((prev) => ({ ...prev, [d.id]: e.target.value }))}
+                        />
+                      </label>
+                      {keep !== null ? (
+                        <span className={keep > 0 ? "text-xs text-[var(--text-muted)]" : "text-xs text-[var(--status-danger)]"}>
+                          Cleva keeps {formatRwf(keep)}
+                        </span>
+                      ) : null}
+                    </>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </fieldset>
+
+      <fieldset className="mt-5">
+        <legend className="type-label mb-2">Opening hours</legend>
+        <div className="space-y-2">
+          {WEEKDAYS.map((day) => {
+            const h = hours[day];
+            return (
+              <div key={day} className="flex flex-wrap items-center gap-3">
+                <span className="w-24 text-sm">{DAY_LABEL[day]}</span>
+                <Checkbox
+                  label="Open"
+                  checked={h !== null}
+                  onChange={(e) =>
+                    setHours((prev) => ({ ...prev, [day]: e.target.checked ? { open: "11:00", close: "21:00" } : null }))
+                  }
+                />
+                {h ? (
+                  <>
+                    <Input
+                      type="time"
+                      className="w-32"
+                      aria-label={`${DAY_LABEL[day]} opens`}
+                      value={h.open}
+                      onChange={(e) => setHours((prev) => ({ ...prev, [day]: { ...h, open: e.target.value } }))}
+                    />
+                    <span className="text-xs text-[var(--text-muted)]">to</span>
+                    <Input
+                      type="time"
+                      className="w-32"
+                      aria-label={`${DAY_LABEL[day]} closes`}
+                      value={h.close}
+                      onChange={(e) => setHours((prev) => ({ ...prev, [day]: { ...h, close: e.target.value } }))}
+                    />
+                  </>
+                ) : (
+                  <span className="text-xs text-[var(--text-muted)]">Closed</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </fieldset>
+
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
+        <Field label="Preparation time (minutes)" help="From accepting an order to ready. Customers see it.">
+          <Input inputMode="numeric" value={f.prepMinutes} onChange={(e) => set("prepMinutes", e.target.value)} />
+        </Field>
+        <Field label="Most open orders at once" help="New orders go to another kitchen above this.">
+          <Input inputMode="numeric" value={f.maxOpenOrders} onChange={(e) => set("maxOpenOrders", e.target.value)} />
+        </Field>
+        <Checkbox
+          label="Taking orders now (the kitchen can switch this off when busy)"
+          checked={f.takingOrders}
+          onChange={(e) => set("takingOrders", e.target.checked)}
+        />
+      </div>
+
+      <fieldset className="mt-5">
+        <legend className="type-label mb-2">Pickup</legend>
+        <Checkbox
+          label="Customers can collect from this kitchen"
+          checked={f.pickupEnabled}
+          onChange={(e) => set("pickupEnabled", e.target.checked)}
+        />
+        {f.pickupEnabled ? (
+          <div className="mt-2 grid gap-3 md:grid-cols-2">
+            <Field label="Pickup address">
+              <Input value={f.pickupAddress} onChange={(e) => set("pickupAddress", e.target.value)} />
+            </Field>
+            <Field label="Directions for customers">
+              <Input value={f.pickupDirections} onChange={(e) => set("pickupDirections", e.target.value)} />
+            </Field>
+          </div>
+        ) : null}
+      </fieldset>
+
+      <fieldset className="mt-5">
+        <legend className="type-label mb-2">Zones this kitchen delivers to</legend>
+        {zones.length === 0 ? (
+          <p className="text-sm text-[var(--text-muted)]">Add a zone under Shop first.</p>
+        ) : (
+          <div className="space-y-2">
+            {zones.map((z) => {
+              const on = z.id in links;
+              return (
+                <div key={z.id} className="flex flex-wrap items-center gap-3">
+                  <Checkbox
+                    label={`${z.name} (${z.district})`}
+                    checked={on}
+                    onChange={(e) =>
+                      setLinks((prev) => {
+                        const next = { ...prev };
+                        if (e.target.checked) next[z.id] = "100";
+                        else delete next[z.id];
+                        return next;
+                      })
+                    }
+                  />
+                  {on ? (
+                    <label className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+                      Priority
+                      <Input
+                        className="w-20"
+                        inputMode="numeric"
+                        value={links[z.id]}
+                        onChange={(e) => setLinks((prev) => ({ ...prev, [z.id]: e.target.value }))}
+                      />
+                    </label>
+                  ) : null}
+                </div>
+              );
+            })}
+            <p className="text-xs text-[var(--text-muted)]">Lower priority is asked first when a zone has several kitchens.</p>
+          </div>
+        )}
+      </fieldset>
+
+      <Field label="Notes" className="mt-5">
+        <Textarea value={f.notes} onChange={(e) => set("notes", e.target.value)} />
+      </Field>
+      {error ? <p className="mt-3 text-sm text-[var(--status-danger)]">{error}</p> : null}
+    </Modal>
+  );
 }

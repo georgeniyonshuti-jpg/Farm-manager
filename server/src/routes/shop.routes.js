@@ -18,7 +18,7 @@ import {
 } from "../services/shop/shopMoney.js";
 import { cancelOrder, confirmPayment, listDeskOrders, rejectPayment } from "../services/shop/shopOrders.js";
 import { saveShopPhoto } from "../services/shop/shopPhotos.js";
-import { getShopSetup, saveButcher, saveProduct, saveShopSettings, saveZone } from "../services/shop/shopSetup.js";
+import { getShopSetup, saveButcher, saveKitchen, saveProduct, saveShopSettings, saveZone } from "../services/shop/shopSetup.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -106,6 +106,15 @@ export function createShopDeskRouter(deps) {
   router.put("/butchers/:id", async (req, res) => {
     const id = idParam(req, res);
     if (id) sendResult(res, await saveButcher(dbQuery, id, req.body ?? {}, actor(req)));
+  });
+
+  router.post("/kitchens", async (req, res) => {
+    sendResult(res, await saveKitchen(dbQuery, null, req.body ?? {}, actor(req)), 201);
+  });
+
+  router.put("/kitchens/:id", async (req, res) => {
+    const id = idParam(req, res);
+    if (id) sendResult(res, await saveKitchen(dbQuery, id, req.body ?? {}, actor(req)));
   });
 
   router.get("/orders", async (req, res) => {
