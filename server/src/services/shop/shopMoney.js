@@ -16,9 +16,16 @@ const NOT_PAID_OUT = `NOT EXISTS (
    WHERE x.order_id = o.id AND x.side = 'butcher_out' AND x.status IN ('pending', 'paid')
 )`;
 
-/** Delivery cost Cleva owes on one order, in SQL. Needs `o` and `z` (zone). */
-const CLEVA_DELIVERY = `CASE WHEN o.delivery_paid_by = 'cleva'
-  THEN COALESCE(o.cleva_delivery_cost_rwf, z.delivery_fee_rwf, 0) ELSE 0 END`;
+/**
+ * Delivery money Cleva owes the partner on one order, in SQL. Needs `o` and `z` (zone).
+ * Only butchers deliver; a BigChix kitchen never gets delivery money (Cleva pays the rider).
+ */
+const CLEVA_DELIVERY = `CASE WHEN o.channel = 'kitchen' THEN 0
+  WHEN o.delivery_paid_by = 'cleva' THEN COALESCE(o.cleva_delivery_cost_rwf, z.delivery_fee_rwf, 0) ELSE 0 END`;
+
+/** What delivery cost Cleva on one order: the butcher's delivery money, or the rider's fare. */
+const CLEVA_DELIVERY_COST = `CASE WHEN o.channel = 'kitchen' THEN COALESCE(o.rider_fare_rwf, 0)
+  ELSE (${CLEVA_DELIVERY}) END`;
 
 function fail(status, error) {
   return { ok: false, status, error };
@@ -159,7 +166,7 @@ export async function setDeliveryCost(dbQuery, orderId, body, actor) {
     const r = await dbQuery(
       `UPDATE shop_orders o
           SET cleva_delivery_cost_rwf = $2, updated_at = now()
-        WHERE o.id = $1::uuid AND o.delivery_paid_by = 'cleva' AND ${NOT_PAID_OUT}
+        WHERE o.id = $1::uuid AND o.channel = 'fresh' AND o.delivery_paid_by = 'cleva' AND ${NOT_PAID_OUT}
         RETURNING o.id::text`,
       [orderId, amount]
     );
@@ -245,7 +252,8 @@ export async function getShopTotals(dbQuery, days = 7) {
          SELECT o.*, (timezone('Africa/Kigali', o.placed_at))::date AS placed_day,
                 (timezone('Africa/Kigali', o.paid_confirmed_at))::date AS paid_day,
                 (timezone('Africa/Kigali', o.delivered_at))::date AS delivered_day,
-                (${CLEVA_DELIVERY})::int AS cleva_delivery
+                (${CLEVA_DELIVERY_COST})::int AS cleva_delivery,
+                CASE WHEN o.channel = 'kitchen' THEN o.delivery_fee_rwf ELSE 0 END AS kitchen_delivery_in
            FROM shop_orders o LEFT JOIN shop_zones z ON z.id = o.zone_id
           WHERE o.placed_at > now() - make_interval(days => $1::int + 1)
              OR o.paid_confirmed_at > now() - make_interval(days => $1::int + 1)
@@ -258,6 +266,8 @@ export async function getShopTotals(dbQuery, days = 7) {
                 WHERE o.paid_day = d.day AND o.status NOT IN ('cancelled'))::int AS "commissionRwf",
               (SELECT COALESCE(sum(cleva_delivery), 0) FROM o
                 WHERE o.paid_day = d.day AND o.status NOT IN ('cancelled'))::int AS "clevaDeliveryRwf",
+              (SELECT COALESCE(sum(kitchen_delivery_in), 0) FROM o
+                WHERE o.paid_day = d.day AND o.status NOT IN ('cancelled'))::int AS "riderFeesInRwf",
               (SELECT count(*) FROM o WHERE o.delivered_day = d.day)::int AS delivered,
               (SELECT count(*) FROM o WHERE o.paid_day = d.day AND o.status = 'cancelled')::int AS "cancelledAfterPay"
          FROM d ORDER BY d.day DESC`,
@@ -271,7 +281,11 @@ export async function getShopTotals(dbQuery, days = 7) {
               (SELECT count(*) FROM shop_settlements WHERE side = 'refund' AND status = 'pending')::int AS "refundsToSend"
          FROM shop_orders`
     );
-    const days_ = r.rows.map((x) => ({ ...x, clevaNetRwf: x.commissionRwf - x.clevaDeliveryRwf }));
+    // On dish orders the customer's delivery fee comes to Cleva, which pays the rider from it.
+    const days_ = r.rows.map((x) => {
+      const riderFeesInRwf = Number(x.riderFeesInRwf) || 0;
+      return { ...x, riderFeesInRwf, clevaNetRwf: x.commissionRwf + riderFeesInRwf - x.clevaDeliveryRwf };
+    });
     return { ok: true, days: days_, now: now.rows[0] };
   } catch (e) {
     return dbError(e, "Could not load totals.");

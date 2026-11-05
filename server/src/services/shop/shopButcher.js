@@ -72,6 +72,8 @@ export function butcherOrderView(row, acceptWithinMinutes, now = new Date()) {
     addressNote: contact ? row.addressNote : null,
     lines: row.lines || [],
     channel: row.channel || "fresh",
+    riderName: row.riderName ?? null,
+    riderPhone: row.riderPhone ?? null,
     fulfilment: row.fulfilment || "delivery",
     deliveryFeeRwf: row.deliveryFeeRwf,
     deliveryPaidBy: row.deliveryPaidBy,
@@ -90,6 +92,8 @@ export async function listButcherOrders(dbQuery, butcher, now = new Date()) {
               o.customer_name AS "customerName", o.customer_phone AS "customerPhone", o.address_note AS "addressNote",
               o.delivery_fee_rwf AS "deliveryFeeRwf", o.delivery_paid_by AS "deliveryPaidBy",
               o.butcher_payout_rwf AS "butcherPayoutRwf", o.channel, o.fulfilment,
+              (SELECT r.name FROM shop_riders r WHERE r.id = o.rider_id) AS "riderName",
+              (SELECT r.phone FROM shop_riders r WHERE r.id = o.rider_id) AS "riderPhone",
               CASE WHEN o.channel = 'kitchen' THEN s.kitchen_accept_within_minutes ELSE s.accept_within_minutes END
                 AS "acceptWithin",
               COALESCE((SELECT json_agg(json_build_object(

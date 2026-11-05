@@ -20,6 +20,7 @@ import { cancelOrder, confirmPayment, listDeskOrders, rejectPayment } from "../s
 import { saveShopPhoto } from "../services/shop/shopPhotos.js";
 import { getShopSetup, saveButcher, saveKitchen, saveProduct, saveShopSettings, saveZone } from "../services/shop/shopSetup.js";
 import { declineKitchenOrder } from "../services/shop/shopKitchenOrders.js";
+import { bookRider, getRiderBoard, payRider, saveRider } from "../services/shop/shopRiders.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -107,6 +108,29 @@ export function createShopDeskRouter(deps) {
   router.put("/butchers/:id", async (req, res) => {
     const id = idParam(req, res);
     if (id) sendResult(res, await saveButcher(dbQuery, id, req.body ?? {}, actor(req)));
+  });
+
+  router.get("/riders", async (_req, res) => {
+    sendResult(res, await getRiderBoard(dbQuery));
+  });
+
+  router.post("/riders", async (req, res) => {
+    sendResult(res, await saveRider(dbQuery, null, req.body ?? {}, actor(req)), 201);
+  });
+
+  router.put("/riders/:id", async (req, res) => {
+    const id = idParam(req, res);
+    if (id) sendResult(res, await saveRider(dbQuery, id, req.body ?? {}, actor(req)));
+  });
+
+  router.post("/riders/:id/pay", async (req, res) => {
+    const id = idParam(req, res);
+    if (id) sendResult(res, await payRider(dbQuery, id, req.body ?? {}, actor(req)));
+  });
+
+  router.post("/orders/:id/rider", async (req, res) => {
+    const id = idParam(req, res);
+    if (id) sendResult(res, await bookRider(dbQuery, id, req.body ?? {}, actor(req)));
   });
 
   router.post("/kitchens", async (req, res) => {

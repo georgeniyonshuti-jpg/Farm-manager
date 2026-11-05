@@ -277,12 +277,29 @@ export function ButcherOrdersPage() {
                     </a>
                   </div>
                 ) : null}
+                {kitchen && !pickup ? (
+                  <p className="text-sm">
+                    {o.riderName ? (
+                      <>
+                        Rider: <strong>{o.riderName}</strong>
+                        {o.riderPhone ? (
+                          <>
+                            {" · "}
+                            <a className="underline" href={`tel:${o.riderPhone}`}>
+                              {o.riderPhone}
+                            </a>
+                          </>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span className="text-[var(--text-secondary)]">Cleva is booking a rider.</span>
+                    )}
+                  </p>
+                ) : null}
                 <p className="text-sm text-[var(--text-secondary)]">
                   You receive {formatRwf(o.butcherPayoutRwf)}
                   {kitchen
-                    ? pickup
-                      ? ""
-                      : " · Cleva sends a rider"
+                    ? ""
                     : o.deliveryPaidBy === "customer"
                       ? ` (includes ${formatRwf(o.deliveryFeeRwf)} delivery)`
                       : " · Cleva pays delivery"}

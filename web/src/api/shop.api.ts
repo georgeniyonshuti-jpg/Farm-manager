@@ -150,6 +150,83 @@ export function saveShopKitchen(token: string | null, id: string | null, body: O
   return save<{ kitchen: ShopKitchen }>(token, "/kitchens", id, body);
 }
 
+// ---------- BigChix riders (desk) ----------
+
+export type ShopRider = {
+  id: string;
+  name: string;
+  phone: string;
+  momoPhone: string | null;
+  momoName: string;
+  plate: string;
+  active: boolean;
+  notes: string;
+};
+
+/** A dish order on the rider board. */
+export type RiderBoardOrder = {
+  id: string;
+  ref: string;
+  status: ShopOrderStatus;
+  district: string;
+  sector: string;
+  addressNote: string;
+  customerName: string;
+  customerPhone: string;
+  deliveryFeeRwf: number;
+  acceptedAt: string | null;
+  readyAt: string | null;
+  outAt: string | null;
+  readyBy: string | null;
+  fareRwf: number | null;
+  riderId: string | null;
+  riderName: string | null;
+  riderPhone: string | null;
+  kitchenName: string | null;
+  kitchenPhone: string | null;
+  kitchenDistrict: string | null;
+  kitchenSector: string | null;
+  kitchenAddress: string;
+};
+
+export type RiderOwed = {
+  riderId: string;
+  name: string;
+  momoPhone: string | null;
+  momoName: string;
+  totalRwf: number;
+  orders: Array<{ orderId: string; ref: string; deliveredAt: string | null; fareRwf: number }>;
+};
+
+export function fetchRiderBoard(token: string | null) {
+  return sendJson<{ riders: ShopRider[]; needsRider: RiderBoardOrder[]; withRider: RiderBoardOrder[]; owed: RiderOwed[] }>(
+    `${BASE}/riders`,
+    token
+  );
+}
+
+export function saveShopRider(token: string | null, id: string | null, body: Omit<ShopRider, "id">) {
+  return save<{ rider: ShopRider }>(token, "/riders", id, body);
+}
+
+export function bookShopRider(token: string | null, orderId: string, body: { riderId: string; fareRwf: number }) {
+  return sendJson<{ riderName: string; fareRwf: number }>(`${BASE}/orders/${encodeURIComponent(orderId)}/rider`, token, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function payShopRider(
+  token: string | null,
+  riderId: string,
+  body: { reference: string; orderIds: string[]; expectedTotalRwf: number }
+) {
+  return sendJson<{ totalRwf: number; orders: number }>(`${BASE}/riders/${encodeURIComponent(riderId)}/pay`, token, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 // ---------- public shop (no login) ----------
 
 const PUBLIC = `${API_BASE_URL}/api/market/shop`;
@@ -387,6 +464,8 @@ export type ButcherOrder = {
   customerPhone: string | null;
   addressNote: string | null;
   lines: Array<{ name: string; qty: number; weightMinKg: number | null; weightMaxKg: number | null; feeRwf?: number | null }>;
+  riderName?: string | null;
+  riderPhone?: string | null;
   channel?: "fresh" | "kitchen";
   fulfilment?: "delivery" | "pickup";
   deliveryFeeRwf: number;

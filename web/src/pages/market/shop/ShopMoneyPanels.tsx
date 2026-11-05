@@ -177,7 +177,7 @@ export function ShopPayoutsPanel() {
   if (error) return <ErrorState message={error} onRetry={() => void load()} />;
 
   const payoutColumns: DataColumn<PayoutButcher>[] = [
-    { key: "shop", header: "Butcher", render: (b) => <span className="font-medium">{b.shopName}</span> },
+    { key: "shop", header: "Butcher or kitchen", render: (b) => <span className="font-medium">{b.shopName}</span> },
     { key: "orders", header: "Delivered orders", numeric: true, render: (b) => b.orders.length },
     { key: "total", header: "To pay", numeric: true, render: (b) => <strong>{formatRwf(b.totalRwf)}</strong> },
     {

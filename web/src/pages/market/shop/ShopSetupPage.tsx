@@ -47,9 +47,10 @@ import {
   type ShopZone,
 } from "../../../api/shop.api";
 import { ShopOrdersPanel } from "./ShopOrdersPanel";
+import { BigChixRidersPanel } from "./BigChixRidersPanel";
 import { ShopPayoutsPanel, ShopTodayPanel } from "./ShopMoneyPanels";
 
-type Tab = "orders" | "today" | "payouts" | "products" | "zones" | "butchers" | "kitchens" | "settings";
+type Tab = "orders" | "today" | "payouts" | "products" | "zones" | "butchers" | "kitchens" | "riders" | "settings";
 
 const BUTCHER_TONE: Record<ButcherStatus, "success" | "warning" | "neutral" | "danger"> = {
   active: "success",
@@ -271,6 +272,7 @@ export function ShopSetupPage({ mode = "shop" }: { mode?: "shop" | "bigchix" }) 
               options={[
                 { value: "products", label: "Menu", badge: dishes.length },
                 { value: "kitchens", label: "Kitchens", badge: kitchens.length },
+                { value: "riders", label: "Riders" },
               ]}
             />
           ) : <PageTabs
@@ -334,6 +336,8 @@ export function ShopSetupPage({ mode = "shop" }: { mode?: "shop" | "bigchix" }) 
             />
           </SectionCard>
         ) : null}
+
+        {tab === "riders" ? <BigChixRidersPanel /> : null}
 
         {tab === "kitchens" ? (
           <SectionCard flushBody>
